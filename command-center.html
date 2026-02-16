@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SOS — Student Operating System</title>
+<script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a0a;--bg2:#0f0f1a;--card:#1a1a2e;--accent:#6C63FF;--accent-dim:#4a44b3;--accent-glow:rgba(108,99,255,0.15);--text:#e0e0e0;--text-dim:#888;--border:#2a2a4e;--danger:#ff4757;--success:#2ed573;--warning:#ffa502;--green:#2ed573;--blue:#45aaf2;--orange:#fd9644;--pink:#fc5c65;--teal:#2bcbba;--radius:12px;--shadow:0 4px 20px rgba(0,0,0,0.4)}
+html,body{height:100%;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+input,textarea,select,button{font-family:inherit;font-size:inherit}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--accent-dim);border-radius:3px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes dotPulse{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
+@keyframes breathe{0%,100%{box-shadow:0 0 30px rgba(108,99,255,0.15)}50%{box-shadow:0 0 60px rgba(108,99,255,0.35)}}
+@keyframes timerRing{from{stroke-dashoffset:283}to{stroke-dashoffset:0}}
+@keyframes overlayIn{from{opacity:0}to{opacity:1}}
+@keyframes toastIn{from{opacity:0;transform:translateY(-20px) translateX(-50%)}to{opacity:1;transform:translateY(0) translateX(-50%)}}
+@keyframes toastOut{from{opacity:1;transform:translateY(0) translateX(-50%)}to{opacity:0;transform:translateY(-20px) translateX(-50%)}}
+@keyframes peekSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes cardPop{from{opacity:0;transform:scale(0.95) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes gentlePulse{0%,100%{opacity:1}50%{opacity:0.7}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.fade-in{animation:fadeIn .3s ease}
+.slide-up{animation:slideUp .3s ease}
+.card-pop{animation:cardPop .25s ease}
+
+/* SOS Layout */
+#root{height:100vh;display:flex;flex-direction:column}
+.sos-app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;z-index:10}
+.sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth}
+.sos-input-area{flex-shrink:0;border-top:1px solid var(--border);background:var(--card);padding:8px 16px 12px}
+.sos-msg{padding:6px 16px;display:flex;animation:slideUp .25s ease}
+.sos-msg-user{justify-content:flex-end}
+.sos-msg-ai{justify-content:flex-start}
+.sos-bubble{max-width:80%;padding:12px 16px;border-radius:16px;font-size:0.92rem;line-height:1.55;word-break:break-word;position:relative}
+.sos-bubble-user{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.sos-bubble-ai{background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
+.sos-bubble-time{font-size:0.6rem;opacity:0.45;margin-top:4px;text-align:right}
+.sos-chip{background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.25);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;transition:all .2s;white-space:nowrap}
+.sos-chip:hover{background:rgba(108,99,255,0.2);border-color:var(--accent)}
+.sos-chip:active{transform:scale(0.96)}
+
+/* Confirmation Card */
+.confirm-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:4px 0;max-width:360px;animation:cardPop .25s ease}
+.confirm-card-field{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:0.85rem}
+.confirm-card-label{color:var(--text-dim);font-size:0.78rem}
+.confirm-card-value{font-weight:600}
+.confirm-card-actions{display:flex;gap:8px;margin-top:10px}
+.confirm-btn{padding:7px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:600;font-size:0.82rem;transition:all .15s}
+.confirm-btn:active{transform:scale(0.96)}
+.confirm-btn-yes{background:var(--success);color:#fff}
+.confirm-btn-edit{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
+.confirm-btn-cancel{background:transparent;border:1px solid var(--danger);color:var(--danger);font-size:0.78rem;padding:5px 10px}
+
+/* Edit fields inside confirmation card */
+.confirm-edit-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.confirm-edit-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:0.85rem;outline:none;flex:1}
+.confirm-edit-input:focus{border-color:var(--accent)}
+
+/* Schedule Peek */
+.peek-overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);animation:overlayIn .2s ease}
+.peek-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:var(--bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:65vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
+.peek-handle{width:36px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px}
+.peek-section{margin-bottom:16px}
+.peek-section-title{font-size:0.75rem;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.peek-timeline-slot{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.85rem}
+.peek-timeline-time{width:55px;flex-shrink:0;color:var(--text-dim);font-size:0.78rem;text-align:right}
+.peek-timeline-block{flex:1;padding:4px 10px;border-radius:8px;font-weight:500}
+.peek-task-item{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.85rem}
+.peek-task-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* Auth Screen */
+.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center}
+.auth-form{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;animation:fadeIn .4s ease}
+.auth-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:0.92rem;outline:none;margin-bottom:12px}
+.auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
+.auth-btn{width:100%;padding:12px;border-radius:10px;border:none;font-weight:700;font-size:0.95rem;cursor:pointer;transition:all .15s;margin-bottom:8px}
+.auth-btn:active{transform:scale(0.97)}
+.auth-btn-primary{background:var(--accent);color:#fff}
+.auth-btn-secondary{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
+.auth-error{background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.25);color:var(--danger);padding:10px 14px;border-radius:10px;font-size:0.84rem;margin-bottom:12px}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--text-dim);font-size:0.78rem}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* Sync indicator */
+.sync-dot{width:6px;height:6px;border-radius:3px;display:inline-block;margin-right:4px}
+.sync-saving{background:var(--warning);animation:gentlePulse 1s infinite}
+.sync-saved{background:var(--success)}
+.sync-error{background:var(--danger)}
+
+/* Responsive */
+@media(max-width:768px){
+  .sos-bubble{max-width:88%}
+  .sos-header h1{font-size:1rem!important}
+  .peek-panel{max-height:75vh}
+}
+@media(max-width:500px){
+  .sos-input-area{padding:6px 10px 10px}
+  .sos-bubble{max-width:92%;font-size:0.88rem}
+  .sos-chip{font-size:0.78rem;padding:5px 11px}
+  .auth-form{padding:24px 20px}
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
+button:hover{opacity:0.88}
+button:active{transform:scale(0.97)}
+select option{background:#0f0f23;color:var(--text)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+/* ═══════════════════════════════════════════════
+   SUPABASE CONFIG
+   ═══════════════════════════════════════════════ */
+const SUPABASE_URL = 'https://evqylqgkzlbbrvogxsjn.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV2cXlscWdremxiYnJ2b2d4c2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNzQ1NTUsImV4cCI6MjA4Njg1MDU1NX0.NDpkE7367X5b3fhBpY268qJR6q8q2xQYs5tKL8RyIDQ';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* Edge Function URL for secure Groq proxy */
+const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
+
+/* ─── Date helpers ─── */
+function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
+function fmtFull(d) { return new Date(d).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
+function toDateStr(d) {
+  const dt = new Date(d);
+  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+}
+function today() { return toDateStr(new Date()); }
+function daysUntil(dateStr) {
+  const now = new Date(); now.setHours(0,0,0,0);
+  const target = new Date(dateStr + 'T00:00:00');
+  return Math.round((target - now) / 86400000);
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function fmtTime(h, m) {
+  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+}
+
+/* ─── Nudge Engine ─── */
+function getNudge(task) {
+  if (task.status === 'done') return { emoji:'done', text:'Done! Nice work.' };
+  const d = daysUntil(task.dueDate);
+  if (d < 0) return { emoji:'overdue', text:'Overdue by ' + Math.abs(d) + ' day' + (Math.abs(d)>1?'s':'') };
+  if (d === 0) return { emoji:'today', text:'Due today' };
+  if (d === 1) return { emoji:'tomorrow', text:'Due tomorrow' };
+  if (d <= 3) return { emoji:'soon', text:d + ' days left' };
+  if (d <= 7) return { emoji:'week', text:d + ' days left' };
+  return { emoji:'chill', text:d + ' days left' };
+}
+
+function getPriority(task) {
+  if (task.status === 'done') return 999;
+  const d = daysUntil(task.dueDate);
+  let score = d;
+  if (task.status === 'not_started') score -= 2;
+  if (task.status === 'in_progress') score -= 1;
+  return score;
+}
+
+/* ─── Category Colors ─── */
+const CAT_COLORS = {
+  school:'var(--accent)', swim:'var(--teal)', debate:'var(--orange)',
+  'free time':'var(--green)', sleep:'var(--blue)', other:'var(--pink)',
+  homework:'var(--accent)', test:'var(--danger)', practice:'var(--teal)',
+  event:'var(--orange)'
+};
+function catColor(cat) { return CAT_COLORS[cat?.toLowerCase()] || 'var(--accent)'; }
+
+/* ─── Weather Icons ─── */
+function weatherEmoji(code) {
+  if (code <= 1) return '☀️'; if (code <= 3) return '☁️';
+  if (code <= 48) return '🌫️'; if (code <= 67) return '🌧️';
+  if (code <= 77) return '🌨️'; if (code <= 82) return '🌦️';
+  return '⛈️';
+}
+
+const CHAT_MAX_MESSAGES = 60;
+
+/* ═══════════════════════════════════════════════
+   SUPABASE DATA LAYER
+   Reads from / writes to Supabase. Falls back to
+   localStorage if offline or not logged in.
+   ═══════════════════════════════════════════════ */
+
+/* Convert DB row → app shape */
+function dbTaskToApp(row) {
+  return {
+    id: row.id, title: row.title, subject: row.subject || '',
+    dueDate: row.due_date, estTime: row.est_time || 30,
+    status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0,
+    completedAt: row.completed_at, createdAt: row.created_at
+  };
+}
+function appTaskToDb(t, userId) {
+  return {
+    id: t.id, user_id: userId, title: t.title, subject: t.subject || '',
+    due_date: t.dueDate, est_time: t.estTime || 30,
+    status: t.status || 'not_started', focus_minutes: t.focusMinutes || 0,
+    completed_at: t.completedAt || null, created_at: t.createdAt || new Date().toISOString()
+  };
+}
+function dbEventToApp(row) {
+  return {
+    id: row.id, title: row.title, type: row.event_type || 'other',
+    subject: row.subject || '', date: row.event_date,
+    recurring: row.recurring || 'none', createdAt: row.created_at
+  };
+}
+function appEventToDb(e, userId) {
+  return {
+    id: e.id, user_id: userId, title: e.title, event_type: e.type || 'other',
+    subject: e.subject || '', event_date: e.date,
+    recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString()
+  };
+}
+function dbNoteToApp(row) {
+  return { id: row.id, name: row.name, content: row.content || '', updatedAt: row.updated_at };
+}
+function appNoteToDb(n, userId) {
+  return { id: n.id, user_id: userId, name: n.name, content: n.content || '', updated_at: n.updatedAt || new Date().toISOString() };
+}
+
+/* Full load from Supabase */
+async function loadAllFromSupabase(userId) {
+  try {
+    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes] = await Promise.all([
+      sb.from('tasks').select('*').eq('user_id', userId),
+      sb.from('events').select('*').eq('user_id', userId),
+      sb.from('notes').select('*').eq('user_id', userId),
+      sb.from('chat_messages').select('*').eq('user_id', userId).order('created_at', { ascending: true }).limit(CHAT_MAX_MESSAGES),
+      sb.from('recurring_blocks').select('*').eq('user_id', userId),
+      sb.from('date_blocks').select('*').eq('user_id', userId),
+      sb.from('profiles').select('*').eq('id', userId).single()
+    ]);
+
+    const tasks = (tasksRes.data || []).map(dbTaskToApp);
+    const events = (eventsRes.data || []).map(dbEventToApp);
+    const notes = (notesRes.data || []).map(dbNoteToApp);
+    const messages = (chatRes.data || []).map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.created_at).getTime() }));
+
+    // Reconstruct blocks object from recurring_blocks + date_blocks
+    const recurring = (recurringRes.data || []).map(rb => ({
+      id: rb.id, name: rb.name, category: rb.category,
+      start: rb.start_time?.slice(0,5) || '00:00',
+      end: rb.end_time?.slice(0,5) || '01:00',
+      days: rb.days || []
+    }));
+    const dates = {};
+    (dateBlocksRes.data || []).forEach(db => {
+      if (!dates[db.block_date]) dates[db.block_date] = {};
+      dates[db.block_date][db.time_slot] = db.name === null ? null : { name: db.name, category: db.category || 'school' };
+    });
+    const blocks = { recurring, dates };
+
+    const weatherCoords = profileRes.data
+      ? { lat: profileRes.data.weather_lat || 42.33, lon: profileRes.data.weather_lon || -71.21 }
+      : { lat: 42.33, lon: -71.21 };
+
+    return { tasks, events, notes, messages, blocks, weatherCoords };
+  } catch (e) {
+    console.error('Failed to load from Supabase:', e);
+    return null;
+  }
+}
+
+/* ── Individual save helpers (fire-and-forget) ── */
+async function dbUpsertTask(task, userId) {
+  const { error } = await sb.from('tasks').upsert(appTaskToDb(task, userId), { onConflict: 'id' });
+  if (error) console.error('Task upsert error:', error);
+}
+async function dbDeleteTask(taskId, userId) {
+  const { error } = await sb.from('tasks').delete().eq('id', taskId).eq('user_id', userId);
+  if (error) console.error('Task delete error:', error);
+}
+async function dbUpsertEvent(event, userId) {
+  const { error } = await sb.from('events').upsert(appEventToDb(event, userId), { onConflict: 'id' });
+  if (error) console.error('Event upsert error:', error);
+}
+async function dbUpsertNote(note, userId) {
+  const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
+  if (error) console.error('Note upsert error:', error);
+}
+async function dbInsertChatMsg(role, content, userId) {
+  const { error } = await sb.from('chat_messages').insert({ user_id: userId, role, content });
+  if (error) console.error('Chat insert error:', error);
+}
+async function dbClearChat(userId) {
+  const { error } = await sb.from('chat_messages').delete().eq('user_id', userId);
+  if (error) console.error('Chat clear error:', error);
+}
+async function dbUpsertDateBlock(date, timeSlot, data, userId) {
+  const row = {
+    user_id: userId, block_date: date, time_slot: timeSlot,
+    name: data ? data.name : null, category: data ? (data.category || 'school') : 'school'
+  };
+  const { error } = await sb.from('date_blocks').upsert(row, { onConflict: 'user_id,block_date,time_slot' });
+  if (error) console.error('Date block upsert error:', error);
+}
+
+/* ── Migrate localStorage → Supabase (first login) ── */
+async function migrateLocalStorage(userId) {
+  const migrated = localStorage.getItem('sos_migrated_' + userId);
+  if (migrated) return false;
+
+  try {
+    // Tasks
+    const localTasks = JSON.parse(localStorage.getItem('cc_tasks') || '[]');
+    if (localTasks.length > 0) {
+      const rows = localTasks.map(t => appTaskToDb(t, userId));
+      await sb.from('tasks').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Events
+    const localEvents = JSON.parse(localStorage.getItem('cc_events') || '[]');
+    if (localEvents.length > 0) {
+      const rows = localEvents.map(e => appEventToDb(e, userId));
+      await sb.from('events').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Notes
+    const localNotes = JSON.parse(localStorage.getItem('cc_notes') || '[]');
+    if (localNotes.length > 0) {
+      const rows = localNotes.map(n => appNoteToDb(n, userId));
+      await sb.from('notes').upsert(rows, { onConflict: 'id' });
+    }
+
+    // Chat messages
+    const localChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+    if (localChat.length > 0) {
+      const rows = localChat.map(m => ({ user_id: userId, role: m.role, content: m.content }));
+      await sb.from('chat_messages').insert(rows);
+    }
+
+    // Blocks (recurring + date overrides)
+    const localBlocks = JSON.parse(localStorage.getItem('cc_blocks') || '{"recurring":[],"dates":{}}');
+    if (localBlocks.recurring?.length > 0) {
+      const rows = localBlocks.recurring.map(rb => ({
+        user_id: userId, name: rb.name, category: rb.category || 'school',
+        start_time: rb.start || '00:00', end_time: rb.end || '01:00', days: rb.days || []
+      }));
+      await sb.from('recurring_blocks').insert(rows);
+    }
+    if (localBlocks.dates && Object.keys(localBlocks.dates).length > 0) {
+      const rows = [];
+      Object.entries(localBlocks.dates).forEach(([date, slots]) => {
+        Object.entries(slots).forEach(([slot, data]) => {
+          rows.push({
+            user_id: userId, block_date: date, time_slot: slot,
+            name: data ? data.name : null, category: data ? (data.category || 'school') : 'school'
+          });
+        });
+      });
+      if (rows.length > 0) await sb.from('date_blocks').upsert(rows, { onConflict: 'user_id,block_date,time_slot' });
+    }
+
+    // Weather coords
+    const localCoords = JSON.parse(localStorage.getItem('cc_weather_coords') || 'null');
+    if (localCoords) {
+      await sb.from('profiles').update({ weather_lat: localCoords.lat, weather_lon: localCoords.lon }).eq('id', userId);
+    }
+
+    localStorage.setItem('sos_migrated_' + userId, 'true');
+    console.log('Migration complete');
+    return true;
+  } catch (e) {
+    console.error('Migration error:', e);
+    return false;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   SOS SYSTEM PROMPT BUILDER
+   ═══════════════════════════════════════════════ */
+function buildSystemPrompt(tasks, blocks, events, notes) {
+  const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  const todayKey = today();
+  const currentHour = new Date().getHours();
+
+  const todayBlocks = {};
+  const todayDow = new Date().getDay();
+  (blocks.recurring || []).forEach(rb => {
+    if (rb.days.includes(todayDow)) {
+      const [sh, sm] = rb.start.split(':').map(Number);
+      const [eh, em] = rb.end.split(':').map(Number);
+      let ch = sh, cm = sm;
+      while (ch < eh || (ch === eh && cm < em)) {
+        const key = String(ch).padStart(2,'0') + ':' + String(cm).padStart(2,'0');
+        todayBlocks[key] = { name: rb.name, category: rb.category };
+        cm += 30; if (cm >= 60) { ch++; cm = 0; }
+      }
+    }
+  });
+  const dateOverrides = blocks.dates?.[todayKey] || {};
+  Object.entries(dateOverrides).forEach(([k, v]) => {
+    if (v === null) delete todayBlocks[k]; else todayBlocks[k] = v;
+  });
+
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const weekSummary = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate() - d.getDay() + i);
+    const ds = toDateStr(d); const dow = d.getDay(); const activities = [];
+    (blocks.recurring || []).forEach(rb => {
+      if (rb.days.includes(dow)) activities.push(rb.name + ' ' + rb.start + '-' + rb.end);
+    });
+    tasks.filter(t => t.dueDate === ds && t.status !== 'done').forEach(t => activities.push('DUE: ' + t.title));
+    events.filter(e => e.date === ds).forEach(e => activities.push('EVENT: ' + e.title));
+    if (activities.length > 0) weekSummary.push(dayNames[dow] + ' ' + fmt(ds) + ': ' + activities.join(', '));
+  }
+
+  const activeTasks = tasks.filter(t => t.status !== 'done').sort((a,b) => getPriority(a) - getPriority(b));
+  const overdueTasks = activeTasks.filter(t => daysUntil(t.dueDate) < 0);
+  const upcomingEvents = events.filter(ev => { const d = daysUntil(ev.date); return d >= 0 && d <= 14; }).map(ev => ev.title + ' (' + ev.type + ') on ' + fmt(ev.date));
+  const now = new Date(); const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
+  const doneThisWeek = tasks.filter(t => t.status === 'done' && t.completedAt && new Date(t.completedAt) >= weekStart).length;
+  const dailyLoad = {}; activeTasks.forEach(t => { dailyLoad[t.dueDate] = (dailyLoad[t.dueDate] || 0) + (t.estTime || 30); });
+  const overloadedDays = Object.entries(dailyLoad).filter(([d, mins]) => mins > 120).map(([d, mins]) => fmt(d) + ' (' + mins + ' min)');
+  const taskList = activeTasks.map(t =>
+    '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') +
+    ' | due ' + fmt(t.dueDate) + ' (' + daysUntil(t.dueDate) + 'd)' +
+    ' | ' + t.estTime + 'min | ' + t.status.replace('_',' ') + ' | id:' + t.id
+  ).join('\n');
+
+  return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
+
+VOICE & PERSONALITY:
+- Talk like a supportive friend, not a teacher or assistant. Casual language, lowercase-ish energy.
+- Keep responses to 2-4 sentences unless they ask for detail. No walls of text.
+- Celebrate wins without being corny. Light humor when it fits.
+- Never condescending. This student is smart — they just need help managing time.
+- When they're stressed, be calming. When they're procrastinating, be gently honest.
+- You're not a planner — you're their study sidekick who happens to run their schedule.
+
+CORE BEHAVIORS:
+1. SLEEP PROTECTION: Never schedule or suggest work past 10pm. If they try to, gently push back: "that's sleep territory — let's find time earlier."
+2. TASK DECOMPOSITION: For big projects (>60 min or multi-day), suggest breaking into 2-4 smaller chunks with their own dates.
+3. WORKLOAD BALANCING: If a day has 2+ hours of tasks, suggest spreading to lighter days.
+4. MISSED TASK RECOVERY: For overdue tasks, don't guilt — suggest a realistic new date. "no stress, let's just move it."
+5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
+6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
+
+TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
+
+ACTIVE TASKS (sorted by urgency):
+${taskList || '(none)'}
+
+${overdueTasks.length > 0 ? 'OVERDUE: ' + overdueTasks.map(t => t.title + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ') : ''}
+
+TODAY'S SCHEDULE:
+${Object.entries(todayBlocks).length > 0 ? Object.entries(todayBlocks).sort().map(([k, v]) => k + ' ' + v.name).join('\n') : '(nothing scheduled)'}
+
+THIS WEEK:
+${weekSummary.join('\n') || '(no scheduled activities)'}
+
+UPCOMING EVENTS: ${upcomingEvents.join(', ') || 'none'}
+${overloadedDays.length > 0 ? 'OVERLOADED DAYS: ' + overloadedDays.join(', ') : ''}
+COMPLETED THIS WEEK: ${doneThisWeek} tasks
+
+ACTIONS — Include these at the END of your response when you need to modify data. Wrap each in <action> tags:
+
+- Add task: <action>{"type":"add_task","title":"...","subject":"...","due":"YYYY-MM-DD","estimated_minutes":30}</action>
+- Complete task: <action>{"type":"complete_task","task_id":"..."}</action>
+- Update task: <action>{"type":"update_task","task_id":"...","title":"...","due":"YYYY-MM-DD","estimated_minutes":30}</action>
+- Add planner block: <action>{"type":"add_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","activity":"...","category":"school"}</action>
+- Add calendar event: <action>{"type":"add_event","title":"...","date":"YYYY-MM-DD","event_type":"homework","subject":"..."}</action>
+- Add note: <action>{"type":"add_note","tab_name":"...","content":"..."}</action>
+- Break task into parts: <action>{"type":"break_task","parent_title":"...","subtasks":[{"title":"...","due":"YYYY-MM-DD","estimated_minutes":20}]}</action>
+
+IMPORTANT RULES FOR ACTIONS:
+- When the user asks to add/create something, ALWAYS include the action tag so it actually gets created.
+- When adding tasks, infer reasonable due dates and time estimates if not specified.
+- For "due Thursday" or day names, calculate the actual YYYY-MM-DD date from today (${todayKey}).
+- Confirm naturally in your message: "got it — added [task] for [date]. that gives you X days."
+- If something is ambiguous, ask ONE short question. Don't quiz them.
+- Categories for planner blocks: school, swim, debate, free time, sleep, other
+- Event types: homework, test, practice, event, other`;
+}
+
+/* ─── Action parser ─── */
+function parseActions(text) {
+  const actions = []; const regex = /<action>([\s\S]*?)<\/action>/g; let match;
+  while ((match = regex.exec(text)) !== null) {
+    try { actions.push(JSON.parse(match[1].trim())); } catch (e) { console.error('Failed to parse action:', match[1], e); }
+  }
+  return actions;
+}
+function stripActionTags(text) { return text.replace(/<action>[\s\S]*?<\/action>/g, '').trim(); }
+
+/* ═══════════════════════════════════════════════
+   AUTH SCREEN
+   ═══════════════════════════════════════════════ */
+function AuthScreen({ onAuth }) {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) onAuth(session.user);
+      else setCheckingSession(false);
+    });
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      if (mode === 'signup') {
+        const { data, error: err } = await sb.auth.signUp({
+          email, password,
+          options: { data: { display_name: displayName || 'Student' } }
+        });
+        if (err) throw err;
+        if (data.user) {
+          // Check if email confirmation is required
+          if (data.session) {
+            onAuth(data.user);
+          } else {
+            setError(null);
+            setMode('check-email');
+          }
+        }
+      } else {
+        const { data, error: err } = await sb.auth.signInWithPassword({ email, password });
+        if (err) throw err;
+        if (data.user) onAuth(data.user);
+      }
+    } catch (err) {
+      setError(err.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (checkingSession) {
+    return (
+      <div className="auth-screen">
+        <div style={{ fontSize:'2rem', fontWeight:900, background:'linear-gradient(135deg, var(--accent), var(--teal))', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:16 }}>SOS</div>
+        <div style={{ width:24, height:24, border:'3px solid var(--border)', borderTopColor:'var(--accent)', borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+
+  if (mode === 'check-email') {
+    return (
+      <div className="auth-screen">
+        <div className="auth-form">
+          <div style={{ fontSize:'2rem', marginBottom:8 }}>📧</div>
+          <div style={{ fontSize:'1.1rem', fontWeight:700, marginBottom:8 }}>Check your email</div>
+          <div style={{ fontSize:'0.88rem', color:'var(--text-dim)', marginBottom:20, lineHeight:1.5 }}>
+            We sent a confirmation link to <strong style={{ color:'var(--text)' }}>{email}</strong>. Click it, then come back and log in.
+          </div>
+          <button className="auth-btn auth-btn-primary" onClick={() => setMode('login')}>
+            Back to login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-screen">
+      <div style={{ marginBottom:24 }}>
+        <div style={{ fontSize:'2.5rem', fontWeight:900, background:'linear-gradient(135deg, var(--accent), var(--teal))', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:4 }}>SOS</div>
+        <div style={{ fontSize:'0.85rem', color:'var(--text-dim)' }}>Student Operating System</div>
+      </div>
+
+      <form className="auth-form" onSubmit={handleSubmit}>
+        <div style={{ fontSize:'1.1rem', fontWeight:700, marginBottom:16 }}>
+          {mode === 'login' ? 'Welcome back' : 'Create your account'}
+        </div>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        {mode === 'signup' && (
+          <input className="auth-input" type="text" placeholder="Your name" value={displayName} onChange={e => setDisplayName(e.target.value)} autoComplete="name" />
+        )}
+        <input className="auth-input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" />
+        <input className="auth-input" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
+
+        <button className="auth-btn auth-btn-primary" type="submit" disabled={loading}>
+          {loading ? 'Loading...' : (mode === 'login' ? 'Sign in' : 'Create account')}
+        </button>
+
+        <div className="auth-divider">or</div>
+
+        <button type="button" className="auth-btn auth-btn-secondary"
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(null); }}>
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+        </button>
+      </form>
+
+      <div style={{ marginTop:16, fontSize:'0.72rem', color:'var(--text-dim)', maxWidth:300, lineHeight:1.5 }}>
+        Your data syncs across all your devices. No more losing stuff when you clear your browser.
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   CONFIRMATION CARD
+   ═══════════════════════════════════════════════ */
+function ConfirmationCard({ action, onConfirm, onCancel }) {
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState({});
+  useEffect(() => { setEditData({ ...action }); }, []);
+
+  function getCardInfo() {
+    switch (action.type) {
+      case 'add_task': return { icon:'📋', label:'New Task', fields: [
+        { key:'title', label:'Task', value:action.title }, { key:'subject', label:'Subject', value:action.subject||'—' },
+        { key:'due', label:'Due', value:action.due?fmt(action.due):'No date' }, { key:'estimated_minutes', label:'Time', value:(action.estimated_minutes||30)+' min' }
+      ]};
+      case 'add_event': return { icon:'📅', label:'New Event', fields: [
+        { key:'title', label:'Event', value:action.title }, { key:'date', label:'Date', value:action.date?fmt(action.date):'No date' },
+        { key:'event_type', label:'Type', value:action.event_type||'other' }, { key:'subject', label:'Subject', value:action.subject||'—' }
+      ]};
+      case 'add_block': return { icon:'🗓', label:'Schedule Block', fields: [
+        { key:'activity', label:'Activity', value:action.activity }, { key:'date', label:'Date', value:action.date?fmt(action.date):'Today' },
+        { key:'time', label:'Time', value:(action.start||'?')+' - '+(action.end||'?') }, { key:'category', label:'Category', value:action.category||'school' }
+      ]};
+      case 'complete_task': return { icon:'✅', label:'Complete Task', fields: [{ key:'task_id', label:'Task ID', value:action.task_id }] };
+      case 'break_task': return { icon:'✂️', label:'Break Into Parts', fields: [
+        { key:'parent_title', label:'Project', value:action.parent_title }, { key:'subtasks', label:'Parts', value:(action.subtasks||[]).length+' sub-tasks' }
+      ]};
+      default: return { icon:'⚡', label:'Action', fields: Object.entries(action).filter(([k])=>k!=='type').map(([k,v])=>({key:k,label:k,value:String(v)})) };
+    }
+  }
+  const info = getCardInfo();
+
+  return (
+    <div className="confirm-card card-pop">
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+        <span style={{ fontSize:'1.1rem' }}>{info.icon}</span>
+        <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--accent)' }}>{info.label}</span>
+      </div>
+      {!editing ? info.fields.map(f => (
+        <div key={f.key} className="confirm-card-field">
+          <span className="confirm-card-label">{f.label}</span>
+          <span className="confirm-card-value">{f.value}</span>
+        </div>
+      )) : (
+        <div>
+          {(action.type === 'add_task') && <>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>setEditData(p=>({...p,title:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Due</span><input className="confirm-edit-input" type="date" value={editData.due||''} onChange={e=>setEditData(p=>({...p,due:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Mins</span><input className="confirm-edit-input" type="number" min="5" step="5" value={editData.estimated_minutes||30} onChange={e=>setEditData(p=>({...p,estimated_minutes:Number(e.target.value)}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Class</span><input className="confirm-edit-input" value={editData.subject||''} onChange={e=>setEditData(p=>({...p,subject:e.target.value}))} placeholder="e.g. Math"/></div>
+          </>}
+          {(action.type === 'add_event') && <>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>setEditData(p=>({...p,title:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>setEditData(p=>({...p,date:e.target.value}))}/></div>
+          </>}
+          {(action.type === 'add_block') && <>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>What</span><input className="confirm-edit-input" value={editData.activity||''} onChange={e=>setEditData(p=>({...p,activity:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>setEditData(p=>({...p,date:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>Start</span><input className="confirm-edit-input" type="time" value={editData.start||''} onChange={e=>setEditData(p=>({...p,start:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.78rem',color:'var(--text-dim)',width:50}}>End</span><input className="confirm-edit-input" type="time" value={editData.end||''} onChange={e=>setEditData(p=>({...p,end:e.target.value}))}/></div>
+          </>}
+        </div>
+      )}
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-yes" onClick={() => { editing ? onConfirm({...action,...editData}) : onConfirm(action); }}>
+          {editing ? 'Save' : 'Looks good'} ✓
+        </button>
+        {!editing && action.type !== 'complete_task' && <button className="confirm-btn confirm-btn-edit" onClick={() => setEditing(true)}>Edit</button>}
+        <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   SCHEDULE PEEK PANEL
+   ═══════════════════════════════════════════════ */
+function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
+  const todayKey = today(); const todayDow = new Date().getDay();
+  const timeline = useMemo(() => {
+    const result = {};
+    (blocks.recurring || []).forEach(rb => {
+      if (rb.days.includes(todayDow)) {
+        const [sh,sm]=rb.start.split(':').map(Number); const [eh,em]=rb.end.split(':').map(Number);
+        let ch=sh,cm=sm;
+        while(ch<eh||(ch===eh&&cm<em)){const key=String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');result[key]={name:rb.name,category:rb.category};cm+=30;if(cm>=60){ch++;cm=0;}}
+      }
+    });
+    const ov = blocks.dates?.[todayKey]||{};
+    Object.entries(ov).forEach(([k,v])=>{if(v===null)delete result[k];else result[k]=v;});
+    return result;
+  },[blocks,todayKey,todayDow]);
+
+  const condensed = useMemo(()=>{
+    const sorted=Object.entries(timeline).sort(([a],[b])=>a.localeCompare(b));const bl=[];let cur=null;
+    sorted.forEach(([time,data])=>{if(cur&&cur.name===data.name&&cur.category===data.category){cur.end=time;cur.slots++}else{if(cur)bl.push(cur);cur={start:time,end:time,name:data.name,category:data.category,slots:1}}});
+    if(cur)bl.push(cur);
+    return bl.map(b=>{const[eh,em]=b.end.split(':').map(Number);let nm=em+30,nh=eh;if(nm>=60){nh++;nm=0}return{...b,endDisplay:String(nh).padStart(2,'0')+':'+String(nm).padStart(2,'0')}});
+  },[timeline]);
+
+  const activeTasks=useMemo(()=>tasks.filter(t=>t.status!=='done').sort((a,b)=>getPriority(a)-getPriority(b)).slice(0,5),[tasks]);
+  const upcomingEvents=useMemo(()=>events.filter(ev=>{const d=daysUntil(ev.date);return d>=0&&d<=7}).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4),[events]);
+  const currentHour=new Date().getHours();
+  const greeting=currentHour<12?'Good morning':currentHour<17?'Good afternoon':'Good evening';
+
+  return (<>
+    <div className="peek-overlay" onClick={onClose}/>
+    <div className="peek-panel">
+      <div className="peek-handle"/>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
+        {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6}}><span style={{fontSize:'1.3rem'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
+      </div>
+      <div className="peek-section">
+        <div className="peek-section-title">Today's Schedule</div>
+        {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Nothing scheduled today</div>:
+        condensed.map((block,i)=>(
+          <div key={i} className="peek-timeline-slot"><div className="peek-timeline-time">{fmtTime(...block.start.split(':').map(Number))}</div>
+          <div className="peek-timeline-block" style={{background:catColor(block.category)+'20',borderLeft:'3px solid '+catColor(block.category)}}>{block.name}<span style={{fontSize:'0.72rem',color:'var(--text-dim)',marginLeft:8}}>{block.slots*30}min</span></div></div>
+        ))}
+      </div>
+      {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Tasks ({activeTasks.length})</div>
+        {activeTasks.map(task=>{const d=daysUntil(task.dueDate);const dotColor=d<0?'var(--danger)':d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
+          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d<0?Math.abs(d)+'d overdue':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{fontSize:'0.78rem',fontWeight:600,color:dotColor}}>{task.status==='in_progress'?'🔶':'⬜'}</div></div>)
+        })}
+      </div>}
+      {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
+        {upcomingEvents.map(ev=>(<div key={ev.id} className="peek-task-item"><div className="peek-task-dot" style={{background:catColor(ev.type)}}/><div><div style={{fontWeight:500}}>{ev.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{fmt(ev.date)}{ev.subject&&' · '+ev.subject}</div></div></div>))}
+      </div>}
+    </div>
+  </>);
+}
+
+/* ═══════════════════════════════════════════════
+   TOAST
+   ═══════════════════════════════════════════════ */
+function Toast({message,onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,2400);return()=>clearTimeout(t)},[]);
+  return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:12,background:'var(--success)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4)',animation:'toastIn .3s ease, toastOut .3s ease 2.1s forwards'}}>{message}</div>);
+}
+
+/* ═══════════════════════════════════════════════
+   FOCUS MODE
+   ═══════════════════════════════════════════════ */
+function FocusMode({task,onComplete,onExit,onUpdateTask}){
+  const[secondsLeft,setSecondsLeft]=useState(25*60);const[totalSeconds]=useState(25*60);
+  const[isRunning,setIsRunning]=useState(true);const[elapsed,setElapsed]=useState(0);
+  const[showBreakPrompt,setShowBreakPrompt]=useState(false);const[onBreak,setOnBreak]=useState(false);
+  const startTimeRef=useRef(Date.now());const endTimeRef=useRef(Date.now()+25*60*1000);
+
+  useEffect(()=>{
+    if(!isRunning)return;
+    const iv=setInterval(()=>{
+      const now=Date.now();const remaining=Math.max(0,Math.round((endTimeRef.current-now)/1000));
+      setSecondsLeft(remaining);setElapsed(Math.round((now-startTimeRef.current)/1000));
+      if(remaining<=0){
+        setIsRunning(false);
+        try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const playTone=(freq,start,dur)=>{const osc=ctx.createOscillator();const gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type='sine';gain.gain.setValueAtTime(0.3,ctx.currentTime+start);gain.gain.exponentialRampToValueAtTime(0.01,ctx.currentTime+start+dur);osc.start(ctx.currentTime+start);osc.stop(ctx.currentTime+start+dur)};playTone(660,0,0.25);playTone(880,0.3,0.35)}catch(e){}
+        if(!onBreak){setShowBreakPrompt(true);const focusSecs=Math.round((now-startTimeRef.current)/1000);onUpdateTask(task.id,{focusMinutes:(task.focusMinutes||0)+Math.round(focusSecs/60)})}
+        else{setOnBreak(false);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+25*60*1000;setSecondsLeft(25*60);setIsRunning(true)}
+      }
+    },250);return()=>clearInterval(iv);
+  },[isRunning,onBreak]);
+
+  useEffect(()=>{function handleKey(e){if(e.key==='Escape')onExit();if(e.key===' '){e.preventDefault();togglePause()}}window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey)},[isRunning]);
+  function togglePause(){if(isRunning)setIsRunning(false);else{endTimeRef.current=Date.now()+secondsLeft*1000;setIsRunning(true)}}
+  function startBreak(){setShowBreakPrompt(false);setOnBreak(true);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+5*60*1000;setSecondsLeft(5*60);setIsRunning(true)}
+  function keepGoing(){setShowBreakPrompt(false);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+25*60*1000;setSecondsLeft(25*60);setIsRunning(true)}
+  function handleDone(){onUpdateTask(task.id,{status:'done',completedAt:new Date().toISOString(),focusMinutes:(task.focusMinutes||0)+Math.round(elapsed/60)});onComplete()}
+
+  const mins=Math.floor(secondsLeft/60);const secs=secondsLeft%60;
+  const progress=totalSeconds>0?(1-secondsLeft/(onBreak?300:totalSeconds)):0;
+  const circumference=2*Math.PI*45;
+  const btnBase={border:'none',borderRadius:10,padding:'12px 24px',cursor:'pointer',fontWeight:600,fontSize:'0.92rem',transition:'all .15s'};
+
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:1000,background:'#050510',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',animation:'overlayIn .4s ease'}}>
+      <div style={{position:'absolute',inset:0,animation:isRunning?'breathe 4s ease-in-out infinite':'none',pointerEvents:'none'}}/>
+      <div style={{textAlign:'center',marginBottom:40,position:'relative',zIndex:1}}>
+        <div style={{fontSize:'1.8rem',fontWeight:700,marginBottom:8}}>{task.title}</div>
+        {task.subject&&<div style={{fontSize:'1rem',color:'var(--text-dim)',marginBottom:4}}>{task.subject}</div>}
+        <div style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>{task.dueDate&&<span>{fmt(task.dueDate)}</span>}{task.estTime>0&&<span style={{marginLeft:12}}>{task.estTime}min estimated</span>}</div>
+        {onBreak&&<div style={{marginTop:8,color:'var(--success)',fontWeight:600}}>Break time</div>}
+      </div>
+      <div style={{position:'relative',width:180,height:180,marginBottom:30}}>
+        <svg width="180" height="180" style={{transform:'rotate(-90deg)'}}><circle cx="90" cy="90" r="45" fill="none" stroke="var(--border)" strokeWidth="6"/><circle cx="90" cy="90" r="45" fill="none" stroke={onBreak?'var(--success)':'var(--accent)'} strokeWidth="6" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference*(1-progress)} style={{transition:'stroke-dashoffset .5s ease'}}/></svg>
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+          <div style={{fontSize:'2.5rem',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{String(mins).padStart(2,'0')}:{String(secs).padStart(2,'0')}</div>
+          <div style={{fontSize:'0.8rem',color:'var(--text-dim)'}}>{isRunning?(onBreak?'Break':'Focusing'):'Paused'}</div>
+        </div>
+      </div>
+      {showBreakPrompt&&<div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,textAlign:'center',marginBottom:20,maxWidth:340,boxShadow:'var(--shadow)'}} className="fade-in"><div style={{fontSize:'1.1rem',fontWeight:600,marginBottom:12}}>Nice session. Take 5?</div><div style={{display:'flex',gap:10,justifyContent:'center'}}><button onClick={startBreak} style={{...btnBase,background:'var(--success)',color:'#fff'}}>Start break</button><button onClick={keepGoing} style={{...btnBase,background:'transparent',border:'1px solid var(--accent)',color:'var(--accent)'}}>Keep going</button></div></div>}
+      {!showBreakPrompt&&<div style={{display:'flex',gap:12,position:'relative',zIndex:1}}><button onClick={handleDone} style={{...btnBase,background:'var(--success)',color:'#fff'}}>Done ✓</button><button onClick={togglePause} style={{...btnBase,background:'transparent',border:'1px solid var(--accent)',color:'var(--accent)'}}>{isRunning?'Pause':'Resume'}</button><button onClick={onExit} style={{...btnBase,background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)'}}>Exit</button></div>}
+      <div style={{position:'absolute',bottom:20,fontSize:'0.7rem',color:'var(--text-dim)'}}>Space to pause/resume · Escape to exit</div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   SOS MAIN APP
+   ═══════════════════════════════════════════════ */
+function App() {
+  const [user, setUser] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  // ── Data stores ──
+  const [tasks, setTasks] = useState([]);
+  const [blocks, setBlocks] = useState({ recurring: [], dates: {} });
+  const [notes, setNotes] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [weatherData, setWeatherData] = useState(null);
+  const [weatherCoords, setWeatherCoords] = useState({ lat:42.33, lon:-71.21 });
+
+  // ── UI state ──
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [chatError, setChatError] = useState(null);
+  const [pendingActions, setPendingActions] = useState([]);
+  const [showPeek, setShowPeek] = useState(false);
+  const [focusTaskId, setFocusTaskId] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
+
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+  const chatAreaRef = useRef(null);
+
+  // ── Auth handler ──
+  async function handleAuth(authUser) {
+    setUser(authUser);
+    // Migrate any existing localStorage data to Supabase
+    const didMigrate = await migrateLocalStorage(authUser.id);
+    if (didMigrate) setToastMsg('Migrated your existing data to the cloud ☁️');
+
+    // Load all data from Supabase
+    const data = await loadAllFromSupabase(authUser.id);
+    if (data) {
+      setTasks(data.tasks);
+      setBlocks(data.blocks);
+      setNotes(data.notes);
+      setEvents(data.events);
+      setMessages(data.messages);
+      setWeatherCoords(data.weatherCoords);
+    }
+    setDataLoaded(true);
+  }
+
+  // ── Listen for auth state changes (logout, token refresh) ──
+  useEffect(() => {
+    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setDataLoaded(false);
+        setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Auto-scroll ──
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages, isLoading, pendingActions]);
+
+  // ── Focus input on load ──
+  useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
+
+  // ── Weather fetch ──
+  const fetchWeather = useCallback(async () => {
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${weatherCoords.lat}&longitude=${weatherCoords.lon}&current=temperature_2m,weathercode,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weathercode,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
+      const res = await fetch(url); if (!res.ok) throw new Error('Weather fetch failed');
+      const data = await res.json();
+      setWeatherData({ current:data.current, daily:data.daily, fetchedAt:Date.now() });
+    } catch(e) { console.error('Weather fetch error:', e); }
+  }, [weatherCoords]);
+  useEffect(() => { if (dataLoaded) { const stale = !weatherData?.fetchedAt || (Date.now() - weatherData.fetchedAt > 3600000); if (stale) fetchWeather(); } }, [dataLoaded]);
+
+  // ── Sync helper: wraps a DB write with sync status ──
+  async function syncOp(fn) {
+    setSyncStatus('saving');
+    try { await fn(); setSyncStatus('saved'); } catch(e) { console.error('Sync error:', e); setSyncStatus('error'); }
+  }
+
+  // ── Update a single task and sync ──
+  function updateTask(taskId, updates) {
+    setTasks(prev => {
+      const next = prev.map(t => t.id === taskId ? { ...t, ...updates } : t);
+      if (user) {
+        const updated = next.find(t => t.id === taskId);
+        if (updated) syncOp(() => dbUpsertTask(updated, user.id));
+      }
+      return next;
+    });
+  }
+
+  // ── Action executor (writes to Supabase) ──
+  function executeAction(action) {
+    try {
+      switch (action.type) {
+        case 'add_task': {
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:action.due||today(), estTime:action.estimated_minutes||30, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          setTasks(prev => [...prev, task]);
+          if (user) syncOp(() => dbUpsertTask(task, user.id));
+          break;
+        }
+        case 'complete_task':
+          if (action.task_id) updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
+          break;
+        case 'update_task':
+          if (action.task_id) {
+            const upd = {};
+            if (action.title) upd.title = action.title;
+            if (action.due) upd.dueDate = action.due;
+            if (action.estimated_minutes) upd.estTime = action.estimated_minutes;
+            updateTask(action.task_id, upd);
+          }
+          break;
+        case 'add_block': {
+          const date = action.date || today();
+          const [sh,sm] = (action.start||'00:00').split(':').map(Number);
+          const [eh,em] = (action.end||'01:00').split(':').map(Number);
+          setBlocks(prev => {
+            const newDates = { ...(prev.dates||{}) };
+            const dayBlocks = { ...(newDates[date]||{}) };
+            let ch=sh, cm=sm;
+            while (ch<eh||(ch===eh&&cm<em)) {
+              const key = String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');
+              const data = { name:action.activity||'Block', category:action.category||'school' };
+              dayBlocks[key] = data;
+              if (user) syncOp(() => dbUpsertDateBlock(date, key, data, user.id));
+              cm+=30; if(cm>=60){ch++;cm=0;}
+            }
+            newDates[date] = dayBlocks;
+            return { ...prev, dates:newDates };
+          });
+          break;
+        }
+        case 'add_event': {
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), recurring:'none', createdAt:new Date().toISOString() };
+          setEvents(prev => [...prev, ev]);
+          if (user) syncOp(() => dbUpsertEvent(ev, user.id));
+          break;
+        }
+        case 'add_note': {
+          const tabName = action.tab_name||'SOS Note'; const content = action.content||'';
+          setNotes(prev => {
+            const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
+            if (existing >= 0) {
+              const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString() } : n);
+              if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
+              return updated;
+            }
+            const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString() };
+            if (user) syncOp(() => dbUpsertNote(newNote, user.id));
+            return [...prev, newNote];
+          });
+          break;
+        }
+        case 'break_task': {
+          (action.subtasks||[]).forEach(st => {
+            const task = { id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+            setTasks(prev => [...prev, task]);
+            if (user) syncOp(() => dbUpsertTask(task, user.id));
+          });
+          break;
+        }
+        default: console.warn('Unknown action type:', action.type);
+      }
+    } catch(e) { console.error('Failed to execute action:', action, e); }
+  }
+
+  // ── Confirmation handlers ──
+  function handleConfirmAction(idx, action) {
+    executeAction(action);
+    setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+    setToastMsg('✓ '+(action.title||action.activity||'Action')+' added');
+  }
+  function handleCancelAction(idx) { setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
+  function autoConfirmPending() {
+    if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
+  }
+
+  // ── Send message via Edge Function (Groq key stays server-side) ──
+  async function sendMessage(text) {
+    if (!text?.trim() || isLoading) return;
+    autoConfirmPending();
+    setChatError(null);
+
+    const userMsg = { role:'user', content:text.trim(), timestamp:Date.now() };
+    const updated = [...messages, userMsg];
+    while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
+    setMessages(updated);
+    setInput('');
+    setIsLoading(true);
+
+    // Save user message to DB
+    if (user) dbInsertChatMsg('user', text.trim(), user.id);
+
+    try {
+      const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
+      const systemPrompt = buildSystemPrompt(tasks, blocks, events, notes);
+
+      // Call the Edge Function instead of Groq directly
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+
+      const response = await fetch(EDGE_FN_URL, {
+        method:'POST',
+        headers: {
+          'Content-Type':'application/json',
+          'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
+        },
+        body: JSON.stringify({
+          systemPrompt,
+          messages: historyForApi
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || 'AI request failed: ' + response.status);
+      }
+
+      const data = await response.json();
+      const rawContent = data?.content || "hmm, didn't get a response. try again?";
+
+      const actions = parseActions(rawContent);
+      const displayContent = stripActionTags(rawContent);
+
+      if (actions.length > 0) {
+        const needsConfirm = actions.filter(a => ['add_task','add_event','add_block','break_task'].includes(a.type));
+        const autoExec = actions.filter(a => !['add_task','add_event','add_block','break_task'].includes(a.type));
+        autoExec.forEach(executeAction);
+        if (needsConfirm.length > 0) setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
+      }
+
+      const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+
+      // Save assistant message to DB
+      if (user) dbInsertChatMsg('assistant', displayContent, user.id);
+    } catch(err) {
+      console.error('Chat error:', err);
+      setChatError(err.message || "couldn't reach the server — check your connection");
+    } finally { setIsLoading(false); }
+  }
+
+  function handleSubmit(e) { if(e)e.preventDefault(); sendMessage(input); }
+  function sendChip(text) { setInput(''); sendMessage(text); }
+  function clearChat() {
+    setMessages([]); setPendingActions([]); setChatError(null);
+    if (user) dbClearChat(user.id);
+  }
+
+  async function handleLogout() {
+    await sb.auth.signOut();
+  }
+
+  // ── Focus Mode ──
+  const focusTask = focusTaskId ? tasks.find(t=>t.id===focusTaskId) : null;
+  function startFocusOnTop() {
+    const active = tasks.filter(t=>t.status!=='done').sort((a,b)=>getPriority(a)-getPriority(b));
+    if (active.length > 0) setFocusTaskId(active[0].id);
+    else setToastMsg('No active tasks to focus on');
+  }
+
+  // ── Keyboard shortcuts ──
+  useEffect(()=>{
+    function handleKey(e){
+      const tag=document.activeElement?.tagName?.toLowerCase();
+      if(tag==='input'||tag==='textarea'||tag==='select')return;
+      if(focusTaskId)return;
+      const key=e.key.toLowerCase();
+      if(key==='f'){e.preventDefault();startFocusOnTop()}
+      else if(key==='/'){e.preventDefault();inputRef.current?.focus()}
+      else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
+      else if(key==='escape'){if(showPeek)setShowPeek(false)}
+    }
+    window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
+  },[focusTaskId,showPeek,tasks]);
+
+  // ── Typing dots ──
+  const TypingDots=()=>(
+    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+      <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 16px',display:'flex',gap:5,alignItems:'center'}}>
+        {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'var(--accent)',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.2)+'s'}}/>))}
+      </div>
+    </div>
+  );
+
+  const quickChips = [
+    { label:'What should I do?', msg:'What should I work on right now?' },
+    { label:'Add a task', msg:'I need to add a task' },
+    { label:'My schedule', action:()=>setShowPeek(true) },
+    { label:'Focus mode', action:()=>startFocusOnTop() },
+  ];
+
+  const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
+  const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
+
+  // ── Not logged in → show auth ──
+  if (!user) return <AuthScreen onAuth={handleAuth} />;
+
+  // ── Loading data ──
+  if (!dataLoaded) {
+    return (
+      <div className="auth-screen">
+        <div style={{fontSize:'2rem',fontWeight:900,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16}}>SOS</div>
+        <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+        <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)'}}>Loading your data...</div>
+      </div>
+    );
+  }
+
+  // ── Focus mode takes over ──
+  if (focusTask) {
+    return <FocusMode task={focusTask} onUpdateTask={updateTask}
+      onComplete={()=>{setFocusTaskId(null);setToastMsg('Task completed!')}}
+      onExit={()=>setFocusTaskId(null)}/>;
+  }
+
+  return (
+    <div className="sos-app">
+      {/* ── Header ── */}
+      <div className="sos-header">
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+          <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
+            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
+          <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s'}}>📋 Peek</button>
+          {weatherData?.current&&<div style={{fontSize:'0.85rem',display:'flex',alignItems:'center',gap:4}}><span>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:600,fontSize:'0.82rem'}}>{Math.round(weatherData.current.temperature_2m)}°</span></div>}
+          <button onClick={handleLogout} title="Sign out" style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:'pointer',borderRadius:8,padding:'5px 8px',fontSize:'0.72rem',transition:'all .2s'}}>Sign out</button>
+        </div>
+      </div>
+
+      {/* ── Chat Area ── */}
+      <div className="sos-chat-area" ref={chatAreaRef}>
+        {messages.length===0&&!isLoading&&(
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'40px 24px',textAlign:'center'}}>
+            <div style={{fontSize:'2.8rem',marginBottom:12,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900}}>SOS</div>
+            <div style={{fontSize:'1rem',color:'var(--text)',fontWeight:600,marginBottom:6}}>hey, i'm your study sidekick</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:380,lineHeight:1.6,marginBottom:28}}>tell me what's on your plate and i'll help you figure it out. i know your tasks, schedule, and events — so just talk to me like a friend.</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:400}}>
+              {['I have a math test on Friday','What should I work on?','Help me plan my week','I have a science project due Thursday'].map(s=>(
+                <button key={s} className="sos-chip" onClick={()=>sendChip(s)}>{s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((msg,i)=>(
+          <div key={i} className={`sos-msg ${msg.role==='user'?'sos-msg-user':'sos-msg-ai'}`}>
+            <div className={`sos-bubble ${msg.role==='user'?'sos-bubble-user':'sos-bubble-ai'}`}>
+              {msg.content}
+              <div className="sos-bubble-time">{msg.timestamp?new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</div>
+            </div>
+          </div>
+        ))}
+        {pendingActions.map((pa,idx)=>(
+          <div key={'pa-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)}/>
+          </div>
+        ))}
+        {isLoading&&<TypingDots/>}
+        {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
+        <div ref={messagesEndRef} style={{height:1}}/>
+      </div>
+
+      {/* ── Input Area ── */}
+      <div className="sos-input-area">
+        {messages.length>0&&(
+          <div style={{display:'flex',gap:6,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
+            {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
+            <button className="sos-chip" onClick={clearChat} style={{background:'rgba(255,71,87,0.08)',borderColor:'rgba(255,71,87,0.2)',color:'var(--danger)'}}>Clear chat</button>
+          </div>
+        )}
+        <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
+          <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
+            placeholder={messages.length===0?"what's on your plate today?":"type anything..."}
+            disabled={isLoading}
+            style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .2s'}}
+            onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
+          <button type="submit" disabled={isLoading||!input.trim()} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!input.trim())?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||!input.trim())?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
+        </form>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)'}}><span>/ to focus input</span><span>S for schedule</span><span>F for focus mode</span></div>
+      </div>
+
+      {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
+      {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
+    </div>
+  );
+}
+
+/* ─── Mount ─── */
+try {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
+} catch (e) {
+  document.getElementById('root').innerHTML = '<div style="padding:40px;text-align:center;color:#ff4757;font-family:sans-serif"><h2>Failed to load SOS</h2><p>' + e.message + '</p></div>';
+}
+</script>
+</body>
+</html>
