@@ -88,10 +88,22 @@ To modify the application, simply edit `index.html`. The React JSX code is trans
 
 ## Security Note
 
-This application includes API keys for demonstration purposes. For production use, consider:
-1. Moving sensitive keys to environment variables
-2. Implementing proper authentication
-3. Using Supabase Row Level Security (RLS)
+⚠️ **IMPORTANT SECURITY WARNING** ⚠️
+
+This application includes Supabase API keys embedded directly in the HTML file for demonstration purposes. **These keys are publicly visible** and should NOT be used in production without proper security measures.
+
+**Before deploying to production:**
+1. **Rotate the API keys** - Generate new keys in your Supabase dashboard
+2. **Move keys to environment variables** or use a secure backend proxy
+3. **Implement Row Level Security (RLS)** in your Supabase database
+4. **Never commit sensitive keys** to public repositories
+5. Be aware that keys in git history remain accessible even after rotation
+
+For production use, consider:
+- Using Supabase Edge Functions to proxy API calls
+- Implementing proper authentication and authorization
+- Restricting API key permissions in Supabase dashboard
+- Using environment-specific configurations
 
 ## License
 

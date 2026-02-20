@@ -45,7 +45,7 @@ Now you can:
 
 ## Step 4: Use Focus Mode
 
-Press `F` or say "start focus mode" to enter a distraction-free study environment with:
+Press `F` or type "start focus mode" in the chat to enter a distraction-free study environment with:
 - Pomodoro timer (25 min work / 5 min break)
 - Current task display
 - Minimal interface
