@@ -215,17 +215,83 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .g-picker-btn:disabled{opacity:.5;cursor:not-allowed}
 .g-picked-file{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.3);border-radius:10px;margin-bottom:8px;animation:fadeIn .2s ease}
 
+/* Fullscreen panels */
+.notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
+
+/* Notes editing */
+.notes-new-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:7px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px}
+.notes-new-btn:hover{filter:brightness(1.1)}
+.notes-new-btn:active{transform:scale(0.96)}
+.notes-title-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:0.92rem;font-weight:700;outline:none;width:100%;margin-bottom:8px;transition:border-color .15s}
+.notes-title-input:focus{border-color:var(--accent)}
+.notes-toolbar{display:flex;gap:4px;padding:6px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:10px 10px 0 0;flex-wrap:wrap;align-items:center}
+.notes-toolbar-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:4px 8px;font-size:0.78rem;cursor:pointer;transition:all .15s;min-width:28px;text-align:center;font-weight:600;line-height:1}
+.notes-toolbar-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(108,99,255,0.06)}
+.notes-toolbar-btn.active{background:rgba(108,99,255,0.15);border-color:var(--accent);color:var(--accent)}
+.notes-toolbar-sep{width:1px;height:18px;background:var(--border);margin:0 4px}
+.notes-editor{min-height:180px;max-height:50vh;overflow-y:auto;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;color:var(--text);font-size:0.88rem;line-height:1.65;outline:none;word-break:break-word}
+.notes-editor:focus{border-color:var(--accent)}
+.notes-editor:empty::before{content:attr(data-placeholder);color:var(--text-dim);opacity:0.5}
+.notes-edit-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+.notes-save-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .15s}
+.notes-save-btn:hover{filter:brightness(1.1)}
+.notes-cancel-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:7px 16px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .15s}
+.notes-cancel-btn:hover{border-color:var(--accent);color:var(--text)}
+.notes-fs-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:4px 8px;cursor:pointer;font-size:0.85rem;transition:all .15s}
+.notes-fs-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Calendar month grid */
+.cal-month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.cal-month-title{font-size:1.1rem;font-weight:700}
+.cal-nav-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:0.85rem;transition:all .15s}
+.cal-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-day-header{text-align:center;font-size:0.72rem;font-weight:600;color:var(--text-dim);padding:6px 2px;text-transform:uppercase}
+.cal-cell{min-height:70px;padding:4px 6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:0.78rem;overflow:hidden;transition:border-color .15s;cursor:default}
+.cal-cell:hover{border-color:var(--accent-dim)}
+.cal-cell.other-month{opacity:0.35}
+.cal-cell.today{border-color:var(--accent);background:rgba(108,99,255,0.06)}
+.cal-cell-date{font-weight:600;margin-bottom:2px;font-size:0.75rem}
+.cal-cell-event{font-size:0.65rem;padding:1px 4px;border-radius:4px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-cell-event.task{background:rgba(108,99,255,0.15);color:var(--accent)}
+.cal-cell-event.event{background:rgba(46,213,115,0.15);color:var(--success)}
+.cal-cell-event.overdue{background:rgba(255,71,87,0.15);color:var(--danger)}
+.cal-cell-more{font-size:0.6rem;color:var(--text-dim);margin-top:1px}
+
+/* Chat sidebar */
+@keyframes sidebarSlideIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+@keyframes sidebarSlideOut{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+.chat-sidebar-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);animation:overlayIn .2s ease}
+.chat-sidebar{position:fixed;top:0;left:0;bottom:0;width:min(85vw,340px);z-index:61;background:var(--bg);border-right:1px solid var(--border);padding:16px;overflow-y:auto;animation:sidebarSlideIn .25s ease}
+.chat-sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.chat-sidebar-title{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px}
+.chat-sidebar-empty{text-align:center;padding:40px 16px;color:var(--text-dim);font-size:0.85rem}
+.chat-sidebar-list{display:flex;flex-direction:column;gap:8px}
+.chat-sidebar-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:all .15s;animation:fadeIn .2s ease}
+.chat-sidebar-item:hover{border-color:var(--accent-dim);background:rgba(108,99,255,0.03)}
+.chat-sidebar-item.active{border-color:var(--accent);background:rgba(108,99,255,0.06)}
+.chat-sidebar-item-title{font-weight:600;font-size:0.88rem;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-sidebar-item-meta{display:flex;align-items:center;justify-content:space-between;font-size:0.72rem;color:var(--text-dim)}
+.chat-sidebar-item-delete{background:transparent;border:1px solid rgba(255,71,87,0.25);color:var(--danger);border-radius:6px;padding:2px 8px;font-size:0.7rem;font-weight:600;cursor:pointer;transition:all .15s}
+.chat-sidebar-item-delete:hover{background:rgba(255,71,87,0.1);border-color:var(--danger)}
+
 /* Responsive */
 @media(max-width:768px){
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
+  .cal-cell{min-height:55px}
+  .cal-cell-event{font-size:0.6rem}
 }
 @media(max-width:500px){
   .sos-input-area{padding:6px 10px 10px}
   .sos-bubble{max-width:92%;font-size:0.88rem}
   .sos-chip{font-size:0.78rem;padding:5px 11px}
   .auth-form{padding:24px 20px}
+  .cal-cell{min-height:45px;padding:2px 3px}
+  .cal-cell-date{font-size:0.68rem}
+  .cal-cell-event{font-size:0.58rem}
+  .notes-editor{min-height:120px}
 }
 /* Photo in chat */
 .sos-bubble img[alt="photo"]{transition:opacity .15s}
@@ -1776,10 +1842,14 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 }
 
 /* ═══════════════════════════════════════════════
-   SCHEDULE PEEK PANEL
+   SCHEDULE PEEK PANEL (with fullscreen calendar)
    ═══════════════════════════════════════════════ */
 function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
   const todayKey = today(); const todayDow = new Date().getDay();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+
   const timeline = useMemo(() => {
     const result = {};
     (blocks.recurring || []).forEach(rb => {
@@ -1807,14 +1877,111 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
   const currentHour=new Date().getHours();
   const greeting=currentHour<12?'Good morning':currentHour<17?'Good afternoon':'Good evening';
 
+  // ── Month calendar grid ──
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(calYear, calMonth, 1);
+    const lastDay = new Date(calYear, calMonth + 1, 0);
+    const startDow = firstDay.getDay();
+    const daysInMonth = lastDay.getDate();
+    const prevMonthLast = new Date(calYear, calMonth, 0).getDate();
+
+    const cells = [];
+    // Previous month trailing days
+    for (let i = startDow - 1; i >= 0; i--) {
+      const d = prevMonthLast - i;
+      const dt = new Date(calYear, calMonth - 1, d);
+      cells.push({ date: dt, day: d, isCurrentMonth: false });
+    }
+    // Current month days
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(calYear, calMonth, d);
+      cells.push({ date: dt, day: d, isCurrentMonth: true });
+    }
+    // Next month leading days
+    const remaining = 7 - (cells.length % 7);
+    if (remaining < 7) {
+      for (let d = 1; d <= remaining; d++) {
+        const dt = new Date(calYear, calMonth + 1, d);
+        cells.push({ date: dt, day: d, isCurrentMonth: false });
+      }
+    }
+    return cells;
+  }, [calYear, calMonth]);
+
+  // Build a map of date → items for the calendar
+  const dateItemsMap = useMemo(() => {
+    const map = {};
+    function addItem(dateStr, item) {
+      if (!map[dateStr]) map[dateStr] = [];
+      map[dateStr].push(item);
+    }
+    tasks.forEach(t => {
+      if (!t.dueDate) return;
+      const cls = t.status === 'done' ? 'task' : (daysUntil(t.dueDate) < 0 ? 'overdue' : 'task');
+      addItem(t.dueDate, { title: t.title, cls });
+    });
+    events.forEach(ev => {
+      if (!ev.date) return;
+      addItem(ev.date, { title: ev.title, cls: 'event' });
+    });
+    return map;
+  }, [tasks, events]);
+
+  function prevMonth() { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }
+  function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
+  function goToday() { setCalYear(new Date().getFullYear()); setCalMonth(new Date().getMonth()); }
+
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
   return (<>
     <div className="peek-overlay" onClick={onClose}/>
-    <div className="peek-panel">
-      <div className="peek-handle"/>
+    <div className={'peek-panel' + (isFullscreen ? ' fullscreen' : '')}>
+      {!isFullscreen && <div className="peek-handle"/>}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
-        {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6}}><span style={{fontSize:'1.3rem'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6,marginRight:4}}><span style={{fontSize:'1.3rem'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
+          <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen calendar'}>
+            {isFullscreen ? '⊟' : '⛶'}
+          </button>
+          <button className="g-modal-close" onClick={onClose}>×</button>
+        </div>
       </div>
+
+      {/* ── Fullscreen: Month Calendar Grid ── */}
+      {isFullscreen && (
+        <div style={{marginBottom:16}}>
+          <div className="cal-month-nav">
+            <button className="cal-nav-btn" onClick={prevMonth}>◀</button>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
+              <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
+            </div>
+            <button className="cal-nav-btn" onClick={nextMonth}>▶</button>
+          </div>
+          <div className="cal-grid">
+            {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
+            {calendarDays.map((cell, i) => {
+              const dateStr = cell.date.getFullYear() + '-' + String(cell.date.getMonth()+1).padStart(2,'0') + '-' + String(cell.date.getDate()).padStart(2,'0');
+              const isToday = dateStr === todayKey;
+              const items = dateItemsMap[dateStr] || [];
+              const maxShow = 2;
+              return (
+                <div key={i} className={'cal-cell' + (cell.isCurrentMonth ? '' : ' other-month') + (isToday ? ' today' : '')}>
+                  <div className="cal-cell-date" style={isToday ? {color:'var(--accent)'} : {}}>{cell.day}</div>
+                  {items.slice(0, maxShow).map((item, j) => (
+                    <div key={j} className={'cal-cell-event ' + item.cls} title={item.title}>{item.title}</div>
+                  ))}
+                  {items.length > maxShow && <div className="cal-cell-more">+{items.length - maxShow} more</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Regular peek content ── */}
       <div className="peek-section">
         <div className="peek-section-title">Today's Schedule</div>
         {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Nothing scheduled today</div>:
@@ -1847,11 +2014,17 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
 }
 
 /* ═══════════════════════════════════════════════
-   NOTES PANEL (reference system)
+   NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, onClose, onDeleteNote }) {
+function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [newNoteName, setNewNoteName] = useState('');
+  const editorRef = useRef(null);
 
   // ── Search / reference system ──
   const filteredNotes = useMemo(() => {
@@ -1878,7 +2051,6 @@ function NotesPanel({ notes, onClose, onDeleteNote }) {
     return scored.map(s => ({ ...s.note, _firstMatch: s.firstMatchIndex }));
   }, [notes, searchQuery]);
 
-  // ── Extract snippet around first match ──
   function getSnippet(content, firstMatch) {
     if (firstMatch < 0 || !content) return content?.slice(0, 150) || '';
     const start = Math.max(0, firstMatch - 80);
@@ -1889,7 +2061,6 @@ function NotesPanel({ notes, onClose, onDeleteNote }) {
     return snippet;
   }
 
-  // ── Highlight matching keywords in text ──
   function highlightText(text) {
     if (!searchQuery.trim() || !text) return text;
     const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 1);
@@ -1907,24 +2078,129 @@ function NotesPanel({ notes, onClose, onDeleteNote }) {
     const src = note.source || '';
     if (src === 'pdf') return React.createElement('span', { className: 'notes-badge notes-badge-pdf' }, 'PDF');
     if (src === 'google_docs') return React.createElement('span', { className: 'notes-badge notes-badge-docs' }, 'Docs');
+    if (src === 'manual') return React.createElement('span', { className: 'notes-badge', style:{background:'rgba(43,203,186,0.12)',color:'var(--teal)'} }, 'Manual');
     return React.createElement('span', { className: 'notes-badge notes-badge-ai' }, 'AI');
+  }
+
+  // ── Formatting toolbar actions ──
+  function execFormat(cmd, value) {
+    document.execCommand(cmd, false, value || null);
+    editorRef.current?.focus();
+  }
+
+  // ── Start editing a note ──
+  function startEdit(note, e) {
+    e.stopPropagation();
+    setEditingId(note.id);
+    setEditingName(note.name);
+    setExpandedId(note.id);
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = note.content || '';
+        editorRef.current.focus();
+      }
+    }, 50);
+  }
+
+  // ── Save edited note ──
+  function saveEdit() {
+    if (!editingName.trim()) return;
+    const content = editorRef.current?.innerHTML || '';
+    onUpdateNote({ id: editingId, name: editingName.trim(), content, updatedAt: new Date().toISOString() });
+    setEditingId(null);
+    setEditingName('');
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingName('');
+  }
+
+  // ── Create new note ──
+  function startNewNote() {
+    setIsCreatingNew(true);
+    setNewNoteName('');
+    setExpandedId(null);
+    setEditingId(null);
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = '';
+        editorRef.current.focus();
+      }
+    }, 50);
+  }
+
+  function saveNewNote() {
+    const title = newNoteName.trim() || 'Untitled Note';
+    const content = editorRef.current?.innerHTML || '';
+    onCreateNote({ name: title, content, source: 'manual' });
+    setIsCreatingNew(false);
+    setNewNoteName('');
+  }
+
+  function cancelNewNote() {
+    setIsCreatingNew(false);
+    setNewNoteName('');
+  }
+
+  // ── Formatting toolbar component ──
+  function FormatToolbar() {
+    return (
+      <div className="notes-toolbar">
+        <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
+        <div className="notes-toolbar-sep"/>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
+        <div className="notes-toolbar-sep"/>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">→</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">←</button>
+        <div className="notes-toolbar-sep"/>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
+      </div>
+    );
   }
 
   return (
     <>
       <div className="peek-overlay" onClick={onClose}/>
-      <div className="notes-panel">
-        <div className="peek-handle"/>
+      <div className={'notes-panel' + (isFullscreen ? ' fullscreen' : '')}>
+        {!isFullscreen && <div className="peek-handle"/>}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <span style={{fontSize:'1.1rem'}}>📝</span>
             <span style={{fontWeight:700,fontSize:'1.05rem'}}>Notes</span>
             {notes.length > 0 && <span style={{fontSize:'0.75rem',color:'var(--text-dim)',background:'var(--bg2)',padding:'2px 8px',borderRadius:10,fontWeight:600}}>{notes.length}</span>}
           </div>
-          <button className="g-modal-close" onClick={onClose}>×</button>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <button className="notes-new-btn" onClick={startNewNote}>+ New Note</button>
+            <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+              {isFullscreen ? '⊟' : '⛶'}
+            </button>
+            <button className="g-modal-close" onClick={onClose}>×</button>
+          </div>
         </div>
 
-        {notes.length > 0 && (
+        {/* ── New note creation form ── */}
+        {isCreatingNew && (
+          <div style={{marginBottom:16,animation:'fadeIn .2s ease'}}>
+            <input className="notes-title-input" value={newNoteName} onChange={e => setNewNoteName(e.target.value)}
+              placeholder="Note title..." autoFocus/>
+            <FormatToolbar/>
+            <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="Start writing your note..."
+              onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); execFormat('indent'); }}}/>
+            <div className="notes-edit-actions">
+              <button className="notes-cancel-btn" onClick={cancelNewNote}>Cancel</button>
+              <button className="notes-save-btn" onClick={saveNewNote}>Save Note</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Search bar ── */}
+        {notes.length > 0 && !isCreatingNew && !editingId && (
           <div className="notes-search-wrap">
             <span className="notes-search-icon">🔍</span>
             <input className="notes-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
@@ -1932,15 +2208,16 @@ function NotesPanel({ notes, onClose, onDeleteNote }) {
           </div>
         )}
 
-        {filteredNotes.length === 0 && !searchQuery.trim() && (
+        {/* ── Empty states ── */}
+        {filteredNotes.length === 0 && !searchQuery.trim() && !isCreatingNew && (
           <div className="notes-empty">
             <div style={{fontSize:'2rem',marginBottom:8,opacity:0.4}}>📝</div>
             <div>No notes yet</div>
-            <div style={{fontSize:'0.82rem',marginTop:4}}>Import a PDF, Google Doc, or save study materials from chat</div>
+            <div style={{fontSize:'0.82rem',marginTop:4}}>Click "+ New Note" to create one, or import a PDF, Google Doc, or save study materials from chat</div>
           </div>
         )}
 
-        {filteredNotes.length === 0 && searchQuery.trim() && (
+        {filteredNotes.length === 0 && searchQuery.trim() && !isCreatingNew && (
           <div className="notes-empty">
             <div style={{fontSize:'1.5rem',marginBottom:8,opacity:0.4}}>🔍</div>
             <div>No matches for "{searchQuery}"</div>
@@ -1948,32 +2225,53 @@ function NotesPanel({ notes, onClose, onDeleteNote }) {
           </div>
         )}
 
+        {/* ── Notes list ── */}
         <div className="notes-list">
           {filteredNotes.map(note => {
             const isExpanded = expandedId === note.id;
+            const isEditing = editingId === note.id;
             const isSearching = searchQuery.trim().length > 0;
+            const plainContent = (note.content || '').replace(/<[^>]*>/g, '');
             const snippet = isSearching && note._firstMatch !== undefined
-              ? getSnippet(note.content, note._firstMatch)
-              : (note.content || '').slice(0, 150);
+              ? getSnippet(plainContent, note._firstMatch)
+              : plainContent.slice(0, 150);
 
             return (
               <div key={note.id} className={'notes-item' + (isExpanded ? ' expanded' : '')}
-                onClick={() => setExpandedId(isExpanded ? null : note.id)}>
-                <div className="notes-item-header">
-                  <div className="notes-item-name">{isSearching ? highlightText(note.name) : note.name}</div>
-                  <div className="notes-item-meta">
-                    {getSourceBadge(note)}
-                    {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
-                    <button className="notes-delete" onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>✕</button>
+                onClick={() => { if (!isEditing) { setExpandedId(isExpanded ? null : note.id); setEditingId(null); } }}>
+                {/* ── Editing mode ── */}
+                {isEditing ? (
+                  <div onClick={e => e.stopPropagation()}>
+                    <input className="notes-title-input" value={editingName} onChange={e => setEditingName(e.target.value)}
+                      placeholder="Note title..." autoFocus/>
+                    <FormatToolbar/>
+                    <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="Write something..."
+                      onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); execFormat('indent'); }}}/>
+                    <div className="notes-edit-actions">
+                      <button className="notes-cancel-btn" onClick={cancelEdit}>Cancel</button>
+                      <button className="notes-save-btn" onClick={saveEdit}>Save</button>
+                    </div>
                   </div>
-                </div>
-                {!isExpanded && snippet && (
-                  <div className="notes-item-preview">
-                    {isSearching ? highlightText(snippet) : snippet}{!isSearching && (note.content || '').length > 150 ? '…' : ''}
-                  </div>
-                )}
-                {isExpanded && (
-                  <div className="notes-item-content">{isSearching ? highlightText(note.content) : note.content}</div>
+                ) : (
+                  <>
+                    <div className="notes-item-header">
+                      <div className="notes-item-name">{isSearching ? highlightText(note.name) : note.name}</div>
+                      <div className="notes-item-meta">
+                        {getSourceBadge(note)}
+                        {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
+                        <button className="notes-toolbar-btn" onClick={e => startEdit(note, e)} title="Edit" style={{fontSize:'0.72rem',padding:'3px 7px'}}>✎</button>
+                        <button className="notes-delete" onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>✕</button>
+                      </div>
+                    </div>
+                    {!isExpanded && snippet && (
+                      <div className="notes-item-preview">
+                        {isSearching ? highlightText(snippet) : snippet}{!isSearching && plainContent.length > 150 ? '…' : ''}
+                      </div>
+                    )}
+                    {isExpanded && (
+                      <div className="notes-item-content" dangerouslySetInnerHTML={{__html: note.content || ''}}/>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -2079,7 +2377,7 @@ function App() {
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
-  const DAILY_CONTENT_LIMIT = 3;
+  const DAILY_CONTENT_LIMIT = 5;
   // Google OAuth state
   const [googleToken, setGoogleToken] = useState(() => {
     const t = sessionStorage.getItem('sos_google_token');
@@ -2097,6 +2395,12 @@ function App() {
   const [calSyncCount, setCalSyncCount] = useState(0);
   const [calSyncError, setCalSyncError] = useState(null);
   const syncCalendarRef = useRef(null); // always holds latest syncCalendar fn — avoids stale interval closures
+
+  // Saved conversations state
+  const [savedChats, setSavedChats] = useState([]);
+  const [showChatSidebar, setShowChatSidebar] = useState(false);
+  const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
   const [pendingPhoto, setPendingPhoto] = useState(null); // { base64, preview, mimeType }
@@ -2119,7 +2423,19 @@ function App() {
     if (data) {
       setTasks(data.tasks);
       setBlocks(data.blocks);
-      setNotes(data.notes);
+      // Split notes: regular notes vs saved chat conversations
+      const regularNotes = [];
+      const chatSaves = [];
+      (data.notes || []).forEach(n => {
+        if (n.name && n.name.startsWith('[chat-save]')) {
+          try {
+            const parsed = JSON.parse(n.content);
+            chatSaves.push({ id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 });
+          } catch(e) { regularNotes.push(n); }
+        } else { regularNotes.push(n); }
+      });
+      setNotes(regularNotes);
+      setSavedChats(chatSaves);
       setEvents(data.events);
       setMessages(data.messages);
       setWeatherCoords(data.weatherCoords);
@@ -2539,6 +2855,63 @@ function App() {
     setToastMsg('Note deleted');
   }
 
+  function handleUpdateNote(updated) {
+    setNotes(prev => prev.map(n => n.id === updated.id ? { ...n, ...updated } : n));
+    if (user) syncOp(() => dbUpsertNote(updated, user.id));
+    setToastMsg('Note saved');
+  }
+
+  function handleCreateNote(noteData) {
+    const note = { id: uid(), ...noteData, updatedAt: new Date().toISOString() };
+    setNotes(prev => [...prev, note]);
+    if (user) syncOp(() => dbUpsertNote(note, user.id));
+    setToastMsg('Note created');
+  }
+
+  // ── Save / Load / Delete chat conversations ──
+  function saveChat() {
+    if (messages.length === 0) return;
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) + (firstUserMsg.content.length > 60 ? '...' : '') : 'Chat ' + new Date().toLocaleDateString();
+    const chatId = uid();
+    const savedAt = new Date().toISOString();
+    const chatData = { title, messages: messages.slice(), savedAt, messageCount: messages.length };
+    // Save to Supabase via notes table with special prefix
+    const note = { id: chatId, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
+    if (user) syncOp(() => dbUpsertNote(note, user.id));
+    setSavedChats(prev => [{ id: chatId, ...chatData }, ...prev]);
+    // Clear current chat
+    setMessages([]); setPendingActions([]); setChatError(null);
+    if (user) dbClearChat(user.id);
+    setToastMsg('Chat saved');
+  }
+
+  function loadSavedChat(chatId) {
+    const chat = savedChats.find(c => c.id === chatId);
+    if (!chat) return;
+    setViewingSavedChatId(chatId);
+    setMessages(chat.messages || []);
+    setShowChatSidebar(false);
+  }
+
+  function deleteSavedChat(chatId) {
+    setSavedChats(prev => prev.filter(c => c.id !== chatId));
+    if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
+    if (viewingSavedChatId === chatId) { setViewingSavedChatId(null); setMessages([]); }
+    setToastMsg('Conversation deleted');
+  }
+
+  function exitSavedChatView() {
+    setViewingSavedChatId(null);
+    setMessages([]);
+    // Reload current chat from DB
+    if (user) {
+      sb.from('chat_messages').select('*').eq('user_id', user.id).order('created_at').then(({ data }) => {
+        if (data) setMessages(data.map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.created_at).getTime(), photoUrl: m.photo_url || null })));
+      });
+    }
+  }
+
   function autoConfirmPending() {
     if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
     if (pendingContent.length > 0) { pendingContent.forEach((c,i) => { const formatted = formatContentForNote(c); executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted }); }); setPendingContent([]); }
@@ -2613,7 +2986,7 @@ function App() {
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         if (response.status === 429 && errData?.rateLimited) {
-          const limitMsg = "hey, you've used all 3 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
+          const limitMsg = "hey, you've used all 5 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
@@ -2703,8 +3076,8 @@ function App() {
     } finally { setIsLoading(false); }
   }
 
-  function handleSubmit(e) { if(e)e.preventDefault(); if(!user){setShowAuthModal(true);return;} sendMessage(input); }
-  function sendChip(text) { if(!user){setInput(text);setShowAuthModal(true);return;} setInput(''); sendMessage(text); }
+  function handleSubmit(e) { if(e)e.preventDefault(); if(viewingSavedChatId)return; if(!user){setShowAuthModal(true);return;} sendMessage(input); }
+  function sendChip(text) { if(viewingSavedChatId)return; if(!user){setInput(text);setShowAuthModal(true);return;} setInput(''); sendMessage(text); }
 
   async function handlePhotoSelect(e) {
     const file = e.target.files?.[0];
@@ -2750,10 +3123,11 @@ function App() {
       else if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
       else if(key==='n'){e.preventDefault();setShowNotes(p=>!p)}
-      else if(key==='escape'){if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false)}
+      else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
+      else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false)}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[focusTaskId,showPeek,showNotes,tasks]);
+  },[focusTaskId,showPeek,showNotes,showChatSidebar,tasks]);
 
   // ── Typing dots ──
   const TypingDots=()=>(
@@ -2821,6 +3195,7 @@ function App() {
           {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
           <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s'}}>📋 Peek</button>
           <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>📝 Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'var(--accent)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
+          <button onClick={()=>setShowChatSidebar(true)} title="Chat history (H)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>💬 History{savedChats.length>0&&<span style={{fontSize:'0.68rem',background:'var(--accent)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{savedChats.length}</span>}</button>
           {isGoogleConnected() ? (
             <button onClick={()=>setShowGoogleModal(true)} className="g-hdr-btn connected" title="Import from Google Calendar, Docs, or Drive">
               <span>🔗</span> Import
@@ -2845,7 +3220,13 @@ function App() {
 
       {/* ── Chat Area ── */}
       <div className="sos-chat-area" ref={chatAreaRef}>
-        {messages.length===0&&!isLoading&&(
+        {viewingSavedChatId && (
+          <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
+            <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
+            <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back to chat</button>
+          </div>
+        )}
+        {messages.length===0&&!isLoading&&!viewingSavedChatId&&(
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'40px 24px',textAlign:'center'}}>
             <div style={{fontSize:'2.8rem',marginBottom:12,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900}}>SOS</div>
             <div style={{fontSize:'1rem',color:'var(--text)',fontWeight:600,marginBottom:6}}>hey, i'm your study sidekick</div>
@@ -2890,7 +3271,9 @@ function App() {
         {messages.length>0&&(
           <div style={{display:'flex',gap:6,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
-            <button className="sos-chip" onClick={clearChat} style={{background:'rgba(255,71,87,0.08)',borderColor:'rgba(255,71,87,0.2)',color:'var(--danger)'}}>Clear chat</button>
+            {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
+            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back to chat</button>}
+            <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
           </div>
         )}
         {pendingPhoto&&(
@@ -2907,17 +3290,48 @@ function App() {
             📷
           </button>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-            placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?"what's on your plate today?":"type anything..."}
-            disabled={isLoading}
-            style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .2s'}}
+            placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?"what's on your plate today?":"type anything..."}
+            disabled={isLoading||!!viewingSavedChatId}
+            style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .2s'}}
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-          <button type="submit" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||(!input.trim()&&!pendingPhoto))?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
+          <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>F for focus mode</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>F for focus mode</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
-      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote}/>}
+      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showChatSidebar&&(
+        <>
+          <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
+          <div className="chat-sidebar">
+            <div className="chat-sidebar-header">
+              <div className="chat-sidebar-title"><span>💬</span> Saved Chats</div>
+              <button className="g-modal-close" onClick={()=>setShowChatSidebar(false)}>×</button>
+            </div>
+            {savedChats.length === 0 ? (
+              <div className="chat-sidebar-empty">
+                <div style={{fontSize:'1.8rem',marginBottom:8,opacity:0.4}}>💬</div>
+                <div>No saved conversations yet</div>
+                <div style={{fontSize:'0.78rem',marginTop:4}}>Use "Save chat" to keep a conversation</div>
+              </div>
+            ) : (
+              <div className="chat-sidebar-list">
+                {savedChats.map(chat => (
+                  <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
+                    onClick={() => loadSavedChat(chat.id)}>
+                    <div className="chat-sidebar-item-title">{chat.title}</div>
+                    <div className="chat-sidebar-item-meta">
+                      <span>{chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''} · {fmt(chat.savedAt)}</span>
+                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
       {showGoogleModal && isGoogleConnected() && (
         <GoogleImportModal
           googleToken={googleToken}
