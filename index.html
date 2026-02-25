@@ -125,6 +125,31 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .peek-task-item{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.85rem}
 .peek-task-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
+/* Notes Panel */
+.notes-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:var(--bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:70vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
+.notes-search{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px 10px 36px;color:var(--text);font-size:0.88rem;outline:none;margin-bottom:14px;transition:border-color .15s}
+.notes-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
+.notes-search-wrap{position:relative;margin-bottom:14px}
+.notes-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:0.85rem;opacity:0.4;pointer-events:none}
+.notes-list{display:flex;flex-direction:column;gap:8px}
+.notes-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:border-color .15s,background .15s;animation:fadeIn .2s ease}
+.notes-item:hover{border-color:var(--accent-dim);background:rgba(108,99,255,0.03)}
+.notes-item.expanded{border-color:var(--accent-dim)}
+.notes-item-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.notes-item-name{font-weight:700;font-size:0.88rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notes-item-meta{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.notes-badge{font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:6px;text-transform:uppercase;letter-spacing:0.3px}
+.notes-badge-pdf{background:rgba(255,71,87,0.12);color:var(--danger)}
+.notes-badge-docs{background:rgba(69,170,242,0.12);color:var(--blue)}
+.notes-badge-ai{background:rgba(108,99,255,0.12);color:var(--accent)}
+.notes-item-date{font-size:0.72rem;color:var(--text-dim)}
+.notes-item-preview{font-size:0.82rem;color:var(--text-dim);margin-top:8px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.notes-item-content{font-size:0.84rem;color:var(--text);margin-top:10px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;padding:10px 12px;background:var(--bg);border-radius:8px;border:1px solid rgba(255,255,255,0.04)}
+.notes-match{background:rgba(108,99,255,0.3);border-radius:2px;padding:0 2px}
+.notes-delete{background:transparent;border:1px solid rgba(255,71,87,0.25);color:var(--danger);border-radius:6px;padding:3px 8px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:all .15s;flex-shrink:0}
+.notes-delete:hover{background:rgba(255,71,87,0.1);border-color:var(--danger)}
+.notes-empty{text-align:center;padding:40px 20px;color:var(--text-dim);font-size:0.88rem;line-height:1.6}
+
 /* Auth Screen */
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center}
 .auth-form{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;animation:fadeIn .4s ease}
@@ -658,6 +683,28 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
     ' | ' + t.estTime + 'min | ' + t.status.replace('_',' ') + ' | id:' + t.id
   ).join('\n');
 
+  // ── Build notes section for AI context ──
+  const noteNames = notes.map(n => n.name).join(', ') || 'none';
+  let notesSection = '';
+  if (notes.length > 0) {
+    // Sort: PDF-sourced first (reference docs), then Docs, then AI-generated
+    const sortOrder = { pdf: 0, google_docs: 1 };
+    const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
+    const maxTotal = 8000;
+    let totalLen = 0;
+    sorted.forEach(n => {
+      if (totalLen >= maxTotal) return;
+      const src = n.source === 'pdf' ? 'PDF' : n.source === 'google_docs' ? 'Google Doc' : 'study material';
+      const maxPer = 2000;
+      const content = (n.content || '').slice(0, maxPer) + ((n.content || '').length > maxPer ? '\n[truncated]' : '');
+      const entry = '--- ' + n.name + ' (source: ' + src + ') ---\n' + content + '\n\n';
+      if (totalLen + entry.length <= maxTotal) {
+        notesSection += entry;
+        totalLen += entry.length;
+      }
+    });
+  }
+
   // ── Tier 1 (Llama) gets a lean prompt — no task list to hallucinate from ──
   if (tier === 1) {
     const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
@@ -670,13 +717,15 @@ TODAY: ${todayStr}
 TODAY'S SCHEDULE: ${scheduleStr}
 COMPLETED THIS WEEK: ${doneThisWeek} task${doneThisWeek !== 1 ? 's' : ''}
 ${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} task${activeTasks.length !== 1 ? 's' : ''} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
+NOTES: ${noteNames}
 
 RULES:
 1. NEVER invent specific tasks, deadlines, or events. If it's not explicitly listed above, it doesn't exist — do not make it up.
 2. Do NOT output any <action> tags. This is a chat-only response.
 3. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
 4. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
-5. Stay warm, brief, and casual.`;
+5. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help (which will route to the full AI).
+6. Stay warm, brief, and casual.`;
   }
 
   return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
@@ -696,6 +745,7 @@ CORE BEHAVIORS:
 4. MISSED TASK RECOVERY: For overdue tasks, don't guilt — suggest a realistic new date. "no stress, let's just move it."
 5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
 6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
+7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.
 
 TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
 
@@ -713,6 +763,9 @@ ${weekSummary.join('\n') || '(no scheduled activities)'}
 UPCOMING EVENTS: ${upcomingEvents.join(', ') || 'none'}
 ${overloadedDays.length > 0 ? 'OVERLOADED DAYS: ' + overloadedDays.join(', ') : ''}
 COMPLETED THIS WEEK: ${doneThisWeek} tasks
+
+${notesSection ? `STUDENT'S NOTES & REFERENCE DOCUMENTS:
+${notesSection}` : 'NOTES: (none)'}
 
 ACTIONS — you can modify the student's data using XML action tags. Always put ONE action tag at the very end of your message. Never list or describe these actions in your visible text — just use them silently.
 
@@ -847,6 +900,11 @@ function classifyMessage(text) {
   // ── TIER 2 (content gen): Flashcards, quizzes, outlines, etc. → Gemini + high tokens ──
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
     return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
+  }
+
+  // ── TIER 2 (notes reference): Questions about notes/reference docs → Gemini (needs full note content) ──
+  if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
+    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
   }
 
   // ── TIER 2 (action): Any scheduling/task signal → Gemini ──
@@ -1789,6 +1847,144 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
 }
 
 /* ═══════════════════════════════════════════════
+   NOTES PANEL (reference system)
+   ═══════════════════════════════════════════════ */
+function NotesPanel({ notes, onClose, onDeleteNote }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+
+  // ── Search / reference system ──
+  const filteredNotes = useMemo(() => {
+    if (!searchQuery.trim()) return notes.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 0);
+    if (queryWords.length === 0) return notes;
+
+    const scored = notes.map(note => {
+      const normName = normalize(note.name);
+      const normContent = normalize(note.content || '');
+      let score = 0;
+      let firstMatchIndex = -1;
+      queryWords.forEach(qw => {
+        if (normName.includes(qw)) score += 40;
+        const idx = normContent.indexOf(qw);
+        if (idx >= 0) {
+          score += 30;
+          if (firstMatchIndex < 0) firstMatchIndex = idx;
+        }
+      });
+      return { note, score, firstMatchIndex };
+    }).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+
+    return scored.map(s => ({ ...s.note, _firstMatch: s.firstMatchIndex }));
+  }, [notes, searchQuery]);
+
+  // ── Extract snippet around first match ──
+  function getSnippet(content, firstMatch) {
+    if (firstMatch < 0 || !content) return content?.slice(0, 150) || '';
+    const start = Math.max(0, firstMatch - 80);
+    const end = Math.min(content.length, firstMatch + 120);
+    let snippet = content.slice(start, end);
+    if (start > 0) snippet = '…' + snippet;
+    if (end < content.length) snippet += '…';
+    return snippet;
+  }
+
+  // ── Highlight matching keywords in text ──
+  function highlightText(text) {
+    if (!searchQuery.trim() || !text) return text;
+    const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 1);
+    if (queryWords.length === 0) return text;
+    const pattern = queryWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const regex = new RegExp('(' + pattern + ')', 'gi');
+    const parts = text.split(regex);
+    return parts.map((part, i) => regex.test(part)
+      ? React.createElement('span', { key: i, className: 'notes-match' }, part)
+      : part
+    );
+  }
+
+  function getSourceBadge(note) {
+    const src = note.source || '';
+    if (src === 'pdf') return React.createElement('span', { className: 'notes-badge notes-badge-pdf' }, 'PDF');
+    if (src === 'google_docs') return React.createElement('span', { className: 'notes-badge notes-badge-docs' }, 'Docs');
+    return React.createElement('span', { className: 'notes-badge notes-badge-ai' }, 'AI');
+  }
+
+  return (
+    <>
+      <div className="peek-overlay" onClick={onClose}/>
+      <div className="notes-panel">
+        <div className="peek-handle"/>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:'1.1rem'}}>📝</span>
+            <span style={{fontWeight:700,fontSize:'1.05rem'}}>Notes</span>
+            {notes.length > 0 && <span style={{fontSize:'0.75rem',color:'var(--text-dim)',background:'var(--bg2)',padding:'2px 8px',borderRadius:10,fontWeight:600}}>{notes.length}</span>}
+          </div>
+          <button className="g-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        {notes.length > 0 && (
+          <div className="notes-search-wrap">
+            <span className="notes-search-icon">🔍</span>
+            <input className="notes-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search notes for keywords..." autoFocus/>
+          </div>
+        )}
+
+        {filteredNotes.length === 0 && !searchQuery.trim() && (
+          <div className="notes-empty">
+            <div style={{fontSize:'2rem',marginBottom:8,opacity:0.4}}>📝</div>
+            <div>No notes yet</div>
+            <div style={{fontSize:'0.82rem',marginTop:4}}>Import a PDF, Google Doc, or save study materials from chat</div>
+          </div>
+        )}
+
+        {filteredNotes.length === 0 && searchQuery.trim() && (
+          <div className="notes-empty">
+            <div style={{fontSize:'1.5rem',marginBottom:8,opacity:0.4}}>🔍</div>
+            <div>No matches for "{searchQuery}"</div>
+            <div style={{fontSize:'0.82rem',marginTop:4}}>Try different keywords or check spelling</div>
+          </div>
+        )}
+
+        <div className="notes-list">
+          {filteredNotes.map(note => {
+            const isExpanded = expandedId === note.id;
+            const isSearching = searchQuery.trim().length > 0;
+            const snippet = isSearching && note._firstMatch !== undefined
+              ? getSnippet(note.content, note._firstMatch)
+              : (note.content || '').slice(0, 150);
+
+            return (
+              <div key={note.id} className={'notes-item' + (isExpanded ? ' expanded' : '')}
+                onClick={() => setExpandedId(isExpanded ? null : note.id)}>
+                <div className="notes-item-header">
+                  <div className="notes-item-name">{isSearching ? highlightText(note.name) : note.name}</div>
+                  <div className="notes-item-meta">
+                    {getSourceBadge(note)}
+                    {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
+                    <button className="notes-delete" onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>✕</button>
+                  </div>
+                </div>
+                {!isExpanded && snippet && (
+                  <div className="notes-item-preview">
+                    {isSearching ? highlightText(snippet) : snippet}{!isSearching && (note.content || '').length > 150 ? '…' : ''}
+                  </div>
+                )}
+                {isExpanded && (
+                  <div className="notes-item-content">{isSearching ? highlightText(note.content) : note.content}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    TOAST
    ═══════════════════════════════════════════════ */
 function Toast({message,onDone}){
@@ -1878,6 +2074,7 @@ function App() {
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
   const [showPeek, setShowPeek] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
   const [focusTaskId, setFocusTaskId] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
@@ -2336,6 +2533,12 @@ function App() {
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
   }
 
+  function handleDeleteNote(noteId) {
+    setNotes(prev => prev.filter(n => n.id !== noteId));
+    if (user) syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+    setToastMsg('Note deleted');
+  }
+
   function autoConfirmPending() {
     if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
     if (pendingContent.length > 0) { pendingContent.forEach((c,i) => { const formatted = formatContentForNote(c); executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted }); }); setPendingContent([]); }
@@ -2546,10 +2749,11 @@ function App() {
       if(key==='f'){e.preventDefault();startFocusOnTop()}
       else if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
-      else if(key==='escape'){if(showPeek)setShowPeek(false)}
+      else if(key==='n'){e.preventDefault();setShowNotes(p=>!p)}
+      else if(key==='escape'){if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false)}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[focusTaskId,showPeek,tasks]);
+  },[focusTaskId,showPeek,showNotes,tasks]);
 
   // ── Typing dots ──
   const TypingDots=()=>(
@@ -2567,6 +2771,7 @@ function App() {
     { label:'Focus mode', action:()=>startFocusOnTop() },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
+    { label:'📝 Notes', action:()=>setShowNotes(true) },
     { label:'🔗 Import', action:()=>isGoogleConnected()?setShowGoogleModal(true):connectGoogle() },
   ];
 
@@ -2615,6 +2820,7 @@ function App() {
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
           <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s'}}>📋 Peek</button>
+          <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>📝 Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'var(--accent)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
           {isGoogleConnected() ? (
             <button onClick={()=>setShowGoogleModal(true)} className="g-hdr-btn connected" title="Import from Google Calendar, Docs, or Drive">
               <span>🔗</span> Import
@@ -2707,10 +2913,11 @@ function App() {
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
           <button type="submit" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||(!input.trim()&&!pendingPhoto))?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)'}}><span>/ to focus input</span><span>S for schedule</span><span>F for focus mode</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>F for focus mode</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
+      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote}/>}
       {showGoogleModal && isGoogleConnected() && (
         <GoogleImportModal
           googleToken={googleToken}
