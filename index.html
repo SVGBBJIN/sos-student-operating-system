@@ -28,8 +28,6 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes dotPulse{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
-@keyframes breathe{0%,100%{box-shadow:0 0 30px rgba(108,99,255,0.15)}50%{box-shadow:0 0 60px rgba(108,99,255,0.35)}}
-@keyframes timerRing{from{stroke-dashoffset:283}to{stroke-dashoffset:0}}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
 @keyframes toastIn{from{opacity:0;transform:translateY(-20px) translateX(-50%)}to{opacity:1;transform:translateY(0) translateX(-50%)}}
 @keyframes toastOut{from{opacity:1;transform:translateY(0) translateX(-50%)}to{opacity:0;transform:translateY(-20px) translateX(-50%)}}
@@ -465,14 +463,18 @@ function dbEventToApp(row) {
   return {
     id: row.id, title: row.title, type: row.event_type || 'other',
     subject: row.subject || '', date: row.event_date,
-    recurring: row.recurring || 'none', createdAt: row.created_at
+    recurring: row.recurring || 'none', createdAt: row.created_at,
+    googleId: row.google_id || null,
+    source: row.source || 'manual'
   };
 }
 function appEventToDb(e, userId) {
   return {
     id: e.id, user_id: userId, title: e.title, event_type: e.type || 'other',
     subject: e.subject || '', event_date: e.date,
-    recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString()
+    recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString(),
+    google_id: e.googleId || null,
+    source: e.source || 'manual'
   };
 }
 function dbNoteToApp(row) {
@@ -615,6 +617,34 @@ async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
 async function dbClearChat(userId) {
   const { error } = await sb.from('chat_messages').delete().eq('user_id', userId);
   if (error) console.error('Chat clear error:', error);
+}
+async function pushEventToGoogle(event, token) {
+  try {
+    const body = { summary: event.title, start: { date: event.date }, end: { date: event.date } };
+    if (event.googleId) {
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + event.googleId, {
+        method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) { console.error('Google event update failed:', res.status); return event.googleId; }
+      const data = await res.json(); return data.id;
+    } else {
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) { console.error('Google event create failed:', res.status); return null; }
+      const data = await res.json(); return data.id;
+    }
+  } catch (e) { console.error('pushEventToGoogle error:', e); return event.googleId || null; }
+}
+async function deleteEventFromGoogle(googleId, token) {
+  try {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + googleId, {
+      method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok && res.status !== 404 && res.status !== 410) console.error('Google event delete failed:', res.status);
+  } catch (e) { console.error('deleteEventFromGoogle error:', e); }
 }
 async function dbUpsertDateBlock(date, timeSlot, data, userId) {
   const row = {
@@ -2291,63 +2321,6 @@ function Toast({message,onDone}){
 }
 
 /* ═══════════════════════════════════════════════
-   FOCUS MODE
-   ═══════════════════════════════════════════════ */
-function FocusMode({task,onComplete,onExit,onUpdateTask}){
-  const[secondsLeft,setSecondsLeft]=useState(25*60);const[totalSeconds]=useState(25*60);
-  const[isRunning,setIsRunning]=useState(true);const[elapsed,setElapsed]=useState(0);
-  const[showBreakPrompt,setShowBreakPrompt]=useState(false);const[onBreak,setOnBreak]=useState(false);
-  const startTimeRef=useRef(Date.now());const endTimeRef=useRef(Date.now()+25*60*1000);
-
-  useEffect(()=>{
-    if(!isRunning)return;
-    const iv=setInterval(()=>{
-      const now=Date.now();const remaining=Math.max(0,Math.round((endTimeRef.current-now)/1000));
-      setSecondsLeft(remaining);setElapsed(Math.round((now-startTimeRef.current)/1000));
-      if(remaining<=0){
-        setIsRunning(false);
-        try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const playTone=(freq,start,dur)=>{const osc=ctx.createOscillator();const gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type='sine';gain.gain.setValueAtTime(0.3,ctx.currentTime+start);gain.gain.exponentialRampToValueAtTime(0.01,ctx.currentTime+start+dur);osc.start(ctx.currentTime+start);osc.stop(ctx.currentTime+start+dur)};playTone(660,0,0.25);playTone(880,0.3,0.35)}catch(e){}
-        if(!onBreak){setShowBreakPrompt(true);const focusSecs=Math.round((now-startTimeRef.current)/1000);onUpdateTask(task.id,{focusMinutes:(task.focusMinutes||0)+Math.round(focusSecs/60)})}
-        else{setOnBreak(false);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+25*60*1000;setSecondsLeft(25*60);setIsRunning(true)}
-      }
-    },250);return()=>clearInterval(iv);
-  },[isRunning,onBreak]);
-
-  useEffect(()=>{function handleKey(e){if(e.key==='Escape')onExit();if(e.key===' '){e.preventDefault();togglePause()}}window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey)},[isRunning]);
-  function togglePause(){if(isRunning)setIsRunning(false);else{endTimeRef.current=Date.now()+secondsLeft*1000;setIsRunning(true)}}
-  function startBreak(){setShowBreakPrompt(false);setOnBreak(true);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+5*60*1000;setSecondsLeft(5*60);setIsRunning(true)}
-  function keepGoing(){setShowBreakPrompt(false);startTimeRef.current=Date.now();endTimeRef.current=Date.now()+25*60*1000;setSecondsLeft(25*60);setIsRunning(true)}
-  function handleDone(){onUpdateTask(task.id,{status:'done',completedAt:new Date().toISOString(),focusMinutes:(task.focusMinutes||0)+Math.round(elapsed/60)});onComplete()}
-
-  const mins=Math.floor(secondsLeft/60);const secs=secondsLeft%60;
-  const progress=totalSeconds>0?(1-secondsLeft/(onBreak?300:totalSeconds)):0;
-  const circumference=2*Math.PI*45;
-  const btnBase={border:'none',borderRadius:10,padding:'12px 24px',cursor:'pointer',fontWeight:600,fontSize:'0.92rem',transition:'all .15s'};
-
-  return(
-    <div style={{position:'fixed',inset:0,zIndex:1000,background:'#050510',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',animation:'overlayIn .4s ease'}}>
-      <div style={{position:'absolute',inset:0,animation:isRunning?'breathe 4s ease-in-out infinite':'none',pointerEvents:'none'}}/>
-      <div style={{textAlign:'center',marginBottom:40,position:'relative',zIndex:1}}>
-        <div style={{fontSize:'1.8rem',fontWeight:700,marginBottom:8}}>{task.title}</div>
-        {task.subject&&<div style={{fontSize:'1rem',color:'var(--text-dim)',marginBottom:4}}>{task.subject}</div>}
-        <div style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>{task.dueDate&&<span>{fmt(task.dueDate)}</span>}{task.estTime>0&&<span style={{marginLeft:12}}>{task.estTime}min estimated</span>}</div>
-        {onBreak&&<div style={{marginTop:8,color:'var(--success)',fontWeight:600}}>Break time</div>}
-      </div>
-      <div style={{position:'relative',width:180,height:180,marginBottom:30}}>
-        <svg width="180" height="180" style={{transform:'rotate(-90deg)'}}><circle cx="90" cy="90" r="45" fill="none" stroke="var(--border)" strokeWidth="6"/><circle cx="90" cy="90" r="45" fill="none" stroke={onBreak?'var(--success)':'var(--accent)'} strokeWidth="6" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference*(1-progress)} style={{transition:'stroke-dashoffset .5s ease'}}/></svg>
-        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
-          <div style={{fontSize:'2.5rem',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{String(mins).padStart(2,'0')}:{String(secs).padStart(2,'0')}</div>
-          <div style={{fontSize:'0.8rem',color:'var(--text-dim)'}}>{isRunning?(onBreak?'Break':'Focusing'):'Paused'}</div>
-        </div>
-      </div>
-      {showBreakPrompt&&<div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:20,textAlign:'center',marginBottom:20,maxWidth:340,boxShadow:'var(--shadow)'}} className="fade-in"><div style={{fontSize:'1.1rem',fontWeight:600,marginBottom:12}}>Nice session. Take 5?</div><div style={{display:'flex',gap:10,justifyContent:'center'}}><button onClick={startBreak} style={{...btnBase,background:'var(--success)',color:'#fff'}}>Start break</button><button onClick={keepGoing} style={{...btnBase,background:'transparent',border:'1px solid var(--accent)',color:'var(--accent)'}}>Keep going</button></div></div>}
-      {!showBreakPrompt&&<div style={{display:'flex',gap:12,position:'relative',zIndex:1}}><button onClick={handleDone} style={{...btnBase,background:'var(--success)',color:'#fff'}}>Done ✓</button><button onClick={togglePause} style={{...btnBase,background:'transparent',border:'1px solid var(--accent)',color:'var(--accent)'}}>{isRunning?'Pause':'Resume'}</button><button onClick={onExit} style={{...btnBase,background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)'}}>Exit</button></div>}
-      <div style={{position:'absolute',bottom:20,fontSize:'0.7rem',color:'var(--text-dim)'}}>Space to pause/resume · Escape to exit</div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
@@ -2373,7 +2346,6 @@ function App() {
   const [pendingContent, setPendingContent] = useState([]);
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [focusTaskId, setFocusTaskId] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
@@ -2488,7 +2460,7 @@ function App() {
         googleClientRef.current = window.google.accounts.oauth2.initTokenClient({
           client_id: '504839570150-i4s8urseqgrjucbhqfjc9phiavrcn08d.apps.googleusercontent.com',
           scope: [
-            'https://www.googleapis.com/auth/calendar.readonly',
+            'https://www.googleapis.com/auth/calendar.events',
             'https://www.googleapis.com/auth/documents.readonly',
             'https://www.googleapis.com/auth/drive.readonly',
             'https://www.googleapis.com/auth/userinfo.email',
@@ -2625,9 +2597,17 @@ function App() {
           break;
         }
         case 'add_event': {
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), recurring:'none', createdAt:new Date().toISOString() };
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => [...prev, ev]);
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
+          if (isGoogleConnected() && calSyncEnabled) {
+            pushEventToGoogle(ev, googleToken).then(gid => {
+              if (gid) {
+                setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, googleId: gid } : e));
+                if (user) syncOp(() => dbUpsertEvent({ ...ev, googleId: gid }, user.id));
+              }
+            });
+          }
           break;
         }
         case 'add_note': {
@@ -2667,6 +2647,9 @@ function App() {
             const match = resolveEvent(action.title || action.event_id, prev);
             if (!match) return prev;
             if (user) syncOp(() => sb.from('events').delete().eq('id', match.id).eq('user_id', user.id));
+            if (match.googleId && isGoogleConnected() && calSyncEnabled) {
+              deleteEventFromGoogle(match.googleId, googleToken);
+            }
             return prev.filter(ev => ev.id !== match.id);
           });
           break;
@@ -2683,6 +2666,9 @@ function App() {
             } : ev);
             const updated = next.find(ev => ev.id === match.id);
             if (updated && user) syncOp(() => dbUpsertEvent(updated, user.id));
+            if (updated && updated.googleId && isGoogleConnected() && calSyncEnabled) {
+              pushEventToGoogle(updated, googleToken);
+            }
             return next;
           });
           break;
@@ -2755,25 +2741,39 @@ function App() {
   // ── Google import handlers ──
   // silent=true: called by auto-sync (no modal close, no toast, returns count for status display)
   function handleImportGoogleEvents(gevents, silent = false) {
-    let count = 0;
-    let skipped = 0;
+    let added = 0; let updated = 0; let skipped = 0;
     gevents.forEach(gev => {
       if (!gev.date) return;
-      // Dedup: skip if an event with the same title + date already exists
+      // First, try to find an existing SOS event with this googleId
+      const existingByGoogleId = events.find(ex => ex.googleId && ex.googleId === gev.googleId);
+      if (existingByGoogleId) {
+        if (existingByGoogleId.title !== gev.title || existingByGoogleId.date !== gev.date) {
+          const updatedEv = { ...existingByGoogleId, title: gev.title, date: gev.date };
+          setEvents(prev => prev.map(ev => ev.id === existingByGoogleId.id ? updatedEv : ev));
+          if (user) syncOp(() => dbUpsertEvent(updatedEv, user.id));
+          updated++;
+        } else { skipped++; }
+        return;
+      }
+      // Legacy dedup: if no googleId match, check title+date
       const dupTitle = (gev.title||'').toLowerCase();
       const isDup = events.some(ex => ex.title.toLowerCase() === dupTitle && ex.date === gev.date);
       if (isDup) { skipped++; return; }
-      const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar' };
+      const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar', googleId: gev.googleId };
       setEvents(prev => [...prev, ev]);
       if (user) syncOp(() => dbUpsertEvent(ev, user.id));
-      count++;
+      added++;
     });
     if (!silent) {
       setShowGoogleModal(false);
-      const msg = 'Imported ' + count + ' event' + (count !== 1 ? 's' : '') + ' from Google Calendar 📅' + (skipped > 0 ? ' (' + skipped + ' duplicate' + (skipped !== 1 ? 's' : '') + ' skipped)' : '');
-      if (count > 0 || skipped > 0) setToastMsg(msg);
+      const parts = [];
+      if (added > 0) parts.push('Imported ' + added + ' event' + (added !== 1 ? 's' : ''));
+      if (updated > 0) parts.push('updated ' + updated);
+      if (skipped > 0) parts.push(skipped + ' unchanged');
+      const msg = (parts.join(', ') || 'No changes') + ' from Google Calendar';
+      setToastMsg(msg);
     }
-    return count;
+    return added;
   }
 
   // ── Calendar auto-sync ──
@@ -2802,8 +2802,26 @@ function App() {
         startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
         allDay: !!e.start?.date,
       }));
-      const count = handleImportGoogleEvents(gevents, true); // silent — no modal close, no toast
-      setCalSyncCount(count);
+      // 1. Import/update from Google
+      const count = handleImportGoogleEvents(gevents, true);
+      // 2. Detect Google-side deletions: SOS events with a googleId
+      //    whose date falls within the sync window but whose googleId
+      //    is NOT in the fetched Google events — these were deleted on Google
+      const googleIdSet = new Set(gevents.map(g => g.googleId));
+      const todayStr = today();
+      const maxStr = toDateStr(max);
+      const toRemove = events.filter(ev =>
+        ev.googleId &&
+        ev.source === 'google_calendar' &&
+        ev.date >= todayStr &&
+        ev.date <= maxStr &&
+        !googleIdSet.has(ev.googleId)
+      );
+      toRemove.forEach(ev => {
+        setEvents(prev => prev.filter(e => e.id !== ev.id));
+        if (user) syncOp(() => sb.from('events').delete().eq('id', ev.id).eq('user_id', user.id));
+      });
+      setCalSyncCount(count + toRemove.length);
       const lastAt = new Date().toISOString();
       setCalSyncLastAt(lastAt);
       localStorage.setItem('sos_cal_sync_last', lastAt);
@@ -3104,30 +3122,20 @@ function App() {
     await sb.auth.signOut();
   }
 
-  // ── Focus Mode ──
-  const focusTask = focusTaskId ? tasks.find(t=>t.id===focusTaskId) : null;
-  function startFocusOnTop() {
-    const active = tasks.filter(t=>t.status!=='done').sort((a,b)=>getPriority(a)-getPriority(b));
-    if (active.length > 0) setFocusTaskId(active[0].id);
-    else setToastMsg('No active tasks to focus on');
-  }
-
   // ── Keyboard shortcuts ──
   useEffect(()=>{
     function handleKey(e){
       const tag=document.activeElement?.tagName?.toLowerCase();
       if(tag==='input'||tag==='textarea'||tag==='select')return;
-      if(focusTaskId)return;
       const key=e.key.toLowerCase();
-      if(key==='f'){e.preventDefault();startFocusOnTop()}
-      else if(key==='/'){e.preventDefault();inputRef.current?.focus()}
+      if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
       else if(key==='n'){e.preventDefault();setShowNotes(p=>!p)}
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false)}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[focusTaskId,showPeek,showNotes,showChatSidebar,tasks]);
+  },[showPeek,showNotes,showChatSidebar]);
 
   // ── Typing dots ──
   const TypingDots=()=>(
@@ -3142,7 +3150,6 @@ function App() {
     { label:'What should I do?', msg:'What should I work on right now?' },
     { label:'Add a task', msg:'I need to add a task' },
     { label:'My schedule', action:()=>setShowPeek(true) },
-    { label:'Focus mode', action:()=>startFocusOnTop() },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
     { label:'📝 Notes', action:()=>setShowNotes(true) },
@@ -3171,13 +3178,6 @@ function App() {
         <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
       </div>
     );
-  }
-
-  // ── Focus mode takes over ──
-  if (focusTask) {
-    return <FocusMode task={focusTask} onUpdateTask={updateTask}
-      onComplete={()=>{setFocusTaskId(null);setToastMsg('Task completed!')}}
-      onExit={()=>setFocusTaskId(null)}/>;
   }
 
   return (
@@ -3296,7 +3296,7 @@ function App() {
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
           <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>F for focus mode</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
