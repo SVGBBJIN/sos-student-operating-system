@@ -17,7 +17,7 @@
 <script>if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';}</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0a0a0a;--bg2:#0f0f1a;--card:#1a1a2e;--accent:#6C63FF;--accent-dim:#4a44b3;--accent-glow:rgba(108,99,255,0.15);--text:#e0e0e0;--text-dim:#888;--border:#2a2a4e;--danger:#ff4757;--success:#2ed573;--warning:#ffa502;--green:#2ed573;--blue:#45aaf2;--orange:#fd9644;--pink:#fc5c65;--teal:#2bcbba;--radius:12px;--shadow:0 4px 20px rgba(0,0,0,0.4)}
+:root{--bg:#0a0a0a;--bg2:#0f0f1a;--card:#1a1a2e;--accent:#6C63FF;--accent-dim:#4a44b3;--accent-glow:rgba(108,99,255,0.15);--text:#e0e0e0;--text-dim:#888;--border:#2a2a4e;--danger:#ff4757;--success:#2ed573;--warning:#ffa502;--green:#2ed573;--blue:#45aaf2;--orange:#fd9644;--pink:#fc5c65;--teal:#2bcbba;--radius:12px;--shadow:0 4px 20px rgba(0,0,0,0.4);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
@@ -43,29 +43,30 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
 .sos-app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
-.sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;z-index:10}
+.sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(108,99,255,0.15);background:linear-gradient(180deg,#1a1a2e 0%,#12122a 100%);flex-shrink:0;z-index:10}
 .sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth}
-.sos-input-area{flex-shrink:0;border-top:1px solid var(--border);background:var(--card);padding:8px 16px 12px}
-.sos-msg{padding:6px 16px;display:flex;animation:slideUp .25s ease}
+.sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,#12122a 0%,#1a1a2e 100%);padding:8px 16px 12px}
+.sos-msg{padding:8px 16px;display:flex;animation:slideUp .25s ease}
 .sos-msg-user{justify-content:flex-end}
 .sos-msg-ai{justify-content:flex-start}
 .sos-bubble{max-width:80%;padding:12px 16px;border-radius:16px;font-size:0.92rem;line-height:1.55;word-break:break-word;position:relative}
-.sos-bubble-user{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
-.sos-bubble-ai{background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
+.sos-bubble-user{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;border-bottom-right-radius:4px;box-shadow:0 2px 12px rgba(108,99,255,0.2)}
+.sos-bubble-ai{background:linear-gradient(135deg,rgba(26,26,46,0.95) 0%,rgba(15,15,26,0.95) 100%);border:1px solid rgba(108,99,255,0.08);border-bottom-left-radius:4px;backdrop-filter:blur(8px)}
 .sos-bubble-time{font-size:0.6rem;opacity:0.45;margin-top:4px;text-align:right}
-.sos-chip{background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.25);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;transition:all .2s;white-space:nowrap}
-.sos-chip:hover{background:rgba(108,99,255,0.2);border-color:var(--accent)}
+.sos-chip{background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:0.82rem;cursor:pointer;transition:all .25s ease;white-space:nowrap}
+.sos-chip:hover{background:linear-gradient(135deg,rgba(108,99,255,0.18),rgba(43,203,186,0.1));border-color:var(--accent);box-shadow:0 2px 12px rgba(108,99,255,0.1)}
 .sos-chip:active{transform:scale(0.96)}
 
 /* Confirmation Card */
-.confirm-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:4px 0;max-width:360px;animation:cardPop .25s ease}
+.confirm-card{background:linear-gradient(145deg,var(--bg2) 0%,rgba(26,26,46,0.8) 100%);border:1px solid rgba(108,99,255,0.12);border-radius:16px;padding:16px;margin:8px 0;max-width:360px;animation:cardPop .25s ease;transition:transform .2s ease,box-shadow .2s ease}
+.confirm-card:hover{transform:translateY(-1px);box-shadow:0 8px 25px rgba(108,99,255,0.08)}
 .confirm-card-field{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:0.85rem}
 .confirm-card-label{color:var(--text-dim);font-size:0.78rem}
 .confirm-card-value{font-weight:600}
 .confirm-card-actions{display:flex;gap:8px;margin-top:10px}
 .confirm-btn{padding:7px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:600;font-size:0.82rem;transition:all .15s}
 .confirm-btn:active{transform:scale(0.96)}
-.confirm-btn-yes{background:var(--success);color:#fff}
+.confirm-btn-yes{background:linear-gradient(135deg,var(--success) 0%,#1db954 100%);color:#fff;box-shadow:0 2px 8px rgba(46,213,115,0.2)}
 .confirm-btn-edit{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
 .confirm-btn-cancel{background:transparent;border:1px solid var(--danger);color:var(--danger);font-size:0.78rem;padding:5px 10px}
 
@@ -75,7 +76,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .confirm-edit-input:focus{border-color:var(--accent)}
 
 /* Content Cards */
-.content-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:4px 0;max-width:420px;animation:cardPop .25s ease}
+.content-card{background:linear-gradient(145deg,var(--bg2) 0%,rgba(26,26,46,0.8) 100%);border:1px solid rgba(108,99,255,0.12);border-radius:16px;padding:16px;margin:8px 0;max-width:420px;animation:cardPop .25s ease;transition:transform .2s ease,box-shadow .2s ease}
+.content-card:hover{transform:translateY(-1px);box-shadow:0 8px 25px rgba(108,99,255,0.08)}
 .content-card-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .content-card-title{font-weight:700;font-size:0.88rem;color:var(--accent)}
 .content-card-subject{font-size:0.72rem;color:var(--text-dim)}
@@ -86,8 +88,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .fc-inner{position:relative;width:100%;height:100%;transition:transform 0.5s;transform-style:preserve-3d}
 .fc-inner.flipped{transform:rotateY(180deg)}
 .fc-front,.fc-back{position:absolute;inset:0;backface-visibility:hidden;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center;font-size:0.9rem;line-height:1.5}
-.fc-front{background:linear-gradient(135deg,var(--card),var(--bg2));border:1px solid var(--border)}
-.fc-back{background:linear-gradient(135deg,rgba(108,99,255,0.12),var(--bg2));border:1px solid var(--accent-dim);transform:rotateY(180deg);color:var(--success);font-weight:600}
+.fc-front{background:linear-gradient(135deg,#1e1e3a 0%,var(--bg2) 100%);border:1px solid rgba(108,99,255,0.15)}
+.fc-back{background:linear-gradient(135deg,rgba(108,99,255,0.15) 0%,rgba(43,203,186,0.08) 100%);border:1px solid var(--accent-dim);transform:rotateY(180deg);color:var(--success);font-weight:600}
 .fc-nav{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .fc-nav-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all .15s}
 .fc-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -108,12 +110,12 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .quiz-choice.wrong{border-color:var(--danger);background:rgba(255,71,87,0.1);color:var(--danger)}
 .quiz-choice.reveal-correct{border-color:var(--success);background:rgba(46,213,115,0.08)}
 .quiz-score{text-align:center;padding:16px;font-size:1rem;font-weight:700;color:var(--accent)}
-.quiz-btn{padding:8px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;transition:all .15s;background:var(--accent);color:#fff}
+.quiz-btn{padding:8px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:600;font-size:0.85rem;transition:all .15s;background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;box-shadow:0 2px 8px rgba(108,99,255,0.2)}
 .quiz-btn:disabled{opacity:0.4;cursor:not-allowed}
 
 /* Schedule Peek */
-.peek-overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);animation:overlayIn .2s ease}
-.peek-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:var(--bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:65vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
+.peek-overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);animation:overlayIn .2s ease}
+.peek-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:linear-gradient(180deg,#0f0f1a 0%,#0a0a0a 100%);border-top:1px solid rgba(108,99,255,0.15);border-radius:20px 20px 0 0;max-height:65vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
 .peek-handle{width:36px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px}
 .peek-section{margin-bottom:16px}
 .peek-section-title{font-size:0.75rem;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
@@ -124,7 +126,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .peek-task-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
 /* Notes Panel */
-.notes-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:var(--bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:70vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
+.notes-panel{position:fixed;bottom:0;left:0;right:0;z-index:51;background:linear-gradient(180deg,#0f0f1a 0%,#0a0a0a 100%);border-top:1px solid rgba(108,99,255,0.15);border-radius:20px 20px 0 0;max-height:70vh;overflow-y:auto;padding:16px 20px 24px;animation:peekSlideUp .3s ease}
 .notes-search{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px 10px 36px;color:var(--text);font-size:0.88rem;outline:none;margin-bottom:14px;transition:border-color .15s}
 .notes-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
 .notes-search-wrap{position:relative;margin-bottom:14px}
@@ -150,12 +152,12 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 
 /* Auth Screen */
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center}
-.auth-form{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px 28px;width:100%;max-width:360px;animation:fadeIn .4s ease}
+.auth-form{background:linear-gradient(145deg,#1a1a2e 0%,#0f0f1a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:20px;padding:32px 28px;width:100%;max-width:360px;animation:fadeIn .4s ease}
 .auth-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:0.92rem;outline:none;margin-bottom:12px}
 .auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
 .auth-btn{width:100%;padding:12px;border-radius:10px;border:none;font-weight:700;font-size:0.95rem;cursor:pointer;transition:all .15s;margin-bottom:8px}
 .auth-btn:active{transform:scale(0.97)}
-.auth-btn-primary{background:var(--accent);color:#fff}
+.auth-btn-primary{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;box-shadow:0 2px 8px rgba(108,99,255,0.2)}
 .auth-btn-secondary{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
 .auth-error{background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.25);color:var(--danger);padding:10px 14px;border-radius:10px;font-size:0.84rem;margin-bottom:12px}
 .auth-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--text-dim);font-size:0.78rem}
@@ -168,9 +170,9 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sync-error{background:var(--danger)}
 
 /* Google Import Modal */
-.g-overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);animation:overlayIn .2s ease}
+.g-overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);animation:overlayIn .2s ease}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
-.g-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;background:var(--bg);border:1px solid var(--border);border-radius:18px;width:min(92vw,440px);max-height:82vh;overflow-y:auto;padding:20px;animation:cardPop .25s ease}
+.g-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;background:linear-gradient(180deg,#0f0f1a 0%,#0a0a0a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:20px;width:min(92vw,440px);max-height:82vh;overflow-y:auto;padding:20px;animation:cardPop .25s ease}
 .g-modal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .g-modal-title{font-size:1.05rem;font-weight:700;display:flex;align-items:center;gap:8px}
 .g-modal-close{background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-size:1.3rem;line-height:1;padding:2px 6px;border-radius:6px;transition:color .15s}
@@ -217,7 +219,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
 
 /* Notes editing */
-.notes-new-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:7px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px}
+.notes-new-btn{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;border:none;border-radius:10px;padding:7px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;box-shadow:0 2px 8px rgba(108,99,255,0.2)}
 .notes-new-btn:hover{filter:brightness(1.1)}
 .notes-new-btn:active{transform:scale(0.96)}
 .notes-title-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:0.92rem;font-weight:700;outline:none;width:100%;margin-bottom:8px;transition:border-color .15s}
@@ -259,14 +261,14 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 /* Chat sidebar */
 @keyframes sidebarSlideIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @keyframes sidebarSlideOut{from{transform:translateX(0)}to{transform:translateX(-100%)}}
-.chat-sidebar-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);animation:overlayIn .2s ease}
-.chat-sidebar{position:fixed;top:0;left:0;bottom:0;width:min(85vw,340px);z-index:61;background:var(--bg);border-right:1px solid var(--border);padding:16px;overflow-y:auto;animation:sidebarSlideIn .25s ease}
+.chat-sidebar-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);animation:overlayIn .2s ease}
+.chat-sidebar{position:fixed;top:0;left:0;bottom:0;width:min(85vw,340px);z-index:61;background:linear-gradient(180deg,rgba(15,15,26,0.98) 0%,rgba(10,10,10,0.98) 100%);border-right:1px solid rgba(108,99,255,0.1);padding:16px;overflow-y:auto;animation:sidebarSlideIn .25s ease;backdrop-filter:blur(12px)}
 .chat-sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .chat-sidebar-title{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px}
 .chat-sidebar-empty{text-align:center;padding:40px 16px;color:var(--text-dim);font-size:0.85rem}
 .chat-sidebar-list{display:flex;flex-direction:column;gap:8px}
-.chat-sidebar-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:all .15s;animation:fadeIn .2s ease}
-.chat-sidebar-item:hover{border-color:var(--accent-dim);background:rgba(108,99,255,0.03)}
+.chat-sidebar-item{background:linear-gradient(145deg,var(--bg2) 0%,rgba(26,26,46,0.6) 100%);border:1px solid rgba(108,99,255,0.08);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:all .2s ease;animation:fadeIn .2s ease}
+.chat-sidebar-item:hover{border-color:var(--accent-dim);background:linear-gradient(145deg,rgba(108,99,255,0.06) 0%,rgba(26,26,46,0.8) 100%);transform:translateY(-1px)}
 .chat-sidebar-item.active{border-color:var(--accent);background:rgba(108,99,255,0.06)}
 .chat-sidebar-item-title{font-weight:600;font-size:0.88rem;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-sidebar-item-meta{display:flex;align-items:center;justify-content:space-between;font-size:0.72rem;color:var(--text-dim)}
@@ -295,7 +297,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sos-bubble img[alt="photo"]{transition:opacity .15s}
 .sos-bubble img[alt="photo"]:hover{opacity:0.85}
 
-input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(108,99,255,0.2),0 0 20px rgba(108,99,255,0.05)}
 button:hover{opacity:0.88}
 button:active{transform:scale(0.97)}
 select option{background:#0f0f23;color:var(--text)}
@@ -305,6 +307,61 @@ select option{background:#0f0f23;color:var(--text)}
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+/* ═══════════════════════════════════════════════
+   SVG ICON SYSTEM — modern line icons (Lucide-style)
+   ═══════════════════════════════════════════════ */
+const I = (d, s=18, sw=1.5, fill='none') => React.createElement('svg',{width:s,height:s,viewBox:'0 0 24 24',fill:fill,stroke:'currentColor',strokeWidth:sw,strokeLinecap:'round',strokeLinejoin:'round',style:{display:'inline-block',verticalAlign:'middle',flexShrink:0}},
+  ...(Array.isArray(d)?d:[d]).map((p,i)=>{
+    if(typeof p==='string') return React.createElement('path',{key:i,d:p});
+    const{tag,...attrs}=p;return React.createElement(tag||'path',{key:i,...attrs});
+  })
+);
+const Icon = {
+  clipboard:(s=18)=>I(['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2',{tag:'rect',x:'8',y:'2',width:'8',height:'4',rx:'1',ry:'1'}],s),
+  fileText:(s=18)=>I(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z','M14 2v6h6','M16 13H8','M16 17H8','M10 9H8'],s),
+  messageCircle:(s=18)=>I('M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z',s),
+  link:(s=18)=>I(['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71','M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'],s),
+  sparkles:(s=18)=>I(['M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z','M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z'],s),
+  camera:(s=18)=>I(['M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z',{tag:'circle',cx:'12',cy:'13',r:'4'}],s),
+  send:(s=18)=>I(['M22 2L11 13','M22 2l-7 20-4-9-9-4 20-7z'],s),
+  calendar:(s=18)=>I([{tag:'rect',x:'3',y:'4',width:'18',height:'18',rx:'2',ry:'2'},'M16 2v4','M8 2v4','M3 10h18'],s),
+  calendarClock:(s=18)=>I([{tag:'rect',x:'3',y:'4',width:'18',height:'18',rx:'2',ry:'2'},'M16 2v4','M8 2v4','M3 10h18','M12 14v2l1.5 1.5'],s),
+  checkCircle:(s=18)=>I(['M22 11.08V12a10 10 0 1 1-5.93-9.14','M22 4L12 14.01l-3-3'],s),
+  scissors:(s=18)=>I([{tag:'circle',cx:'6',cy:'6',r:'3'},{tag:'circle',cx:'6',cy:'18',r:'3'},'M20 4L8.12 15.88','M14.47 14.48L20 20','M8.12 8.12L12 12'],s),
+  trash:(s=18)=>I(['M3 6h18','M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2','M10 11v6','M14 11v6'],s),
+  zap:(s=18)=>I('M13 2L3 14h9l-1 8 10-12h-9l1-8z',s,1.5,'none'),
+  helpCircle:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'},'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3','M12 17h.01'],s),
+  layers:(s=18)=>I(['M12 2L2 7l10 5 10-5-10-5z','M2 17l10 5 10-5','M2 12l10 5 10-5'],s),
+  listTree:(s=18)=>I(['M21 12H9','M21 6H9','M21 18H9','M5 6v.01','M5 12v.01','M5 18v.01'],s),
+  hammer:(s=18)=>I(['M15 12l-8.5 8.5c-.83.83-2.17.83-3 0s-.83-2.17 0-3L12 9','M17.64 15L22 10.64','M20.91 11.7l-1.25-1.25c-.6-.6-.93-1.4-.93-2.25V6.5a.5.5 0 0 0-.5-.5H16.2c-.85 0-1.65-.33-2.25-.93l-1.25-1.25c-.6-.6-1.57-.6-2.17 0L8.5 5.85c-.6.6-.6 1.57 0 2.17L12 11.5'],s),
+  trophy:(s=18)=>I(['M6 9H4.5a2.5 2.5 0 0 1 0-5H6','M18 9h1.5a2.5 2.5 0 0 0 0-5H18',{tag:'rect',x:'6',y:'2',width:'12',height:'10',rx:'2'},'M12 12v4','M8 20h8','M10 16h4'],s),
+  thumbsUp:(s=18)=>I(['M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z','M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3'],s),
+  bookOpen:(s=18)=>I(['M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z','M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z'],s),
+  alertTriangle:(s=18)=>I(['M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z','M12 9v4','M12 17h.01'],s),
+  circleDot:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'},{tag:'circle',cx:'12',cy:'12',r:'3',fill:'currentColor'}],s),
+  circle:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'}],s),
+  maximize:(s=18)=>I(['M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3'],s),
+  minimize:(s=18)=>I(['M4 14h6v6','M20 10h-6V4','M14 10l7-7','M3 21l7-7'],s),
+  chevronLeft:(s=18)=>I('M15 18l-6-6 6-6',s,2),
+  chevronRight:(s=18)=>I('M9 18l6-6-6-6',s,2),
+  arrowLeft:(s=18)=>I(['M19 12H5','M12 19l-7-7 7-7'],s),
+  arrowRight:(s=18)=>I(['M5 12h14','M12 5l7 7-7 7'],s),
+  mail:(s=18)=>I([{tag:'rect',x:'2',y:'4',width:'20',height:'16',rx:'2'},'M22 7l-10 7L2 7'],s),
+  check:(s=18)=>I('M20 6L9 17l-5-5',s,2),
+  x:(s=18)=>I(['M18 6L6 18','M6 6l12 12'],s,2),
+  sun:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'5'},'M12 1v2','M12 21v2','M4.22 4.22l1.42 1.42','M18.36 18.36l1.42 1.42','M1 12h2','M21 12h2','M4.22 19.78l1.42-1.42','M18.36 5.64l1.42-1.42'],s),
+  cloud:(s=18)=>I('M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',s),
+  cloudFog:(s=18)=>I(['M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25','M8 19h8','M8 23h8'],s),
+  cloudRain:(s=18)=>I(['M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25','M16 14v6','M8 14v6','M12 16v6'],s),
+  cloudSnow:(s=18)=>I(['M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25','M8 16h.01','M8 20h.01','M12 18h.01','M12 22h.01','M16 16h.01','M16 20h.01'],s,1.5),
+  cloudDrizzle:(s=18)=>I(['M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25','M8 17v1','M8 21v1','M12 15v1','M12 19v1','M16 17v1','M16 21v1'],s),
+  cloudLightning:(s=18)=>I(['M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9','M13 11l-4 6h6l-4 6'],s),
+  search:(s=18)=>I([{tag:'circle',cx:'11',cy:'11',r:'8'},'M21 21l-4.35-4.35'],s),
+  plus:(s=18)=>I(['M12 5v14','M5 12h14'],s,2),
+  edit:(s=18)=>I(['M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7','M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'],s),
+  logout:(s=18)=>I(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4','M16 17l5-5-5-5','M21 12H9'],s),
+};
 
 /* ═══════════════════════════════════════════════
    SUPABASE CONFIG
@@ -375,10 +432,10 @@ function catColor(cat) { return CAT_COLORS[cat?.toLowerCase()] || 'var(--accent)
 
 /* ─── Weather Icons ─── */
 function weatherEmoji(code) {
-  if (code <= 1) return '☀️'; if (code <= 3) return '☁️';
-  if (code <= 48) return '🌫️'; if (code <= 67) return '🌧️';
-  if (code <= 77) return '🌨️'; if (code <= 82) return '🌦️';
-  return '⛈️';
+  if (code <= 1) return Icon.sun(18); if (code <= 3) return Icon.cloud(18);
+  if (code <= 48) return Icon.cloudFog(18); if (code <= 67) return Icon.cloudRain(18);
+  if (code <= 77) return Icon.cloudSnow(18); if (code <= 82) return Icon.cloudDrizzle(18);
+  return Icon.cloudLightning(18);
 }
 
 const CHAT_MAX_MESSAGES = 60;
@@ -1178,7 +1235,7 @@ function AuthModal({ onAuth, onClose }) {
     return (
       <div className="g-overlay" onClick={onClose}>
         <div className="g-modal" onClick={e=>e.stopPropagation()} style={{textAlign:'center'}}>
-          <div style={{fontSize:'2rem',marginBottom:8}}>📧</div>
+          <div style={{marginBottom:8,color:'var(--accent)',display:'flex',justifyContent:'center'}}>{Icon.mail(32)}</div>
           <div style={{fontSize:'1.1rem',fontWeight:700,marginBottom:8}}>Check your email</div>
           <div style={{fontSize:'0.88rem',color:'var(--text-dim)',marginBottom:20,lineHeight:1.5}}>
             We sent a confirmation link to <strong style={{color:'var(--text)'}}>{email}</strong>. Click it, then come back and log in.
@@ -1199,7 +1256,7 @@ function AuthModal({ onAuth, onClose }) {
             <div style={{fontSize:'1.1rem',fontWeight:700}}>{mode === 'login' ? 'Welcome back' : 'Create your account'}</div>
             <div style={{fontSize:'0.8rem',color:'var(--text-dim)',marginTop:2}}>Sign in to save your data across devices</div>
           </div>
-          <button className="g-modal-close" onClick={onClose}>×</button>
+          <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
         </div>
 
         {error && <div className="auth-error">{error}</div>}
@@ -1243,36 +1300,36 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
 
   function getCardInfo() {
     switch (action.type) {
-      case 'add_task': return { icon:'📋', label:'New Task', fields: [
+      case 'add_task': return { icon:Icon.clipboard(18), label:'New Task', fields: [
         { key:'title', label:'Task', value:action.title }, { key:'subject', label:'Subject', value:action.subject||'—' },
         { key:'due', label:'Due', value:action.due?fmt(action.due):'No date' }, { key:'estimated_minutes', label:'Time', value:(action.estimated_minutes||30)+' min' }
       ]};
-      case 'add_event': return { icon:'📅', label:'New Event', fields: [
+      case 'add_event': return { icon:Icon.calendar(18), label:'New Event', fields: [
         { key:'title', label:'Event', value:action.title }, { key:'date', label:'Date', value:action.date?fmt(action.date):'No date' },
         { key:'event_type', label:'Type', value:action.event_type||'other' }, { key:'subject', label:'Subject', value:action.subject||'—' }
       ]};
-      case 'add_block': return { icon:'🗓', label:'Schedule Block', fields: [
+      case 'add_block': return { icon:Icon.calendarClock(18), label:'Schedule Block', fields: [
         { key:'activity', label:'Activity', value:action.activity }, { key:'date', label:'Date', value:action.date?fmt(action.date):'Today' },
         { key:'time', label:'Time', value:(action.start||'?')+' - '+(action.end||'?') }, { key:'category', label:'Category', value:action.category||'school' }
       ]};
-      case 'complete_task': return { icon:'✅', label:'Complete Task', fields: [{ key:'task_id', label:'Task ID', value:action.task_id }] };
-      case 'break_task': return { icon:'✂️', label:'Break Into Parts', fields: [
+      case 'complete_task': return { icon:Icon.checkCircle(18), label:'Complete Task', fields: [{ key:'task_id', label:'Task ID', value:action.task_id }] };
+      case 'break_task': return { icon:Icon.scissors(18), label:'Break Into Parts', fields: [
         { key:'parent_title', label:'Project', value:action.parent_title }, { key:'subtasks', label:'Parts', value:(action.subtasks||[]).length+' sub-tasks' }
       ]};
-      case 'delete_task': return { icon:'🗑', label:'Delete Task', fields: [
+      case 'delete_task': return { icon:Icon.trash(18), label:'Delete Task', fields: [
         { key:'title', label:'Task', value:action.title||action.task_id||'Unknown' }
       ]};
-      case 'delete_event': return { icon:'🗑', label:'Delete Event', fields: [
+      case 'delete_event': return { icon:Icon.trash(18), label:'Delete Event', fields: [
         { key:'title', label:'Event', value:action.title||action.event_id||'Unknown' }
       ]};
-      case 'update_event': return { icon:'📅', label:'Update Event', fields: [
+      case 'update_event': return { icon:Icon.calendar(18), label:'Update Event', fields: [
         { key:'title', label:'Event', value:action.title||'(unchanged)' }, { key:'date', label:'New Date', value:action.date?fmt(action.date):'(unchanged)' },
         { key:'event_type', label:'Type', value:action.event_type||'(unchanged)' }
       ]};
-      case 'delete_block': return { icon:'🗑', label:'Remove Block', fields: [
+      case 'delete_block': return { icon:Icon.trash(18), label:'Remove Block', fields: [
         { key:'date', label:'Date', value:action.date?fmt(action.date):'?' }, { key:'time', label:'Time', value:(action.start||'?')+' - '+(action.end||'?') }
       ]};
-      default: return { icon:'⚡', label:'Action', fields: Object.entries(action).filter(([k])=>k!=='type').map(([k,v])=>({key:k,label:k,value:String(v)})) };
+      default: return { icon:Icon.zap(18), label:'Action', fields: Object.entries(action).filter(([k])=>k!=='type').map(([k,v])=>({key:k,label:k,value:String(v)})) };
     }
   }
   const info = getCardInfo();
@@ -1281,11 +1338,11 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
     <div className="confirm-card card-pop">
       {isFallback && (
         <div style={{fontSize:'0.75rem',color:'#f0a050',marginBottom:8,padding:'4px 8px',background:'rgba(240,160,80,0.1)',borderRadius:6}}>
-          🤔 I think you want to add this — check the details?
+          {Icon.helpCircle(14)} I think you want to add this — check the details?
         </div>
       )}
-      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-        <span style={{ fontSize:'1.1rem' }}>{info.icon}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <span style={{ color:'var(--accent)', display:'flex' }}>{info.icon}</span>
         <span style={{ fontWeight:700, fontSize:'0.88rem', color:'var(--accent)' }}>{info.label}</span>
       </div>
       {!editing ? info.fields.map(f => (
@@ -1314,11 +1371,11 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
         </div>
       )}
       <div className="confirm-card-actions">
-        <button className="confirm-btn confirm-btn-yes" onClick={() => { editing ? onConfirm({...action,...editData}) : onConfirm(action); }}>
-          {editing ? 'Save' : 'Looks good'} ✓
+        <button className="confirm-btn confirm-btn-yes" style={{display:'flex',alignItems:'center',gap:4}} onClick={() => { editing ? onConfirm({...action,...editData}) : onConfirm(action); }}>
+          {editing ? 'Save' : 'Looks good'} {Icon.check(14)}
         </button>
         {!editing && action.type !== 'complete_task' && <button className="confirm-btn confirm-btn-edit" onClick={() => setEditing(true)}>Edit</button>}
-        <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>✕</button>
+        <button className="confirm-btn confirm-btn-cancel" style={{display:'flex',alignItems:'center',gap:2}} onClick={onCancel}>{Icon.x(14)}</button>
       </div>
     </div>
   );
@@ -1331,7 +1388,7 @@ function ContentCard({ icon, title, subject, onSave, onDismiss, children }) {
   return (
     <div className="content-card card-pop">
       <div className="content-card-header">
-        <span style={{ fontSize:'1.1rem' }}>{icon}</span>
+        <span style={{ color:'var(--accent)', display:'flex' }}>{icon}</span>
         <div>
           <div className="content-card-title">{title}</div>
           {subject && <div className="content-card-subject">{subject}</div>}
@@ -1351,13 +1408,13 @@ function FlashcardDisplay({ data, onSave, onDismiss }) {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
 
-  if (cards.length === 0) return <ContentCard icon="🃏" title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards generated.</div></ContentCard>;
+  if (cards.length === 0) return <ContentCard icon={Icon.layers(18)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards generated.</div></ContentCard>;
 
   function goNext() { if (idx < cards.length - 1) { setFlipped(false); setTimeout(() => setIdx(i => i + 1), 100); } }
   function goPrev() { if (idx > 0) { setFlipped(false); setTimeout(() => setIdx(i => i - 1), 100); } }
 
   return (
-    <ContentCard icon="🃏" title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}>
+    <ContentCard icon={Icon.layers(18)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}>
       <div className="fc-container" onClick={() => setFlipped(f => !f)}>
         <div className={'fc-inner' + (flipped ? ' flipped' : '')}>
           <div className="fc-front">
@@ -1369,9 +1426,9 @@ function FlashcardDisplay({ data, onSave, onDismiss }) {
         </div>
       </div>
       <div className="fc-nav">
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goPrev(); }} disabled={idx === 0}>←</button>
+        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goPrev(); }} disabled={idx === 0}>{Icon.chevronLeft(16)}</button>
         <span className="fc-counter">{idx + 1} / {cards.length}</span>
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>→</button>
+        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>{Icon.chevronRight(16)}</button>
       </div>
       <div className="fc-hint">tap card to flip</div>
     </ContentCard>
@@ -1386,7 +1443,7 @@ function QuizDisplay({ data, onSave, onDismiss }) {
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
 
-  if (questions.length === 0) return <ContentCard icon="📝" title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No questions generated.</div></ContentCard>;
+  if (questions.length === 0) return <ContentCard icon={Icon.fileText(18)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No questions generated.</div></ContentCard>;
 
   const q = questions[qIdx];
   const isCorrect = selected === q?.answer;
@@ -1402,10 +1459,10 @@ function QuizDisplay({ data, onSave, onDismiss }) {
   }
 
   return (
-    <ContentCard icon="📝" title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}>
+    <ContentCard icon={Icon.fileText(18)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss}>
       {finished ? (
         <div className="quiz-score">
-          <div style={{ fontSize:'2rem', marginBottom:8 }}>{score === questions.length ? '🎉' : score >= questions.length * 0.7 ? '💪' : '📖'}</div>
+          <div style={{ marginBottom:8, color: score === questions.length ? 'var(--success)' : score >= questions.length * 0.7 ? 'var(--accent)' : 'var(--text-dim)', display:'flex', justifyContent:'center' }}>{score === questions.length ? Icon.trophy(32) : score >= questions.length * 0.7 ? Icon.thumbsUp(32) : Icon.bookOpen(32)}</div>
           <div>{score} / {questions.length} correct</div>
           <div style={{ fontSize:'0.82rem', color:'var(--text-dim)', fontWeight:400, marginTop:4 }}>
             {score === questions.length ? 'Perfect score!' : score >= questions.length * 0.7 ? 'Nice job!' : 'Keep studying, you got this!'}
@@ -1417,7 +1474,7 @@ function QuizDisplay({ data, onSave, onDismiss }) {
           <div className="quiz-progress">
             <span>{qIdx + 1}/{questions.length}</span>
             <div className="quiz-progress-bar"><div className="quiz-progress-fill" style={{ width: ((qIdx + 1) / questions.length * 100) + '%' }}/></div>
-            <span style={{ color:'var(--success)' }}>{score} ✓</span>
+            <span style={{ color:'var(--success)', display:'flex', alignItems:'center', gap:2 }}>{score} {Icon.check(12)}</span>
           </div>
           <div className="quiz-question">{q?.q || 'No question'}</div>
           <div className="quiz-choices">
@@ -1436,7 +1493,7 @@ function QuizDisplay({ data, onSave, onDismiss }) {
           </div>
           <div style={{ display:'flex', gap:8 }}>
             {!revealed && <button className="quiz-btn" onClick={checkAnswer} disabled={!selected}>Check Answer</button>}
-            {revealed && <button className="quiz-btn" onClick={nextQuestion}>{qIdx < questions.length - 1 ? 'Next →' : 'See Score'}</button>}
+            {revealed && <button className="quiz-btn" style={{display:'flex',alignItems:'center',gap:4}} onClick={nextQuestion}>{qIdx < questions.length - 1 ? <>Next {Icon.arrowRight(14)}</> : 'See Score'}</button>}
           </div>
         </>
       )}
@@ -1481,15 +1538,15 @@ function ContentTypeRouter({ content, onSave, onDismiss }) {
     case 'create_quiz':
       return <QuizDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_outline':
-      return <GenericContentDisplay data={content} icon="📑" label="Outline" onSave={onSave} onDismiss={onDismiss} />;
+      return <GenericContentDisplay data={content} icon={Icon.listTree(18)} label="Outline" onSave={onSave} onDismiss={onDismiss} />;
     case 'create_summary':
-      return <GenericContentDisplay data={content} icon="📋" label="Summary" onSave={onSave} onDismiss={onDismiss} />;
+      return <GenericContentDisplay data={content} icon={Icon.clipboard(18)} label="Summary" onSave={onSave} onDismiss={onDismiss} />;
     case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon="📅" label="Study Plan" onSave={onSave} onDismiss={onDismiss} />;
+      return <GenericContentDisplay data={content} icon={Icon.calendar(18)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} />;
     case 'create_project_breakdown':
-      return <GenericContentDisplay data={content} icon="🔨" label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} />;
+      return <GenericContentDisplay data={content} icon={Icon.hammer(18)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} />;
     default:
-      return <GenericContentDisplay data={content} icon="⚡" label="Content" onSave={onSave} onDismiss={onDismiss} />;
+      return <GenericContentDisplay data={content} icon={Icon.zap(18)} label="Content" onSave={onSave} onDismiss={onDismiss} />;
   }
 }
 
@@ -1687,26 +1744,26 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
       <div className="g-modal" onClick={e=>e.stopPropagation()}>
         {/* Header */}
         <div className="g-modal-hdr">
-          <div className="g-modal-title"><span>🔗</span> Import from Google</div>
-          <button className="g-modal-close" onClick={onClose} disabled={isLoading}>×</button>
+          <div className="g-modal-title"><span style={{display:'flex',color:'var(--accent)'}}>{Icon.link(18)}</span> Import from Google</div>
+          <button className="g-modal-close" onClick={onClose} disabled={isLoading}>{Icon.x(16)}</button>
         </div>
 
         {/* Connected account info */}
         {googleUser && (
           <div className="g-connected">
-            <span style={{color:'var(--success)'}}>✓ {googleUser.email}</span>
+            <span style={{color:'var(--success)',display:'flex',alignItems:'center',gap:4}}>{Icon.check(12)} {googleUser.email}</span>
             <button onClick={onDisconnect} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',fontSize:'0.78rem',fontWeight:600,padding:'0 4px'}}>Disconnect</button>
           </div>
         )}
 
         {/* Error */}
-        {err && <div className="g-err">⚠️ {err}</div>}
+        {err && <div className="g-err" style={{display:'flex',alignItems:'center',gap:6}}>{Icon.alertTriangle(14)} {err}</div>}
 
         {/* Tabs */}
         <div className="g-tabs">
           {['calendar','docs','pdf'].map(t=>(
             <button key={t} className={'g-tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setErr(null);}}>
-              {t==='calendar'?'📅 Calendar':t==='docs'?'📄 Docs':'📑 PDF'}
+              {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>:t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>:<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>}
             </button>
           ))}
         </div>
@@ -1719,7 +1776,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
             <div className={'cal-sync-card' + (calSyncEnabled ? ' on' : '') + (calSyncStatus==='error' ? ' error' : '')}>
               <div className="cal-sync-toggle">
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:'1.1rem'}}>{calSyncStatus==='syncing'?'⏳':calSyncEnabled?'🔄':'📅'}</span>
+                  <span style={{display:'flex',color:'var(--accent)'}}>{calSyncStatus==='syncing'?Icon.circle(18):calSyncEnabled?Icon.checkCircle(18):Icon.calendar(18)}</span>
                   <div>
                     <div style={{fontWeight:700,fontSize:'0.88rem'}}>Auto-sync Calendar</div>
                     <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:1}}>
@@ -1736,15 +1793,15 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
               {calSyncEnabled && (
                 <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
                   <div style={{fontSize:'0.78rem'}}>
-                    {calSyncStatus==='syncing' && <span style={{color:'var(--text-dim)'}}>⏳ Syncing now…</span>}
+                    {calSyncStatus==='syncing' && <span style={{color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>{Icon.circle(12)} Syncing now…</span>}
                     {calSyncStatus==='done' && (
                       <span style={{color:'var(--success)'}}>
-                        ✓ Last synced {timeAgo(calSyncLastAt)}
+                        {Icon.check(12)} Last synced {timeAgo(calSyncLastAt)}
                         {calSyncCount > 0 && <span style={{color:'var(--text-dim)',marginLeft:6}}>({calSyncCount} new event{calSyncCount!==1?'s':''})</span>}
                         {calSyncCount === 0 && <span style={{color:'var(--text-dim)',marginLeft:6}}>(no new events)</span>}
                       </span>
                     )}
-                    {calSyncStatus==='error' && <span style={{color:'var(--danger)'}}>⚠️ {calSyncError}</span>}
+                    {calSyncStatus==='error' && <span style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:4}}>{Icon.alertTriangle(12)} {calSyncError}</span>}
                     {calSyncStatus==='idle' && calSyncLastAt && <span style={{color:'var(--text-dim)'}}>Last synced {timeAgo(calSyncLastAt)}</span>}
                     {calSyncStatus==='idle' && !calSyncLastAt && <span style={{color:'var(--text-dim)'}}>Starting first sync…</span>}
                   </div>
@@ -1763,7 +1820,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
                   <>
                     <p className="g-note">Or manually fetch events and choose which ones to import.</p>
                     <button className="g-btn" onClick={fetchCalEvents} disabled={calLoading}>
-                      <span>{calLoading?'⏳':'📅'}</span>
+                      <span style={{display:'flex'}}>{calLoading?Icon.circle(16):Icon.calendar(16)}</span>
                       {calLoading ? 'Fetching events…' : 'Fetch next 2 weeks of events'}
                     </button>
                   </>
@@ -1783,7 +1840,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
                         {calEvents.map((ev,i)=>(
                           <div key={i} className="g-event-row" onClick={()=>toggleEv(i)}>
                             <div className={'g-check'+(selected.has(i)?' on':'')}>
-                              {selected.has(i)&&<span style={{color:'#fff',fontSize:'0.7rem',fontWeight:900}}>✓</span>}
+                              {selected.has(i)&&<span style={{color:'#fff',display:'flex'}}>{Icon.check(12)}</span>}
                             </div>
                             <div style={{flex:1}}>
                               <div className="g-event-title">{ev.title}</div>
@@ -1816,19 +1873,19 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
             <p className="g-note">Pick a Google Doc straight from your Drive — no link pasting needed. Text only; formatting won't carry over.</p>
             {docPickedId ? (
               <div className="g-picked-file">
-                <span style={{fontSize:'1.1rem'}}>📄</span>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(18)}</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:700,fontSize:'0.88rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{docPickedName}</div>
                   <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>Google Doc selected</div>
                 </div>
                 <button onClick={()=>{setDocPickedId(null);setDocPickedName('');setErr(null);}}
-                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1rem',padding:'2px 6px'}}>✕</button>
+                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>
               </div>
             ) : (
               <button className="g-picker-btn"
                 onClick={()=>openDrivePicker('application/vnd.google-apps.document',(id,name)=>{setDocPickedId(id);setDocPickedName(name);setErr(null);})}
                 disabled={pickerLoading}>
-                <span style={{fontSize:'1.4rem'}}>📂</span>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(22)}</span>
                 <div>
                   <div style={{fontWeight:700,fontSize:'0.9rem'}}>{pickerLoading?'Opening picker…':'Browse Google Docs'}</div>
                   <div style={{fontSize:'0.75rem',opacity:0.7,marginTop:2}}>Opens your Drive file browser to choose a doc</div>
@@ -1847,7 +1904,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
           <div className="g-section">
             {/* Option 1: local file */}
             <button className="g-btn" onClick={()=>fileInputRef.current?.click()} disabled={pdfLoading}>
-              <span>💻</span> Upload PDF from your computer
+              <span style={{display:'flex'}}>{Icon.fileText(16)}</span> Upload PDF from your computer
             </button>
             <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}}
               onChange={e=>{if(e.target.files?.[0]){importPdf(e.target.files[0]);e.target.value='';}}}/>
@@ -1857,19 +1914,19 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
             {/* Option 2: Drive Picker */}
             {pdfPickedId ? (
               <div className="g-picked-file">
-                <span style={{fontSize:'1.1rem'}}>📑</span>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.listTree(18)}</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:700,fontSize:'0.88rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{pdfPickedName}</div>
                   <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>PDF from Google Drive</div>
                 </div>
                 <button onClick={()=>{setPdfPickedId(null);setPdfPickedName('');setErr(null);}}
-                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1rem',padding:'2px 6px'}}>✕</button>
+                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>
               </div>
             ) : (
               <button className="g-picker-btn"
                 onClick={()=>openDrivePicker('application/pdf',(id,name)=>{setPdfPickedId(id);setPdfPickedName(name);setErr(null);})}
                 disabled={pdfLoading||pickerLoading}>
-                <span style={{fontSize:'1.4rem'}}>📂</span>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.listTree(22)}</span>
                 <div>
                   <div style={{fontWeight:700,fontSize:'0.9rem'}}>{pickerLoading?'Opening picker…':'Browse Google Drive for PDF'}</div>
                   <div style={{fontSize:'0.75rem',opacity:0.7,marginTop:2}}>Opens your Drive file browser to choose a PDF</div>
@@ -1882,7 +1939,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
                 {pdfLoading?'Reading PDF…':'Import PDF to Notes'}
               </button>
             )}
-            <p className="g-note" style={{marginTop:8}}>⚠️ Scanned/photo PDFs won't work — only PDFs with real digital text can be read.</p>
+            <p className="g-note" style={{marginTop:8,display:'flex',alignItems:'flex-start',gap:6}}><span style={{display:'flex',flexShrink:0,color:'var(--warning)',marginTop:1}}>{Icon.alertTriangle(14)}</span> Scanned/photo PDFs won't work — only PDFs with real digital text can be read.</p>
           </div>
         )}
       </div>
@@ -1990,11 +2047,11 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
-          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6,marginRight:4}}><span style={{fontSize:'1.3rem'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
+          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6,marginRight:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
           <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen calendar'}>
-            {isFullscreen ? '⊟' : '⛶'}
+            {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
           </button>
-          <button className="g-modal-close" onClick={onClose}>×</button>
+          <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
         </div>
       </div>
 
@@ -2002,12 +2059,12 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
       {isFullscreen && (
         <div style={{marginBottom:16}}>
           <div className="cal-month-nav">
-            <button className="cal-nav-btn" onClick={prevMonth}>◀</button>
+            <button className="cal-nav-btn" onClick={prevMonth}>{Icon.chevronLeft(16)}</button>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
               <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
             </div>
-            <button className="cal-nav-btn" onClick={nextMonth}>▶</button>
+            <button className="cal-nav-btn" onClick={nextMonth}>{Icon.chevronRight(16)}</button>
           </div>
           <div className="cal-grid">
             {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
@@ -2040,19 +2097,19 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
         ))}
       </div>
       {overduePeekTasks.length>0&&<div className="peek-section">
-        <div className="peek-section-title" style={{color:'var(--danger)'}}>⚠️ Overdue ({overduePeekTasks.length})</div>
+        <div className="peek-section-title" style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:4}}>{Icon.alertTriangle(14)} Overdue ({overduePeekTasks.length})</div>
         {overduePeekTasks.map(task=>(<div key={task.id} className="peek-task-item">
           <div className="peek-task-dot" style={{background:'var(--danger)'}}/>
           <div style={{flex:1}}>
             <div style={{fontWeight:600,color:'var(--danger)'}}>{task.title}</div>
             <div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{Math.abs(daysUntil(task.dueDate))}d overdue{' · '+(task.estTime||30)+'min'}</div>
           </div>
-          <div style={{fontSize:'0.78rem',fontWeight:600,color:'var(--danger)'}}>{task.status==='in_progress'?'🔶':'⬜'}</div>
+          <div style={{color:'var(--danger)',display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div>
         </div>))}
       </div>}
       {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.length})</div>
         {activeTasks.map(task=>{const d=daysUntil(task.dueDate);const dotColor=d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{fontSize:'0.78rem',fontWeight:600,color:dotColor}}>{task.status==='in_progress'?'🔶':'⬜'}</div></div>)
+          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{color:dotColor,display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
         })}
       </div>}
       {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
@@ -2204,8 +2261,8 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
         <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
         <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
         <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">→</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">←</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
+        <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
         <div className="notes-toolbar-sep"/>
         <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
         <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
@@ -2220,16 +2277,16 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
         {!isFullscreen && <div className="peek-handle"/>}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:'1.1rem'}}>📝</span>
+            <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(18)}</span>
             <span style={{fontWeight:700,fontSize:'1.05rem'}}>Notes</span>
             {notes.length > 0 && <span style={{fontSize:'0.75rem',color:'var(--text-dim)',background:'var(--bg2)',padding:'2px 8px',borderRadius:10,fontWeight:600}}>{notes.length}</span>}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <button className="notes-new-btn" onClick={startNewNote}>+ New Note</button>
+            <button className="notes-new-btn" onClick={startNewNote} style={{display:'flex',alignItems:'center',gap:4}}>{Icon.plus(14)} New Note</button>
             <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-              {isFullscreen ? '⊟' : '⛶'}
+              {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
             </button>
-            <button className="g-modal-close" onClick={onClose}>×</button>
+            <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
           </div>
         </div>
 
@@ -2251,7 +2308,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
         {/* ── Search bar ── */}
         {notes.length > 0 && !isCreatingNew && !editingId && (
           <div className="notes-search-wrap">
-            <span className="notes-search-icon">🔍</span>
+            <span className="notes-search-icon" style={{display:'flex'}}>{Icon.search(14)}</span>
             <input className="notes-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search notes for keywords..." autoFocus/>
           </div>
@@ -2260,7 +2317,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
         {/* ── Empty states ── */}
         {filteredNotes.length === 0 && !searchQuery.trim() && !isCreatingNew && (
           <div className="notes-empty">
-            <div style={{fontSize:'2rem',marginBottom:8,opacity:0.4}}>📝</div>
+            <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.fileText(28)}</div>
             <div>No notes yet</div>
             <div style={{fontSize:'0.82rem',marginTop:4}}>Click "+ New Note" to create one, or import a PDF, Google Doc, or save study materials from chat</div>
           </div>
@@ -2268,7 +2325,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
 
         {filteredNotes.length === 0 && searchQuery.trim() && !isCreatingNew && (
           <div className="notes-empty">
-            <div style={{fontSize:'1.5rem',marginBottom:8,opacity:0.4}}>🔍</div>
+            <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.search(24)}</div>
             <div>No matches for "{searchQuery}"</div>
             <div style={{fontSize:'0.82rem',marginTop:4}}>Try different keywords or check spelling</div>
           </div>
@@ -2309,7 +2366,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
                         {getSourceBadge(note)}
                         {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
                         <button className="notes-toolbar-btn" onClick={e => startEdit(note, e)} title="Edit" style={{fontSize:'0.72rem',padding:'3px 7px'}}>✎</button>
-                        <button className="notes-delete" onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>✕</button>
+                        <button className="notes-delete" style={{display:'flex',alignItems:'center',gap:2}} onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>{Icon.trash(12)} Delete</button>
                       </div>
                     </div>
                     {!isExpanded && snippet && (
@@ -3172,8 +3229,8 @@ function App() {
     { label:'My schedule', action:()=>setShowPeek(true) },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
-    { label:'📝 Notes', action:()=>setShowNotes(true) },
-    { label:'🔗 Import', action:()=>isGoogleConnected()?setShowGoogleModal(true):connectGoogle() },
+    { label:'Notes', action:()=>setShowNotes(true) },
+    { label:'Import', action:()=>isGoogleConnected()?setShowGoogleModal(true):connectGoogle() },
   ];
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
@@ -3182,10 +3239,11 @@ function App() {
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
-      <div className="auth-screen">
-        <div style={{fontSize:'2rem',fontWeight:900,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16}}>SOS</div>
-        <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
-        <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)'}}>Loading your data...</div>
+      <div className="auth-screen" style={{position:'relative'}}>
+        <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
+        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative'}}>SOS</div>
+        <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative'}}/>
+        <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)',position:'relative'}}>Loading your data...</div>
       </div>
     );
   }
@@ -3193,9 +3251,10 @@ function App() {
   // ── Checking session on first load ──
   if (!authChecked) {
     return (
-      <div className="auth-screen">
-        <div style={{fontSize:'2rem',fontWeight:900,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16}}>SOS</div>
-        <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+      <div className="auth-screen" style={{position:'relative'}}>
+        <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
+        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative'}}>SOS</div>
+        <div style={{width:24,height:24,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative'}}/>
       </div>
     );
   }
@@ -3204,36 +3263,36 @@ function App() {
     <div className="sos-app">
       {/* ── Header ── */}
       <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
           </div>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
           {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
-          <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s'}}>📋 Peek</button>
-          <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>📝 Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'var(--accent)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
-          <button onClick={()=>setShowChatSidebar(true)} title="Chat history (H)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>💬 History{savedChats.length>0&&<span style={{fontSize:'0.68rem',background:'var(--accent)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{savedChats.length}</span>}</button>
+          <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.clipboard(14)} Peek</button>
+          <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.fileText(14)} Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
+          <button onClick={()=>setShowChatSidebar(true)} title="Chat history (H)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.messageCircle(14)} History{savedChats.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{savedChats.length}</span>}</button>
           {isGoogleConnected() ? (
             <button onClick={()=>setShowGoogleModal(true)} className="g-hdr-btn connected" title="Import from Google Calendar, Docs, or Drive">
-              <span>🔗</span> Import
+              {Icon.link(14)} Import
             </button>
           ) : (
             <button onClick={connectGoogle} className="g-hdr-btn" title="Connect your Google account to import calendar events, docs, and PDFs">
               <span style={{fontWeight:900,fontSize:'0.85rem'}}>G</span> Connect
             </button>
           )}
-          <div title="Content generations remaining today" style={{fontSize:'0.72rem',color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:3}}>
-            <span style={{fontSize:'0.8rem'}}>✨</span>
+          <div title="Content generations remaining today" style={{fontSize:'0.72rem',color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+            <span style={{display:'flex',color:'var(--accent)'}}>{Icon.sparkles(14)}</span>
             <span style={{fontWeight:600}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
           </div>
-          {weatherData?.current&&<div style={{fontSize:'0.85rem',display:'flex',alignItems:'center',gap:4}}><span>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:600,fontSize:'0.82rem'}}>{Math.round(weatherData.current.temperature_2m)}°</span></div>}
+          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:600,fontSize:'0.82rem'}}>{Math.round(weatherData.current.temperature_2m)}°</span></div>}
           {user ? (
-            <button onClick={handleLogout} title="Sign out" style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:'pointer',borderRadius:8,padding:'5px 8px',fontSize:'0.72rem',transition:'all .2s'}}>Sign out</button>
+            <button onClick={handleLogout} title="Sign out" style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:'pointer',borderRadius:8,padding:'5px 8px',fontSize:'0.72rem',transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.logout(12)} Sign out</button>
           ) : (
-            <button onClick={()=>setShowAuthModal(true)} title="Sign in" style={{background:'var(--accent)',border:'none',color:'#fff',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.72rem',fontWeight:600,transition:'all .2s'}}>Sign in</button>
+            <button onClick={()=>setShowAuthModal(true)} title="Sign in" style={{background:'linear-gradient(135deg,var(--accent),#5a54d4)',border:'none',color:'#fff',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.72rem',fontWeight:600,transition:'all .2s'}}>Sign in</button>
           )}
         </div>
       </div>
@@ -3247,11 +3306,12 @@ function App() {
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(
-          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'40px 24px',textAlign:'center'}}>
-            <div style={{fontSize:'2.8rem',marginBottom:12,background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900}}>SOS</div>
-            <div style={{fontSize:'1rem',color:'var(--text)',fontWeight:600,marginBottom:6}}>hey, i'm your study sidekick</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:380,lineHeight:1.6,marginBottom:28}}>tell me what's on your plate and i'll help you figure it out. i know your tasks, schedule, and events — so just talk to me like a friend.</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:400}}>
+          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
+            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none'}}/>
+            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative'}}>SOS</div>
+            <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative'}}>hey, i'm your study sidekick</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative'}}>tell me what's on your plate and i'll help you figure it out. i know your tasks, schedule, and events — so just talk to me like a friend.</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
               {['I have a math test on Friday','What should I work on?','Make me flashcards for biology','Quiz me on chapter 3'].map(s=>(
                 <button key={s} className="sos-chip" onClick={()=>sendChip(s)}>{s}</button>
               ))}
@@ -3289,7 +3349,7 @@ function App() {
       {/* ── Input Area ── */}
       <div className="sos-input-area">
         {messages.length>0&&(
-          <div style={{display:'flex',gap:6,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
+          <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
             {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back to chat</button>}
@@ -3300,23 +3360,23 @@ function App() {
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:12,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
             <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:8,objectFit:'cover'}}/>
             <span style={{fontSize:'0.82rem',color:'var(--text-dim)',flex:1}}>Photo attached</span>
-            <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',fontSize:'0.9rem',padding:'4px 8px'}}>✕</button>
+            <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
           </div>
         )}
         <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
           <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
           <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-            📷
+            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+            {Icon.camera(18)}
           </button>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
             placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?"what's on your plate today?":"type anything..."}
             disabled={isLoading||!!viewingSavedChatId}
             style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .2s'}}
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-          <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'var(--accent)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',fontSize:'1.1rem',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0}}>➤</button>
+          <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:6,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>📷 for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
@@ -3326,12 +3386,12 @@ function App() {
           <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
           <div className="chat-sidebar">
             <div className="chat-sidebar-header">
-              <div className="chat-sidebar-title"><span>💬</span> Saved Chats</div>
-              <button className="g-modal-close" onClick={()=>setShowChatSidebar(false)}>×</button>
+              <div className="chat-sidebar-title"><span style={{display:'flex',color:'var(--accent)'}}>{Icon.messageCircle(18)}</span> Saved Chats</div>
+              <button className="g-modal-close" onClick={()=>setShowChatSidebar(false)}>{Icon.x(16)}</button>
             </div>
             {savedChats.length === 0 ? (
               <div className="chat-sidebar-empty">
-                <div style={{fontSize:'1.8rem',marginBottom:8,opacity:0.4}}>💬</div>
+                <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
                 <div>No saved conversations yet</div>
                 <div style={{fontSize:'0.78rem',marginTop:4}}>Use "Save chat" to keep a conversation</div>
               </div>
