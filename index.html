@@ -643,20 +643,22 @@ async function dbClearChat(userId) {
 }
 async function pushEventToGoogle(event, token) {
   try {
-    const body = { summary: event.title, start: { date: event.date }, end: { date: event.date } };
+    const endD = new Date(event.date + 'T00:00:00'); endD.setDate(endD.getDate() + 1);
+    const endDate = endD.toISOString().split('T')[0];
+    const body = { summary: event.title, start: { date: event.date }, end: { date: endDate } };
     if (event.googleId) {
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + event.googleId, {
         method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!res.ok) { console.error('Google event update failed:', res.status); return event.googleId; }
+      if (!res.ok) { const errBody = await res.text().catch(() => ''); console.error('Google event update failed:', res.status, errBody); return event.googleId; }
       const data = await res.json(); return data.id;
     } else {
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!res.ok) { console.error('Google event create failed:', res.status); return null; }
+      if (!res.ok) { const errBody = await res.text().catch(() => ''); console.error('Google event create failed:', res.status, errBody); return null; }
       const data = await res.json(); return data.id;
     }
   } catch (e) { console.error('pushEventToGoogle error:', e); return event.googleId || null; }
@@ -666,7 +668,7 @@ async function deleteEventFromGoogle(googleId, token) {
     const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + googleId, {
       method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token }
     });
-    if (!res.ok && res.status !== 404 && res.status !== 410) console.error('Google event delete failed:', res.status);
+    if (!res.ok && res.status !== 404 && res.status !== 410) { const errBody = await res.text().catch(() => ''); console.error('Google event delete failed:', res.status, errBody); }
   } catch (e) { console.error('deleteEventFromGoogle error:', e); }
 }
 async function dbUpsertDateBlock(date, timeSlot, data, userId) {
