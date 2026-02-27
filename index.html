@@ -620,7 +620,13 @@ async function dbClearChat(userId) {
 }
 async function pushEventToGoogle(event, token) {
   try {
-    const body = { summary: event.title, start: { date: event.date }, end: { date: event.date } };
+    // Google Calendar API uses exclusive end dates for all-day events,
+    // so a single-day event on 2025-01-17 needs end.date = 2025-01-18
+    const startDate = event.date;
+    const endDt = new Date(startDate + 'T00:00:00');
+    endDt.setDate(endDt.getDate() + 1);
+    const endDate = endDt.toISOString().split('T')[0];
+    const body = { summary: event.title, start: { date: startDate }, end: { date: endDate } };
     if (event.googleId) {
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + event.googleId, {
         method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -1596,7 +1602,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
         timeMin: now.toISOString(), timeMax: max.toISOString(),
         singleEvents: 'true', orderBy: 'startTime', maxResults: '50'
       });
-      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, { headers: authHeader() });
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, { headers: authHeader(), cache: 'no-store' });
       if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Calendar fetch failed: ' + res.status); }
       const data = await res.json();
       const evs = (data.items || []).filter(e => e.summary).map(e => ({
@@ -2807,7 +2813,8 @@ function App() {
         singleEvents: 'true', orderBy: 'startTime', maxResults: '50'
       });
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, {
-        headers: { 'Authorization': 'Bearer ' + googleToken }
+        headers: { 'Authorization': 'Bearer ' + googleToken },
+        cache: 'no-store'
       });
       if (!res.ok) {
         if (res.status === 401) throw new Error('Google session expired — reconnect Google.');
