@@ -998,7 +998,7 @@ add_note: {"type":"add_note","tab_name":"...","content":"..."}
 break_task: {"type":"break_task","parent_title":"...","subtasks":[{"title":"...","due":"YYYY-MM-DD","estimated_minutes":20}]}
 delete_task: {"type":"delete_task","title":"..."}
 delete_event: {"type":"delete_event","title":"..."}
-update_event: {"type":"update_event","title":"...","date":"YYYY-MM-DD"}
+update_event: {"type":"update_event","title":"...","new_title":"(optional new name)","date":"YYYY-MM-DD"}
 delete_block: {"type":"delete_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"}
 
 RULES:
@@ -1020,6 +1020,7 @@ WHEN TO USE EACH ACTION:
 - "[event] got cancelled/called off/isn't happening/no longer happening/scratch that/off the books/not gonna happen" → delete_event
 - "take [X] off/cross out [X]/wipe [X]/erase [X]" → delete_event or delete_task
 - "move/push/reschedule/change/bump/switch" + date → update_event
+- "rename/call it/change name of" + event → update_event with new_title
 - "remind me/note this/save this/remember" → add_task or add_note
 
 EXAMPLES:
@@ -1388,7 +1389,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
         { key:'title', label:'Event', value:action.title||action.event_id||'Unknown' }
       ]};
       case 'update_event': return { icon:Icon.calendar(16), label:'Update Event', badge:'update', badgeColor:'var(--blue)', borderColor:'var(--blue)', fields: [
-        { key:'title', label:'Event', value:action.title||'(unchanged)' }, { key:'date', label:'Date', value:action.date?fmt(action.date):'(unchanged)' },
+        { key:'title', label:'Event', value:action.new_title||action.title||'(unchanged)' }, { key:'date', label:'Date', value:action.date?fmt(action.date):'(unchanged)' },
         { key:'event_type', label:'Type', value:action.event_type||'(unchanged)' }
       ]};
       case 'delete_block': return { icon:Icon.trash(16), label:'Remove Block', badge:'remove', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
@@ -3111,6 +3112,7 @@ function App() {
             if (!match) return prev;
             const next = prev.map(ev => ev.id === match.id ? {
               ...ev,
+              ...(action.new_title && { title: action.new_title }),
               ...(action.date && { date: action.date }),
               ...(action.event_type && { type: action.event_type }),
               ...(action.subject !== undefined && { subject: action.subject })
@@ -3193,27 +3195,31 @@ function App() {
   // silent=true: called by auto-sync (no modal close, no toast, returns count for status display)
   function handleImportGoogleEvents(gevents, silent = false) {
     let added = 0; let updated = 0; let skipped = 0;
-    gevents.forEach(gev => {
-      if (!gev.date) return;
-      // First, try to find an existing SOS event with this googleId
-      const existingByGoogleId = events.find(ex => ex.googleId && ex.googleId === gev.googleId);
-      if (existingByGoogleId) {
-        if (existingByGoogleId.title !== gev.title || existingByGoogleId.date !== gev.date) {
-          const updatedEv = { ...existingByGoogleId, title: gev.title, date: gev.date };
-          setEvents(prev => prev.map(ev => ev.id === existingByGoogleId.id ? updatedEv : ev));
-          if (user) syncOp(() => dbUpsertEvent(updatedEv, user.id));
-          updated++;
-        } else { skipped++; }
-        return;
-      }
-      // Legacy dedup: if no googleId match, check title+date
-      const dupTitle = (gev.title||'').toLowerCase();
-      const isDup = events.some(ex => ex.title.toLowerCase() === dupTitle && ex.date === gev.date);
-      if (isDup) { skipped++; return; }
-      const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar', googleId: gev.googleId };
-      setEvents(prev => [...prev, ev]);
-      if (user) syncOp(() => dbUpsertEvent(ev, user.id));
-      added++;
+    setEvents(prev => {
+      let next = [...prev];
+      gevents.forEach(gev => {
+        if (!gev.date) return;
+        // First, try to find an existing SOS event with this googleId
+        const existingByGoogleId = next.find(ex => ex.googleId && ex.googleId === gev.googleId);
+        if (existingByGoogleId) {
+          if (existingByGoogleId.title !== gev.title || existingByGoogleId.date !== gev.date) {
+            const updatedEv = { ...existingByGoogleId, title: gev.title, date: gev.date };
+            next = next.map(ev => ev.id === existingByGoogleId.id ? updatedEv : ev);
+            if (user) syncOp(() => dbUpsertEvent(updatedEv, user.id));
+            updated++;
+          } else { skipped++; }
+          return;
+        }
+        // Legacy dedup: if no googleId match, check title+date
+        const dupTitle = (gev.title||'').toLowerCase();
+        const isDup = next.some(ex => ex.title.toLowerCase() === dupTitle && ex.date === gev.date);
+        if (isDup) { skipped++; return; }
+        const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar', googleId: gev.googleId };
+        next = [...next, ev];
+        if (user) syncOp(() => dbUpsertEvent(ev, user.id));
+        added++;
+      });
+      return next;
     });
     if (!silent) {
       setShowGoogleModal(false);
@@ -3255,24 +3261,45 @@ function App() {
       }));
       // 1. Import/update from Google
       const count = handleImportGoogleEvents(gevents, true);
-      // 2. Detect Google-side deletions: SOS events with a googleId
-      //    whose date falls within the sync window but whose googleId
-      //    is NOT in the fetched Google events — these were deleted on Google
+      // 2. Detect Google-side deletions: use functional updater to read
+      //    latest state (after import above) instead of stale closure
       const googleIdSet = new Set(gevents.map(g => g.googleId));
       const todayStr = today();
       const maxStr = toDateStr(max);
-      const toRemove = events.filter(ev =>
-        ev.googleId &&
-        ev.source === 'google_calendar' &&
-        ev.date >= todayStr &&
-        ev.date <= maxStr &&
-        !googleIdSet.has(ev.googleId)
-      );
-      toRemove.forEach(ev => {
-        setEvents(prev => prev.filter(e => e.id !== ev.id));
-        if (user) syncOp(() => sb.from('events').delete().eq('id', ev.id).eq('user_id', user.id));
+      let removedCount = 0;
+      setEvents(prev => {
+        const toRemove = prev.filter(ev =>
+          ev.googleId &&
+          ev.source === 'google_calendar' &&
+          ev.date >= todayStr &&
+          ev.date <= maxStr &&
+          !googleIdSet.has(ev.googleId)
+        );
+        toRemove.forEach(ev => {
+          if (user) syncOp(() => sb.from('events').delete().eq('id', ev.id).eq('user_id', user.id));
+        });
+        removedCount = toRemove.length;
+        const removeIds = new Set(toRemove.map(ev => ev.id));
+        return prev.filter(ev => !removeIds.has(ev.id));
       });
-      setCalSyncCount(count + toRemove.length);
+      // 3. Push local events (no googleId) to Google
+      setEvents(prev => {
+        const toPush = prev.filter(ev =>
+          !ev.googleId &&
+          ev.date >= todayStr &&
+          ev.date <= maxStr
+        );
+        toPush.forEach(ev => {
+          pushEventToGoogle(ev, googleToken).then(gid => {
+            if (gid) {
+              setEvents(p => p.map(e => e.id === ev.id ? { ...e, googleId: gid } : e));
+              if (user) syncOp(() => dbUpsertEvent({ ...ev, googleId: gid }, user.id));
+            }
+          });
+        });
+        return prev;
+      });
+      setCalSyncCount(count + removedCount);
       const lastAt = new Date().toISOString();
       setCalSyncLastAt(lastAt);
       localStorage.setItem('sos_cal_sync_last', lastAt);
