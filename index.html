@@ -253,6 +253,29 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .g-picker-btn:hover:not(:disabled){border-color:var(--accent);background:rgba(108,99,255,0.06);border-style:solid}
 .g-picker-btn:disabled{opacity:.5;cursor:not-allowed}
 .g-picked-file{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.3);border-radius:14px;margin-bottom:8px;animation:fadeIn .2s ease}
+/* Gmail tab */
+.gmail-back-btn{background:transparent;border:none;color:var(--accent);cursor:pointer;font-size:0.82rem;font-weight:600;padding:0 0 10px;display:flex;align-items:center;gap:4px;transition:opacity .15s}
+.gmail-back-btn:hover{opacity:0.8}
+.gmail-compose-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s;flex-shrink:0}
+.gmail-compose-btn:hover{filter:brightness(1.1)}
+.gmail-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:14px;margin-bottom:5px;cursor:pointer;transition:all .15s;animation:fadeIn .2s ease}
+.gmail-row:hover{border-color:var(--accent-dim);background:rgba(108,99,255,0.03)}
+.gmail-row.unread{border-color:rgba(108,99,255,0.3);background:rgba(108,99,255,0.04)}
+.gmail-row-avatar{width:32px;height:32px;min-width:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.82rem;font-weight:700;margin-top:2px}
+.gmail-row-sender{font-size:0.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.gmail-row-date{font-size:0.72rem;color:var(--text-dim);flex-shrink:0;margin-left:auto}
+.gmail-row-subject{font-size:0.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3}
+.gmail-row.unread .gmail-row-subject{color:var(--text)}
+.gmail-row:not(.unread) .gmail-row-subject{color:var(--text-dim)}
+.gmail-row-snippet{font-size:0.75rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;opacity:0.7}
+.gmail-unread-dot{width:8px;height:8px;min-width:8px;border-radius:50%;background:var(--accent);margin-top:12px;flex-shrink:0}
+.gmail-read{animation:fadeIn .2s ease}
+.gmail-read-subject{font-size:1rem;font-weight:700;margin-bottom:6px;line-height:1.35}
+.gmail-read-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.85rem;flex-wrap:wrap}
+.gmail-read-body{white-space:pre-wrap;font-size:0.84rem;line-height:1.65;color:var(--text);padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:14px;max-height:260px;overflow-y:auto;word-break:break-word}
+.gmail-compose{animation:fadeIn .2s ease}
+.gmail-compose-body{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:10px 14px;color:var(--text);font-size:0.88rem;outline:none;resize:vertical;min-height:100px;transition:border-color .15s;font-family:inherit;line-height:1.55}
+.gmail-compose-body:focus{border-color:var(--accent)}
 
 /* Fullscreen panels */
 .notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
@@ -1810,9 +1833,9 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 
         {/* Tabs */}
         <div className="g-tabs">
-          {['calendar','docs','pdf'].map(t=>(
+          {['calendar','gmail','docs','pdf'].map(t=>(
             <button key={t} className={'g-tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setErr(null);}}>
-              {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>:t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>:<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>}
+              {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>:t==='gmail'?<><span style={{display:'inline-flex'}}>{Icon.mail(14)}</span> Gmail</>:t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>:<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>}
             </button>
           ))}
         </div>
