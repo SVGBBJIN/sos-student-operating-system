@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
-<!-- Google Identity Services (OAuth for Calendar/Docs/Drive) -->
+<!-- Google Identity Services (OAuth for Calendar/Docs/Drive/Gmail) -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <!-- Google API client (needed for Drive Picker) -->
 <script src="https://apis.google.com/js/api.js" async defer></script>
@@ -739,20 +739,22 @@ async function dbClearChat(userId) {
 }
 async function pushEventToGoogle(event, token) {
   try {
-    const body = { summary: event.title, start: { date: event.date }, end: { date: event.date } };
+    const endD = new Date(event.date + 'T00:00:00'); endD.setDate(endD.getDate() + 1);
+    const endDate = endD.toISOString().split('T')[0];
+    const body = { summary: event.title, start: { date: event.date }, end: { date: endDate } };
     if (event.googleId) {
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + event.googleId, {
         method: 'PATCH', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!res.ok) { console.error('Google event update failed:', res.status); return event.googleId; }
+      if (!res.ok) { const errBody = await res.text().catch(() => ''); console.error('Google event update failed:', res.status, errBody); return event.googleId; }
       const data = await res.json(); return data.id;
     } else {
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!res.ok) { console.error('Google event create failed:', res.status); return null; }
+      if (!res.ok) { const errBody = await res.text().catch(() => ''); console.error('Google event create failed:', res.status, errBody); return null; }
       const data = await res.json(); return data.id;
     }
   } catch (e) { console.error('pushEventToGoogle error:', e); return event.googleId || null; }
@@ -762,7 +764,7 @@ async function deleteEventFromGoogle(googleId, token) {
     const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + googleId, {
       method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token }
     });
-    if (!res.ok && res.status !== 404 && res.status !== 410) console.error('Google event delete failed:', res.status);
+    if (!res.ok && res.status !== 404 && res.status !== 410) { const errBody = await res.text().catch(() => ''); console.error('Google event delete failed:', res.status, errBody); }
   } catch (e) { console.error('deleteEventFromGoogle error:', e); }
 }
 async function dbUpsertDateBlock(date, timeSlot, data, userId) {
@@ -1625,7 +1627,7 @@ function ContentTypeRouter({ content, onSave, onDismiss }) {
 /* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
-function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect,
+function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onImportEmail, onDisconnect,
   calSyncEnabled, calSyncStatus, calSyncLastAt, calSyncCount, calSyncError, onToggleCalSync, onSyncNow }) {
   const [tab, setTab] = useState('calendar');
   // Calendar tab state
@@ -1642,6 +1644,18 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
   const [pdfPickedName, setPdfPickedName] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
   const fileInputRef = useRef(null);
+  // Gmail tab state
+  const [gmailView, setGmailView] = useState('inbox'); // 'inbox' | 'read' | 'compose'
+  const [gmailMessages, setGmailMessages] = useState([]);
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [gmailFetched, setGmailFetched] = useState(false);
+  const [gmailOpenMsg, setGmailOpenMsg] = useState(null);
+  const [gmailMsgLoading, setGmailMsgLoading] = useState(false);
+  const [composeTo, setComposeTo] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeBody, setComposeBody] = useState('');
+  const [composeSending, setComposeSending] = useState(false);
+  const [composeSuccess, setComposeSuccess] = useState(null);
   // Shared error + picker loading flag
   const [err, setErr] = useState(null);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -1808,7 +1822,170 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
     finally { setPdfLoading(false); }
   }
 
-  const isLoading = calLoading || docLoading || pdfLoading || pickerLoading;
+  // ── Gmail ──
+  function decodeBase64Url(str) {
+    if (!str) return '';
+    const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+    try { return decodeURIComponent(escape(atob(padded))); } catch { return atob(padded); }
+  }
+
+  function getHeader(headers, name) {
+    const h = (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());
+    return h ? h.value : '';
+  }
+
+  function extractPlainBody(payload) {
+    if (!payload) return '';
+    // Direct text/plain body
+    if (payload.mimeType === 'text/plain' && payload.body?.data) {
+      return decodeBase64Url(payload.body.data);
+    }
+    // Multipart — search for text/plain first, then text/html
+    if (payload.parts) {
+      for (const part of payload.parts) {
+        if (part.mimeType === 'text/plain' && part.body?.data) return decodeBase64Url(part.body.data);
+        if (part.parts) {
+          const nested = extractPlainBody(part);
+          if (nested) return nested;
+        }
+      }
+      // Fallback to text/html stripped of tags
+      for (const part of payload.parts) {
+        if (part.mimeType === 'text/html' && part.body?.data) {
+          const html = decodeBase64Url(part.body.data);
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          return tmp.textContent || tmp.innerText || '';
+        }
+      }
+    }
+    // Single html body
+    if (payload.mimeType === 'text/html' && payload.body?.data) {
+      const html = decodeBase64Url(payload.body.data);
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      return tmp.textContent || tmp.innerText || '';
+    }
+    return payload.snippet || '';
+  }
+
+  async function fetchGmailInbox() {
+    setGmailLoading(true); setErr(null);
+    try {
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&labelIds=INBOX', { headers: authHeader() });
+      if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Gmail fetch failed: ' + res.status); }
+      const data = await res.json();
+      const ids = (data.messages || []).map(m => m.id);
+      if (ids.length === 0) { setGmailMessages([]); setGmailFetched(true); return; }
+      // Batch fetch metadata for each message
+      const msgs = await Promise.all(ids.map(async id => {
+        const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + id + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date', { headers: authHeader() });
+        if (!r.ok) return null;
+        const m = await r.json();
+        const from = getHeader(m.payload?.headers, 'From');
+        const subject = getHeader(m.payload?.headers, 'Subject') || '(no subject)';
+        const date = getHeader(m.payload?.headers, 'Date');
+        const unread = (m.labelIds || []).includes('UNREAD');
+        // Parse sender name
+        const fromMatch = from.match(/^(.+?)\s*</) || [null, from];
+        const senderName = (fromMatch[1] || from).replace(/"/g, '').trim();
+        const senderEmail = (from.match(/<(.+?)>/) || [null, from])[1];
+        return { id: m.id, subject, senderName, senderEmail, snippet: m.snippet, date, unread, threadId: m.threadId };
+      }));
+      setGmailMessages(msgs.filter(Boolean));
+      setGmailFetched(true);
+    } catch(e) { setErr(e.message); }
+    finally { setGmailLoading(false); }
+  }
+
+  async function openGmailMessage(msgId) {
+    setGmailMsgLoading(true); setErr(null);
+    try {
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + msgId + '?format=full', { headers: authHeader() });
+      if (!res.ok) throw new Error('Failed to load email: ' + res.status);
+      const m = await res.json();
+      const from = getHeader(m.payload?.headers, 'From');
+      const to = getHeader(m.payload?.headers, 'To');
+      const subject = getHeader(m.payload?.headers, 'Subject') || '(no subject)';
+      const date = getHeader(m.payload?.headers, 'Date');
+      const body = extractPlainBody(m.payload);
+      const fromMatch = from.match(/^(.+?)\s*</) || [null, from];
+      const senderName = (fromMatch[1] || from).replace(/"/g, '').trim();
+      const senderEmail = (from.match(/<(.+?)>/) || [null, from])[1];
+      setGmailOpenMsg({ id: m.id, subject, senderName, senderEmail, to, date, body, snippet: m.snippet });
+      setGmailView('read');
+    } catch(e) { setErr(e.message); }
+    finally { setGmailMsgLoading(false); }
+  }
+
+  function importEmailToNotes() {
+    if (!gmailOpenMsg) return;
+    const title = gmailOpenMsg.subject;
+    const content = 'From: ' + gmailOpenMsg.senderName + ' <' + gmailOpenMsg.senderEmail + '>\n'
+      + 'Date: ' + gmailOpenMsg.date + '\n'
+      + 'Subject: ' + gmailOpenMsg.subject + '\n\n'
+      + (gmailOpenMsg.body || gmailOpenMsg.snippet || '');
+    onImportEmail(title, content);
+  }
+
+  function startReply() {
+    if (!gmailOpenMsg) return;
+    setComposeTo(gmailOpenMsg.senderEmail || '');
+    setComposeSubject(gmailOpenMsg.subject.startsWith('Re:') ? gmailOpenMsg.subject : 'Re: ' + gmailOpenMsg.subject);
+    setComposeBody('\n\n--- Original message ---\nFrom: ' + gmailOpenMsg.senderName + '\nDate: ' + gmailOpenMsg.date + '\n\n' + (gmailOpenMsg.body || '').slice(0, 2000));
+    setComposeSuccess(null);
+    setGmailView('compose');
+  }
+
+  async function sendGmail() {
+    if (!composeTo.trim() || !composeBody.trim()) { setErr('Please fill in the recipient and message body.'); return; }
+    setComposeSending(true); setErr(null); setComposeSuccess(null);
+    try {
+      const raw = ['To: ' + composeTo, 'Subject: ' + composeSubject, 'Content-Type: text/plain; charset=UTF-8', '', composeBody].join('\r\n');
+      const encoded = btoa(unescape(encodeURIComponent(raw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw: encoded })
+      });
+      if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Failed to send email: ' + res.status); }
+      setComposeSuccess('sent');
+      setComposeTo(''); setComposeSubject(''); setComposeBody('');
+    } catch(e) { setErr(e.message); }
+    finally { setComposeSending(false); }
+  }
+
+  async function saveDraft() {
+    if (!composeTo.trim() && !composeSubject.trim() && !composeBody.trim()) { setErr('Nothing to save — add a recipient, subject, or message.'); return; }
+    setComposeSending(true); setErr(null); setComposeSuccess(null);
+    try {
+      const raw = ['To: ' + composeTo, 'Subject: ' + composeSubject, 'Content-Type: text/plain; charset=UTF-8', '', composeBody].join('\r\n');
+      const encoded = btoa(unescape(encodeURIComponent(raw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
+        method: 'POST',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { raw: encoded } })
+      });
+      if (!res.ok) throw new Error('Failed to save draft: ' + res.status);
+      setComposeSuccess('draft');
+    } catch(e) { setErr(e.message); }
+    finally { setComposeSending(false); }
+  }
+
+  function formatGmailDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch { return dateStr; }
+  }
+
+  const isLoading = calLoading || docLoading || pdfLoading || pickerLoading || gmailLoading || gmailMsgLoading || composeSending;
 
   return (
     <>
@@ -1935,6 +2112,121 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
                   </>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── Gmail Tab ── */}
+        {tab==='gmail' && (
+          <div className="g-section">
+
+            {/* Gmail sub-navigation */}
+            {gmailView !== 'inbox' && (
+              <button className="gmail-back-btn" onClick={()=>{setGmailView('inbox');setGmailOpenMsg(null);setErr(null);setComposeSuccess(null);}}>
+                ← Back to inbox
+              </button>
+            )}
+
+            {/* ── Inbox view ── */}
+            {gmailView === 'inbox' && (
+              <>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                  <p className="g-note" style={{margin:0}}>View your recent emails, import to notes, or compose a new message.</p>
+                  <button onClick={()=>{setComposeSuccess(null);setComposeTo('');setComposeSubject('');setComposeBody('');setGmailView('compose');setErr(null);}}
+                    className="gmail-compose-btn">+ Compose</button>
+                </div>
+
+                {!gmailFetched ? (
+                  <button className="g-btn" onClick={fetchGmailInbox} disabled={gmailLoading}>
+                    <span>{gmailLoading?'⏳':'✉️'}</span>
+                    {gmailLoading ? 'Loading inbox…' : 'Load recent emails'}
+                  </button>
+                ) : (
+                  <>
+                    {gmailMessages.length === 0 ? (
+                      <div className="g-status">No emails found in your inbox.</div>
+                    ) : (
+                      <>
+                        <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:8}}>
+                          {gmailMessages.length} recent emails — tap to read.
+                          <button onClick={()=>{setGmailFetched(false);setGmailMessages([]);fetchGmailInbox();}}
+                            style={{marginLeft:8,background:'transparent',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:'0.78rem',fontWeight:600}}>
+                            Refresh
+                          </button>
+                        </div>
+                        <div style={{maxHeight:320,overflowY:'auto'}}>
+                          {gmailMessages.map(msg=>(
+                            <div key={msg.id} className={'gmail-row' + (msg.unread ? ' unread' : '')}
+                              onClick={()=>openGmailMessage(msg.id)}>
+                              <div className="gmail-row-avatar">{msg.senderName ? msg.senderName.charAt(0).toUpperCase() : '?'}</div>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}>
+                                  <span className="gmail-row-sender">{msg.senderName}</span>
+                                  <span className="gmail-row-date">{formatGmailDate(msg.date)}</span>
+                                </div>
+                                <div className="gmail-row-subject">{msg.subject}</div>
+                                <div className="gmail-row-snippet">{msg.snippet}</div>
+                              </div>
+                              {msg.unread && <div className="gmail-unread-dot"/>}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ── Read email view ── */}
+            {gmailView === 'read' && gmailOpenMsg && (
+              <div className="gmail-read">
+                <div className="gmail-read-subject">{gmailOpenMsg.subject}</div>
+                <div className="gmail-read-meta">
+                  <span style={{fontWeight:600}}>{gmailOpenMsg.senderName}</span>
+                  <span style={{color:'var(--text-dim)',fontSize:'0.78rem'}}>&lt;{gmailOpenMsg.senderEmail}&gt;</span>
+                </div>
+                <div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginBottom:10}}>{gmailOpenMsg.date}</div>
+                <div className="gmail-read-body">{gmailOpenMsg.body || gmailOpenMsg.snippet || '(empty message)'}</div>
+                <div className="g-action-row" style={{marginTop:10}}>
+                  <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={importEmailToNotes}>
+                    📝 Save to Notes
+                  </button>
+                  <button className="confirm-btn confirm-btn-cancel" style={{flex:1}} onClick={startReply}>
+                    ↩ Reply
+                  </button>
+                </div>
+              </div>
+            )}
+            {gmailView === 'read' && gmailMsgLoading && (
+              <div className="g-status">Loading email…</div>
+            )}
+
+            {/* ── Compose view ── */}
+            {gmailView === 'compose' && (
+              <div className="gmail-compose">
+                {composeSuccess === 'sent' && (
+                  <div style={{padding:'10px 14px',background:'rgba(46,213,115,0.08)',border:'1px solid rgba(46,213,115,0.3)',borderRadius:10,marginBottom:10,fontSize:'0.85rem',color:'var(--success)',fontWeight:600}}>
+                    ✓ Email sent successfully!
+                  </div>
+                )}
+                {composeSuccess === 'draft' && (
+                  <div style={{padding:'10px 14px',background:'rgba(108,99,255,0.08)',border:'1px solid rgba(108,99,255,0.3)',borderRadius:10,marginBottom:10,fontSize:'0.85rem',color:'var(--accent)',fontWeight:600}}>
+                    ✓ Draft saved to Gmail!
+                  </div>
+                )}
+                <input className="g-input" placeholder="To (email address)" value={composeTo} onChange={e=>setComposeTo(e.target.value)} />
+                <input className="g-input" placeholder="Subject" value={composeSubject} onChange={e=>setComposeSubject(e.target.value)} />
+                <textarea className="gmail-compose-body" placeholder="Write your message…" rows={6} value={composeBody} onChange={e=>setComposeBody(e.target.value)} />
+                <div className="g-action-row" style={{marginTop:6}}>
+                  <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={sendGmail} disabled={composeSending}>
+                    {composeSending ? '⏳ Sending…' : '➤ Send'}
+                  </button>
+                  <button className="confirm-btn confirm-btn-cancel" style={{flex:1}} onClick={saveDraft} disabled={composeSending}>
+                    {composeSending ? '⏳ Saving…' : '💾 Save Draft'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -2622,6 +2914,7 @@ function App() {
             'https://www.googleapis.com/auth/documents.readonly',
             'https://www.googleapis.com/auth/drive.readonly',
             'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/gmail.compose',
           ].join(' '),
           callback: (resp) => {
             if (resp.access_token) {
@@ -3023,6 +3316,13 @@ function App() {
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setShowGoogleModal(false);
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
+  }
+
+  function handleImportEmail(title, text) {
+    const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'gmail' };
+    setNotes(prev => [...prev, note]);
+    if (user) syncOp(() => dbUpsertNote(note, user.id));
+    setToastMsg('Imported email to notes ✉️');
   }
 
   function handleDeleteNote(noteId) {
@@ -3505,6 +3805,7 @@ function App() {
           onImportEvents={handleImportGoogleEvents}
           onImportDoc={handleImportGoogleDoc}
           onImportPdf={handleImportPdf}
+          onImportEmail={handleImportEmail}
           onDisconnect={()=>{ disconnectGoogle(); setShowGoogleModal(false); }}
           calSyncEnabled={calSyncEnabled}
           calSyncStatus={calSyncStatus}
