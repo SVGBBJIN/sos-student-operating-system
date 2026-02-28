@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>SOS — Student Operating System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -19,7 +22,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0a0a0a;--bg2:#0f0f1a;--card:#1a1a2e;--accent:#6C63FF;--accent-dim:#4a44b3;--accent-glow:rgba(108,99,255,0.15);--text:#e0e0e0;--text-dim:#888;--border:#2a2a4e;--danger:#ff4757;--success:#2ed573;--warning:#ffa502;--green:#2ed573;--blue:#45aaf2;--orange:#fd9644;--pink:#fc5c65;--teal:#2bcbba;--radius:14px;--shadow:0 4px 20px rgba(0,0,0,0.4);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
-body{background:linear-gradient(160deg,#0a0a0a 0%,#0d0d1f 30%,#0a0a14 60%,#08080f 100%);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;min-height:100vh}
+body{background:linear-gradient(160deg,#0a0a0a 0%,#0d0d1f 30%,#0a0a14 60%,#08080f 100%);color:var(--text);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;min-height:100vh}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -175,7 +178,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .g-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;background:linear-gradient(180deg,#0f0f1a 0%,#0a0a0a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:24px;width:min(92vw,440px);max-height:82vh;overflow-y:auto;padding:20px;animation:cardPop .25s ease}
 .g-modal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .g-modal-title{font-size:1.05rem;font-weight:700;display:flex;align-items:center;gap:8px}
-.g-modal-close{background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-size:1.3rem;line-height:1;padding:2px 6px;border-radius:6px;transition:color .15s}
+.g-modal-close{background:transparent;border:none;color:var(--text-dim);cursor:pointer;line-height:1;padding:4px;border-radius:6px;transition:color .15s;display:flex;align-items:center;justify-content:center}
 .g-modal-close:hover{color:var(--text)}
 .g-connected{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(46,213,115,0.06);border:1px solid rgba(46,213,115,0.2);border-radius:14px;margin-bottom:12px;font-size:0.8rem}
 .g-tabs{display:flex;gap:4px;margin-bottom:14px;background:var(--bg2);border-radius:14px;padding:3px}
@@ -1296,7 +1299,7 @@ function AuthModal({ onAuth, onClose }) {
 function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   const [editing, setEditing] = useState(!!isFallback);
   const [editData, setEditData] = useState({});
-  useEffect(() => { setEditData({ ...action }); }, []);
+  useEffect(() => { setEditData({ ...action }); }, [action]);
 
   function getCardInfo() {
     switch (action.type) {
@@ -2461,11 +2464,11 @@ function App() {
 
   // ── Alternating welcome screen content ──
   const welcomeVariants = useMemo(() => [
-    { greeting: "hey, i'm your study sidekick", desc: "tell me what's on your plate and i'll help you figure it out. i know your tasks, schedule, and events — so just talk to me like a friend.", chips: ['I have a math test on Friday','What should I work on?','Make me flashcards for biology','Quiz me on chapter 3'] },
-    { greeting: "what's the move today?", desc: "drop your homework, tests, or deadlines on me and i'll help you stay on top of everything. no stress, just vibes.", chips: ['I need to study for finals','Break down my science project','What\'s on my schedule?','Summarize my notes'] },
-    { greeting: "ready when you are", desc: "tell me about your classes, assignments, or anything school-related. i'll organize it, remind you, and even quiz you when you need it.", chips: ['Add a homework assignment','Make a study plan for this week','I have practice at 4pm','Create an outline for my essay'] },
-    { greeting: "let's get you ahead", desc: "i can track your tasks, manage your schedule, create flashcards, and help you study smarter. just tell me what you need.", chips: ['What\'s due this week?','Quiz me on vocabulary','I finished my essay','Help me plan my study time'] },
-    { greeting: "your schedule, simplified", desc: "think of me as your personal planner that actually talks back. tell me what's coming up and i'll handle the rest.", chips: ['I have a test tomorrow','Show me my tasks','Make flashcards for history','What should I prioritize?'] },
+    { greeting: "Hey, I'm Your Study Sidekick", desc: "Tell me what's on your plate and I'll help you figure it out. I know your tasks, schedule, and events — so just talk to me like a friend.", chips: ['I have a math test on Friday','What should I work on?','Make me flashcards for biology','Quiz me on chapter 3'] },
+    { greeting: "What's the Move Today?", desc: "Drop your homework, tests, or deadlines on me and I'll help you stay on top of everything. No stress, just vibes.", chips: ['I need to study for finals','Break down my science project','What\'s on my schedule?','Summarize my notes'] },
+    { greeting: "Ready When You Are", desc: "Tell me about your classes, assignments, or anything school-related. I'll organize it, remind you, and even quiz you when you need it.", chips: ['Add a homework assignment','Make a study plan for this week','I have practice at 4pm','Create an outline for my essay'] },
+    { greeting: "Let's Get You Ahead", desc: "I can track your tasks, manage your schedule, create flashcards, and help you study smarter. Just tell me what you need.", chips: ['What\'s due this week?','Quiz me on vocabulary','I finished my essay','Help me plan my study time'] },
+    { greeting: "Your Schedule, Simplified", desc: "Think of me as your personal planner that actually talks back. Tell me what's coming up and I'll handle the rest.", chips: ['I have a test tomorrow','Show me my tasks','Make flashcards for history','What should I prioritize?'] },
   ], []);
   const welcomeIdx = useMemo(() => Math.floor(Math.random() * 5), []);
 
@@ -3383,7 +3386,7 @@ function App() {
             {Icon.camera(18)}
           </button>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-            placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["what's on your plate today?","what do you need help with?","tell me about your classes...","what's coming up this week?","anything on your mind?"][welcomeIdx]:"type anything..."}
+            placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
             disabled={isLoading||!!viewingSavedChatId}
             style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .2s'}}
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
