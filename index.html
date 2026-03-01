@@ -1103,6 +1103,16 @@ function extractDocsText(doc) {
   return parts.join('').trim();
 }
 
+/* ─── Google Doc ID parser (shared by import modal + daily brief context) ─── */
+// Accepts a full Google Docs URL or a bare doc ID; returns the ID or null.
+function parseDocId(input) {
+  const urlMatch = input.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) return urlMatch[1];
+  const trimmed = input.trim();
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown'];
 
@@ -1776,8 +1786,8 @@ function DailyBriefCard({ brief, onAction }) {
                     alignItems:'center',
                     gap:8
                   }}
-                  onMouseEnter={e => e.target.style.background='rgba(108,99,255,0.08)'}
-                  onMouseLeave={e => e.target.style.background='transparent'}>
+                  onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                   <span style={{color:'var(--accent)',display:'flex'}}>{Icon.sparkles(13)}</span>
                   {opt}
                 </button>
@@ -1875,15 +1885,6 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
   }
 
   // ── Docs ── (uses Google Docs API with direct document access)
-  function parseDocId(input) {
-    const urlMatch = input.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
-    if (urlMatch) return urlMatch[1];
-    // Treat raw input as a Doc ID if it looks like one (alphanumeric + dashes/underscores)
-    const trimmed = input.trim();
-    if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
-    return null;
-  }
-
   async function importDoc() {
     const docId = parseDocId(docInput);
     if (!docId) { setErr('Please enter a valid Google Doc URL or ID.'); return; }
@@ -3154,17 +3155,12 @@ function App() {
       }));
 
       // Find Google Doc IDs in event descriptions and attachments
-      const docIdRegex = /\/document\/d\/([a-zA-Z0-9_-]+)/g;
       const docIds = new Set();
       calendarEvents.forEach(ev => {
-        let match;
-        while ((match = docIdRegex.exec(ev.description)) !== null) docIds.add(match[1]);
-        docIdRegex.lastIndex = 0;
+        for (const m of (ev.description || '').matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)) docIds.add(m[1]);
         (ev.attachments || []).forEach(att => {
-          if (att.fileUrl) {
-            while ((match = docIdRegex.exec(att.fileUrl)) !== null) docIds.add(match[1]);
-            docIdRegex.lastIndex = 0;
-          }
+          if (att.fileUrl)
+            for (const m of att.fileUrl.matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)) docIds.add(m[1]);
         });
       });
 
