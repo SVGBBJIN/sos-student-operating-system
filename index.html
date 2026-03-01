@@ -423,6 +423,10 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
 const VOICE_FN_URL = SUPABASE_URL + '/functions/v1/sos-voice';
 
+/* Groq API — direct voice transcription */
+const GROQ_API_KEY = 'gsk_REPLACE_WITH_YOUR_GROQ_API_KEY';
+const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+
 
 /* ─── Date helpers ─── */
 function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
@@ -3632,18 +3636,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   async function transcribeAudio(blob) {
     setIsTranscribing(true);
     try {
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
       const form = new FormData();
       form.append('file', blob, 'voice.webm');
-      const res = await fetch(VOICE_FN_URL, {
+      form.append('model', 'whisper-large-v3-turbo');
+      form.append('response_format', 'json');
+      form.append('language', 'en');
+      const res = await fetch(GROQ_TRANSCRIPTION_URL, {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        headers: { 'Authorization': 'Bearer ' + GROQ_API_KEY },
         body: form
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || 'Transcription failed');
+        throw new Error(errData?.error?.message || errData?.error || 'Transcription failed');
       }
       const data = await res.json();
       const transcript = (data.text || '').trim();
