@@ -13,6 +13,8 @@
 <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 <!-- Google Identity Services (OAuth for Calendar/Docs/Drive) -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Google API client (needed for Drive Picker) -->
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <!-- pdf.js v3 UMD build (v4 uses ESM which breaks Babel setup) -->
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script>if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';}</script>
@@ -410,6 +412,12 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
 
+/* ─── Google Picker API Key ─────────────────────────────────────────────────
+   Get this from: Google Cloud Console → APIs & Services → Credentials → API Keys
+   Make sure "Google Picker API" is enabled in your project (same project as client 1).
+   Leave empty string if you want to rely on OAuth token alone (picker may still work).
+   ─────────────────────────────────────────────────────────────────────────── */
+const GOOGLE_PICKER_API_KEY = '';
 
 /* ─── Date helpers ─── */
 function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
@@ -1080,29 +1088,6 @@ function parseActions(text) {
 }
 function stripActionTags(text) { return text.replace(/<action>[\s\S]*?<\/action>/g, '').trim(); }
 
-/* ─── Google Docs text extractor (shared by import modal + daily brief) ─── */
-function extractDocsText(doc) {
-  const parts = [];
-  function walkContent(content) {
-    for (const block of (content || [])) {
-      if (block.paragraph) {
-        const line = (block.paragraph.elements || [])
-          .map(el => el.textRun?.content || '')
-          .join('');
-        parts.push(line);
-      } else if (block.table) {
-        for (const row of (block.table.tableRows || [])) {
-          for (const cell of (row.tableCells || [])) {
-            walkContent(cell.content);
-          }
-        }
-      }
-    }
-  }
-  walkContent(doc.body?.content);
-  return parts.join('').trim();
-}
-
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown'];
 
@@ -1618,195 +1603,6 @@ function ContentTypeRouter({ content, onSave, onDismiss }) {
 }
 
 /* ═══════════════════════════════════════════════
-   DAILY BRIEF CARD
-   ═══════════════════════════════════════════════ */
-function DailyBriefCard({ brief, onAction }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  if (!brief) return null;
-
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      overflow:'hidden',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-      animation:'floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.calendar(18)}
-        </div>
-        <div>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Daily Brief</div>
-          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>
-            {new Date().toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })}
-          </div>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div style={{
-        padding:'14px 20px',
-        background:'rgba(108,99,255,0.04)',
-        borderBottom:'1px solid rgba(255,255,255,0.04)',
-        fontSize:'0.88rem',
-        color:'var(--text)',
-        lineHeight:1.5,
-        fontWeight:500
-      }}>
-        {brief.summary}
-      </div>
-
-      {/* Schedule Items */}
-      {brief.schedule_items && brief.schedule_items.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
-          {brief.schedule_items.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'center', gap:10,
-              padding:'6px 0',
-              borderBottom: i < brief.schedule_items.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
-            }}>
-              <span style={{
-                fontSize:'0.78rem', fontWeight:700, color:'var(--teal)',
-                minWidth:72, fontVariantNumeric:'tabular-nums'
-              }}>{item.time}</span>
-              <span style={{fontSize:'0.84rem', color:'var(--text)', flex:1}}>{item.event_name}</span>
-              {item.related_doc_id && (
-                <span style={{display:'flex', color:'var(--accent)', opacity:0.6}} title="Linked document">
-                  {Icon.fileText(13)}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Plan of Action */}
-      {brief.plan_of_action && brief.plan_of_action.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--teal)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Plan of Action</div>
-          {brief.plan_of_action.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'flex-start', gap:8,
-              padding:'5px 0', fontSize:'0.84rem', color:'var(--text)', lineHeight:1.5
-            }}>
-              <span style={{
-                width:20, height:20, borderRadius:6, flexShrink:0, marginTop:1,
-                background:'rgba(43,203,186,0.1)',
-                border:'1px solid rgba(43,203,186,0.2)',
-                color:'var(--teal)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:'0.7rem', fontWeight:700
-              }}>{i + 1}</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Quick Actions Dropdown */}
-      {brief.dropdown_options && brief.dropdown_options.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
-          <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{
-            width:'100%',
-            background:'rgba(108,99,255,0.08)',
-            border:'1px solid rgba(108,99,255,0.2)',
-            borderRadius:10,
-            padding:'10px 14px',
-            color:'var(--accent)',
-            fontSize:'0.84rem',
-            fontWeight:600,
-            cursor:'pointer',
-            display:'flex',
-            alignItems:'center',
-            justifyContent:'space-between',
-            transition:'all .15s'
-          }}>
-            <span style={{display:'flex',alignItems:'center',gap:6}}>
-              {Icon.zap(14)} Quick Actions
-            </span>
-            <span style={{
-              display:'inline-flex',
-              transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition:'transform .2s'
-            }}>
-              {Icon.arrowRight(12)}
-            </span>
-          </button>
-          {dropdownOpen && (
-            <div style={{
-              marginTop:6,
-              borderRadius:10,
-              overflow:'hidden',
-              border:'1px solid rgba(108,99,255,0.15)',
-              background:'rgba(15,15,26,0.95)'
-            }}>
-              {brief.dropdown_options.map((opt, i) => (
-                <button key={i} onClick={() => { setDropdownOpen(false); onAction(opt); }}
-                  style={{
-                    width:'100%',
-                    background:'transparent',
-                    border:'none',
-                    borderBottom: i < brief.dropdown_options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                    padding:'10px 14px',
-                    color:'var(--text)',
-                    fontSize:'0.82rem',
-                    cursor:'pointer',
-                    textAlign:'left',
-                    transition:'background .15s',
-                    display:'flex',
-                    alignItems:'center',
-                    gap:8
-                  }}
-                  onMouseEnter={e => e.target.style.background='rgba(108,99,255,0.08)'}
-                  onMouseLeave={e => e.target.style.background='transparent'}>
-                  <span style={{color:'var(--accent)',display:'flex'}}>{Icon.sparkles(13)}</span>
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Encouragement Footer */}
-      {brief.encouragement && (
-        <div style={{
-          padding:'14px 20px',
-          background:'linear-gradient(135deg, rgba(43,203,186,0.06), rgba(108,99,255,0.04))',
-          fontSize:'0.84rem',
-          color:'var(--teal)',
-          fontWeight:600,
-          fontStyle:'italic',
-          textAlign:'center',
-          lineHeight:1.5
-        }}>
-          {brief.encouragement}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
 function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect,
@@ -1817,14 +1613,18 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
   const [selected, setSelected] = useState(new Set());
   const [calLoading, setCalLoading] = useState(false);
   const [calFetched, setCalFetched] = useState(false);
-  // Docs tab state — direct URL/ID input
-  const [docInput, setDocInput] = useState('');
+  // Docs tab state — Drive Picker (no URL input)
+  const [docPickedId, setDocPickedId] = useState(null);
+  const [docPickedName, setDocPickedName] = useState('');
   const [docLoading, setDocLoading] = useState(false);
-  // PDF tab state — local file upload only
+  // PDF tab state — Drive Picker + local file upload
+  const [pdfPickedId, setPdfPickedId] = useState(null);
+  const [pdfPickedName, setPdfPickedName] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
   const fileInputRef = useRef(null);
-  // Shared error
+  // Shared error + picker loading flag
   const [err, setErr] = useState(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   // ── Helpers ──
   function authHeader() { return { 'Authorization': 'Bearer ' + googleToken }; }
@@ -1841,6 +1641,58 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
     const h = Math.floor(m / 60);
     if (h < 24) return h + ' hr ago';
     return Math.floor(h / 24) + 'd ago';
+  }
+
+  // Converts a Google Docs API document object into a plain text string.
+  // Walks paragraphs and tables recursively to extract all text runs.
+  function extractDocsText(doc) {
+    const parts = [];
+    function walkContent(content) {
+      for (const block of (content || [])) {
+        if (block.paragraph) {
+          const line = (block.paragraph.elements || [])
+            .map(el => el.textRun?.content || '')
+            .join('');
+          parts.push(line);
+        } else if (block.table) {
+          for (const row of (block.table.tableRows || [])) {
+            for (const cell of (row.tableCells || [])) {
+              walkContent(cell.content);
+            }
+          }
+        }
+      }
+    }
+    walkContent(doc.body?.content);
+    return parts.join('').trim();
+  }
+
+  // ── Drive Picker ──
+  // Opens Google's native file browser. mimeType filters what shows up.
+  // onPick(fileId, fileName) is called when the user selects a file.
+  function openDrivePicker(mimeType, onPick) {
+    if (!window.gapi) { setErr('Google API not loaded — refresh and try again.'); return; }
+    setErr(null); setPickerLoading(true);
+    gapi.load('picker', () => {
+      setPickerLoading(false);
+      try {
+        const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setMimeTypes(mimeType)
+          .setIncludeFolders(false);
+        const builder = new google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(googleToken)
+          .setCallback((data) => {
+            if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+              const file = data[google.picker.Response.DOCUMENTS][0];
+              onPick(file[google.picker.Document.ID], file[google.picker.Document.NAME]);
+            }
+          });
+        // Only attach API key if one has been configured
+        if (GOOGLE_PICKER_API_KEY) builder.setDeveloperKey(GOOGLE_PICKER_API_KEY);
+        builder.build().setVisible(true);
+      } catch(e) { setErr('Could not open Drive picker: ' + e.message); }
+    });
   }
 
   // ── Calendar ──
@@ -1874,34 +1726,23 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
     setSelected(prev => { const n=new Set(prev); n.has(i)?n.delete(i):n.add(i); return n; });
   }
 
-  // ── Docs ── (uses Google Docs API with direct document access)
-  function parseDocId(input) {
-    const urlMatch = input.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
-    if (urlMatch) return urlMatch[1];
-    // Treat raw input as a Doc ID if it looks like one (alphanumeric + dashes/underscores)
-    const trimmed = input.trim();
-    if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
-    return null;
-  }
-
+  // ── Docs ── (uses Google Docs API — only needs documents.readonly scope, avoids Drive 403)
   async function importDoc() {
-    const docId = parseDocId(docInput);
-    if (!docId) { setErr('Please enter a valid Google Doc URL or ID.'); return; }
+    if (!docPickedId) return;
     setDocLoading(true); setErr(null);
     try {
-      const res = await fetch('https://docs.googleapis.com/v1/documents/' + docId, { headers: authHeader() });
+      const res = await fetch('https://docs.googleapis.com/v1/documents/' + docPickedId, { headers: authHeader() });
       if (!res.ok) {
         if (res.status === 401) throw new Error('Google session expired — click Reconnect.');
         if (res.status === 403) throw new Error('Access denied. Try disconnecting and reconnecting Google to refresh permissions.');
-        if (res.status === 404) throw new Error('Doc not found. Make sure you have access and the URL/ID is correct.');
+        if (res.status === 404) throw new Error('Doc not found. Make sure you have access.');
         throw new Error('Failed to fetch doc: ' + res.status);
       }
       const doc = await res.json();
       const text = extractDocsText(doc);
       if (!text) throw new Error('Document appears to be empty.');
-      const title = doc.title || 'Imported Doc';
+      const title = doc.title || docPickedName || 'Imported Doc';
       onImportDoc(title, text);
-      setDocInput('');
     } catch(e) { setErr(e.message); }
     finally { setDocLoading(false); }
   }
@@ -1913,9 +1754,23 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
       const lib = window.pdfjsLib;
       if (!lib) throw new Error('PDF library is still loading — wait a moment and try again.');
       let loadingTask;
-      let filename = source.name ? source.name.replace(/\.pdf$/i, '') : 'Imported PDF';
-      const buf = await source.arrayBuffer();
-      loadingTask = lib.getDocument({ data: buf });
+      let filename = 'Imported PDF';
+      if (source instanceof File) {
+        filename = source.name.replace(/\.pdf$/i, '');
+        const buf = await source.arrayBuffer();
+        loadingTask = lib.getDocument({ data: buf });
+      } else {
+        // source is { id, name } from Drive Picker — name is already known, no extra metadata fetch needed
+        filename = (source.name || 'Imported PDF').replace(/\.pdf$/i, '');
+        const res = await fetch('https://www.googleapis.com/drive/v3/files/' + source.id + '?alt=media', { headers: authHeader() });
+        if (!res.ok) {
+          if (res.status === 401) throw new Error('Google session expired — click Reconnect.');
+          if (res.status === 403) throw new Error("Can't access this file. Make sure it's shared or you have Drive access.");
+          throw new Error('Failed to download PDF: ' + res.status);
+        }
+        const buf = await res.arrayBuffer();
+        loadingTask = lib.getDocument({ data: buf });
+      }
       const pdf = await loadingTask.promise;
       let full = '';
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -1933,7 +1788,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
     finally { setPdfLoading(false); }
   }
 
-  const isLoading = calLoading || docLoading || pdfLoading;
+  const isLoading = calLoading || docLoading || pdfLoading || pickerLoading;
 
   return (
     <>
@@ -2067,18 +1922,30 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
         {/* ── Docs Tab ── */}
         {tab==='docs' && (
           <div className="g-section">
-            <p className="g-note">Paste a Google Doc URL or ID below. Text only; formatting won't carry over.</p>
-            <div style={{display:'flex',gap:8,alignItems:'center'}}>
-              <input type="text" value={docInput} onChange={e=>{setDocInput(e.target.value);setErr(null);}}
-                placeholder="https://docs.google.com/document/d/... or Doc ID"
-                style={{flex:1,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',color:'var(--text)',fontSize:'0.85rem',outline:'none',transition:'border-color .2s'}}
-                onFocus={e=>e.target.style.borderColor='var(--accent)'}
-                onBlur={e=>e.target.style.borderColor='var(--border)'}/>
-              {docInput && <button onClick={()=>{setDocInput('');setErr(null);}}
-                style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>}
-            </div>
-            <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:8}}
-              onClick={importDoc} disabled={docLoading||!docInput.trim()}>
+            <p className="g-note">Pick a Google Doc straight from your Drive — no link pasting needed. Text only; formatting won't carry over.</p>
+            {docPickedId ? (
+              <div className="g-picked-file">
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(18)}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{docPickedName}</div>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>Google Doc selected</div>
+                </div>
+                <button onClick={()=>{setDocPickedId(null);setDocPickedName('');setErr(null);}}
+                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>
+              </div>
+            ) : (
+              <button className="g-picker-btn"
+                onClick={()=>openDrivePicker('application/vnd.google-apps.document',(id,name)=>{setDocPickedId(id);setDocPickedName(name);setErr(null);})}
+                disabled={pickerLoading}>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(22)}</span>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.9rem'}}>{pickerLoading?'Opening picker…':'Browse Google Docs'}</div>
+                  <div style={{fontSize:'0.75rem',opacity:0.7,marginTop:2}}>Opens your Drive file browser to choose a doc</div>
+                </div>
+              </button>
+            )}
+            <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:6}}
+              onClick={importDoc} disabled={docLoading||!docPickedId}>
               {docLoading?'Importing…':'Import to Notes'}
             </button>
           </div>
@@ -2087,12 +1954,43 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
         {/* ── PDF Tab ── */}
         {tab==='pdf' && (
           <div className="g-section">
+            {/* Option 1: local file */}
             <button className="g-btn" onClick={()=>fileInputRef.current?.click()} disabled={pdfLoading}>
-              <span style={{display:'flex'}}>{Icon.fileText(16)}</span> {pdfLoading?'Reading PDF…':'Upload PDF from your computer'}
+              <span style={{display:'flex'}}>{Icon.fileText(16)}</span> Upload PDF from your computer
             </button>
             <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}}
               onChange={e=>{if(e.target.files?.[0]){importPdf(e.target.files[0]);e.target.value='';}}}/>
 
+            <div className="g-divider">— or pick from Drive —</div>
+
+            {/* Option 2: Drive Picker */}
+            {pdfPickedId ? (
+              <div className="g-picked-file">
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.listTree(18)}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{pdfPickedName}</div>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>PDF from Google Drive</div>
+                </div>
+                <button onClick={()=>{setPdfPickedId(null);setPdfPickedName('');setErr(null);}}
+                  style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>
+              </div>
+            ) : (
+              <button className="g-picker-btn"
+                onClick={()=>openDrivePicker('application/pdf',(id,name)=>{setPdfPickedId(id);setPdfPickedName(name);setErr(null);})}
+                disabled={pdfLoading||pickerLoading}>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.listTree(22)}</span>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.9rem'}}>{pickerLoading?'Opening picker…':'Browse Google Drive for PDF'}</div>
+                  <div style={{fontSize:'0.75rem',opacity:0.7,marginTop:2}}>Opens your Drive file browser to choose a PDF</div>
+                </div>
+              </button>
+            )}
+            {pdfPickedId && (
+              <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:8}}
+                onClick={()=>importPdf({id:pdfPickedId,name:pdfPickedName})} disabled={pdfLoading}>
+                {pdfLoading?'Reading PDF…':'Import PDF to Notes'}
+              </button>
+            )}
             <p className="g-note" style={{marginTop:8,display:'flex',alignItems:'flex-start',gap:6}}><span style={{display:'flex',flexShrink:0,color:'var(--warning)',marginTop:1}}>{Icon.alertTriangle(14)}</span> Scanned/photo PDFs won't work — only PDFs with real digital text can be read.</p>
           </div>
         )}
@@ -2609,10 +2507,6 @@ function App() {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
 
-  // Daily Brief state
-  const [dailyBrief, setDailyBrief] = useState(null);
-  const briefRequestedRef = useRef(false);
-
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const chatAreaRef = useRef(null);
@@ -2705,8 +2599,8 @@ function App() {
           client_id: '504839570150-i4s8urseqgrjucbhqfjc9phiavrcn08d.apps.googleusercontent.com',
           scope: [
             'https://www.googleapis.com/auth/calendar.events',
-            'https://www.googleapis.com/auth/documents',
-            'https://www.googleapis.com/auth/docs',
+            'https://www.googleapis.com/auth/documents.readonly',
+            'https://www.googleapis.com/auth/drive.readonly',
             'https://www.googleapis.com/auth/userinfo.email',
           ].join(' '),
           callback: (resp) => {
@@ -3121,157 +3015,6 @@ function App() {
     return () => clearInterval(id);
   }, [calSyncEnabled, googleToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Daily Brief: Context Aggregator ──
-  async function getMorningContext() {
-    if (!isGoogleConnected()) return null;
-    try {
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(startOfDay.getTime() + 86400000);
-      const params = new URLSearchParams({
-        timeMin: startOfDay.toISOString(),
-        timeMax: endOfDay.toISOString(),
-        singleEvents: 'true',
-        orderBy: 'startTime',
-        maxResults: '25'
-      });
-      const res = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params,
-        { headers: { 'Authorization': 'Bearer ' + googleToken } }
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      const items = (data.items || []).filter(e => e.summary);
-
-      const calendarEvents = items.map(e => ({
-        id: e.id,
-        title: e.summary,
-        time: e.start?.dateTime
-          ? new Date(e.start.dateTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
-          : 'All day',
-        description: e.description || '',
-        attachments: e.attachments || [],
-      }));
-
-      // Find Google Doc IDs in event descriptions and attachments
-      const docIdRegex = /\/document\/d\/([a-zA-Z0-9_-]+)/g;
-      const docIds = new Set();
-      calendarEvents.forEach(ev => {
-        let match;
-        while ((match = docIdRegex.exec(ev.description)) !== null) docIds.add(match[1]);
-        docIdRegex.lastIndex = 0;
-        (ev.attachments || []).forEach(att => {
-          if (att.fileUrl) {
-            while ((match = docIdRegex.exec(att.fileUrl)) !== null) docIds.add(match[1]);
-            docIdRegex.lastIndex = 0;
-          }
-        });
-      });
-
-      // Fetch first 3000 chars of each linked Google Doc
-      const docContents = {};
-      await Promise.all([...docIds].map(async (docId) => {
-        try {
-          const docRes = await fetch(
-            'https://docs.googleapis.com/v1/documents/' + docId,
-            { headers: { 'Authorization': 'Bearer ' + googleToken } }
-          );
-          if (docRes.ok) {
-            const doc = await docRes.json();
-            const text = extractDocsText(doc);
-            docContents[docId] = text.slice(0, 3000);
-          }
-        } catch (_) {}
-      }));
-
-      return { calendarEvents, docContents };
-    } catch (e) {
-      console.error('getMorningContext error:', e);
-      return null;
-    }
-  }
-
-  // ── Daily Brief: Generator (single Gemini API call) ──
-  async function generateDailyBrief() {
-    if (briefRequestedRef.current) return;
-    briefRequestedRef.current = true;
-    setIsLoading(true);
-    try {
-      const context = await getMorningContext();
-      if (!context) { setIsLoading(false); return; }
-
-      const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-      const activeTasks = tasks.filter(t => t.status !== 'done').slice(0, 10);
-
-      const briefPrompt = `You are SOS, a student's proactive daily planner. Based on the student's calendar and linked documents for today, generate a structured daily brief.
-
-TODAY: ${todayStr}
-
-CALENDAR EVENTS:
-${context.calendarEvents.map(e => '- ' + e.time + ': ' + e.title + (e.description ? ' | Notes: ' + e.description.slice(0, 200) : '')).join('\n') || '(no events today)'}
-
-LINKED DOCUMENT EXCERPTS:
-${Object.entries(context.docContents).map(([id, text]) => '[Doc ' + id + ']: ' + text.slice(0, 500) + '...').join('\n\n') || '(no linked docs)'}
-
-STUDENT'S TASKS:
-${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') + ' due ' + fmt(t.dueDate)).join('\n') || '(no active tasks)'}
-
-Respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
-{
-  "type": "DAILY_BRIEF",
-  "summary": "One sentence overview of the day",
-  "schedule_items": [{"time": "HH:MM AM/PM", "event_name": "...", "related_doc_id": "..." or null}],
-  "plan_of_action": ["Specific action item 1", "Specific action item 2", "...3-5 items total"],
-  "dropdown_options": ["Quick action label 1", "Quick action label 2", "...3-5 options total"],
-  "encouragement": "Short motivational sign-off"
-}
-
-Make plan_of_action items specific and reference actual events/tasks (e.g. "Review Chapter 4 before 2 PM Bio Lab").
-Make dropdown_options actionable quick-actions (e.g. "Generate Study Guide for Bio", "Reschedule Conflicts", "Break down project into subtasks").
-If there are no events, base the brief on the student's tasks and suggest a productive plan.`;
-
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const response = await fetch(EDGE_FN_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY)
-        },
-        body: JSON.stringify({
-          systemPrompt: briefPrompt,
-          messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
-          maxTokens: 2048,
-          model: 'gemini-2.5-flash',
-          provider: 'gemini',
-          isContentGen: false
-        })
-      });
-
-      if (!response.ok) { setIsLoading(false); return; }
-      const data = await response.json();
-      const raw = (data?.content || '').trim();
-
-      // Parse JSON from response (strip markdown fences if present)
-      const jsonStr = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/, '');
-      const brief = JSON.parse(jsonStr);
-      if (brief.type === 'DAILY_BRIEF') {
-        setDailyBrief(brief);
-      }
-    } catch (e) {
-      console.error('Daily brief generation failed:', e);
-    }
-    setIsLoading(false);
-  }
-
-  // ── Daily Brief: Auto-trigger on fresh session with Google connected ──
-  useEffect(() => {
-    if (dataLoaded && isGoogleConnected() && messages.length === 0
-        && !briefRequestedRef.current && !viewingSavedChatId) {
-      generateDailyBrief();
-    }
-  }, [dataLoaded, googleToken, messages.length, viewingSavedChatId]);
-
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
     setNotes(prev => [...prev, note]);
@@ -3336,16 +3079,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function deleteSavedChat(chatId) {
     setSavedChats(prev => prev.filter(c => c.id !== chatId));
     if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
-    if (viewingSavedChatId === chatId) { setViewingSavedChatId(null); setMessages([]); setDailyBrief(null); briefRequestedRef.current = false; }
+    if (viewingSavedChatId === chatId) { setViewingSavedChatId(null); setMessages([]); }
     setToastMsg('Conversation deleted');
   }
 
   function exitSavedChatView() {
     setViewingSavedChatId(null);
     setMessages([]);
-    // Reset daily brief so it can re-trigger for fresh session
-    setDailyBrief(null);
-    briefRequestedRef.current = false;
     // Reload current chat from DB
     if (user) {
       sb.from('chat_messages').select('*').eq('user_id', user.id).order('created_at').then(({ data }) => {
@@ -3654,18 +3394,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
-          // Show Daily Brief card when available
-          if (dailyBrief) {
-            return (
-              <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',height:'100%',padding:'24px 16px',overflowY:'auto'}}>
-                <div style={{position:'absolute',top:'10%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite'}}/>
-                <div style={{fontSize:'1.8rem',marginBottom:4,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-0.5px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-                <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:16,animation:'textReveal 0.4s ease 0.1s both'}}>Here's your game plan for today</div>
-                <DailyBriefCard brief={dailyBrief} onAction={(text) => sendChip(text)} />
-              </div>
-            );
-          }
-          // Default welcome screen
           const wv = welcomeVariants[welcomeIdx];
           return (
           <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
