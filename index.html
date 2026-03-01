@@ -338,6 +338,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box
 button:hover{opacity:0.88}
 button:active{transform:scale(0.97)}
 select option{background:#0f0f23;color:var(--text)}
+
+/* ── Voice Circle Overlay ── */
+.voice-overlay{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(5,5,15,0.9);backdrop-filter:blur(18px);animation:overlayIn .35s ease;cursor:pointer;user-select:none}
+.voice-rings{position:relative;display:flex;align-items:center;justify-content:center;width:300px;height:300px}
+.voice-ring{position:absolute;border-radius:50%;will-change:transform}
+.voice-ring-1{width:300px;height:300px;border:1px solid rgba(108,99,255,0.12)}
+.voice-ring-2{width:228px;height:228px;border:1px solid rgba(108,99,255,0.22);box-shadow:inset 0 0 50px rgba(108,99,255,0.04)}
+.voice-ring-3{width:162px;height:162px;border:1.5px solid rgba(108,99,255,0.38);box-shadow:inset 0 0 30px rgba(108,99,255,0.07),0 0 24px rgba(108,99,255,0.08)}
+.voice-ring-4{width:110px;height:110px;border:2px solid rgba(108,99,255,0.55);background:rgba(108,99,255,0.07);box-shadow:inset 0 0 24px rgba(108,99,255,0.12),0 0 32px rgba(108,99,255,0.12)}
+.voice-center{width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 0 32px rgba(108,99,255,0.65),0 0 72px rgba(108,99,255,0.28),inset 0 1px 0 rgba(255,255,255,0.18)}
 </style>
 </head>
 <body>
@@ -2618,6 +2628,15 @@ function App() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  // Web Audio API for volume visualisation
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const ring1Ref = useRef(null);
+  const ring2Ref = useRef(null);
+  const ring3Ref = useRef(null);
+  const ring4Ref = useRef(null);
 
   // Daily Brief state
   const [dailyBrief, setDailyBrief] = useState(null);
@@ -3559,6 +3578,41 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
+
+      // ── Web Audio: volume analyser for ring animation ──
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.75;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        audioContextRef.current = ctx;
+        analyserRef.current = analyser;
+        dataArrayRef.current = data;
+
+        let idlePhase = 0;
+        function tick() {
+          analyser.getByteFrequencyData(data);
+          // Average the speech-frequency bins (~300Hz–3kHz ≈ first 60 bins at 512 fftSize)
+          let sum = 0;
+          const bins = Math.min(60, data.length);
+          for (let i = 0; i < bins; i++) sum += data[i];
+          const vol = Math.min(sum / bins / 85, 1); // normalise 0–1
+
+          // Gentle sine-wave idle breath + voice-driven expansion
+          idlePhase += 0.028;
+          const idle = Math.sin(idlePhase) * 0.022 + 1;
+          if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
+          if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
+          if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
+          if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
+          animFrameRef.current = requestAnimationFrame(tick);
+        }
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+
       setIsRecording(true);
     } catch (err) {
       console.error('Mic access error:', err);
@@ -3567,6 +3621,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   function stopRecording() {
+    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
@@ -3797,13 +3853,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
           </div>
         )}
-        {isRecording&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 12px',background:'rgba(255,71,87,0.06)',borderRadius:12,border:'1px solid rgba(255,71,87,0.2)',animation:'fadeIn .2s ease'}}>
-            <span style={{width:8,height:8,borderRadius:'50%',background:'var(--danger)',animation:'gentlePulse 1s ease-in-out infinite'}}/>
-            <span style={{fontSize:'0.82rem',color:'var(--danger)',flex:1,fontWeight:500}}>Recording... tap mic to stop</span>
-            <button onClick={stopRecording} style={{background:'rgba(255,71,87,0.1)',border:'1px solid rgba(255,71,87,0.3)',color:'var(--danger)',cursor:'pointer',padding:'4px 10px',borderRadius:8,fontSize:'0.78rem',fontWeight:600}}>Stop</button>
-          </div>
-        )}
         <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
           <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
           <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading||isRecording}
@@ -3877,6 +3926,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
+
+      {/* ── Voice Recording Circle Overlay ── */}
+      {isRecording&&(
+        <div className="voice-overlay" onClick={stopRecording}>
+          <div className="voice-rings">
+            <div className="voice-ring voice-ring-1" ref={ring1Ref}/>
+            <div className="voice-ring voice-ring-2" ref={ring2Ref}/>
+            <div className="voice-ring voice-ring-3" ref={ring3Ref}/>
+            <div className="voice-ring voice-ring-4" ref={ring4Ref}/>
+            <div className="voice-center">{Icon.mic(28)}</div>
+          </div>
+          <div style={{marginTop:36,textAlign:'center',pointerEvents:'none'}}>
+            <div style={{fontSize:'1.05rem',fontWeight:700,color:'var(--text)',letterSpacing:0.4,marginBottom:6}}>Listening...</div>
+            <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Tap anywhere to stop</div>
+          </div>
+        </div>
+      )}
+
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
           <img src={lightboxUrl} alt="full size" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:12,objectFit:'contain'}}/>
