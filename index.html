@@ -338,6 +338,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box
 button:hover{opacity:0.88}
 button:active{transform:scale(0.97)}
 select option{background:#0f0f23;color:var(--text)}
+
+/* ── Voice Circle Overlay ── */
+.voice-overlay{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(5,5,15,0.9);backdrop-filter:blur(18px);animation:overlayIn .35s ease;cursor:pointer;user-select:none}
+.voice-rings{position:relative;display:flex;align-items:center;justify-content:center;width:300px;height:300px}
+.voice-ring{position:absolute;border-radius:50%;will-change:transform}
+.voice-ring-1{width:300px;height:300px;border:1px solid rgba(108,99,255,0.12)}
+.voice-ring-2{width:228px;height:228px;border:1px solid rgba(108,99,255,0.22);box-shadow:inset 0 0 50px rgba(108,99,255,0.04)}
+.voice-ring-3{width:162px;height:162px;border:1.5px solid rgba(108,99,255,0.38);box-shadow:inset 0 0 30px rgba(108,99,255,0.07),0 0 24px rgba(108,99,255,0.08)}
+.voice-ring-4{width:110px;height:110px;border:2px solid rgba(108,99,255,0.55);background:rgba(108,99,255,0.07);box-shadow:inset 0 0 24px rgba(108,99,255,0.12),0 0 32px rgba(108,99,255,0.12)}
+.voice-center{width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 0 32px rgba(108,99,255,0.65),0 0 72px rgba(108,99,255,0.28),inset 0 1px 0 rgba(255,255,255,0.18)}
 </style>
 </head>
 <body>
@@ -398,6 +408,8 @@ const Icon = {
   plus:(s=18)=>I(['M12 5v14','M5 12h14'],s,2),
   edit:(s=18)=>I(['M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7','M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'],s),
   logout:(s=18)=>I(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4','M16 17l5-5-5-5','M21 12H9'],s),
+  mic:(s=18)=>I(['M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z','M19 10v2a7 7 0 0 1-14 0v-2','M12 19v4','M8 23h8'],s),
+  micOff:(s=18)=>I(['M1 1l22 22','M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6','M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17','M12 19v4','M8 23h8'],s),
 };
 
 /* ═══════════════════════════════════════════════
@@ -409,6 +421,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
+const VOICE_FN_URL = SUPABASE_URL + '/functions/v1/sos-voice';
 
 
 /* ─── Date helpers ─── */
@@ -2610,6 +2623,21 @@ function App() {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
 
+  // Voice-to-text state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  // Web Audio API for volume visualisation
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const ring1Ref = useRef(null);
+  const ring2Ref = useRef(null);
+  const ring3Ref = useRef(null);
+  const ring4Ref = useRef(null);
+
   // Daily Brief state
   const [dailyBrief, setDailyBrief] = useState(null);
   const briefRequestedRef = useRef(false);
@@ -3534,6 +3562,109 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       setToastMsg("Couldn't process that photo — try a different one");
     }
   }
+  // ── Voice-to-text recording ──
+  async function startRecording() {
+    if (!user) { setShowAuthModal(true); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        if (blob.size < 100) { setToastMsg("Recording too short — try again"); return; }
+        await transcribeAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+
+      // ── Web Audio: volume analyser for ring animation ──
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.75;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        audioContextRef.current = ctx;
+        analyserRef.current = analyser;
+        dataArrayRef.current = data;
+
+        let idlePhase = 0;
+        function tick() {
+          analyser.getByteFrequencyData(data);
+          // Average the speech-frequency bins (~300Hz–3kHz ≈ first 60 bins at 512 fftSize)
+          let sum = 0;
+          const bins = Math.min(60, data.length);
+          for (let i = 0; i < bins; i++) sum += data[i];
+          const vol = Math.min(sum / bins / 85, 1); // normalise 0–1
+
+          // Gentle sine-wave idle breath + voice-driven expansion
+          idlePhase += 0.028;
+          const idle = Math.sin(idlePhase) * 0.022 + 1;
+          if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
+          if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
+          if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
+          if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
+          animFrameRef.current = requestAnimationFrame(tick);
+        }
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Mic access error:', err);
+      setToastMsg("Couldn't access microphone — check browser permissions");
+    }
+  }
+
+  function stopRecording() {
+    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }
+
+  async function transcribeAudio(blob) {
+    setIsTranscribing(true);
+    try {
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const form = new FormData();
+      form.append('file', blob, 'voice.webm');
+      const res = await fetch(VOICE_FN_URL, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        body: form
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error || 'Transcription failed');
+      }
+      const data = await res.json();
+      const transcript = (data.text || '').trim();
+      if (transcript) {
+        setInput(prev => prev ? prev + ' ' + transcript : transcript);
+        inputRef.current?.focus();
+      } else {
+        setToastMsg("Couldn't catch that — try speaking louder or closer");
+      }
+    } catch (err) {
+      console.error('Transcription error:', err);
+      setToastMsg("Voice transcription failed — " + (err.message || 'try again'));
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  function toggleRecording() {
+    if (isRecording) { stopRecording(); } else { startRecording(); }
+  }
+
   function clearChat() {
     setMessages([]); setPendingActions([]); setChatError(null);
     if (user) dbClearChat(user.id);
@@ -3724,9 +3855,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
           <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-          <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+          <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading||isRecording}
+            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isRecording)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isRecording)?0.5:1}}>
             {Icon.camera(18)}
+          </button>
+          <button type="button" onClick={toggleRecording} disabled={isLoading||isTranscribing||!!viewingSavedChatId}
+            style={{width:40,height:40,borderRadius:'50%',background:isRecording?'rgba(255,71,87,0.15)':'transparent',border:'1px solid '+(isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--border)'),color:isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isTranscribing||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isTranscribing||viewingSavedChatId)?0.5:1,animation:isRecording?'rippleGlow 1.5s ease infinite':'none'}}>
+            {isTranscribing?React.createElement('div',{style:{width:16,height:16,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}):isRecording?Icon.micOff(18):Icon.mic(18)}
           </button>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
             placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
@@ -3735,7 +3870,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
           <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
@@ -3791,6 +3926,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
+
+      {/* ── Voice Recording Circle Overlay ── */}
+      {isRecording&&(
+        <div className="voice-overlay" onClick={stopRecording}>
+          <div className="voice-rings">
+            <div className="voice-ring voice-ring-1" ref={ring1Ref}/>
+            <div className="voice-ring voice-ring-2" ref={ring2Ref}/>
+            <div className="voice-ring voice-ring-3" ref={ring3Ref}/>
+            <div className="voice-ring voice-ring-4" ref={ring4Ref}/>
+            <div className="voice-center">{Icon.mic(28)}</div>
+          </div>
+          <div style={{marginTop:36,textAlign:'center',pointerEvents:'none'}}>
+            <div style={{fontSize:'1.05rem',fontWeight:700,color:'var(--text)',letterSpacing:0.4,marginBottom:6}}>Listening...</div>
+            <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Tap anywhere to stop</div>
+          </div>
+        </div>
+      )}
+
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
           <img src={lightboxUrl} alt="full size" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:12,objectFit:'contain'}}/>
