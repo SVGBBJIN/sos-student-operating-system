@@ -398,6 +398,8 @@ const Icon = {
   plus:(s=18)=>I(['M12 5v14','M5 12h14'],s,2),
   edit:(s=18)=>I(['M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7','M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'],s),
   logout:(s=18)=>I(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4','M16 17l5-5-5-5','M21 12H9'],s),
+  mic:(s=18)=>I(['M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z','M19 10v2a7 7 0 0 1-14 0v-2','M12 19v4','M8 23h8'],s),
+  micOff:(s=18)=>I(['M1 1l22 22','M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6','M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17','M12 19v4','M8 23h8'],s),
 };
 
 /* ═══════════════════════════════════════════════
@@ -409,6 +411,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
+const VOICE_FN_URL = SUPABASE_URL + '/functions/v1/sos-voice';
 
 
 /* ─── Date helpers ─── */
@@ -2610,6 +2613,12 @@ function App() {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
 
+  // Voice-to-text state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
   // Daily Brief state
   const [dailyBrief, setDailyBrief] = useState(null);
   const briefRequestedRef = useRef(false);
@@ -3534,6 +3543,72 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       setToastMsg("Couldn't process that photo — try a different one");
     }
   }
+  // ── Voice-to-text recording ──
+  async function startRecording() {
+    if (!user) { setShowAuthModal(true); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        if (blob.size < 100) { setToastMsg("Recording too short — try again"); return; }
+        await transcribeAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Mic access error:', err);
+      setToastMsg("Couldn't access microphone — check browser permissions");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }
+
+  async function transcribeAudio(blob) {
+    setIsTranscribing(true);
+    try {
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const form = new FormData();
+      form.append('file', blob, 'voice.webm');
+      const res = await fetch(VOICE_FN_URL, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        body: form
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error || 'Transcription failed');
+      }
+      const data = await res.json();
+      const transcript = (data.text || '').trim();
+      if (transcript) {
+        setInput(prev => prev ? prev + ' ' + transcript : transcript);
+        inputRef.current?.focus();
+      } else {
+        setToastMsg("Couldn't catch that — try speaking louder or closer");
+      }
+    } catch (err) {
+      console.error('Transcription error:', err);
+      setToastMsg("Voice transcription failed — " + (err.message || 'try again'));
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  function toggleRecording() {
+    if (isRecording) { stopRecording(); } else { startRecording(); }
+  }
+
   function clearChat() {
     setMessages([]); setPendingActions([]); setChatError(null);
     if (user) dbClearChat(user.id);
@@ -3722,11 +3797,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
           </div>
         )}
+        {isRecording&&(
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 12px',background:'rgba(255,71,87,0.06)',borderRadius:12,border:'1px solid rgba(255,71,87,0.2)',animation:'fadeIn .2s ease'}}>
+            <span style={{width:8,height:8,borderRadius:'50%',background:'var(--danger)',animation:'gentlePulse 1s ease-in-out infinite'}}/>
+            <span style={{fontSize:'0.82rem',color:'var(--danger)',flex:1,fontWeight:500}}>Recording... tap mic to stop</span>
+            <button onClick={stopRecording} style={{background:'rgba(255,71,87,0.1)',border:'1px solid rgba(255,71,87,0.3)',color:'var(--danger)',cursor:'pointer',padding:'4px 10px',borderRadius:8,fontSize:'0.78rem',fontWeight:600}}>Stop</button>
+          </div>
+        )}
         <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
           <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-          <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+          <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading||isRecording}
+            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isRecording)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isRecording)?0.5:1}}>
             {Icon.camera(18)}
+          </button>
+          <button type="button" onClick={toggleRecording} disabled={isLoading||isTranscribing||!!viewingSavedChatId}
+            style={{width:40,height:40,borderRadius:'50%',background:isRecording?'rgba(255,71,87,0.15)':'transparent',border:'1px solid '+(isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--border)'),color:isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isTranscribing||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isTranscribing||viewingSavedChatId)?0.5:1,animation:isRecording?'rippleGlow 1.5s ease infinite':'none'}}>
+            {isTranscribing?React.createElement('div',{style:{width:16,height:16,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}):isRecording?Icon.micOff(18):Icon.mic(18)}
           </button>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
             placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
@@ -3735,7 +3821,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
           <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
         </form>
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
