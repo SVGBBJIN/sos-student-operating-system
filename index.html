@@ -191,7 +191,6 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .auth-form{background:linear-gradient(145deg,#1a1a2e 0%,#0f0f1a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:24px;padding:32px 28px;width:100%;max-width:360px;animation:scaleIn .4s cubic-bezier(0.16,1,0.3,1)}
 .auth-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px 16px;color:var(--text);font-size:0.92rem;outline:none;margin-bottom:12px;transition:border-color .25s ease,box-shadow .25s ease}
 .auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,0.12),0 0 20px rgba(108,99,255,0.06)}
-.auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
 .auth-btn{width:100%;padding:12px;border-radius:14px;border:none;font-weight:700;font-size:0.95rem;cursor:pointer;transition:all .15s;margin-bottom:8px}
 .auth-btn:active{transform:scale(0.97)}
 .auth-btn-primary{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;box-shadow:0 2px 8px rgba(108,99,255,0.2)}
@@ -445,6 +444,17 @@ function fmtTime(h, m) {
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
 }
 
+/* ─── Map raw Google Calendar API items → app event shape ─── */
+function mapGoogleCalItems(items) {
+  return items.filter(e => e.summary).map(e => ({
+    googleId: e.id,
+    title: e.summary,
+    date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
+    startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
+    allDay: !!e.start?.date,
+  }));
+}
+
 /* ─── Nudge Engine ─── */
 function getNudge(task) {
   if (task.status === 'done') return { emoji:'done', text:'Done! Nice work.' };
@@ -639,13 +649,17 @@ const SUBJECT_ALIASES = {
   cs:'computer science', comp:'computer science', la:'language arts'
 };
 
+const SUBJECT_ALIAS_PATTERNS = Object.entries(SUBJECT_ALIASES).map(
+  ([short, long]) => ({ regex: new RegExp('\\b' + short + '\\b', 'g'), replacement: long })
+);
 function normalize(str) {
   if (!str) return '';
   let s = str.toLowerCase().trim();
   // expand known abbreviations
-  Object.entries(SUBJECT_ALIASES).forEach(([short, long]) => {
-    s = s.replace(new RegExp('\\b' + short + '\\b', 'g'), long);
-  });
+  for (const { regex, replacement } of SUBJECT_ALIAS_PATTERNS) {
+    regex.lastIndex = 0;
+    s = s.replace(regex, replacement);
+  }
   return s;
 }
 
@@ -1450,7 +1464,6 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   useEffect(() => { setEditData({ ...action }); }, [action]);
 
   function getCardInfo() {
-    const isDanger = ['delete_task','delete_event','delete_block'].includes(action.type);
     switch (action.type) {
       case 'add_task': return { icon:Icon.clipboard(16), label:'New Task', badge:'task', badgeColor:'var(--accent)', borderColor:'var(--accent)', fields: [
         { key:'title', label:'Title', value:action.title }, { key:'subject', label:'Class', value:action.subject||'—' },
@@ -1616,7 +1629,7 @@ function RecurringEventPopup({ action, onConfirm, onCancel }) {
     const cursor = new Date(start);
     while (cursor <= end && generated.length < 100) {
       if (dayIndices.includes(cursor.getDay())) {
-        const ds = cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+        const ds = toDateStr(cursor);
         generated.push({ id:Math.random().toString(36).slice(2), title:action.title||'Event', date:ds, event_type:action.event_type||'event', subject:action.subject||'', checked:true });
       }
       cursor.setDate(cursor.getDate()+1);
@@ -2069,13 +2082,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, { headers: authHeader() });
       if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Calendar fetch failed: ' + res.status); }
       const data = await res.json();
-      const evs = (data.items || []).filter(e => e.summary).map(e => ({
-        googleId: e.id,
-        title: e.summary,
-        date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
-        startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
-        allDay: !!e.start?.date,
-      }));
+      const evs = mapGoogleCalItems(data.items || []);
       setCalEvents(evs);
       setSelected(new Set(evs.map((_,i) => i)));
       setCalFetched(true);
@@ -2392,7 +2399,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
     (blocks.recurring || []).forEach(rb => {
       calendarDays.forEach(cell => {
         if (rb.days.includes(cell.date.getDay())) {
-          const ds = cell.date.getFullYear()+'-'+String(cell.date.getMonth()+1).padStart(2,'0')+'-'+String(cell.date.getDate()).padStart(2,'0');
+          const ds = toDateStr(cell.date);
           addItem(ds, { title: rb.name, cls: 'block' });
         }
       });
@@ -2442,7 +2449,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
           <div className="cal-grid">
             {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
             {calendarDays.map((cell, i) => {
-              const dateStr = cell.date.getFullYear() + '-' + String(cell.date.getMonth()+1).padStart(2,'0') + '-' + String(cell.date.getDate()).padStart(2,'0');
+              const dateStr = toDateStr(cell.date);
               const isToday = dateStr === todayKey;
               const items = dateItemsMap[dateStr] || [];
               const maxShow = 2;
@@ -2545,9 +2552,10 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
     const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 1);
     if (queryWords.length === 0) return text;
     const pattern = queryWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const regex = new RegExp('(' + pattern + ')', 'gi');
-    const parts = text.split(regex);
-    return parts.map((part, i) => regex.test(part)
+    const splitRegex = new RegExp('(' + pattern + ')', 'gi');
+    const testRegex = new RegExp(pattern, 'i');
+    const parts = text.split(splitRegex);
+    return parts.map((part, i) => testRegex.test(part)
       ? React.createElement('span', { key: i, className: 'notes-match' }, part)
       : part
     );
@@ -2622,26 +2630,23 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
     setNewNoteName('');
   }
 
-  // ── Formatting toolbar component ──
-  function FormatToolbar() {
-    return (
-      <div className="notes-toolbar">
-        <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
-      </div>
-    );
-  }
+  const FormatToolbar = useCallback(() => (
+    <div className="notes-toolbar">
+      <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
+    </div>
+  ), []);
 
   return (
     <>
@@ -2768,6 +2773,15 @@ function Toast({message,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,2400);return()=>clearTimeout(t)},[]);
   return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:14,background:'linear-gradient(135deg,var(--success),#1db954)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4),0 0 40px rgba(46,213,115,0.1)',animation:'toastIn .3s cubic-bezier(0.16,1,0.3,1), toastOut .3s ease 2.1s forwards',backdropFilter:'blur(8px)'}}>{message}</div>);
 }
+
+/* ─── Typing Dots (loading indicator) ─── */
+const TypingDots=()=>(
+  <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
+      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
+    </div>
+  </div>
+);
 
 /* ═══════════════════════════════════════════════
    SOS MAIN APP
@@ -3058,6 +3072,7 @@ function App() {
           const date = action.date || today();
           const [sh,sm] = (action.start||'00:00').split(':').map(Number);
           const [eh,em] = (action.end||'01:00').split(':').map(Number);
+          const slotOps = [];
           setBlocks(prev => {
             const newDates = { ...(prev.dates||{}) };
             const dayBlocks = { ...(newDates[date]||{}) };
@@ -3066,12 +3081,13 @@ function App() {
               const key = String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');
               const data = { name:action.activity||'Block', category:action.category||'school' };
               dayBlocks[key] = data;
-              if (user) syncOp(() => dbUpsertDateBlock(date, key, data, user.id));
+              slotOps.push({ date, key, data });
               cm+=30; if(cm>=60){ch++;cm=0;}
             }
             newDates[date] = dayBlocks;
             return { ...prev, dates:newDates };
           });
+          if (user && slotOps.length > 0) syncOp(() => Promise.all(slotOps.map(s => dbUpsertDateBlock(s.date, s.key, s.data, user.id))));
           break;
         }
         case 'add_event': {
@@ -3104,11 +3120,11 @@ function App() {
           break;
         }
         case 'break_task': {
-          (action.subtasks||[]).forEach(st => {
-            const task = { id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
-            setTasks(prev => [...prev, task]);
-            if (user) syncOp(() => dbUpsertTask(task, user.id));
-          });
+          const newTasks = (action.subtasks||[]).map(st => ({
+            id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+          }));
+          setTasks(prev => [...prev, ...newTasks]);
+          if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
           break;
         }
         case 'delete_task': {
@@ -3157,6 +3173,7 @@ function App() {
             const delDate = action.date;
             const [dsh,dsm] = (action.start).split(':').map(Number);
             const [deh,dem] = (action.end||action.start).split(':').map(Number);
+            const delOps = [];
             setBlocks(prev => {
               const newDates = { ...(prev.dates||{}) };
               const dayBlks = { ...(newDates[delDate]||{}) };
@@ -3164,12 +3181,13 @@ function App() {
               while (dch<deh||(dch===deh&&dcm<dem)) {
                 const key = String(dch).padStart(2,'0')+':'+String(dcm).padStart(2,'0');
                 delete dayBlks[key];
-                if (user) syncOp(() => dbUpsertDateBlock(delDate, key, null, user.id));
+                delOps.push(key);
                 dcm+=30; if(dcm>=60){dch++;dcm=0;}
               }
               newDates[delDate] = dayBlks;
               return { ...prev, dates:newDates };
             });
+            if (user && delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(delDate, key, null, user.id))));
           }
           break;
         default: console.warn('Unknown action type:', action.type);
@@ -3278,13 +3296,7 @@ function App() {
         throw new Error('Calendar fetch failed (' + res.status + ')');
       }
       const data = await res.json();
-      const gevents = (data.items || []).filter(e => e.summary).map(e => ({
-        googleId: e.id,
-        title: e.summary,
-        date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
-        startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
-        allDay: !!e.start?.date,
-      }));
+      const gevents = mapGoogleCalItems(data.items || []);
       // 1. Import/update from Google
       const count = handleImportGoogleEvents(gevents, true);
       // 2. Detect Google-side deletions: use functional updater to read
@@ -3907,15 +3919,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showPeek,showNotes,showChatSidebar]);
 
-  // ── Typing dots ──
-  const TypingDots=()=>(
-    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-      <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-        {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
-      </div>
-    </div>
-  );
-
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
     { label:'Add a task', msg:'I need to add a task' },
@@ -4055,7 +4058,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     const cursor=new Date(start);let count=0;
                     while(cursor<=end&&count<100){
                       if(dayIndices.includes(cursor.getDay())){
-                        const ds=cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+                        const ds=toDateStr(cursor);
                         executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
                         count++;
                       }
