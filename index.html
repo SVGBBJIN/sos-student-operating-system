@@ -293,6 +293,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .cal-cell-event.task{background:rgba(108,99,255,0.15);color:var(--accent)}
 .cal-cell-event.event{background:rgba(46,213,115,0.15);color:var(--success)}
 .cal-cell-event.overdue{background:rgba(255,71,87,0.15);color:var(--danger)}
+.cal-cell-event.block{background:rgba(69,170,242,0.15);color:var(--blue)}
 .cal-cell-more{font-size:0.6rem;color:var(--text-dim);margin-top:1px}
 
 /* Chat sidebar */
@@ -982,6 +983,7 @@ delete_task: {"type":"delete_task","title":"..."}
 delete_event: {"type":"delete_event","title":"..."}
 update_event: {"type":"update_event","title":"...","new_title":"(optional new name)","date":"YYYY-MM-DD"}
 delete_block: {"type":"delete_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"}
+add_recurring_event: {"type":"add_recurring_event","title":"...","event_type":"practice","subject":"...","days":["Monday","Wednesday","Friday"],"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}
 
 RULES:
 1. ALWAYS output the <action> tag. Never describe what you "could" do — just do it.
@@ -1004,6 +1006,7 @@ WHEN TO USE EACH ACTION:
 - "move/push/reschedule/change/bump/switch" + date → update_event
 - "rename/call it/change name of" + event → update_event with new_title
 - "remind me/note this/save this/remember" → add_task or add_note
+- "every Monday/Wednesday/Friday" or "Mon/Wed/Fri weekly" or "practice on Tuesdays and Thursdays" → add_recurring_event (use start_date = today, end_date = 3 months from today unless specified)
 
 EXAMPLES:
 
@@ -1042,6 +1045,10 @@ You: "got it, wiped it from the calendar 🗑"
 User: "I finished the bio homework"
 You: "nice work! ✅ marked it done."
 <action>{"type":"complete_task","task_id":"[id from ACTIVE TASKS]"}</action>
+
+User: "I have swim practice every Mon Wed Fri"
+You: "got it — added swim practice for every Monday, Wednesday, and Friday 🏊"
+<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return d.toISOString().slice(0,10); })()}"}</action>
 
 WRONG (never do this):
 User: "I have a math test on Friday"
@@ -1091,6 +1098,36 @@ function parseActions(text) {
   }
   return actions;
 }
+function parseActionsDetailed(text) {
+  const actions = []; const malformedFragments = [];
+  const regex = /<action>([\s\S]*?)<\/action>/g; let match;
+  while ((match = regex.exec(text)) !== null) {
+    const raw = match[1].trim();
+    try { actions.push(JSON.parse(raw)); } catch (e) { console.error('Malformed action JSON:', raw, e); malformedFragments.push(raw); }
+  }
+  return { actions, malformedFragments };
+}
+async function parseActionsWithRecovery(rawContent, token) {
+  const { actions, malformedFragments } = parseActionsDetailed(rawContent);
+  if (malformedFragments.length === 0) return actions;
+  console.warn('Attempting JSON recovery for', malformedFragments.length, 'malformed fragment(s)');
+  try {
+    const fixPrompt = 'Fix the following malformed JSON action tags. Return ONLY valid <action>JSON</action> tags, nothing else.\n\nMalformed fragments:\n' +
+      malformedFragments.map((f, i) => 'Fragment ' + (i+1) + ': ' + f).join('\n') +
+      '\n\nRules:\n- Fix syntax errors (missing quotes, trailing commas, unescaped characters)\n- Do NOT change the intent or values — only fix the JSON syntax\n- Return each fixed action in <action>...</action> tags';
+    const response = await fetch(EDGE_FN_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
+      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const fixedActions = parseActions(data?.content || '');
+      return [...actions, ...fixedActions];
+    }
+  } catch (e) { console.error('JSON recovery re-prompt failed:', e); }
+  return actions;
+}
 function stripActionTags(text) { return text.replace(/<action>[\s\S]*?<\/action>/g, '').trim(); }
 
 /* ─── Google Docs text extractor (shared by import modal + daily brief) ─── */
@@ -1129,29 +1166,63 @@ function parseDocId(input) {
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown'];
 
-function classifyMessage(text) {
-  // ── TIER 2 (content gen): Flashcards, quizzes, outlines, etc. → Gemini + high tokens ──
+/* Regex-based classifier (kept as fast fallback) */
+function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
     return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
   }
-
-  // ── TIER 2 (notes reference): Questions about notes/reference docs → Gemini (needs full note content) ──
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
     return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
   }
-
-  // ── TIER 2 (action): Any scheduling/task signal → Gemini ──
-  // One broad pattern: if the message contains ANY date word, time word, school subject,
-  // action verb, or school activity — send to Gemini. When in doubt, Gemini handles it.
-  // Gemini understands "chem thing fri", "coach moved practice", unusual phrasing, etc.
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
-
   if (actionSignals.test(text)) {
     return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
   }
-
-  // ── TIER 1: Pure chat — no scheduling signals → Llama 8B (fast) ──
   return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+}
+
+/* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
+async function classifyMessage(text) {
+  try {
+    const session = await sb.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const classifyPrompt = `You are a message classifier for a student planner app. Classify the user message into exactly one category and return ONLY a JSON object.
+
+Categories:
+- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets
+- NOTES_REF: Questions about the student's own notes, reference docs, PDFs, or looking things up in saved documents
+- ACTION: Any scheduling, task, event, block, calendar, or organizational request. Includes mentions of dates, times, school subjects, activities, verbs like add/delete/schedule/cancel/move, and slang equivalents
+- CHAT: General conversation, greetings, questions, or anything with no scheduling or content generation intent
+
+Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"category":"ACTION"} or {"category":"CHAT"}`;
+
+    const response = await fetch(EDGE_FN_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
+      body:JSON.stringify({
+        systemPrompt:classifyPrompt,
+        messages:[{role:'user',content:text}],
+        maxTokens:32,
+        model:'llama-3.1-8b-instant',
+        provider:'groq',
+        isContentGen:false
+      })
+    });
+    if (!response.ok) throw new Error('Classification request failed');
+    const data = await response.json();
+    const raw = (data?.content || '').trim();
+    const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
+    const result = JSON.parse(jsonStr);
+    switch (result.category) {
+      case 'CONTENT_GEN': return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
+      case 'NOTES_REF':   return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
+      case 'ACTION':      return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+    }
+  } catch (e) {
+    console.warn('LLM classification failed, using regex fallback:', e);
+    return classifyMessageRegex(text);
+  }
 }
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
@@ -1463,6 +1534,125 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
         </button>
         {!editing && action.type !== 'complete_task' && <button className="confirm-btn confirm-btn-edit" onClick={() => setEditing(true)}>{Icon.edit(14)} Edit</button>}
         <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>{Icon.x(14)} Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   BULK CONFIRMATION CARD
+   ═══════════════════════════════════════════════ */
+function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
+  const [checked, setChecked] = useState(actions.map(() => true));
+  const [selectAll, setSelectAll] = useState(true);
+
+  useEffect(() => { setChecked(actions.map(() => true)); setSelectAll(true); }, [actions.length]);
+
+  function toggleItem(idx) { setChecked(prev => { const n=[...prev]; n[idx]=!n[idx]; return n; }); }
+  function toggleAll() { const v=!selectAll; setSelectAll(v); setChecked(actions.map(()=>v)); }
+
+  function getActionLabel(a) {
+    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring' };
+    return (labels[a.type]||'Action')+': '+(a.title||a.activity||a.parent_title||'Untitled');
+  }
+  function getBadgeColor(a) {
+    if (a.type?.startsWith('delete')) return 'var(--danger)';
+    if (a.type==='add_event'||a.type==='add_recurring_event') return 'var(--teal)';
+    if (a.type==='add_block') return 'var(--blue)';
+    return 'var(--accent)';
+  }
+
+  const selectedCount = checked.filter(Boolean).length;
+
+  return (
+    <div className="confirm-card" style={{maxWidth:420,borderLeftColor:'var(--accent)'}}>
+      <div className="confirm-card-hdr">
+        <div className="confirm-card-hdr-left">
+          <div className="confirm-card-hdr-icon" style={{background:'rgba(108,99,255,0.1)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>{Icon.layers(16)}</div>
+          <span className="confirm-card-hdr-title">Bulk Add</span>
+        </div>
+        <span className="confirm-card-hdr-badge" style={{background:'rgba(108,99,255,0.1)',color:'var(--accent)',border:'1px solid rgba(108,99,255,0.2)'}}>{actions.length} items</span>
+      </div>
+      <div className="confirm-card-body" style={{maxHeight:250,overflowY:'auto'}}>
+        <label style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',cursor:'pointer',fontWeight:600,fontSize:'0.82rem',borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+          <input type="checkbox" checked={selectAll} onChange={toggleAll}/> Select All ({actions.length})
+        </label>
+        {actions.map((pa,idx)=>(
+          <label key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',cursor:'pointer',fontSize:'0.82rem',borderBottom:'1px solid rgba(255,255,255,0.03)'}}>
+            <input type="checkbox" checked={checked[idx]} onChange={()=>toggleItem(idx)}/>
+            <span style={{display:'inline-block',width:6,height:6,borderRadius:'50%',background:getBadgeColor(pa.action),flexShrink:0}}/>
+            <span style={{flex:1}}>
+              {getActionLabel(pa.action)}
+              {pa.action.date&&<span style={{color:'var(--text-dim)',fontSize:'0.75rem',marginLeft:6}}>{fmt(pa.action.date)}</span>}
+              {pa.action.due&&<span style={{color:'var(--text-dim)',fontSize:'0.75rem',marginLeft:6}}>due {fmt(pa.action.due)}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-yes" onClick={()=>onConfirmSelected(checked)} disabled={selectedCount===0}>
+          {Icon.check(14)} Approve {selectedCount}
+        </button>
+        <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>{Icon.x(14)} Dismiss All</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   RECURRING EVENT POPUP
+   ═══════════════════════════════════════════════ */
+function RecurringEventPopup({ action, onConfirm, onCancel }) {
+  const [generatedEvents, setGeneratedEvents] = useState([]);
+  const [selAll, setSelAll] = useState(true);
+
+  useEffect(() => {
+    const dayNameToIndex = { Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6 };
+    const dayIndices = (action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
+    const start = new Date(action.start_date || new Date().toISOString().slice(0,10));
+    const endDefault = new Date(); endDefault.setMonth(endDefault.getMonth()+3);
+    const end = new Date(action.end_date || endDefault.toISOString().slice(0,10));
+    const generated = [];
+    const cursor = new Date(start);
+    while (cursor <= end && generated.length < 100) {
+      if (dayIndices.includes(cursor.getDay())) {
+        const ds = cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+        generated.push({ id:Math.random().toString(36).slice(2), title:action.title||'Event', date:ds, event_type:action.event_type||'event', subject:action.subject||'', checked:true });
+      }
+      cursor.setDate(cursor.getDate()+1);
+    }
+    setGeneratedEvents(generated);
+  }, [action]);
+
+  function toggleEv(idx) { setGeneratedEvents(prev=>prev.map((ev,i)=>i===idx?{...ev,checked:!ev.checked}:ev)); }
+  function toggleAllEv() { const v=!selAll; setSelAll(v); setGeneratedEvents(prev=>prev.map(ev=>({...ev,checked:v}))); }
+  const checkedCount = generatedEvents.filter(e=>e.checked).length;
+
+  return (
+    <div className="confirm-card" style={{maxWidth:420,borderLeftColor:'var(--teal)'}}>
+      <div className="confirm-card-hdr">
+        <div className="confirm-card-hdr-left">
+          <div className="confirm-card-hdr-icon" style={{background:'rgba(43,203,186,0.1)',borderColor:'rgba(43,203,186,0.2)',color:'var(--teal)'}}>{Icon.calendar(16)}</div>
+          <span className="confirm-card-hdr-title">Recurring: {action.title}</span>
+        </div>
+        <span className="confirm-card-hdr-badge" style={{background:'rgba(43,203,186,0.1)',color:'var(--teal)',border:'1px solid rgba(43,203,186,0.2)'}}>{checkedCount} events</span>
+      </div>
+      <div className="confirm-card-body" style={{maxHeight:200,overflowY:'auto'}}>
+        <label style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',cursor:'pointer',fontWeight:600,fontSize:'0.82rem',borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+          <input type="checkbox" checked={selAll} onChange={toggleAllEv}/> Select All ({generatedEvents.length})
+        </label>
+        {generatedEvents.map((ev,idx)=>(
+          <label key={ev.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',cursor:'pointer',fontSize:'0.82rem'}}>
+            <input type="checkbox" checked={ev.checked} onChange={()=>toggleEv(idx)}/>
+            <span>{ev.title} — {fmt(ev.date)} ({new Date(ev.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'})})</span>
+          </label>
+        ))}
+      </div>
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-yes" onClick={()=>onConfirm(generatedEvents.filter(e=>e.checked))} disabled={checkedCount===0}>
+          {Icon.check(14)} Add {checkedCount} Events
+        </button>
+        <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>{Icon.x(14)} Cancel</button>
       </div>
     </div>
   );
@@ -2187,6 +2377,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
     const map = {};
     function addItem(dateStr, item) {
       if (!map[dateStr]) map[dateStr] = [];
+      if (item.cls === 'block' && map[dateStr].some(i => i.cls === 'block' && i.title === item.title)) return;
       map[dateStr].push(item);
     }
     tasks.forEach(t => {
@@ -2198,8 +2389,22 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
       if (!ev.date) return;
       addItem(ev.date, { title: ev.title, cls: 'event' });
     });
+    (blocks.recurring || []).forEach(rb => {
+      calendarDays.forEach(cell => {
+        if (rb.days.includes(cell.date.getDay())) {
+          const ds = cell.date.getFullYear()+'-'+String(cell.date.getMonth()+1).padStart(2,'0')+'-'+String(cell.date.getDate()).padStart(2,'0');
+          addItem(ds, { title: rb.name, cls: 'block' });
+        }
+      });
+    });
+    Object.entries(blocks.dates || {}).forEach(([dateStr, slots]) => {
+      const seen = new Set();
+      Object.values(slots).forEach(slot => {
+        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); addItem(dateStr, { title: slot.name, cls: 'block' }); }
+      });
+    });
     return map;
-  }, [tasks, events]);
+  }, [tasks, events, blocks, calendarDays]);
 
   function prevMonth() { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }
   function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
@@ -3418,7 +3623,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     // Force Gemini tier 2 when photo is attached (Llama can't do vision)
     const routing = photo
       ? { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 }
-      : classifyMessage(text);
+      : await classifyMessage(text);
 
     try {
       const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
@@ -3470,16 +3675,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         setContentGenUsed(prev => prev + 1);
       }
 
-      let actions = parseActions(rawContent);
+      let actions = await parseActionsWithRecovery(rawContent, token);
       const displayContent = stripActionTags(rawContent);
 
-      // ── Fail-safe: Tier 2 action request but AI returned no action tags ──
-      // Skip for photo-only messages — the AI handles photos differently
-      // Route through the resolution pipeline so delete actions get proper title→ID matching
+      // ── JSON Recovery: Tier 2 action request but AI returned no action tags ──
+      // Re-prompt the model to generate the missing action tags before falling back to regex
       if (routing.tier === 2 && !routing.isContentGen && actions.length === 0 && !photo) {
-        const fallback = inferActionFromMessage(text);
-        if (fallback) {
-          actions = [fallback];
+        try {
+          const recoveryPrompt = 'The user said: "' + text + '"\nYour previous response was: "' + displayContent + '"\n\nYou were supposed to include an <action>JSON</action> tag but you didn\'t.\nBased on the user\'s message, generate ONLY the action tag(s) that should have been included.\nDo NOT include any conversational text \u2014 ONLY the <action>...</action> tag(s).\n\nAvailable action types: add_task, add_event, add_block, complete_task, delete_task, delete_event, update_event, delete_block, break_task, add_recurring_event\nToday is ' + today() + '.';
+          const recoveryResponse = await fetch(EDGE_FN_URL, {
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
+            body:JSON.stringify({ systemPrompt:recoveryPrompt, messages:[{role:'user',content:text}], maxTokens:256, model:routing.model, provider:routing.provider, isContentGen:false })
+          });
+          if (recoveryResponse.ok) {
+            const recoveryData = await recoveryResponse.json();
+            actions = parseActions(recoveryData?.content || '');
+          }
+        } catch (recoveryErr) { console.warn('JSON recovery re-prompt failed:', recoveryErr); }
+
+        // Final fallback: client-side regex inference
+        if (actions.length === 0) {
+          const fallback = inferActionFromMessage(text);
+          if (fallback) { actions = [fallback]; }
         }
       }
 
@@ -3521,7 +3739,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (actions.length > 0) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event'];
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
@@ -3821,9 +4039,51 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           </div>
         ))}
-        {pendingActions.map((pa,idx)=>(
+        {pendingActions.length > 1 ? (
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <BulkConfirmationCard
+              actions={pendingActions}
+              onConfirmSelected={(checkedArr)=>{
+                const toExec=pendingActions.filter((_,i)=>checkedArr[i]);
+                toExec.forEach(pa=>{
+                  if(pa.action.type==='add_recurring_event'){
+                    const dayNameToIndex={Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6};
+                    const dayIndices=(pa.action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
+                    const start=new Date(pa.action.start_date||new Date().toISOString().slice(0,10));
+                    const endDef=new Date();endDef.setMonth(endDef.getMonth()+3);
+                    const end=new Date(pa.action.end_date||endDef.toISOString().slice(0,10));
+                    const cursor=new Date(start);let count=0;
+                    while(cursor<=end&&count<100){
+                      if(dayIndices.includes(cursor.getDay())){
+                        const ds=cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+                        executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
+                        count++;
+                      }
+                      cursor.setDate(cursor.getDate()+1);
+                    }
+                  } else { executeAction(pa.action); }
+                });
+                setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
+                if(toExec.length>0)setToastMsg('Added '+toExec.length+' items');
+              }}
+              onCancel={()=>setPendingActions([])}
+            />
+          </div>
+        ) : pendingActions.map((pa,idx)=>(
           <div key={'pa-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
+            {pa.action.type==='add_recurring_event' ? (
+              <RecurringEventPopup
+                action={pa.action}
+                onConfirm={(checkedEvents)=>{
+                  checkedEvents.forEach(ev=>executeAction({type:'add_event',title:ev.title,date:ev.date,event_type:ev.event_type,subject:ev.subject}));
+                  setPendingActions(prev=>prev.filter((_,i)=>i!==idx));
+                  setToastMsg('Added '+checkedEvents.length+' recurring events');
+                }}
+                onCancel={()=>handleCancelAction(idx)}
+              />
+            ) : (
+              <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
+            )}
           </div>
         ))}
         {pendingContent.map((pc,idx)=>(
