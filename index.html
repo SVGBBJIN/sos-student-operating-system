@@ -452,7 +452,6 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
-const VOICE_FN_URL = SUPABASE_URL + '/functions/v1/sos-voice';
 
 
 /* ─── Date helpers ─── */
@@ -4011,7 +4010,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const token = session?.data?.session?.access_token;
       const form = new FormData();
       form.append('file', blob, 'voice.webm');
-      const res = await fetch(VOICE_FN_URL, {
+      const res = await fetch(EDGE_FN_URL, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
         body: form

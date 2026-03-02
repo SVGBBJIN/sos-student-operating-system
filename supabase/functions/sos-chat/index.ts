@@ -169,7 +169,6 @@ serve(async (req: Request) => {
 
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     if (!GROQ_API_KEY) {
       return new Response(
@@ -180,6 +179,53 @@ serve(async (req: Request) => {
         }
       );
     }
+
+    // ── Voice transcription path (multipart/form-data) ──
+    const contentType = req.headers.get("content-type") || "";
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await req.formData();
+      const audioFile = formData.get("file");
+
+      if (!audioFile) {
+        return new Response(
+          JSON.stringify({ error: "No audio file provided" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const groqForm = new FormData();
+      groqForm.append("file", audioFile, (audioFile as File).name || "audio.webm");
+      groqForm.append("model", "whisper-large-v3-turbo");
+      groqForm.append("response_format", "json");
+      groqForm.append("language", "en");
+
+      const groqRes = await fetch(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+          body: groqForm,
+        }
+      );
+
+      if (!groqRes.ok) {
+        const errText = await groqRes.text();
+        console.error("Groq Whisper error:", groqRes.status, errText);
+        return new Response(
+          JSON.stringify({ error: "Transcription failed", details: errText }),
+          { status: groqRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const whisperResult = await groqRes.json();
+      return new Response(
+        JSON.stringify({ text: whisperResult.text || "" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Chat completion path (JSON body) ──
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     const body = await req.json();
     const {
