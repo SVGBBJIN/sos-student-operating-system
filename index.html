@@ -2956,6 +2956,8 @@ function App() {
   const micStreamRef = useRef(null);
   const recordingTimerRef = useRef(null);
   const waveformRef = useRef(null);
+  const speechRecRef = useRef(null);             // live SpeechRecognition instance
+  const speechTranscriptRef = useRef('');         // fallback transcript from browser
   // Web Audio API for volume visualisation
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -3961,10 +3963,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
       audioChunksRef.current = [];
+      speechTranscriptRef.current = '';
       const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorderRef.current = recorder;
       recorder.start();
+      // Start browser SpeechRecognition in parallel as fallback
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SR) {
+        try {
+          const recognition = new SR();
+          recognition.lang = 'en-US';
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.onresult = (e) => { speechTranscriptRef.current = Array.from(e.results).map(r => r[0].transcript).join(''); };
+          recognition.onerror = () => {};
+          speechRecRef.current = recognition;
+          recognition.start();
+        } catch(e) { /* browser doesn't support — fine, Groq is primary */ }
+      }
       startWaveformAnimation(stream);
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
@@ -3975,9 +3992,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
   }
 
+  function stopSpeechRec() {
+    if (speechRecRef.current) { try { speechRecRef.current.stop(); } catch(e) {} speechRecRef.current = null; }
+  }
+
   function stopRecording() {
     clearInterval(recordingTimerRef.current);
     stopWaveformAnimation();
+    stopSpeechRec();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.onstop = async () => {
         cleanupMicStream();
@@ -3993,6 +4015,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function cancelRecording() {
     clearInterval(recordingTimerRef.current);
     stopWaveformAnimation();
+    stopSpeechRec();
+    speechTranscriptRef.current = '';
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.onstop = null;
       mediaRecorderRef.current.ondataavailable = null;
@@ -4005,10 +4029,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   async function transcribeAudio(blob) {
     setIsTranscribing(true);
+    let transcript = '';
     try {
+      // Primary: Groq Whisper via edge function
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-      // Convert blob to base64 for JSON transport (avoids multipart issues with edge functions)
       const arrayBuf = await blob.arrayBuffer();
       const bytes = new Uint8Array(arrayBuf);
       let binary = '';
@@ -4022,24 +4047,28 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         },
         body: JSON.stringify({ mode: 'voice', audioBase64, audioMimeType: blob.type || 'audio/webm' })
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || 'Transcription failed');
+      if (res.ok) {
+        const data = await res.json();
+        transcript = (data.text || '').trim();
       }
-      const data = await res.json();
-      const transcript = (data.text || '').trim();
-      if (transcript) {
-        setInput(prev => prev ? prev + ' ' + transcript : transcript);
-        inputRef.current?.focus();
-      } else {
-        setToastMsg("Couldn't catch that — try speaking louder or closer");
-      }
-    } catch (err) {
-      console.error('Transcription error:', err);
-      setToastMsg("Voice transcription failed — " + (err.message || 'try again'));
-    } finally {
-      setIsTranscribing(false);
+    } catch (groqErr) {
+      console.warn('Groq transcription failed, checking browser fallback:', groqErr);
     }
+
+    // Fallback: use browser SpeechRecognition transcript collected during recording
+    if (!transcript) {
+      transcript = (speechTranscriptRef.current || '').trim();
+      if (transcript) console.log('Using browser SpeechRecognition fallback');
+    }
+    speechTranscriptRef.current = '';
+
+    if (transcript) {
+      setInput(prev => prev ? prev + ' ' + transcript : transcript);
+      inputRef.current?.focus();
+    } else {
+      setToastMsg("Couldn't catch that — try speaking louder or closer");
+    }
+    setIsTranscribing(false);
   }
 
 
