@@ -180,21 +180,27 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── Voice transcription path (multipart/form-data) ──
-    const contentType = req.headers.get("content-type") || "";
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await req.formData();
-      const audioFile = formData.get("file");
+    const body = await req.json();
 
-      if (!audioFile) {
+    // ── Voice transcription path ──
+    if (body.mode === "voice") {
+      const { audioBase64, audioMimeType } = body;
+      if (!audioBase64) {
         return new Response(
-          JSON.stringify({ error: "No audio file provided" }),
+          JSON.stringify({ error: "No audio data provided" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
+      // Decode base64 → binary → Blob → File for Groq
+      const binaryStr = atob(audioBase64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const audioBlob = new Blob([bytes], { type: audioMimeType || "audio/webm" });
+      const audioFile = new File([audioBlob], "voice.webm", { type: audioMimeType || "audio/webm" });
+
       const groqForm = new FormData();
-      groqForm.append("file", audioFile, (audioFile as File).name || "audio.webm");
+      groqForm.append("file", audioFile, "voice.webm");
       groqForm.append("model", "whisper-large-v3-turbo");
       groqForm.append("response_format", "json");
       groqForm.append("language", "en");
@@ -224,10 +230,9 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── Chat completion path (JSON body) ──
+    // ── Chat completion path ──
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
-    const body = await req.json();
     const {
       systemPrompt,
       messages,

@@ -4008,12 +4008,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     try {
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-      const form = new FormData();
-      form.append('file', blob, 'voice.webm');
+      // Convert blob to base64 for JSON transport (avoids multipart issues with edge functions)
+      const arrayBuf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const audioBase64 = btoa(binary);
       const res = await fetch(EDGE_FN_URL, {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
-        body: form
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY)
+        },
+        body: JSON.stringify({ mode: 'voice', audioBase64, audioMimeType: blob.type || 'audio/webm' })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
