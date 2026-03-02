@@ -444,6 +444,25 @@ function fmtTime(h, m) {
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
 }
 
+/* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
+function summarizeBlockSlots(slotMap) {
+  const entries = Object.entries(slotMap).filter(([,v]) => v).sort(([a],[b]) => a.localeCompare(b));
+  if (!entries.length) return [];
+  const ranges = [];
+  let curName = null, startKey = null, prevKey = null;
+  const advance = key => { const [h,m] = key.split(':').map(Number); return String(m===30?h+1:h).padStart(2,'0')+':'+(m===30?'00':'30'); };
+  for (const [key, val] of entries) {
+    const name = val?.name || String(val);
+    if (name !== curName) {
+      if (curName !== null) ranges.push(curName + ' ' + startKey + '-' + advance(prevKey));
+      curName = name; startKey = key;
+    }
+    prevKey = key;
+  }
+  if (curName !== null) ranges.push(curName + ' ' + startKey + '-' + advance(prevKey));
+  return ranges;
+}
+
 /* ─── Map raw Google Calendar API items → app event shape ─── */
 function mapGoogleCalItems(items) {
   return items.filter(e => e.summary).map(e => ({
@@ -875,10 +894,24 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
   const weekSummary = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(); d.setDate(d.getDate() - d.getDay() + i);
-    const ds = toDateStr(d); const dow = d.getDay(); const activities = [];
+    const ds = toDateStr(d); const dow = d.getDay();
+    // Build merged block map (recurring base + date-specific overrides) for this day
+    const daySlots = {};
     (blocks.recurring || []).forEach(rb => {
-      if (rb.days.includes(dow)) activities.push(rb.name + ' ' + rb.start + '-' + rb.end);
+      if (rb.days.includes(dow)) {
+        const [sh,sm] = rb.start.split(':').map(Number);
+        const [eh,em] = rb.end.split(':').map(Number);
+        let ch=sh, cm=sm;
+        while (ch<eh||(ch===eh&&cm<em)) {
+          daySlots[String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0')] = { name: rb.name };
+          cm+=30; if(cm>=60){ch++;cm=0;}
+        }
+      }
     });
+    Object.entries(blocks.dates?.[ds] || {}).forEach(([k,v]) => {
+      if (v===null) delete daySlots[k]; else daySlots[k] = v;
+    });
+    const activities = summarizeBlockSlots(daySlots);
     tasks.filter(t => t.dueDate === ds && t.status !== 'done').forEach(t => activities.push('DUE: ' + t.title));
     events.filter(e => e.date === ds).forEach(e => activities.push('EVENT: ' + e.title));
     if (activities.length > 0) weekSummary.push(dayNames[dow] + ' ' + fmt(ds) + ': ' + activities.join(', '));
@@ -922,9 +955,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
   // ── Tier 1 (Llama) gets a lean prompt — no task list to hallucinate from ──
   if (tier === 1) {
     const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
-    const scheduleStr = Object.entries(todayBlocks).length > 0
-      ? Object.entries(todayBlocks).sort().map(([k,v]) => k + ' ' + v.name).join(', ')
-      : 'nothing scheduled';
+    const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
     return `You are SOS, a chill study sidekick. Talk like a supportive friend — casual, brief (2-3 sentences max), never condescending.
 
 TODAY: ${todayStr}
@@ -969,7 +1000,7 @@ ${taskList || '(none)'}
 ${overdueTasks.length > 0 ? 'OVERDUE: ' + overdueTasks.map(t => t.title + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ') : ''}
 
 TODAY'S SCHEDULE:
-${Object.entries(todayBlocks).length > 0 ? Object.entries(todayBlocks).sort().map(([k, v]) => k + ' ' + v.name).join('\n') : '(nothing scheduled)'}
+${summarizeBlockSlots(todayBlocks).join('\n') || '(nothing scheduled)'}
 
 THIS WEEK:
 ${weekSummary.join('\n') || '(no scheduled activities)'}
@@ -2847,6 +2878,7 @@ function App() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const speechRecRef = useRef(null);          // Web Speech API instance
   // Web Audio API for volume visualisation
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -3793,8 +3825,75 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
   }
   // ── Voice-to-text recording ──
+  // ── Ring animation helpers ──
+  function startRingAnimation(stream) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.75;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    audioContextRef.current = ctx; analyserRef.current = analyser; dataArrayRef.current = data;
+    let idlePhase = 0;
+    function tick() {
+      analyser.getByteFrequencyData(data);
+      let sum = 0; const bins = Math.min(60, data.length);
+      for (let i = 0; i < bins; i++) sum += data[i];
+      const vol = Math.min(sum / bins / 85, 1);
+      idlePhase += 0.028;
+      const idle = Math.sin(idlePhase) * 0.022 + 1;
+      if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
+      if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
+      if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
+      if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
+      animFrameRef.current = requestAnimationFrame(tick);
+    }
+    animFrameRef.current = requestAnimationFrame(tick);
+  }
+  function stopRingAnimation() {
+    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
+  }
+
   async function startRecording() {
     if (!user) { setShowAuthModal(true); return; }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      // ── Primary path: browser-native speech recognition (no API key needed) ──
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        startRingAnimation(stream);
+        setIsRecording(true);
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        speechRecRef.current = recognition;
+        recognition.onresult = (e) => {
+          const transcript = Array.from(e.results).map(r => r[0].transcript).join('').trim();
+          if (transcript) { setInput(prev => prev ? prev + ' ' + transcript : transcript); inputRef.current?.focus(); }
+          else setToastMsg("Couldn't catch that — try speaking louder or closer");
+        };
+        recognition.onend = () => {
+          stream.getTracks().forEach(t => t.stop());
+          stopRingAnimation();
+          setIsRecording(false);
+          speechRecRef.current = null;
+        };
+        recognition.onerror = (e) => {
+          if (e.error !== 'aborted') setToastMsg(e.error === 'not-allowed' ? "Couldn't access microphone — check browser permissions" : "Couldn't catch that — try again");
+        };
+        recognition.start();
+      } catch (err) {
+        console.error('Mic access error:', err);
+        setToastMsg("Couldn't access microphone — check browser permissions");
+      }
+      return;
+    }
+
+    // ── Fallback: MediaRecorder + Groq Whisper ──
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
@@ -3808,41 +3907,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
-
-      // ── Web Audio: volume analyser for ring animation ──
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.75;
-        ctx.createMediaStreamSource(stream).connect(analyser);
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        audioContextRef.current = ctx;
-        analyserRef.current = analyser;
-        dataArrayRef.current = data;
-
-        let idlePhase = 0;
-        function tick() {
-          analyser.getByteFrequencyData(data);
-          // Average the speech-frequency bins (~300Hz–3kHz ≈ first 60 bins at 512 fftSize)
-          let sum = 0;
-          const bins = Math.min(60, data.length);
-          for (let i = 0; i < bins; i++) sum += data[i];
-          const vol = Math.min(sum / bins / 85, 1); // normalise 0–1
-
-          // Gentle sine-wave idle breath + voice-driven expansion
-          idlePhase += 0.028;
-          const idle = Math.sin(idlePhase) * 0.022 + 1;
-          if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
-          if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
-          if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
-          if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
-          animFrameRef.current = requestAnimationFrame(tick);
-        }
-        animFrameRef.current = requestAnimationFrame(tick);
-      }
-
+      startRingAnimation(stream);
       setIsRecording(true);
     } catch (err) {
       console.error('Mic access error:', err);
@@ -3851,11 +3916,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   function stopRecording() {
-    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
-    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
+    if (speechRecRef.current) { speechRecRef.current.stop(); speechRecRef.current = null; return; }
+    stopRingAnimation();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
     setIsRecording(false);
   }
 
