@@ -169,7 +169,6 @@ serve(async (req: Request) => {
 
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     if (!GROQ_API_KEY) {
       return new Response(
@@ -182,6 +181,58 @@ serve(async (req: Request) => {
     }
 
     const body = await req.json();
+
+    // ── Voice transcription path ──
+    if (body.mode === "voice") {
+      const { audioBase64, audioMimeType } = body;
+      if (!audioBase64) {
+        return new Response(
+          JSON.stringify({ error: "No audio data provided" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Decode base64 → binary → Blob → File for Groq
+      const binaryStr = atob(audioBase64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const audioBlob = new Blob([bytes], { type: audioMimeType || "audio/webm" });
+      const audioFile = new File([audioBlob], "voice.webm", { type: audioMimeType || "audio/webm" });
+
+      const groqForm = new FormData();
+      groqForm.append("file", audioFile, "voice.webm");
+      groqForm.append("model", "whisper-large-v3-turbo");
+      groqForm.append("response_format", "json");
+      groqForm.append("language", "en");
+
+      const groqRes = await fetch(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+          body: groqForm,
+        }
+      );
+
+      if (!groqRes.ok) {
+        const errText = await groqRes.text();
+        console.error("Groq Whisper error:", groqRes.status, errText);
+        return new Response(
+          JSON.stringify({ error: "Transcription failed", details: errText }),
+          { status: groqRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const whisperResult = await groqRes.json();
+      return new Response(
+        JSON.stringify({ text: whisperResult.text || "" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Chat completion path ──
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+
     const {
       systemPrompt,
       messages,

@@ -191,7 +191,6 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .auth-form{background:linear-gradient(145deg,#1a1a2e 0%,#0f0f1a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:24px;padding:32px 28px;width:100%;max-width:360px;animation:scaleIn .4s cubic-bezier(0.16,1,0.3,1)}
 .auth-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px 16px;color:var(--text);font-size:0.92rem;outline:none;margin-bottom:12px;transition:border-color .25s ease,box-shadow .25s ease}
 .auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,0.12),0 0 20px rgba(108,99,255,0.06)}
-.auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(108,99,255,0.2)}
 .auth-btn{width:100%;padding:12px;border-radius:14px;border:none;font-weight:700;font-size:0.95rem;cursor:pointer;transition:all .15s;margin-bottom:8px}
 .auth-btn:active{transform:scale(0.97)}
 .auth-btn-primary{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;box-shadow:0 2px 8px rgba(108,99,255,0.2)}
@@ -349,6 +348,36 @@ select option{background:#0f0f23;color:var(--text)}
 .voice-ring-3{width:162px;height:162px;border:1.5px solid rgba(108,99,255,0.38);box-shadow:inset 0 0 30px rgba(108,99,255,0.07),0 0 24px rgba(108,99,255,0.08)}
 .voice-ring-4{width:110px;height:110px;border:2px solid rgba(108,99,255,0.55);background:rgba(108,99,255,0.07);box-shadow:inset 0 0 24px rgba(108,99,255,0.12),0 0 32px rgba(108,99,255,0.12)}
 .voice-center{width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 0 32px rgba(108,99,255,0.65),0 0 72px rgba(108,99,255,0.28),inset 0 1px 0 rgba(255,255,255,0.18)}
+
+/* ── Inline Voice Recording Bar ── */
+.voice-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97));border:1px solid rgba(255,71,87,0.2);border-radius:28px;animation:scaleIn .2s ease;box-shadow:0 4px 20px rgba(0,0,0,0.3),inset 0 0 30px rgba(255,71,87,0.03)}
+.voice-bar-indicator{display:flex;align-items:center;gap:6px}
+.voice-bar-dot{width:10px;height:10px;border-radius:50%;background:var(--danger);box-shadow:0 0 8px rgba(255,71,87,0.5);animation:gentlePulse 1s ease-in-out infinite}
+.voice-bar-timer{font-size:0.82rem;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;min-width:34px}
+.voice-bar-waveform{flex:1;display:flex;align-items:center;justify-content:center;gap:2px;height:36px;overflow:hidden}
+.voice-bar-bar{width:3px;min-height:3px;border-radius:2px;background:linear-gradient(180deg,var(--accent),rgba(108,99,255,0.4));transition:height .06s ease-out}
+.voice-bar-cancel{width:38px;height:38px;border-radius:50%;background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.2);color:var(--danger);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.voice-bar-cancel:hover{background:rgba(255,71,87,0.18);border-color:var(--danger)}
+.voice-bar-send{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#5a54d4);border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;box-shadow:0 2px 12px rgba(108,99,255,0.3)}
+.voice-bar-send:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(108,99,255,0.4)}
+
+/* ── Plan Card ── */
+.plan-card{background:linear-gradient(160deg,rgba(10,10,18,0.97),rgba(15,15,30,0.95));border:1px solid rgba(108,99,255,0.12);border-radius:16px;overflow:hidden;max-width:420px;animation:floatUp .4s cubic-bezier(0.16,1,0.3,1);box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+.plan-card-hdr{padding:14px 18px;border-bottom:1px solid rgba(108,99,255,0.1);background:linear-gradient(135deg,rgba(108,99,255,0.1),rgba(43,203,186,0.06));display:flex;align-items:center;gap:10px}
+.plan-card-hdr-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--teal));display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 4px 12px rgba(108,99,255,0.25)}
+.plan-card-hdr-title{font-weight:800;font-size:0.92rem;color:var(--text);flex:1}
+.plan-card-body{padding:6px 0;max-height:320px;overflow-y:auto}
+.plan-step{display:flex;align-items:flex-start;gap:10px;padding:10px 18px;cursor:pointer;transition:background .15s;border-bottom:1px solid rgba(255,255,255,0.02)}
+.plan-step:hover{background:rgba(108,99,255,0.04)}
+.plan-step:last-child{border-bottom:none}
+.plan-step-check{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--border);background:transparent;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;transition:all .2s;cursor:pointer}
+.plan-step-check.checked{background:linear-gradient(135deg,var(--accent),var(--teal));border-color:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(108,99,255,0.3)}
+.plan-step-content{flex:1;min-width:0}
+.plan-step-title{font-size:0.85rem;font-weight:600;color:var(--text);line-height:1.4}
+.plan-step-title.done{text-decoration:line-through;opacity:0.5}
+.plan-step-meta{font-size:0.72rem;color:var(--text-dim);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.plan-step-line{position:absolute;left:27px;top:32px;bottom:0;width:2px;background:rgba(108,99,255,0.1)}
+.plan-card-footer{padding:10px 18px;border-top:1px solid rgba(108,99,255,0.08);display:flex;gap:8px;background:rgba(108,99,255,0.02)}
 </style>
 </head>
 <body>
@@ -374,6 +403,7 @@ const Icon = {
   camera:(s=18)=>I(['M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z',{tag:'circle',cx:'12',cy:'13',r:'4'}],s),
   send:(s=18)=>I(['M22 2L11 13','M22 2l-7 20-4-9-9-4 20-7z'],s),
   calendar:(s=18)=>I([{tag:'rect',x:'3',y:'4',width:'18',height:'18',rx:'2',ry:'2'},'M16 2v4','M8 2v4','M3 10h18'],s),
+  clock:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'},'M12 6v6l4 2'],s),
   calendarClock:(s=18)=>I([{tag:'rect',x:'3',y:'4',width:'18',height:'18',rx:'2',ry:'2'},'M16 2v4','M8 2v4','M3 10h18','M12 14v2l1.5 1.5'],s),
   checkCircle:(s=18)=>I(['M22 11.08V12a10 10 0 1 1-5.93-9.14','M22 4L12 14.01l-3-3'],s),
   scissors:(s=18)=>I([{tag:'circle',cx:'6',cy:'6',r:'3'},{tag:'circle',cx:'6',cy:'18',r:'3'},'M20 4L8.12 15.88','M14.47 14.48L20 20','M8.12 8.12L12 12'],s),
@@ -422,7 +452,6 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
-const VOICE_FN_URL = SUPABASE_URL + '/functions/v1/sos-voice';
 
 
 /* ─── Date helpers ─── */
@@ -443,6 +472,36 @@ function fmtTime(h, m) {
   const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
   const ampm = h >= 12 ? 'PM' : 'AM';
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+}
+
+/* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
+function summarizeBlockSlots(slotMap) {
+  const entries = Object.entries(slotMap).filter(([,v]) => v).sort(([a],[b]) => a.localeCompare(b));
+  if (!entries.length) return [];
+  const ranges = [];
+  let curName = null, startKey = null, prevKey = null;
+  const advance = key => { const [h,m] = key.split(':').map(Number); return String(m===30?h+1:h).padStart(2,'0')+':'+(m===30?'00':'30'); };
+  for (const [key, val] of entries) {
+    const name = val?.name || String(val);
+    if (name !== curName) {
+      if (curName !== null) ranges.push(curName + ' ' + startKey + '-' + advance(prevKey));
+      curName = name; startKey = key;
+    }
+    prevKey = key;
+  }
+  if (curName !== null) ranges.push(curName + ' ' + startKey + '-' + advance(prevKey));
+  return ranges;
+}
+
+/* ─── Map raw Google Calendar API items → app event shape ─── */
+function mapGoogleCalItems(items) {
+  return items.filter(e => e.summary).map(e => ({
+    googleId: e.id,
+    title: e.summary,
+    date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
+    startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
+    allDay: !!e.start?.date,
+  }));
 }
 
 /* ─── Nudge Engine ─── */
@@ -639,13 +698,17 @@ const SUBJECT_ALIASES = {
   cs:'computer science', comp:'computer science', la:'language arts'
 };
 
+const SUBJECT_ALIAS_PATTERNS = Object.entries(SUBJECT_ALIASES).map(
+  ([short, long]) => ({ regex: new RegExp('\\b' + short + '\\b', 'g'), replacement: long })
+);
 function normalize(str) {
   if (!str) return '';
   let s = str.toLowerCase().trim();
   // expand known abbreviations
-  Object.entries(SUBJECT_ALIASES).forEach(([short, long]) => {
-    s = s.replace(new RegExp('\\b' + short + '\\b', 'g'), long);
-  });
+  for (const { regex, replacement } of SUBJECT_ALIAS_PATTERNS) {
+    regex.lastIndex = 0;
+    s = s.replace(regex, replacement);
+  }
   return s;
 }
 
@@ -861,10 +924,24 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
   const weekSummary = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(); d.setDate(d.getDate() - d.getDay() + i);
-    const ds = toDateStr(d); const dow = d.getDay(); const activities = [];
+    const ds = toDateStr(d); const dow = d.getDay();
+    // Build merged block map (recurring base + date-specific overrides) for this day
+    const daySlots = {};
     (blocks.recurring || []).forEach(rb => {
-      if (rb.days.includes(dow)) activities.push(rb.name + ' ' + rb.start + '-' + rb.end);
+      if (rb.days.includes(dow)) {
+        const [sh,sm] = rb.start.split(':').map(Number);
+        const [eh,em] = rb.end.split(':').map(Number);
+        let ch=sh, cm=sm;
+        while (ch<eh||(ch===eh&&cm<em)) {
+          daySlots[String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0')] = { name: rb.name };
+          cm+=30; if(cm>=60){ch++;cm=0;}
+        }
+      }
     });
+    Object.entries(blocks.dates?.[ds] || {}).forEach(([k,v]) => {
+      if (v===null) delete daySlots[k]; else daySlots[k] = v;
+    });
+    const activities = summarizeBlockSlots(daySlots);
     tasks.filter(t => t.dueDate === ds && t.status !== 'done').forEach(t => activities.push('DUE: ' + t.title));
     events.filter(e => e.date === ds).forEach(e => activities.push('EVENT: ' + e.title));
     if (activities.length > 0) weekSummary.push(dayNames[dow] + ' ' + fmt(ds) + ': ' + activities.join(', '));
@@ -908,9 +985,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
   // ── Tier 1 (Llama) gets a lean prompt — no task list to hallucinate from ──
   if (tier === 1) {
     const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
-    const scheduleStr = Object.entries(todayBlocks).length > 0
-      ? Object.entries(todayBlocks).sort().map(([k,v]) => k + ' ' + v.name).join(', ')
-      : 'nothing scheduled';
+    const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
     return `You are SOS, a chill study sidekick. Talk like a supportive friend — casual, brief (2-3 sentences max), never condescending.
 
 TODAY: ${todayStr}
@@ -955,7 +1030,7 @@ ${taskList || '(none)'}
 ${overdueTasks.length > 0 ? 'OVERDUE: ' + overdueTasks.map(t => t.title + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ') : ''}
 
 TODAY'S SCHEDULE:
-${Object.entries(todayBlocks).length > 0 ? Object.entries(todayBlocks).sort().map(([k, v]) => k + ' ' + v.name).join('\n') : '(nothing scheduled)'}
+${summarizeBlockSlots(todayBlocks).join('\n') || '(nothing scheduled)'}
 
 THIS WEEK:
 ${weekSummary.join('\n') || '(no scheduled activities)'}
@@ -984,6 +1059,7 @@ delete_event: {"type":"delete_event","title":"..."}
 update_event: {"type":"update_event","title":"...","new_title":"(optional new name)","date":"YYYY-MM-DD"}
 delete_block: {"type":"delete_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"}
 add_recurring_event: {"type":"add_recurring_event","title":"...","event_type":"practice","subject":"...","days":["Monday","Wednesday","Friday"],"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}
+make_plan: {"type":"make_plan","title":"Study Plan for Finals","steps":[{"title":"Review Ch.1 notes","date":"YYYY-MM-DD","time":"16:00-17:00","estimated_minutes":60},{"title":"Practice problems","date":"YYYY-MM-DD","time":"15:00-16:00","estimated_minutes":60}]}
 
 RULES:
 1. ALWAYS output the <action> tag. Never describe what you "could" do — just do it.
@@ -1007,6 +1083,7 @@ WHEN TO USE EACH ACTION:
 - "rename/call it/change name of" + event → update_event with new_title
 - "remind me/note this/save this/remember" → add_task or add_note
 - "every Monday/Wednesday/Friday" or "Mon/Wed/Fri weekly" or "practice on Tuesdays and Thursdays" → add_recurring_event (use start_date = today, end_date = 3 months from today unless specified)
+- "make me a plan/help me plan/plan out/schedule my study/build a plan" → make_plan (create a structured step-by-step plan with dates, times, and estimated minutes for each step. Consider existing blocks and events to avoid conflicts.)
 
 EXAMPLES:
 
@@ -1164,7 +1241,7 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown'];
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
@@ -1450,7 +1527,6 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   useEffect(() => { setEditData({ ...action }); }, [action]);
 
   function getCardInfo() {
-    const isDanger = ['delete_task','delete_event','delete_block'].includes(action.type);
     switch (action.type) {
       case 'add_task': return { icon:Icon.clipboard(16), label:'New Task', badge:'task', badgeColor:'var(--accent)', borderColor:'var(--accent)', fields: [
         { key:'title', label:'Title', value:action.title }, { key:'subject', label:'Class', value:action.subject||'—' },
@@ -1616,7 +1692,7 @@ function RecurringEventPopup({ action, onConfirm, onCancel }) {
     const cursor = new Date(start);
     while (cursor <= end && generated.length < 100) {
       if (dayIndices.includes(cursor.getDay())) {
-        const ds = cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+        const ds = toDateStr(cursor);
         generated.push({ id:Math.random().toString(36).slice(2), title:action.title||'Event', date:ds, event_type:action.event_type||'event', subject:action.subject||'', checked:true });
       }
       cursor.setDate(cursor.getDate()+1);
@@ -1811,8 +1887,50 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss }) {
+function PlanCard({ data, onApply, onSave, onDismiss }) {
+  const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
+  const steps = data.steps || [];
+  const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
+  const checkedCount = checked.filter(Boolean).length;
+  return (
+    <div className="plan-card">
+      <div className="plan-card-hdr">
+        <div className="plan-card-hdr-icon">{Icon.listTree(18)}</div>
+        <div className="plan-card-hdr-title">{data.title||'Plan'}</div>
+        <span style={{fontSize:'0.7rem',fontWeight:700,padding:'2px 8px',borderRadius:6,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
+      </div>
+      <div className="plan-card-body">
+        {steps.map((step,i) => (
+          <div key={i} className="plan-step" onClick={() => toggle(i)}>
+            <div className={'plan-step-check' + (checked[i] ? ' checked' : '')}>
+              {checked[i] && Icon.check(12)}
+            </div>
+            <div className="plan-step-content">
+              <div className={'plan-step-title' + (checked[i] ? '' : ' done')}>{step.title}</div>
+              <div className="plan-step-meta">
+                {step.date && <span>{Icon.calendar(10)} {fmt(step.date)}</span>}
+                {step.time && <span>{Icon.clock(10)} {step.time}</span>}
+                {step.estimated_minutes && <span>{step.estimated_minutes}min</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="plan-card-footer">
+        <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={() => onApply(steps.filter((_,i) => checked[i]))}>
+          {Icon.check(14)} Add {checkedCount} as tasks
+        </button>
+        <button className="confirm-btn confirm-btn-edit" onClick={onSave}>Save to notes</button>
+        <button className="confirm-btn confirm-btn-cancel" onClick={onDismiss}>{Icon.x(12)}</button>
+      </div>
+    </div>
+  );
+}
+
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
   switch (content.type) {
+    case 'make_plan':
+      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_flashcards':
       return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_quiz':
@@ -2069,13 +2187,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
       const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, { headers: authHeader() });
       if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Calendar fetch failed: ' + res.status); }
       const data = await res.json();
-      const evs = (data.items || []).filter(e => e.summary).map(e => ({
-        googleId: e.id,
-        title: e.summary,
-        date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
-        startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
-        allDay: !!e.start?.date,
-      }));
+      const evs = mapGoogleCalItems(data.items || []);
       setCalEvents(evs);
       setSelected(new Set(evs.map((_,i) => i)));
       setCalFetched(true);
@@ -2392,7 +2504,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
     (blocks.recurring || []).forEach(rb => {
       calendarDays.forEach(cell => {
         if (rb.days.includes(cell.date.getDay())) {
-          const ds = cell.date.getFullYear()+'-'+String(cell.date.getMonth()+1).padStart(2,'0')+'-'+String(cell.date.getDate()).padStart(2,'0');
+          const ds = toDateStr(cell.date);
           addItem(ds, { title: rb.name, cls: 'block' });
         }
       });
@@ -2442,7 +2554,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
           <div className="cal-grid">
             {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
             {calendarDays.map((cell, i) => {
-              const dateStr = cell.date.getFullYear() + '-' + String(cell.date.getMonth()+1).padStart(2,'0') + '-' + String(cell.date.getDate()).padStart(2,'0');
+              const dateStr = toDateStr(cell.date);
               const isToday = dateStr === todayKey;
               const items = dateItemsMap[dateStr] || [];
               const maxShow = 2;
@@ -2545,9 +2657,10 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
     const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 1);
     if (queryWords.length === 0) return text;
     const pattern = queryWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const regex = new RegExp('(' + pattern + ')', 'gi');
-    const parts = text.split(regex);
-    return parts.map((part, i) => regex.test(part)
+    const splitRegex = new RegExp('(' + pattern + ')', 'gi');
+    const testRegex = new RegExp(pattern, 'i');
+    const parts = text.split(splitRegex);
+    return parts.map((part, i) => testRegex.test(part)
       ? React.createElement('span', { key: i, className: 'notes-match' }, part)
       : part
     );
@@ -2622,26 +2735,23 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
     setNewNoteName('');
   }
 
-  // ── Formatting toolbar component ──
-  function FormatToolbar() {
-    return (
-      <div className="notes-toolbar">
-        <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
-        <div className="notes-toolbar-sep"/>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
-        <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
-      </div>
-    );
-  }
+  const FormatToolbar = useCallback(() => (
+    <div className="notes-toolbar">
+      <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
+      <div className="notes-toolbar-sep"/>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
+      <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
+    </div>
+  ), []);
 
   return (
     <>
@@ -2769,6 +2879,15 @@ function Toast({message,onDone}){
   return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:14,background:'linear-gradient(135deg,var(--success),#1db954)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4),0 0 40px rgba(46,213,115,0.1)',animation:'toastIn .3s cubic-bezier(0.16,1,0.3,1), toastOut .3s ease 2.1s forwards',backdropFilter:'blur(8px)'}}>{message}</div>);
 }
 
+/* ─── Typing Dots (loading indicator) ─── */
+const TypingDots=()=>(
+  <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
+      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
+    </div>
+  </div>
+);
+
 /* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
@@ -2831,8 +2950,14 @@ function App() {
   // Voice-to-text state
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const micStreamRef = useRef(null);
+  const recordingTimerRef = useRef(null);
+  const waveformRef = useRef(null);
+  const speechRecRef = useRef(null);             // live SpeechRecognition instance
+  const speechTranscriptRef = useRef('');         // fallback transcript from browser
   // Web Audio API for volume visualisation
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -3058,6 +3183,7 @@ function App() {
           const date = action.date || today();
           const [sh,sm] = (action.start||'00:00').split(':').map(Number);
           const [eh,em] = (action.end||'01:00').split(':').map(Number);
+          const slotOps = [];
           setBlocks(prev => {
             const newDates = { ...(prev.dates||{}) };
             const dayBlocks = { ...(newDates[date]||{}) };
@@ -3066,12 +3192,13 @@ function App() {
               const key = String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');
               const data = { name:action.activity||'Block', category:action.category||'school' };
               dayBlocks[key] = data;
-              if (user) syncOp(() => dbUpsertDateBlock(date, key, data, user.id));
+              slotOps.push({ date, key, data });
               cm+=30; if(cm>=60){ch++;cm=0;}
             }
             newDates[date] = dayBlocks;
             return { ...prev, dates:newDates };
           });
+          if (user && slotOps.length > 0) syncOp(() => Promise.all(slotOps.map(s => dbUpsertDateBlock(s.date, s.key, s.data, user.id))));
           break;
         }
         case 'add_event': {
@@ -3104,11 +3231,11 @@ function App() {
           break;
         }
         case 'break_task': {
-          (action.subtasks||[]).forEach(st => {
-            const task = { id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
-            setTasks(prev => [...prev, task]);
-            if (user) syncOp(() => dbUpsertTask(task, user.id));
-          });
+          const newTasks = (action.subtasks||[]).map(st => ({
+            id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+          }));
+          setTasks(prev => [...prev, ...newTasks]);
+          if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
           break;
         }
         case 'delete_task': {
@@ -3157,6 +3284,7 @@ function App() {
             const delDate = action.date;
             const [dsh,dsm] = (action.start).split(':').map(Number);
             const [deh,dem] = (action.end||action.start).split(':').map(Number);
+            const delOps = [];
             setBlocks(prev => {
               const newDates = { ...(prev.dates||{}) };
               const dayBlks = { ...(newDates[delDate]||{}) };
@@ -3164,12 +3292,13 @@ function App() {
               while (dch<deh||(dch===deh&&dcm<dem)) {
                 const key = String(dch).padStart(2,'0')+':'+String(dcm).padStart(2,'0');
                 delete dayBlks[key];
-                if (user) syncOp(() => dbUpsertDateBlock(delDate, key, null, user.id));
+                delOps.push(key);
                 dcm+=30; if(dcm>=60){dch++;dcm=0;}
               }
               newDates[delDate] = dayBlks;
               return { ...prev, dates:newDates };
             });
+            if (user && delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(delDate, key, null, user.id))));
           }
           break;
         default: console.warn('Unknown action type:', action.type);
@@ -3203,6 +3332,8 @@ function App() {
           return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
         case 'create_project_breakdown':
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
+        case 'make_plan':
+          return '# ' + (c.title||'Plan') + '\n\n' + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
         default: return JSON.stringify(c, null, 2);
       }
     } catch(e) { return JSON.stringify(c, null, 2); }
@@ -3216,6 +3347,13 @@ function App() {
     setToastMsg('Saved "' + (c.title || 'content') + '" to notes');
   }
   function handleDismissContent(idx) { setPendingContent(prev => prev.filter((_,i) => i !== idx)); }
+  function handleApplyPlan(idx, steps) {
+    steps.forEach(step => {
+      executeAction({ type:'add_task', title:step.title, subject:'', due:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
+    });
+    setPendingContent(prev => prev.filter((_,i) => i !== idx));
+    setToastMsg('Added ' + steps.length + ' tasks from plan');
+  }
 
   // ── Google import handlers ──
   // silent=true: called by auto-sync (no modal close, no toast, returns count for status display)
@@ -3278,13 +3416,7 @@ function App() {
         throw new Error('Calendar fetch failed (' + res.status + ')');
       }
       const data = await res.json();
-      const gevents = (data.items || []).filter(e => e.summary).map(e => ({
-        googleId: e.id,
-        title: e.summary,
-        date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
-        startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
-        allDay: !!e.start?.date,
-      }));
+      const gevents = mapGoogleCalItems(data.items || []);
       // 1. Import/update from Google
       const count = handleImportGoogleEvents(gevents, true);
       // 2. Detect Google-side deletions: use functional updater to read
@@ -3781,56 +3913,78 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
   }
   // ── Voice-to-text recording ──
+  // ── Audio animation helpers ──
+  function startWaveformAnimation(stream) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.75;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    audioContextRef.current = ctx; analyserRef.current = analyser; dataArrayRef.current = data;
+    let idlePhase = 0;
+    function tick() {
+      analyser.getByteFrequencyData(data);
+      // Update inline waveform bars
+      if (waveformRef.current) {
+        const bars = waveformRef.current.children;
+        const step = Math.max(1, Math.floor(data.length / bars.length));
+        for (let i = 0; i < bars.length; i++) {
+          const val = data[Math.min(i * step, data.length - 1)] || 0;
+          bars[i].style.height = Math.max(3, (val / 255) * 34) + 'px';
+        }
+      }
+      // Update fullscreen ring overlay (if visible)
+      let sum = 0; const bins = Math.min(60, data.length);
+      for (let i = 0; i < bins; i++) sum += data[i];
+      const vol = Math.min(sum / bins / 85, 1);
+      idlePhase += 0.028;
+      const idle = Math.sin(idlePhase) * 0.022 + 1;
+      if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
+      if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
+      if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
+      if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
+      animFrameRef.current = requestAnimationFrame(tick);
+    }
+    animFrameRef.current = requestAnimationFrame(tick);
+  }
+  function stopWaveformAnimation() {
+    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
+  }
+  function cleanupMicStream() {
+    if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+  }
+
   async function startRecording() {
     if (!user) { setShowAuthModal(true); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
       audioChunksRef.current = [];
+      speechTranscriptRef.current = '';
       const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-        if (blob.size < 100) { setToastMsg("Recording too short — try again"); return; }
-        await transcribeAudio(blob);
-      };
       mediaRecorderRef.current = recorder;
       recorder.start();
-
-      // ── Web Audio: volume analyser for ring animation ──
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.75;
-        ctx.createMediaStreamSource(stream).connect(analyser);
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        audioContextRef.current = ctx;
-        analyserRef.current = analyser;
-        dataArrayRef.current = data;
-
-        let idlePhase = 0;
-        function tick() {
-          analyser.getByteFrequencyData(data);
-          // Average the speech-frequency bins (~300Hz–3kHz ≈ first 60 bins at 512 fftSize)
-          let sum = 0;
-          const bins = Math.min(60, data.length);
-          for (let i = 0; i < bins; i++) sum += data[i];
-          const vol = Math.min(sum / bins / 85, 1); // normalise 0–1
-
-          // Gentle sine-wave idle breath + voice-driven expansion
-          idlePhase += 0.028;
-          const idle = Math.sin(idlePhase) * 0.022 + 1;
-          if (ring1Ref.current) ring1Ref.current.style.transform = `scale(${(idle + vol * 0.38).toFixed(4)})`;
-          if (ring2Ref.current) ring2Ref.current.style.transform = `scale(${(idle * 0.99 + vol * 0.27).toFixed(4)})`;
-          if (ring3Ref.current) ring3Ref.current.style.transform = `scale(${(idle * 0.98 + vol * 0.17).toFixed(4)})`;
-          if (ring4Ref.current) ring4Ref.current.style.transform = `scale(${(idle * 0.97 + vol * 0.09).toFixed(4)})`;
-          animFrameRef.current = requestAnimationFrame(tick);
-        }
-        animFrameRef.current = requestAnimationFrame(tick);
+      // Start browser SpeechRecognition in parallel as fallback
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SR) {
+        try {
+          const recognition = new SR();
+          recognition.lang = 'en-US';
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.onresult = (e) => { speechTranscriptRef.current = Array.from(e.results).map(r => r[0].transcript).join(''); };
+          recognition.onerror = () => {};
+          speechRecRef.current = recognition;
+          recognition.start();
+        } catch(e) { /* browser doesn't support — fine, Groq is primary */ }
       }
-
+      startWaveformAnimation(stream);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
       setIsRecording(true);
     } catch (err) {
       console.error('Mic access error:', err);
@@ -3838,50 +3992,85 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
   }
 
+  function stopSpeechRec() {
+    if (speechRecRef.current) { try { speechRecRef.current.stop(); } catch(e) {} speechRecRef.current = null; }
+  }
+
   function stopRecording() {
-    if (animFrameRef.current) { cancelAnimationFrame(animFrameRef.current); animFrameRef.current = null; }
-    if (audioContextRef.current) { audioContextRef.current.close().catch(()=>{}); audioContextRef.current = null; analyserRef.current = null; dataArrayRef.current = null; }
+    clearInterval(recordingTimerRef.current);
+    stopWaveformAnimation();
+    stopSpeechRec();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = async () => {
+        cleanupMicStream();
+        const blob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
+        if (blob.size < 100) { setToastMsg("Recording too short — try again"); return; }
+        await transcribeAudio(blob);
+      };
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);
   }
 
-  async function transcribeAudio(blob) {
-    setIsTranscribing(true);
-    try {
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const form = new FormData();
-      form.append('file', blob, 'voice.webm');
-      const res = await fetch(VOICE_FN_URL, {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
-        body: form
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || 'Transcription failed');
-      }
-      const data = await res.json();
-      const transcript = (data.text || '').trim();
-      if (transcript) {
-        setInput(prev => prev ? prev + ' ' + transcript : transcript);
-        inputRef.current?.focus();
-      } else {
-        setToastMsg("Couldn't catch that — try speaking louder or closer");
-      }
-    } catch (err) {
-      console.error('Transcription error:', err);
-      setToastMsg("Voice transcription failed — " + (err.message || 'try again'));
-    } finally {
-      setIsTranscribing(false);
+  function cancelRecording() {
+    clearInterval(recordingTimerRef.current);
+    stopWaveformAnimation();
+    stopSpeechRec();
+    speechTranscriptRef.current = '';
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.stop();
     }
+    cleanupMicStream();
+    setIsRecording(false);
+    setRecordingTime(0);
   }
 
-  function toggleRecording() {
-    if (isRecording) { stopRecording(); } else { startRecording(); }
+  async function transcribeAudio(blob) {
+    setIsTranscribing(true);
+    let transcript = '';
+    try {
+      // Primary: Groq Whisper via edge function
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const arrayBuf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const audioBase64 = btoa(binary);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY)
+        },
+        body: JSON.stringify({ mode: 'voice', audioBase64, audioMimeType: blob.type || 'audio/webm' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        transcript = (data.text || '').trim();
+      }
+    } catch (groqErr) {
+      console.warn('Groq transcription failed, checking browser fallback:', groqErr);
+    }
+
+    // Fallback: use browser SpeechRecognition transcript collected during recording
+    if (!transcript) {
+      transcript = (speechTranscriptRef.current || '').trim();
+      if (transcript) console.log('Using browser SpeechRecognition fallback');
+    }
+    speechTranscriptRef.current = '';
+
+    if (transcript) {
+      setInput(prev => prev ? prev + ' ' + transcript : transcript);
+      inputRef.current?.focus();
+    } else {
+      setToastMsg("Couldn't catch that — try speaking louder or closer");
+    }
+    setIsTranscribing(false);
   }
+
 
   function clearChat() {
     setMessages([]); setPendingActions([]); setChatError(null);
@@ -3906,15 +4095,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showPeek,showNotes,showChatSidebar]);
-
-  // ── Typing dots ──
-  const TypingDots=()=>(
-    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-      <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-        {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
-      </div>
-    </div>
-  );
 
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
@@ -4055,7 +4235,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     const cursor=new Date(start);let count=0;
                     while(cursor<=end&&count<100){
                       if(dayIndices.includes(cursor.getDay())){
-                        const ds=cursor.getFullYear()+'-'+String(cursor.getMonth()+1).padStart(2,'0')+'-'+String(cursor.getDate()).padStart(2,'0');
+                        const ds=toDateStr(cursor);
                         executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
                         count++;
                       }
@@ -4088,7 +4268,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)}/>
           </div>
         ))}
         {isLoading&&<TypingDots/>}
@@ -4113,23 +4293,45 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
           </div>
         )}
-        <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-          <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-          <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading||isRecording}
-            style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isRecording)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isRecording)?0.5:1}}>
-            {Icon.camera(18)}
-          </button>
-          <button type="button" onClick={toggleRecording} disabled={isLoading||isTranscribing||!!viewingSavedChatId}
-            style={{width:40,height:40,borderRadius:'50%',background:isRecording?'rgba(255,71,87,0.15)':'transparent',border:'1px solid '+(isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--border)'),color:isRecording?'var(--danger)':isTranscribing?'var(--accent)':'var(--text-dim)',cursor:(isLoading||isTranscribing||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||isTranscribing||viewingSavedChatId)?0.5:1,animation:isRecording?'rippleGlow 1.5s ease infinite':'none'}}>
-            {isTranscribing?React.createElement('div',{style:{width:16,height:16,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}):isRecording?Icon.micOff(18):Icon.mic(18)}
-          </button>
-          <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-            placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
-            disabled={isLoading||!!viewingSavedChatId}
-            style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
-            onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-          <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
-        </form>
+        {isRecording ? (
+          /* ── Inline Voice Recording Bar ── */
+          <div className="voice-bar">
+            <div className="voice-bar-indicator">
+              <div className="voice-bar-dot"/>
+              <div className="voice-bar-timer">{Math.floor(recordingTime/60)}:{String(recordingTime%60).padStart(2,'0')}</div>
+            </div>
+            <div className="voice-bar-waveform" ref={waveformRef}>
+              {Array.from({length:40},(_,i)=><div key={i} className="voice-bar-bar" style={{height:'3px'}}/>)}
+            </div>
+            <button className="voice-bar-cancel" onClick={cancelRecording} title="Cancel">{Icon.trash(16)}</button>
+            <button className="voice-bar-send" onClick={stopRecording} title="Send voice">{Icon.send(18)}</button>
+          </div>
+        ) : isTranscribing ? (
+          /* ── Transcribing indicator ── */
+          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:28}}>
+            <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
+            <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
+          </div>
+        ) : (
+          /* ── Normal chat input form ── */
+          <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
+            <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
+            <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
+              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+              {Icon.camera(18)}
+            </button>
+            <button type="button" onClick={startRecording} disabled={isLoading||!!viewingSavedChatId}
+              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
+              {Icon.mic(18)}
+            </button>
+            <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
+              placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+              disabled={isLoading||!!viewingSavedChatId}
+              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
+              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
+            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
+          </form>
+        )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
 
@@ -4187,22 +4389,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
 
-      {/* ── Voice Recording Circle Overlay ── */}
-      {isRecording&&(
-        <div className="voice-overlay" onClick={stopRecording}>
-          <div className="voice-rings">
-            <div className="voice-ring voice-ring-1" ref={ring1Ref}/>
-            <div className="voice-ring voice-ring-2" ref={ring2Ref}/>
-            <div className="voice-ring voice-ring-3" ref={ring3Ref}/>
-            <div className="voice-ring voice-ring-4" ref={ring4Ref}/>
-            <div className="voice-center">{Icon.mic(28)}</div>
-          </div>
-          <div style={{marginTop:36,textAlign:'center',pointerEvents:'none'}}>
-            <div style={{fontSize:'1.05rem',fontWeight:700,color:'var(--text)',letterSpacing:0.4,marginBottom:6}}>Listening...</div>
-            <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Tap anywhere to stop</div>
-          </div>
-        </div>
-      )}
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
