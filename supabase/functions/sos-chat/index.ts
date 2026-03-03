@@ -7,17 +7,53 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Groq chat completion ── */
+/* ── Groq chat completion (text + optional vision) ─────────────────────────
+   For vision models (e.g. llama-3.2-90b-vision-preview) pass imageBase64 +
+   imageMimeType. The image is attached to the last user message as an
+   OpenAI-style content array so Groq's vision endpoint can read it.
+   ────────────────────────────────────────────────────────────────────────── */
 async function callGroq(
   apiKey: string,
   model: string,
   systemPrompt: string,
   messages: { role: string; content: string }[],
-  maxTokens: number
+  maxTokens: number,
+  imageBase64?: string,
+  imageMimeType?: string
 ): Promise<{ content: string }> {
+  // Convert to Groq/OpenAI message format; inject image into last user turn
+  const groqMessages: { role: string; content: unknown }[] = [
+    { role: "system", content: systemPrompt },
+  ];
+
+  const lastUserIdx = imageBase64 && imageMimeType
+    ? [...messages].map((m) => m.role).lastIndexOf("user")
+    : -1;
+
+  messages.forEach((msg, idx) => {
+    const isLastUser = msg.role === "user" && idx === lastUserIdx;
+
+    if (isLastUser) {
+      groqMessages.push({
+        role: "user",
+        content: [
+          { type: "text", text: msg.content },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${imageMimeType};base64,${imageBase64}`,
+            },
+          },
+        ],
+      });
+    } else {
+      groqMessages.push({ role: msg.role, content: msg.content });
+    }
+  });
+
   const body = {
     model,
-    messages: [{ role: "system", content: systemPrompt }, ...messages],
+    messages: groqMessages,
     max_tokens: maxTokens,
     temperature: 0.7,
   };
@@ -38,72 +74,6 @@ async function callGroq(
 
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content ?? "";
-  return { content };
-}
-
-/* ── Gemini generateContent ── */
-async function callGemini(
-  apiKey: string,
-  systemPrompt: string,
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  imageBase64?: string,
-  imageMimeType?: string
-): Promise<{ content: string }> {
-  // Build Gemini contents array — merge consecutive same-role messages
-  const merged: { role: string; parts: unknown[] }[] = [];
-
-  // System instruction goes first as a user turn (Gemini convention)
-  // Then alternate user/model
-  for (const msg of messages) {
-    const geminiRole = msg.role === "assistant" ? "model" : "user";
-    const last = merged[merged.length - 1];
-    if (last && last.role === geminiRole) {
-      last.parts.push({ text: "\n" + msg.content });
-    } else {
-      merged.push({ role: geminiRole, parts: [{ text: msg.content }] });
-    }
-  }
-
-  // Ensure first message is from user (Gemini requirement)
-  if (merged.length > 0 && merged[0].role !== "user") {
-    merged.unshift({ role: "user", parts: [{ text: "(context)" }] });
-  }
-
-  // Attach image to the last user message if provided
-  if (imageBase64 && imageMimeType) {
-    const lastUser = [...merged].reverse().find((m) => m.role === "user");
-    if (lastUser) {
-      lastUser.parts.push({
-        inlineData: { mimeType: imageMimeType, data: imageBase64 },
-      });
-    }
-  }
-
-  const body = {
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: merged,
-    generationConfig: {
-      maxOutputTokens: maxTokens,
-      temperature: 0.7,
-    },
-  };
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini error ${res.status}: ${errText}`);
-  }
-
-  const data = await res.json();
-  const content =
-    data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
   return { content };
 }
 
@@ -140,7 +110,6 @@ async function checkContentRateLimit(
     return { allowed: false, used };
   }
 
-  // Increment
   await sb.from("content_generations").upsert(
     { user_id: userId, date: todayEST, count: used + 1 },
     { onConflict: "user_id,date" }
@@ -188,16 +157,23 @@ serve(async (req: Request) => {
       if (!audioBase64) {
         return new Response(
           JSON.stringify({ error: "No audio data provided" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
         );
       }
 
-      // Decode base64 → binary → Blob → File for Groq
       const binaryStr = atob(audioBase64);
       const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const audioBlob = new Blob([bytes], { type: audioMimeType || "audio/webm" });
-      const audioFile = new File([audioBlob], "voice.webm", { type: audioMimeType || "audio/webm" });
+      for (let i = 0; i < binaryStr.length; i++)
+        bytes[i] = binaryStr.charCodeAt(i);
+      const audioBlob = new Blob([bytes], {
+        type: audioMimeType || "audio/webm",
+      });
+      const audioFile = new File([audioBlob], "voice.webm", {
+        type: audioMimeType || "audio/webm",
+      });
 
       const groqForm = new FormData();
       groqForm.append("file", audioFile, "voice.webm");
@@ -219,7 +195,10 @@ serve(async (req: Request) => {
         console.error("Groq Whisper error:", groqRes.status, errText);
         return new Response(
           JSON.stringify({ error: "Transcription failed", details: errText }),
-          { status: groqRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          {
+            status: groqRes.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
         );
       }
 
@@ -230,21 +209,18 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── Chat completion path ──
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-
+    // ── Chat completion path (all models via Groq) ──
     const {
       systemPrompt,
       messages,
       maxTokens = 1024,
       model,
-      provider,
       isContentGen,
       imageBase64,
       imageMimeType,
     } = body;
 
-    // Rate limiting for content generation
+    // Rate limiting for WRITE / content generation intent
     if (isContentGen) {
       const userId = extractUserId(req.headers.get("Authorization"));
       if (userId) {
@@ -261,54 +237,15 @@ serve(async (req: Request) => {
       }
     }
 
-    let result: { content: string };
-
-    if (provider === "gemini") {
-      if (!GEMINI_API_KEY) {
-        // No Gemini key — go straight to Groq fallback
-        console.warn("No GEMINI_API_KEY, falling back to gpt-oss-20b via Groq");
-        result = await callGroq(
-          GROQ_API_KEY,
-          "gpt-oss-20b",
-          systemPrompt,
-          messages,
-          maxTokens
-        );
-      } else {
-        try {
-          result = await callGemini(
-            GEMINI_API_KEY,
-            systemPrompt,
-            messages,
-            maxTokens,
-            imageBase64,
-            imageMimeType
-          );
-        } catch (geminiErr) {
-          // FALLBACK: Gemini failed → call gpt-oss-20b via Groq
-          console.warn(
-            "Gemini failed, falling back to gpt-oss-20b via Groq:",
-            (geminiErr as Error).message
-          );
-          result = await callGroq(
-            GROQ_API_KEY,
-            "gpt-oss-20b",
-            systemPrompt,
-            messages,
-            maxTokens
-          );
-        }
-      }
-    } else {
-      // Groq provider
-      result = await callGroq(
-        GROQ_API_KEY,
-        model || "llama-3.1-8b-instant",
-        systemPrompt,
-        messages,
-        maxTokens
-      );
-    }
+    const result = await callGroq(
+      GROQ_API_KEY,
+      model || "llama-3.1-8b-instant",
+      systemPrompt,
+      messages,
+      maxTokens,
+      imageBase64,
+      imageMimeType
+    );
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
