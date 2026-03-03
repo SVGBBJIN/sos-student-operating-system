@@ -450,8 +450,10 @@ const SUPABASE_URL = 'https://evqylqgkzlbbrvogxsjn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV2cXlscWdremxiYnJ2b2d4c2puIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNzQ1NTUsImV4cCI6MjA4Njg1MDU1NX0.NDpkE7367X5b3fhBpY268qJR6q8q2xQYs5tKL8RyIDQ';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* Edge Function URL for secure Groq proxy */
-const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
+/* Edge Function URL — uses Vercel API route when deployed on Vercel, otherwise Supabase Edge Function */
+const EDGE_FN_URL = window.location.hostname.includes('vercel.app')
+  ? '/api/chat'
+  : SUPABASE_URL + '/functions/v1/sos-chat';
 
 
 /* ─── Date helpers ─── */
@@ -1255,7 +1257,8 @@ function classifyMessageRegex(text) {
   if (actionSignals.test(text)) {
     return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
   }
-  return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+  // All messages use Gemini tier 2 so every model has full capabilities (flashcards, calendar, commands)
+  return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
 }
 
 /* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
@@ -1294,7 +1297,8 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
       case 'CONTENT_GEN': return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
       case 'NOTES_REF':   return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
       case 'ACTION':      return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
-      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+      // CHAT and all other categories also use Gemini tier 2 so every model has full capabilities
+      default:            return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
