@@ -453,6 +453,15 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* Edge Function URL for secure Groq proxy */
 const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/sos-chat';
 
+/* ─── OSS Model Stack (all via Groq API) ───────────────────────────────────
+   Stage 1 – Router  : GPT OSS 20B  ($0.075 in / $0.30 out | ~1,000 t/s)
+                       Detects intent only — outputs max 3 words.
+   Stage 2 – Executor: Llama 3.1 8B ($0.05  in / $0.08 out |   560 t/s)
+                       Writes the full response / action JSON.
+   ─────────────────────────────────────────────────────────────────────── */
+const GROQ_ROUTER_MODEL = 'llama-3.3-70b-versatile';  // Stage 1: 20B-tier intent router
+const GROQ_EXEC_MODEL   = 'llama-3.1-8b-instant';     // Stage 2: structured JSON writer
+
 
 /* ─── Date helpers ─── */
 function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
@@ -1243,61 +1252,67 @@ function parseDocId(input) {
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
 
-/* Regex-based classifier (kept as fast fallback) */
+/* Regex-based classifier (fallback when router call fails) */
 function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
+    return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'WRITE',   tier:2, isContentGen:true,  maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
+    return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'TUTOR',   tier:2, isContentGen:false, maxTokens:2048 };
   }
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
   if (actionSignals.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+    return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'UTILITY', tier:2, isContentGen:false, maxTokens:1024 };
   }
-  return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+  return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'CHAT',    tier:1, isContentGen:false, maxTokens:1024 };
 }
 
-/* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
+/* ── 2-Stage OSS pipeline (all via Groq) ──────────────────────────────────
+   Stage 1 — Router (GROQ_ROUTER_MODEL / 20B-tier):
+     Receives the raw user message.
+     Prompt: "Identify intent: [UTILITY, TUTOR, WRITE]. Output max 3 words."
+     Returns one of: UTILITY | TUTOR | WRITE  (or defaults to CHAT)
+
+   Stage 2 — Executor (GROQ_EXEC_MODEL / Llama 3.1 8B):
+     Receives the full system prompt + conversation history.
+     Writes the complete response including any <action>JSON</action> tags.
+   ────────────────────────────────────────────────────────────────────── */
 async function classifyMessage(text) {
   try {
     const session = await sb.auth.getSession();
     const token = session?.data?.session?.access_token;
-    const classifyPrompt = `You are a message classifier for a student planner app. Classify the user message into exactly one category and return ONLY a JSON object.
 
-Categories:
-- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets
-- NOTES_REF: Questions about the student's own notes, reference docs, PDFs, or looking things up in saved documents
-- ACTION: Any scheduling, task, event, block, calendar, or organizational request. Includes mentions of dates, times, school subjects, activities, verbs like add/delete/schedule/cancel/move, and slang equivalents
-- CHAT: General conversation, greetings, questions, or anything with no scheduling or content generation intent
-
-Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"category":"ACTION"} or {"category":"CHAT"}`;
-
-    const response = await fetch(EDGE_FN_URL, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({
-        systemPrompt:classifyPrompt,
-        messages:[{role:'user',content:text}],
-        maxTokens:32,
-        model:'llama-3.1-8b-instant',
-        provider:'groq',
-        isContentGen:false
+    // ── Stage 1: Router — detect intent in ≤3 words ──
+    const routerResponse = await fetch(EDGE_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+(token||SUPABASE_ANON_KEY) },
+      body: JSON.stringify({
+        systemPrompt: 'Identify intent: [UTILITY, TUTOR, WRITE]. Output max 3 words.',
+        messages: [{ role:'user', content: text }],
+        maxTokens: 10,
+        model: GROQ_ROUTER_MODEL,
+        provider: 'groq',
+        isContentGen: false
       })
     });
-    if (!response.ok) throw new Error('Classification request failed');
-    const data = await response.json();
-    const raw = (data?.content || '').trim();
-    const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
-    const result = JSON.parse(jsonStr);
-    switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
-      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+    if (!routerResponse.ok) throw new Error('Router request failed');
+    const routerData = await routerResponse.json();
+    const intent = (routerData?.content || '').trim().toUpperCase();
+
+    // ── Stage 2: Map intent → Llama 3.1 8B executor config ──
+    if (intent.includes('WRITE')) {
+      return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'WRITE',   tier:2, isContentGen:true,  maxTokens:4096 };
     }
+    if (intent.includes('TUTOR')) {
+      return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'TUTOR',   tier:2, isContentGen:false, maxTokens:2048 };
+    }
+    if (intent.includes('UTILITY')) {
+      return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'UTILITY', tier:2, isContentGen:false, maxTokens:1024 };
+    }
+    // Default → lean CHAT response (no action tags)
+    return { provider:'groq', model:GROQ_EXEC_MODEL, intent:'CHAT', tier:1, isContentGen:false, maxTokens:1024 };
   } catch (e) {
-    console.warn('LLM classification failed, using regex fallback:', e);
+    console.warn('Router classification failed, using regex fallback:', e);
     return classifyMessageRegex(text);
   }
 }
@@ -3603,8 +3618,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'gemini-2.5-flash',
-          provider: 'gemini',
+          model: GROQ_EXEC_MODEL,
+          provider: 'groq',
           isContentGen: false
         })
       });
@@ -3752,9 +3767,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Force Gemini tier 2 when photo is attached (Llama can't do vision)
+    // Force Groq vision model when photo is attached (standard Llama lacks vision)
     const routing = photo
-      ? { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 }
+      ? { provider:'groq', model:'llama-3.2-90b-vision-preview', intent:'TUTOR', tier:2, isContentGen:false, maxTokens:2048 }
       : await classifyMessage(text);
 
     try {
