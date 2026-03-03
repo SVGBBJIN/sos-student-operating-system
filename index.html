@@ -1243,23 +1243,47 @@ function parseDocId(input) {
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
 
+const CONTENT_GEN_REGEX = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const NOTES_REF_REGEX = /\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i;
+const ACTION_SIGNALS_REGEX = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
+
+function getRegexClassification(text) {
+  if (CONTENT_GEN_REGEX.test(text)) {
+    return {
+      confidence: 0.98,
+      route: { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 }
+    };
+  }
+  if (NOTES_REF_REGEX.test(text)) {
+    return {
+      confidence: 0.95,
+      route: { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 }
+    };
+  }
+  if (ACTION_SIGNALS_REGEX.test(text)) {
+    return {
+      confidence: 0.9,
+      route: { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 }
+    };
+  }
+  return {
+    confidence: 0.6,
+    route: { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 }
+  };
+}
+
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
-  if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
-  }
-  if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
-  }
-  const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
-  if (actionSignals.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
-  }
-  return { provider:'groq', model:'llama-3.1-8b-instant', tier:1, isContentGen:false, maxTokens:1024 };
+  return getRegexClassification(text).route;
 }
 
 /* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
 async function classifyMessage(text) {
+  const regexDecision = getRegexClassification(text);
+  if (regexDecision.confidence >= 0.9) {
+    return regexDecision.route;
+  }
+
   try {
     const session = await sb.auth.getSession();
     const token = session?.data?.session?.access_token;
@@ -1298,7 +1322,7 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
-    return classifyMessageRegex(text);
+    return regexDecision.route;
   }
 }
 
