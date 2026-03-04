@@ -3081,6 +3081,7 @@ function App() {
   const ring4Ref = useRef(null);
 
   // Daily Brief state
+  const DAILY_BRIEF_ENABLED = false;
   const [dailyBrief, setDailyBrief] = useState(null);
   const briefRequestedRef = useRef(false);
 
@@ -3694,6 +3695,7 @@ function App() {
 
   // ── Daily Brief: Generator (single GPT-OSS API call) ──
   async function generateDailyBrief() {
+    if (!DAILY_BRIEF_ENABLED) return;
     if (briefRequestedRef.current) return;
     briefRequestedRef.current = true;
     setIsLoading(true);
@@ -3767,11 +3769,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   // ── Daily Brief: Auto-trigger on fresh session when the page opens ──
   useEffect(() => {
-    if (dataLoaded && messages.length === 0
-        && !briefRequestedRef.current && !viewingSavedChatId) {
-      generateDailyBrief();
-    }
-  }, [dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
+    if (!DAILY_BRIEF_ENABLED) return;
+    if (!dataLoaded || !googleToken) return;
+    if (messages.length > 0 || viewingSavedChatId) return;
+    if (!events || events.length === 0) return;
+    generateDailyBrief();
+  }, [DAILY_BRIEF_ENABLED, dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
 
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
@@ -4389,19 +4392,6 @@ Today is ${today()}.`;
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
-          // Show Daily Brief card when available
-          if (dailyBrief) {
-            return (
-              <div style={{position:'relative',height:'100%',minHeight:'100%'}}>
-                <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px 64px',overflowY:'auto'}}>
-                  <div style={{position:'absolute',top:'14%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite'}}/>
-                  <div style={{fontSize:'1.8rem',marginBottom:4,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-0.5px',position:'relative',animation:'gradientShift 4s ease infinite'}}>SOS</div>
-                  <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:16,opacity:0.92}}>Here's your game plan for today</div>
-                  <DailyBriefCard brief={dailyBrief} onAction={(text) => sendChip(text)} />
-                </div>
-              </div>
-            );
-          }
           // Default welcome screen
           const wv = welcomeVariants[welcomeIdx];
           return (
