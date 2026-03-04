@@ -265,11 +265,11 @@ serve(async (req: Request) => {
 
     if (provider === "gemini") {
       if (!GEMINI_API_KEY) {
-        // No Gemini key — go straight to Groq fallback
-        console.warn("No GEMINI_API_KEY, falling back to gpt-oss-20b via Groq");
+        // No Gemini key — fall back to llama-3.3-70b-versatile via Groq (full tier-2 prompt preserved)
+        console.warn("No GEMINI_API_KEY, falling back to llama-3.3-70b-versatile via Groq");
         result = await callGroq(
           GROQ_API_KEY,
-          "gpt-oss-20b",
+          "llama-3.3-70b-versatile",
           systemPrompt,
           messages,
           maxTokens
@@ -285,14 +285,14 @@ serve(async (req: Request) => {
             imageMimeType
           );
         } catch (geminiErr) {
-          // FALLBACK: Gemini failed → call gpt-oss-20b via Groq
+          // FALLBACK: Gemini failed → llama-3.3-70b-versatile via Groq (full tier-2 prompt preserved)
           console.warn(
-            "Gemini failed, falling back to gpt-oss-20b via Groq:",
+            "Gemini failed, falling back to llama-3.3-70b-versatile via Groq:",
             (geminiErr as Error).message
           );
           result = await callGroq(
             GROQ_API_KEY,
-            "gpt-oss-20b",
+            "llama-3.3-70b-versatile",
             systemPrompt,
             messages,
             maxTokens
