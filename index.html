@@ -3052,6 +3052,7 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -4283,6 +4284,7 @@ Today is ${today()}.`;
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
+  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4308,8 +4310,8 @@ Today is ${today()}.`;
   }
 
   return (
-    <div className="sos-app">
-      <aside className="sos-sidebar">
+    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      {layoutMode === 'sidebar' && <aside className="sos-sidebar">
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-brand">SOS</div>
           {user && <div style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
@@ -4353,15 +4355,31 @@ Today is ${today()}.`;
           )}
         </div>
         <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
+          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.chevronLeft(12)} <span style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
           {user ? (
             <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.logout(12)} <span style={{flex:1,textAlign:'left'}}>Sign out</span></button>
           ) : (
             <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.messageCircle(12)} <span style={{flex:1,textAlign:'left'}}>Sign in</span></button>
           )}
         </div>
-      </aside>
+      </aside>}
 
       <div className="sos-main">
+      {layoutMode === 'topbar' && <div className="sos-header">
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
+            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
+          </div>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
+          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
+          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
+        </div>
+      </div>}
 
       {/* ── Chat Area ── */}
       <div className="sos-chat-area" ref={chatAreaRef}>
