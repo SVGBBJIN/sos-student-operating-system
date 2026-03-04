@@ -1127,7 +1127,7 @@ You: "nice work! ✅ marked it done."
 
 User: "I have swim practice every Mon Wed Fri"
 You: "got it — added swim practice for every Monday, Wednesday, and Friday 🏊"
-<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return d.toISOString().slice(0,10); })()}"}</action>
+<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return toDateStr(d); })()}"}</action>
 
 WRONG (never do this):
 User: "I have a math test on Friday"
@@ -1197,7 +1197,7 @@ async function parseActionsWithRecovery(rawContent, token) {
     const response = await fetch(EDGE_FN_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
+      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'openai/gpt-oss-20b', provider:'groq', isContentGen:false })
     });
     if (response.ok) {
       const data = await response.json();
@@ -1207,7 +1207,89 @@ async function parseActionsWithRecovery(rawContent, token) {
   } catch (e) { console.error('JSON recovery re-prompt failed:', e); }
   return actions;
 }
-function stripActionTags(text) { return text.replace(/<action>[\s\S]*?<\/action>/g, '').trim(); }
+function stripActionTags(text) {
+  return (text || '')
+    .replace(/<action>[\s\S]*?<\/action>/gi, '')
+    .replace(/<action[\s\S]*$/gi, '')
+    .trim();
+}
+
+function parseActionDecisionResponse(text) {
+  const raw = (text || '').trim();
+  if (!raw || /^no$/i.test(raw)) return [];
+
+  // Preferred format: command lines mapped into local templates
+  // Example: add_event; title=Math Test; date=2026-02-14; event_type=test; subject=Math
+  const parseScalar = (v) => {
+    const t = (v || '').trim();
+    if (!t) return '';
+    if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return t.slice(1, -1);
+    if (/^-?\d+$/.test(t)) return Number(t);
+    if (/^(true|false)$/i.test(t)) return /^true$/i.test(t);
+    return t;
+  };
+
+  const parseParams = (paramText) => {
+    const out = {};
+    for (const part of (paramText || '').split(';')) {
+      const seg = part.trim();
+      if (!seg) continue;
+      const idx = seg.indexOf('=');
+      if (idx === -1) continue;
+      const key = seg.slice(0, idx).trim();
+      const valueRaw = seg.slice(idx + 1).trim();
+      if (!key) continue;
+      if (key === 'days') {
+        out.days = valueRaw.replace(/^\[|\]$/g, '').split(',').map(s => s.trim()).filter(Boolean);
+        continue;
+      }
+      if (key === 'subtasks') {
+        try { out.subtasks = JSON.parse(valueRaw); } catch (_) { out.subtasks = []; }
+        continue;
+      }
+      out[key] = parseScalar(valueRaw);
+    }
+    return out;
+  };
+
+  const fromTemplate = (type, p) => {
+    switch ((type || '').trim()) {
+      case 'add_task': return { type:'add_task', title:p.title||'Untitled', subject:p.subject||'', due:p.due||today(), estimated_minutes:Number(p.estimated_minutes||30) };
+      case 'add_event': return { type:'add_event', title:p.title||'Event', date:p.date||today(), event_type:p.event_type||'event', subject:p.subject||'' };
+      case 'add_block': return { type:'add_block', activity:p.activity||'Block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00', category:p.category||'school' };
+      case 'complete_task': return { type:'complete_task', task_id:p.task_id||'' };
+      case 'delete_task': return { type:'delete_task', title:p.title||p.task_id||'' };
+      case 'delete_event': return { type:'delete_event', title:p.title||p.event_id||'' };
+      case 'update_event': return { type:'update_event', title:p.title||'', new_title:p.new_title||undefined, date:p.date||undefined, event_type:p.event_type||undefined, subject:p.subject };
+      case 'delete_block': return { type:'delete_block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00' };
+      case 'break_task': return { type:'break_task', parent_title:p.parent_title||p.title||'Task', subtasks:Array.isArray(p.subtasks)?p.subtasks:[] };
+      case 'add_recurring_event': return { type:'add_recurring_event', title:p.title||'Recurring Event', event_type:p.event_type||'practice', subject:p.subject||'', days:Array.isArray(p.days)?p.days:[], start_date:p.start_date||today(), end_date:p.end_date||today() };
+      case 'clear_all': return { type:'clear_all' };
+      default: return null;
+    }
+  };
+
+  const commandActions = raw.split(/\|\|/).map(s => s.trim()).filter(Boolean).map(cmd => {
+    const [typePart, ...rest] = cmd.split(';');
+    const type = (typePart || '').trim().toLowerCase();
+    const params = parseParams(rest.join(';'));
+    return fromTemplate(type, params);
+  }).filter(Boolean);
+  if (commandActions.length > 0) return commandActions;
+
+  const tagged = parseActions(raw);
+  if (tagged.length > 0) return tagged;
+
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return [parsed];
+  } catch (e) {
+    console.warn('Failed to parse action decision JSON:', e);
+  }
+  return [];
+}
 
 /* ─── Google Docs text extractor (shared by import modal + daily brief) ─── */
 function extractDocsText(doc) {
@@ -1248,20 +1330,20 @@ const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','cr
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
   }
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
   if (actionSignals.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
   }
-  // All messages use Gemini tier 2 so every model has full capabilities (flashcards, calendar, commands)
-  return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+  // All messages use GPT-OSS so one model handles chat + actions + content.
+  return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
 }
 
-/* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
+/* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
 async function classifyMessage(text) {
   try {
     const session = await sb.auth.getSession();
@@ -1283,7 +1365,7 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
         systemPrompt:classifyPrompt,
         messages:[{role:'user',content:text}],
         maxTokens:32,
-        model:'llama-3.1-8b-instant',
+        model:'openai/gpt-oss-20b',
         provider:'groq',
         isContentGen:false
       })
@@ -1294,11 +1376,11 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
     const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
     const result = JSON.parse(jsonStr);
     switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
-      // CHAT and all other categories also use Gemini tier 2 so every model has full capabilities
-      default:            return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+      case 'CONTENT_GEN': return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
+      case 'NOTES_REF':   return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
+      case 'ACTION':      return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      // CHAT and all other categories also use GPT-OSS so every capability stays available
+      default:            return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
@@ -1350,6 +1432,11 @@ function inferActionFromMessage(text) {
   // ── Check for remove/delete intent FIRST (before add logic) ──
   const removeSignals = /\b(cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|cut|forget|nevermind|never\s*mind)\b/i;
   const removePhrases = /\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out|get\s+rid\s+of)\b/i;
+  const clearAllSignals = /\b(clear|delete|remove|wipe|reset|nuke)\b[\s\S]{0,24}\b(all|everything)\b|\b(start\s+over|clean\s+slate|wipe\s+it\s+all|clear\s+everything)\b/i;
+
+  if (clearAllSignals.test(text)) {
+    return { type:'clear_all' };
+  }
 
   if (removeSignals.test(text) || removePhrases.test(text)) {
     let removeTitle = text.trim()
@@ -1561,11 +1648,14 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
       case 'delete_block': return { icon:Icon.trash(16), label:'Remove Block', badge:'remove', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
         { key:'date', label:'Date', value:action.date?fmt(action.date):'?' }, { key:'time', label:'Time', value:(action.start||'?')+' — '+(action.end||'?') }
       ]};
+      case 'clear_all': return { icon:Icon.alertTriangle(16), label:'Clear Everything', badge:'danger', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
+        { key:'scope', label:'Scope', value:'Tasks, events, and schedule blocks will be removed.' }
+      ]};
       default: return { icon:Icon.zap(16), label:'Action', badge:'action', badgeColor:'var(--accent)', borderColor:'var(--accent)', fields: Object.entries(action).filter(([k])=>k!=='type').map(([k,v])=>({key:k,label:k,value:String(v)})) };
     }
   }
   const info = getCardInfo();
-  const isDanger = ['delete_task','delete_event','delete_block'].includes(action.type);
+  const isDanger = ['delete_task','delete_event','delete_block','clear_all'].includes(action.type);
 
   return (
     <div className="confirm-card" style={{borderLeftColor:info.borderColor}}>
@@ -1632,7 +1722,7 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   function toggleAll() { const v=!selectAll; setSelectAll(v); setChecked(actions.map(()=>v)); }
 
   function getActionLabel(a) {
-    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring' };
+    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring', clear_all:'Clear Everything' };
     return (labels[a.type]||'Action')+': '+(a.title||a.activity||a.parent_title||'Untitled');
   }
   function getBadgeColor(a) {
@@ -1689,9 +1779,9 @@ function RecurringEventPopup({ action, onConfirm, onCancel }) {
   useEffect(() => {
     const dayNameToIndex = { Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6 };
     const dayIndices = (action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-    const start = new Date(action.start_date || new Date().toISOString().slice(0,10));
+    const start = new Date(action.start_date || today());
     const endDefault = new Date(); endDefault.setMonth(endDefault.getMonth()+3);
-    const end = new Date(action.end_date || endDefault.toISOString().slice(0,10));
+    const end = new Date(action.end_date || toDateStr(endDefault));
     const generated = [];
     const cursor = new Date(start);
     while (cursor <= end && generated.length < 100) {
@@ -3305,6 +3395,18 @@ function App() {
             if (user && delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(delDate, key, null, user.id))));
           }
           break;
+        case 'clear_all':
+          setTasks([]);
+          setEvents([]);
+          setBlocks({ dates:{} });
+          if (user) {
+            syncOp(() => Promise.all([
+              sb.from('tasks').delete().eq('user_id', user.id),
+              sb.from('events').delete().eq('user_id', user.id),
+              sb.from('date_blocks').delete().eq('user_id', user.id)
+            ]));
+          }
+          break;
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); }
@@ -3493,11 +3595,28 @@ function App() {
 
   // ── Daily Brief: Context Aggregator ──
   async function getMorningContext() {
-    if (!isGoogleConnected()) return null;
     try {
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const endOfDay = new Date(startOfDay.getTime() + 86400000);
+      const localTodayEvents = events
+        .filter(ev => ev.date === today())
+        .slice(0, 25)
+        .map(ev => ({
+          id: ev.id,
+          title: ev.title,
+          time: 'Scheduled',
+          description: '',
+          attachments: []
+        }));
+
+      const docContents = {};
+      let calendarEvents = localTodayEvents;
+
+      if (!isGoogleConnected()) {
+        return { calendarEvents, docContents };
+      }
+
       const params = new URLSearchParams({
         timeMin: startOfDay.toISOString(),
         timeMax: endOfDay.toISOString(),
@@ -3509,11 +3628,11 @@ function App() {
         'https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params,
         { headers: { 'Authorization': 'Bearer ' + googleToken } }
       );
-      if (!res.ok) return null;
+      if (!res.ok) return { calendarEvents, docContents };
       const data = await res.json();
       const items = (data.items || []).filter(e => e.summary);
 
-      const calendarEvents = items.map(e => ({
+      calendarEvents = items.map(e => ({
         id: e.id,
         title: e.summary,
         time: e.start?.dateTime
@@ -3534,7 +3653,6 @@ function App() {
       });
 
       // Fetch first 3000 chars of each linked Google Doc
-      const docContents = {};
       await Promise.all([...docIds].map(async (docId) => {
         try {
           const docRes = await fetch(
@@ -3556,7 +3674,7 @@ function App() {
     }
   }
 
-  // ── Daily Brief: Generator (single Gemini API call) ──
+  // ── Daily Brief: Generator (single GPT-OSS API call) ──
   async function generateDailyBrief() {
     if (briefRequestedRef.current) return;
     briefRequestedRef.current = true;
@@ -3607,8 +3725,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'gemini-2.5-flash',
-          provider: 'gemini',
+          model: 'openai/gpt-oss-20b',
+          provider: 'groq',
           isContentGen: false
         })
       });
@@ -3629,13 +3747,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setIsLoading(false);
   }
 
-  // ── Daily Brief: Auto-trigger on fresh session with Google connected ──
+  // ── Daily Brief: Auto-trigger on fresh session when the page opens ──
   useEffect(() => {
-    if (dataLoaded && isGoogleConnected() && messages.length === 0
+    if (dataLoaded && messages.length === 0
         && !briefRequestedRef.current && !viewingSavedChatId) {
       generateDailyBrief();
     }
-  }, [dataLoaded, googleToken, messages.length, viewingSavedChatId]);
+  }, [dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
 
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
@@ -3756,43 +3874,103 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Force Gemini tier 2 when photo is attached (Llama can't do vision)
-    const routing = photo
-      ? { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 }
-      : await classifyMessage(text);
-
     try {
       const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
-      const systemPrompt = buildSystemPrompt(tasks, blocks, events, notes, routing.tier);
+      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 1);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      const fetchBody = {
-        systemPrompt,
+      const actionPrompt = `You decide whether the user's latest message requires an SOS action command.
+
+Return exactly one of these outputs:
+1) no
+2) command line(s) that map to prewritten local JSON templates
+
+If the message is conversational only, return: no
+If an action is needed, use one of:
+- add_task
+- add_event
+- add_block
+- complete_task
+- delete_task
+- delete_event
+- update_event
+- delete_block
+- break_task
+- add_recurring_event
+- clear_all
+
+Formatting rules (strict):
+- Output MUST be exactly one line.
+- Output MUST be either the single word no OR command format.
+- Command format: action_type; key=value; key=value
+- For multiple actions, join commands with: ||
+- No markdown, no code fences, no commentary.
+
+Examples:
+- add_task; title=History essay; subject=History; due=2026-03-12; estimated_minutes=45
+- add_event; title=Math Test; date=2026-03-15; event_type=test; subject=Math
+- delete_event; title=Math Test
+- add_recurring_event; title=Swim Practice; event_type=practice; days=Monday,Wednesday,Friday; start_date=2026-03-05; end_date=2026-06-05
+- clear_all
+
+Today is ${today()}.`;
+
+      const actionDecisionPromise = photo
+        ? Promise.resolve({ actions: [], actionDecisionText: '' })
+        : (async () => {
+            let actions = [];
+            let actionDecisionText = '';
+            try {
+              const actionResponse = await fetch(EDGE_FN_URL, {
+                method:'POST',
+                headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
+                body:JSON.stringify({
+                  systemPrompt: actionPrompt,
+                  messages:[{ role:'user', content: msgContent }],
+                  maxTokens: 512,
+                  model:'openai/gpt-oss-20b',
+                  provider:'groq',
+                  isContentGen:false
+                })
+              });
+              if (actionResponse.ok) {
+                const actionData = await actionResponse.json();
+                actionDecisionText = (actionData?.content || '').trim();
+                actions = parseActionDecisionResponse(actionDecisionText);
+              }
+            } catch (actionErr) {
+              console.warn('Action decision call failed:', actionErr);
+            }
+            return { actions, actionDecisionText };
+          })();
+
+      const chatBody = {
+        systemPrompt: chatPrompt,
         messages: historyForApi,
-        maxTokens: routing.maxTokens,
-        model: routing.model,
-        provider: routing.provider,
-        isContentGen: routing.isContentGen
+        maxTokens: 1024,
+        model: 'openai/gpt-oss-20b',
+        provider: 'groq',
+        isContentGen: false
       };
       if (photo) {
-        fetchBody.imageBase64 = photo.base64;
-        fetchBody.imageMimeType = photo.mimeType;
+        chatBody.imageBase64 = photo.base64;
+        chatBody.imageMimeType = photo.mimeType;
       }
 
-      const response = await fetch(EDGE_FN_URL, {
+      const chatResponse = await fetch(EDGE_FN_URL, {
         method:'POST',
         headers: {
           'Content-Type':'application/json',
           'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
         },
-        body: JSON.stringify(fetchBody)
+        body: JSON.stringify(chatBody)
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        if (response.status === 429 && errData?.rateLimited) {
+      if (!chatResponse.ok) {
+        const errData = await chatResponse.json().catch(() => ({}));
+        if (chatResponse.status === 429 && errData?.rateLimited) {
           const limitMsg = "hey, you've used all 5 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -3801,44 +3979,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           setIsLoading(false);
           return;
         }
-        throw new Error(errData?.error || 'AI request failed: ' + response.status);
+        throw new Error(errData?.error || 'AI request failed: ' + chatResponse.status);
       }
 
-      const data = await response.json();
-      const rawContent = data?.content || "hmm, didn't get a response. try again?";
+      const chatData = await chatResponse.json();
+      const displayContent = stripActionTags(chatData?.content || "hmm, didn't get a response. try again?");
 
-      if (routing.isContentGen) {
-        setContentGenUsed(prev => prev + 1);
-      }
+      // Show Llama conversational response immediately.
+      // Action processing continues afterward so OSS-20B can return without blocking chat UX.
+      const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', displayContent, user.id);
 
-      let actions = await parseActionsWithRecovery(rawContent, token);
-      const displayContent = stripActionTags(rawContent);
-
-      // ── JSON Recovery: Tier 2 action request but AI returned no action tags ──
-      // Re-prompt the model to generate the missing action tags before falling back to regex
-      if (routing.tier === 2 && !routing.isContentGen && actions.length === 0 && !photo) {
-        try {
-          const recoveryPrompt = 'The user said: "' + text + '"\nYour previous response was: "' + displayContent + '"\n\nYou were supposed to include an <action>JSON</action> tag but you didn\'t.\nBased on the user\'s message, generate ONLY the action tag(s) that should have been included.\nDo NOT include any conversational text \u2014 ONLY the <action>...</action> tag(s).\n\nAvailable action types: add_task, add_event, add_block, complete_task, delete_task, delete_event, update_event, delete_block, break_task, add_recurring_event\nToday is ' + today() + '.';
-          const recoveryResponse = await fetch(EDGE_FN_URL, {
-            method:'POST',
-            headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-            body:JSON.stringify({ systemPrompt:recoveryPrompt, messages:[{role:'user',content:text}], maxTokens:256, model:routing.model, provider:routing.provider, isContentGen:false })
-          });
-          if (recoveryResponse.ok) {
-            const recoveryData = await recoveryResponse.json();
-            actions = parseActions(recoveryData?.content || '');
-          }
-        } catch (recoveryErr) { console.warn('JSON recovery re-prompt failed:', recoveryErr); }
-
-        // Final fallback: client-side regex inference
-        if (actions.length === 0) {
-          const fallback = inferActionFromMessage(text);
-          if (fallback) { actions = [fallback]; }
-        }
+      const actionDecision = await actionDecisionPromise;
+      let actions = actionDecision.actions;
+      if (actions.length === 0 && actionDecision.actionDecisionText && !/^no$/i.test(actionDecision.actionDecisionText)) {
+        const fallback = inferActionFromMessage(text);
+        if (fallback) actions = [fallback];
       }
 
       // ── Resolve actions: translate AI names → real IDs using resolveEvent/resolveTask ──
-      let resolutionFailed = false; // tracks if any action couldn't be resolved — suppresses AI response if so
       const resolved = [];
       for (const a of actions) {
         if (a.type === 'delete_event' || a.type === 'update_event') {
@@ -3846,7 +4006,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, event_id: match.id, title: match.title });
           } else {
-            resolutionFailed = true;
             const msg = { role:'assistant', content: a.type === 'delete_event'
               ? "hmm, I couldn't find that event to remove. what's the exact name?"
               : "I couldn't find that event to update. which one did you mean?", timestamp:Date.now() };
@@ -3859,7 +4018,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
           } else {
-            resolutionFailed = true;
             const msg = { role:'assistant', content:"hmm, I couldn't find that task. what's the exact name?", timestamp:Date.now() };
             setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           }
@@ -3875,7 +4033,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (actions.length > 0) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
@@ -3884,13 +4042,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
       }
 
-      // Only show AI's text response if resolution didn't fail.
-      // If it failed, the "not found" error message is already shown — don't also show the AI saying "got it, removed it!"
-      if (!resolutionFailed) {
-        const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
-        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-        if (user) dbInsertChatMsg('assistant', displayContent, user.id);
-      }
+      // We intentionally keep the initial conversational reply above even if action resolution fails.
+      // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
       console.error('Chat error:', err);
       setChatError(err.message || "couldn't reach the server — check your connection");
@@ -4233,9 +4386,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   if(pa.action.type==='add_recurring_event'){
                     const dayNameToIndex={Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6};
                     const dayIndices=(pa.action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-                    const start=new Date(pa.action.start_date||new Date().toISOString().slice(0,10));
+                    const start=new Date(pa.action.start_date||today());
                     const endDef=new Date();endDef.setMonth(endDef.getMonth()+3);
-                    const end=new Date(pa.action.end_date||endDef.toISOString().slice(0,10));
+                    const end=new Date(pa.action.end_date||toDateStr(endDef));
                     const cursor=new Date(start);let count=0;
                     while(cursor<=end&&count<100){
                       if(dayIndices.includes(cursor.getDay())){
