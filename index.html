@@ -48,6 +48,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 @keyframes holoShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
 @keyframes textReveal{from{opacity:0;transform:translateY(6px);filter:blur(4px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}
 @keyframes orbFloat{0%,100%{transform:translate(0,0) scale(1)}25%{transform:translate(8px,-12px) scale(1.05)}50%{transform:translate(-4px,-8px) scale(0.98)}75%{transform:translate(-10px,4px) scale(1.02)}}
+@keyframes waterFlow{0%{transform:translate3d(-25%,0,0) rotate(0deg)}50%{transform:translate3d(0,-2%,0) rotate(2deg)}100%{transform:translate3d(-25%,0,0) rotate(0deg)}}
 @keyframes scaleIn{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}
 @keyframes neonFlicker{0%,100%{opacity:1}92%{opacity:1}93%{opacity:0.7}94%{opacity:1}96%{opacity:0.8}97%{opacity:1}}
 .fade-in{animation:fadeIn .3s ease}
@@ -56,9 +57,20 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
-.sos-app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:radial-gradient(circle at 20% 15%, rgba(108,99,255,0.16), transparent 36%),radial-gradient(circle at 82% 12%, rgba(43,203,186,0.12), transparent 32%),linear-gradient(160deg,#080813 0%,#0c0c1d 48%,#090916 100%)}
+.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.14);background:linear-gradient(180deg,rgba(14,14,26,0.98) 0%,rgba(9,9,17,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative}
+.sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.22) 0%, rgba(69,170,242,0.12) 45%, transparent 72%);filter:blur(35px);pointer-events:none;animation:waterFlow 14s ease-in-out infinite}
+.sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
+.sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
+.sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
+.sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
+.sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
+.sos-side-meta{font-size:0.73rem;color:var(--text-dim);display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
+.sos-side-list{flex:1;overflow-y:auto;padding-right:2px;position:relative;z-index:1}
+.sos-main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
+.sos-main::before{content:'';position:absolute;inset:-20% -10%;background:radial-gradient(ellipse at 70% 25%, rgba(108,99,255,0.16), transparent 45%),radial-gradient(ellipse at 30% 78%, rgba(43,203,186,0.14), transparent 42%),linear-gradient(120deg,rgba(69,170,242,0.06),rgba(108,99,255,0.1),rgba(43,203,186,0.06));filter:blur(14px);pointer-events:none;animation:waterFlow 18s ease-in-out infinite}
 .sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(108,99,255,0.15);background:linear-gradient(180deg,#1a1a2e 0%,#12122a 100%);flex-shrink:0;z-index:10;animation:fadeIn .4s ease}
-.sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth;background:transparent}
+.sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth;background:transparent;position:relative;z-index:1}
 .sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,#12122a 0%,#1a1a2e 100%);padding:8px 16px 12px;animation:fadeIn .3s ease}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
@@ -314,6 +326,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 
 /* Responsive */
 @media(max-width:768px){
+  .sos-app{flex-direction:column}
+  .sos-sidebar{width:100%;height:auto;max-height:42vh;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
@@ -4296,41 +4310,59 @@ Today is ${today()}.`;
 
   return (
     <div className="sos-app">
-      {/* ── Header ── */}
-      <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',animation:'gradientShift 4s ease infinite'}}>SOS</div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+      <aside className="sos-sidebar">
+        <div className="sos-sidebar-head">
+          <div className="sos-sidebar-brand">SOS</div>
+          {user && <div style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
           </div>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
-          <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.fileText(14)} Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
-          <button onClick={()=>setShowChatSidebar(true)} title="Chat history (H)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.messageCircle(14)} History{savedChats.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{savedChats.length}</span>}</button>
+        <div className="sos-side-actions">
+          <button className="sos-side-btn" onClick={clearChat}>{Icon.plus(14)} <span style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowPeek(true)}>{Icon.clipboard(14)} <span style={{flex:1,textAlign:'left'}}>Schedule</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowNotes(true)}>{Icon.fileText(14)} <span style={{flex:1,textAlign:'left'}}>Notes</span><span style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
           {isGoogleConnected() ? (
-            <button onClick={()=>setShowGoogleModal(true)} className="g-hdr-btn connected" title="Import from Google Calendar, Docs, or Drive">
-              {Icon.link(14)} Import
-            </button>
+            <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)}>{Icon.link(14)} <span style={{flex:1,textAlign:'left'}}>Import</span></button>
           ) : (
-            <button onClick={connectGoogle} className="g-hdr-btn" title="Connect your Google account to import calendar events, docs, and PDFs">
-              <span style={{fontWeight:900,fontSize:'0.85rem'}}>G</span> Connect
-            </button>
-          )}
-          <div title="Content generations remaining today" style={{fontSize:'0.72rem',color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span style={{display:'flex',color:'var(--accent)'}}>{Icon.sparkles(14)}</span>
-            <span style={{fontWeight:600}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
-          </div>
-          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:600,fontSize:'0.82rem'}}>{Math.round(weatherData.current.temperature_2m)}°</span></div>}
-          {user ? (
-            <button onClick={handleLogout} title="Sign out" style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:'pointer',borderRadius:8,padding:'5px 8px',fontSize:'0.72rem',transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.logout(12)} Sign out</button>
-          ) : (
-            <button onClick={()=>setShowAuthModal(true)} title="Sign in" style={{background:'linear-gradient(135deg,var(--accent),#5a54d4)',border:'none',color:'#fff',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.72rem',fontWeight:600,transition:'all .2s'}}>Sign in</button>
+            <button className="sos-side-btn" onClick={connectGoogle}><span style={{fontWeight:900,fontSize:'0.86rem'}}>G</span> <span style={{flex:1,textAlign:'left'}}>Connect Google</span></button>
           )}
         </div>
-      </div>
+        <div className="sos-side-meta">
+          <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
+          <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
+        </div>
+        <div className="sos-side-list">
+          {savedChats.length === 0 ? (
+            <div className="chat-sidebar-empty" style={{paddingTop:24}}>
+              <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
+              <div>No saved conversations yet</div>
+            </div>
+          ) : (
+            <div className="chat-sidebar-list">
+              {savedChats.map(chat => (
+                <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
+                  onClick={() => loadSavedChat(chat.id)}>
+                  <div className="chat-sidebar-item-title">{chat.title}</div>
+                  <div className="chat-sidebar-item-meta">
+                    <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
+                    <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
+          {user ? (
+            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.logout(12)} <span style={{flex:1,textAlign:'left'}}>Sign out</span></button>
+          ) : (
+            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.messageCircle(12)} <span style={{flex:1,textAlign:'left'}}>Sign in</span></button>
+          )}
+        </div>
+      </aside>
+
+      <div className="sos-main">
 
       {/* ── Chat Area ── */}
       <div className="sos-chat-area" ref={chatAreaRef}>
@@ -4495,6 +4527,7 @@ Today is ${today()}.`;
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+      </div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
