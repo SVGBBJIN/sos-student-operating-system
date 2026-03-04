@@ -3236,7 +3236,11 @@ function App() {
   }
 
   // ── Auto-scroll ──
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages, isLoading, pendingActions, pendingContent]);
+  useEffect(() => {
+    const chatEl = chatAreaRef.current;
+    if (!chatEl) return;
+    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+  }, [messages, isLoading, pendingActions, pendingContent]);
 
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
