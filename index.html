@@ -2048,6 +2048,9 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
 function DailyBriefCard({ brief, onAction }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   if (!brief) return null;
+  const scheduleItems = (brief.schedule_items || []).filter(item => (item?.event_name || '').trim() || (item?.time || '').trim());
+  const isScheduleBlank = scheduleItems.length === 0;
+  const allClearMsg = 'all clear for now go have some fun';
 
   return (
     <div style={{
@@ -2057,7 +2060,9 @@ function DailyBriefCard({ brief, onAction }) {
       padding:0,
       maxWidth:480,
       width:'100%',
-      overflow:'hidden',
+      maxHeight:'70vh',
+      overflowY:'auto',
+      overflowX:'hidden',
       boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
       animation:'floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'
     }}>
@@ -2096,23 +2101,24 @@ function DailyBriefCard({ brief, onAction }) {
         lineHeight:1.5,
         fontWeight:500
       }}>
-        {brief.summary}
+        {isScheduleBlank ? allClearMsg : (brief.summary || allClearMsg)}
       </div>
 
       {/* Schedule Items */}
-      {brief.schedule_items && brief.schedule_items.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
-          {brief.schedule_items.map((item, i) => (
+      <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
+        {isScheduleBlank ? (
+          <div style={{fontSize:'0.84rem', color:'var(--text-dim)', lineHeight:1.5}}>{allClearMsg}</div>
+        ) : scheduleItems.map((item, i) => (
             <div key={i} style={{
               display:'flex', alignItems:'center', gap:10,
               padding:'6px 0',
-              borderBottom: i < brief.schedule_items.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
+              borderBottom: i < scheduleItems.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
             }}>
               <span style={{
                 fontSize:'0.78rem', fontWeight:700, color:'var(--teal)',
                 minWidth:72, fontVariantNumeric:'tabular-nums'
-              }}>{item.time}</span>
+              }}>{item.time || '—'}</span>
               <span style={{fontSize:'0.84rem', color:'var(--text)', flex:1}}>{item.event_name}</span>
               {item.related_doc_id && (
                 <span style={{display:'flex', color:'var(--accent)', opacity:0.6}} title="Linked document">
@@ -2121,8 +2127,7 @@ function DailyBriefCard({ brief, onAction }) {
               )}
             </div>
           ))}
-        </div>
-      )}
+      </div>
 
       {/* Plan of Action */}
       {brief.plan_of_action && brief.plan_of_action.length > 0 && (
