@@ -2077,7 +2077,6 @@ function DailyBriefCard({ brief, onAction }) {
       overflowY:'auto',
       overflowX:'hidden',
       boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-      animation:'floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'
     }}>
       {/* Header */}
       <div style={{
@@ -4393,10 +4392,10 @@ Today is ${today()}.`;
           // Show Daily Brief card when available
           if (dailyBrief) {
             return (
-              <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',height:'100%',padding:'24px 16px',overflowY:'auto'}}>
+              <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',minHeight:'100%',padding:'24px 16px',overflowY:'auto'}}>
                 <div style={{position:'absolute',top:'10%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite'}}/>
-                <div style={{fontSize:'1.8rem',marginBottom:4,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-0.5px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-                <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:16,animation:'textReveal 0.4s ease 0.1s both'}}>Here's your game plan for today</div>
+                <div style={{fontSize:'1.8rem',marginBottom:4,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-0.5px',position:'relative',animation:'gradientShift 4s ease infinite'}}>SOS</div>
+                <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:16,opacity:0.92}}>Here's your game plan for today</div>
                 <DailyBriefCard brief={dailyBrief} onAction={(text) => sendChip(text)} />
               </div>
             );
