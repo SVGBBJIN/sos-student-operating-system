@@ -57,10 +57,11 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
 .sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,#05050a 0%,#070711 35%,#05050c 70%,#040408 100%);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
-.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:all .35s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
 .sos-sidebar.collapsed{width:86px;padding:14px 10px}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
-.sos-sidebar.collapsed .sos-side-label,.sos-sidebar.collapsed .sos-side-meta,.sos-sidebar.collapsed .sos-side-list,.sos-sidebar.collapsed .sync-label{display:none}
+.sos-side-label,.sos-side-meta,.sos-side-list,.sync-label{opacity:1;transform:translateX(0);max-height:900px;overflow:hidden;visibility:visible;transition:opacity .22s ease,transform .22s ease,max-height .3s ease,margin .3s ease,padding .3s ease,visibility .22s}
+.sos-sidebar.collapsed .sos-side-label,.sos-sidebar.collapsed .sos-side-meta,.sos-sidebar.collapsed .sos-side-list,.sos-sidebar.collapsed .sync-label{opacity:0;transform:translateX(-6px);max-height:0;margin:0!important;padding-top:0!important;padding-bottom:0!important;visibility:hidden;pointer-events:none}
 .sos-sidebar.collapsed .sos-side-btn{justify-content:center;padding:10px}
 .sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
 .sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
@@ -79,7 +80,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .settings-sub{font-size:0.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:12px}
 .settings-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(108,99,255,0.12)}
 .settings-row:first-of-type{border-top:none;padding-top:0}
-.settings-toggle{border:1px solid rgba(108,99,255,0.22);background:rgba(108,99,255,0.1);color:var(--text);padding:8px 12px;border-radius:12px;font-size:0.82rem;font-weight:600;cursor:pointer}
+.settings-toggle{border:1px solid rgba(108,99,255,0.22);background:rgba(108,99,255,0.1);color:var(--text);padding:8px 12px;border-radius:12px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s ease}
+.settings-toggle:hover{border-color:var(--accent);background:rgba(108,99,255,0.16)}
 .sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.1);background:linear-gradient(180deg,#0d0d1c 0%,#121224 100%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
@@ -4425,8 +4427,8 @@ Today is ${today()}.`;
       </div>}
 
       {activePanel === 'settings' ? (
-        <div className="sos-chat-area">
-          <div className="settings-view">
+        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
+          <div className="settings-view" style={{animation:'slideUp .28s ease'}}>
             <div className="settings-card">
               <div className="settings-title">Settings</div>
               <div className="settings-sub">Customize your workspace layout and keep the controls for topbar/sidebar behavior in one place.</div>
@@ -4457,7 +4459,7 @@ Today is ${today()}.`;
       ) : (
       <>
       {/* ── Chat Area ── */}
-      <div className="sos-chat-area" ref={chatAreaRef}>
+      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
         {viewingSavedChatId && (
           <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
             <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
