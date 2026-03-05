@@ -64,6 +64,10 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sos-sidebar.collapsed .sos-side-label,.sos-sidebar.collapsed .sos-side-meta,.sos-sidebar.collapsed .sos-side-list,.sos-sidebar.collapsed .sync-label{opacity:0;transform:translateX(-6px);max-height:0;margin:0!important;padding-top:0!important;padding-bottom:0!important;visibility:hidden;pointer-events:none}
 .sos-sidebar.collapsed .sos-side-btn{justify-content:center;padding:10px}
 .sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
+.sos-sidebar-head-left{display:flex;align-items:center;gap:8px;min-width:0}
+.sos-collapse-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
+.sos-collapse-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
+.sos-collapse-btn:active{transform:translateY(0) scale(0.97)}
 .sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
 .sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
 .sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
@@ -466,6 +470,7 @@ const Icon = {
   logout:(s=18)=>I(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4','M16 17l5-5-5-5','M21 12H9'],s),
   mic:(s=18)=>I(['M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z','M19 10v2a7 7 0 0 1-14 0v-2','M12 19v4','M8 23h8'],s),
   micOff:(s=18)=>I(['M1 1l22 22','M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6','M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17','M12 19v4','M8 23h8'],s),
+  panel:(s=18)=>I([{tag:'rect',x:'3',y:'3',width:'18',height:'18',rx:'5',ry:'5'},'M10 3v18'],s),
 };
 
 /* ═══════════════════════════════════════════════
@@ -4359,11 +4364,16 @@ Today is ${today()}.`;
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
-          <div className="sos-sidebar-brand">{sidebarCollapsed ? 'S' : 'SOS'}</div>
-          {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
+          <div className="sos-sidebar-head-left">
+            <div className="sos-sidebar-brand">{sidebarCollapsed ? 'S' : 'SOS'}</div>
+            {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+              <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
+              {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
+            </div>}
+          </div>
+          <button className="sos-collapse-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>
+            {Icon.panel(16)}
+          </button>
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
@@ -4371,7 +4381,6 @@ Today is ${today()}.`;
           <button className="sos-side-btn" onClick={()=>setShowNotes(true)} title="Notes">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes</span><span className="sos-side-label" style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
-          <button className="sos-side-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>{sidebarCollapsed?Icon.chevronRight(14):Icon.chevronLeft(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>{sidebarCollapsed?'Expand':'Collapse'}</span></button>
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
