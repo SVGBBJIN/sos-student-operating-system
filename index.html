@@ -68,6 +68,9 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sos-collapse-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
 .sos-collapse-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
 .sos-collapse-btn:active{transform:translateY(0) scale(0.97)}
+.topbar-sidebar-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
+.topbar-sidebar-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
+.topbar-sidebar-btn:active{transform:translateY(0) scale(0.97)}
 .sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
 .sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
 .sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
@@ -4420,7 +4423,7 @@ Today is ${today()}.`;
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
+          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
           <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
