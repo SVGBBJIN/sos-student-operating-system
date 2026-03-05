@@ -57,10 +57,22 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
 .sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,#05050a 0%,#070711 35%,#05050c 70%,#040408 100%);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
-.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:all .35s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar.collapsed{width:86px;padding:14px 10px}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
+.sos-side-label,.sos-side-meta,.sos-side-list,.sync-label{opacity:1;transform:translateX(0);max-height:900px;overflow:hidden;visibility:visible;transition:opacity .22s ease,transform .22s ease,max-height .3s ease,margin .3s ease,padding .3s ease,visibility .22s}
+.sos-sidebar.collapsed .sos-side-label,.sos-sidebar.collapsed .sos-side-meta,.sos-sidebar.collapsed .sos-side-list,.sos-sidebar.collapsed .sync-label{opacity:0;transform:translateX(-6px);max-height:0;margin:0!important;padding-top:0!important;padding-bottom:0!important;visibility:hidden;pointer-events:none}
+.sos-sidebar.collapsed .sos-side-btn{justify-content:center;padding:10px}
 .sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
-.sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
+.sos-sidebar-head-left{display:flex;align-items:center;gap:8px;min-width:0}
+.sos-collapse-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
+.sos-collapse-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
+.sos-collapse-btn:active{transform:translateY(0) scale(0.97)}
+.topbar-sidebar-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
+.topbar-sidebar-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
+.topbar-sidebar-btn:active{transform:translateY(0) scale(0.97)}
+.sos-sidebar-brand{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0}
+.sos-brand-logo{display:block;filter:drop-shadow(0 4px 12px rgba(42,168,255,0.22))}
 .sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
 .sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
 .sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
@@ -70,6 +82,14 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sos-main::before{content:'';position:absolute;inset:-20% -10%;background:radial-gradient(ellipse at 70% 25%, rgba(108,99,255,0.14), transparent 45%),radial-gradient(ellipse at 30% 78%, rgba(43,203,186,0.1), transparent 42%),linear-gradient(120deg,rgba(69,170,242,0.05),rgba(108,99,255,0.08),rgba(43,203,186,0.05));filter:blur(14px);pointer-events:none}
 .sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,#111124 0%,#0b0b18 100%);flex-shrink:0;z-index:10;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth;background:transparent;position:relative;z-index:1}
+.settings-view{max-width:720px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.settings-card{border:1px solid rgba(108,99,255,0.18);border-radius:16px;background:linear-gradient(145deg,rgba(16,16,28,0.95),rgba(10,10,18,0.95));padding:16px}
+.settings-title{font-size:1.1rem;font-weight:700;margin-bottom:4px}
+.settings-sub{font-size:0.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:12px}
+.settings-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(108,99,255,0.12)}
+.settings-row:first-of-type{border-top:none;padding-top:0}
+.settings-toggle{border:1px solid rgba(108,99,255,0.22);background:rgba(108,99,255,0.1);color:var(--text);padding:8px 12px;border-radius:12px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s ease}
+.settings-toggle:hover{border-color:var(--accent);background:rgba(108,99,255,0.16)}
 .sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.1);background:linear-gradient(180deg,#0d0d1c 0%,#121224 100%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
@@ -454,7 +474,9 @@ const Icon = {
   logout:(s=18)=>I(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4','M16 17l5-5-5-5','M21 12H9'],s),
   mic:(s=18)=>I(['M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z','M19 10v2a7 7 0 0 1-14 0v-2','M12 19v4','M8 23h8'],s),
   micOff:(s=18)=>I(['M1 1l22 22','M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6','M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17','M12 19v4','M8 23h8'],s),
+  panel:(s=18)=>I([{tag:'rect',x:'3',y:'3',width:'18',height:'18',rx:'5',ry:'5'},'M10 3v18'],s),
 };
+
 
 /* ═══════════════════════════════════════════════
    SUPABASE CONFIG
@@ -2251,7 +2273,7 @@ function DailyBriefCard({ brief, onAction }) {
 /* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
-function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect,
+function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect, onConnect,
   calSyncEnabled, calSyncStatus, calSyncLastAt, calSyncCount, calSyncError, onToggleCalSync, onSyncNow }) {
   const [tab, setTab] = useState('calendar');
   // Calendar tab state
@@ -2269,6 +2291,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
   const [err, setErr] = useState(null);
 
   // ── Helpers ──
+  const isConnected = !!googleToken;
   function authHeader() { return { 'Authorization': 'Bearer ' + googleToken }; }
 
   // Converts an ISO timestamp to a friendly "X min ago" string
@@ -2368,15 +2391,20 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
       <div className="g-modal" onClick={e=>e.stopPropagation()}>
         {/* Header */}
         <div className="g-modal-hdr">
-          <div className="g-modal-title"><span style={{display:'flex',color:'var(--accent)'}}>{Icon.link(18)}</span> Import from Google</div>
+          <div className="g-modal-title"><span style={{display:'flex',color:'var(--accent)'}}>{Icon.link(18)}</span> Import</div>
           <button className="g-modal-close" onClick={onClose} disabled={isLoading}>{Icon.x(16)}</button>
         </div>
 
         {/* Connected account info */}
-        {googleUser && (
+        {googleUser ? (
           <div className="g-connected">
             <span style={{color:'var(--success)',display:'flex',alignItems:'center',gap:4}}>{Icon.check(12)} {googleUser.email}</span>
             <button onClick={onDisconnect} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',fontSize:'0.78rem',fontWeight:600,padding:'0 4px'}}>Disconnect</button>
+          </div>
+        ) : (
+          <div className="g-connected" style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)'}}>
+            <span style={{color:'var(--text-dim)',display:'flex',alignItems:'center',gap:6}}>{Icon.link(12)} Connect Google to import Calendar events or Docs.</span>
+            <button onClick={onConnect} style={{background:'transparent',border:'1px solid rgba(108,99,255,0.3)',color:'var(--accent)',cursor:'pointer',fontSize:'0.76rem',fontWeight:600,padding:'4px 8px',borderRadius:8}}>Connect</button>
           </div>
         )}
 
@@ -2395,6 +2423,13 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
         {/* ── Calendar Tab ── */}
         {tab==='calendar' && (
           <div className="g-section">
+            {!isConnected ? (
+              <div className="g-note" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span>Connect Google to import and sync calendar events.</span>
+                <button className="g-hdr-btn" onClick={onConnect}>Connect</button>
+              </div>
+            ) : (
+            <>
 
             {/* ── Auto-sync toggle card ── */}
             <div className={'cal-sync-card' + (calSyncEnabled ? ' on' : '') + (calSyncStatus==='error' ? ' error' : '')}>
@@ -2488,12 +2523,21 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
                 )}
               </>
             )}
+            </>
+            )}
           </div>
         )}
 
         {/* ── Docs Tab ── */}
         {tab==='docs' && (
           <div className="g-section">
+            {!isConnected ? (
+              <div className="g-note" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span>Connect Google to import Docs.</span>
+                <button className="g-hdr-btn" onClick={onConnect}>Connect</button>
+              </div>
+            ) : (
+            <>
             <p className="g-note">Paste a Google Doc URL or ID below. Text only; formatting won't carry over.</p>
             <div style={{display:'flex',gap:8,alignItems:'center'}}>
               <input type="text" value={docInput} onChange={e=>{setDocInput(e.target.value);setErr(null);}}
@@ -2508,6 +2552,8 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
               onClick={importDoc} disabled={docLoading||!docInput.trim()}>
               {docLoading?'Importing…':'Import to Notes'}
             </button>
+            </>
+            )}
           </div>
         )}
 
@@ -3052,6 +3098,8 @@ function App() {
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
+  const [activePanel, setActivePanel] = useState('chat');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -4273,10 +4321,10 @@ Today is ${today()}.`;
       else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
       else if(key==='n'){e.preventDefault();setShowNotes(p=>!p)}
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false)}
+      else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar]);
+  },[showPeek,showNotes,showChatSidebar,activePanel]);
 
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
@@ -4285,12 +4333,14 @@ Today is ${today()}.`;
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
     { label:'Notes', action:()=>setShowNotes(true) },
-    { label:'Import', action:()=>isGoogleConnected()?setShowGoogleModal(true):connectGoogle() },
+    { label:'Import', action:()=>setShowGoogleModal(true) },
+    { label:'Settings', action:()=>setActivePanel('settings') },
   ];
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4317,23 +4367,25 @@ Today is ${today()}.`;
 
   return (
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
-      {layoutMode === 'sidebar' && <aside className="sos-sidebar">
+      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
-          <div className="sos-sidebar-brand">SOS</div>
-          {user && <div style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
+          <div className="sos-sidebar-head-left">
+            <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="assets/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
+            {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+              <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
+              {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
+            </div>}
+          </div>
+          <button className="sos-collapse-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>
+            {Icon.panel(16)}
+          </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={clearChat}>{Icon.plus(14)} <span style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowPeek(true)}>{Icon.clipboard(14)} <span style={{flex:1,textAlign:'left'}}>Schedule</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowNotes(true)}>{Icon.fileText(14)} <span style={{flex:1,textAlign:'left'}}>Notes</span><span style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
-          {isGoogleConnected() ? (
-            <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)}>{Icon.link(14)} <span style={{flex:1,textAlign:'left'}}>Import</span></button>
-          ) : (
-            <button className="sos-side-btn" onClick={connectGoogle}><span style={{fontWeight:900,fontSize:'0.86rem'}}>G</span> <span style={{flex:1,textAlign:'left'}}>Connect Google</span></button>
-          )}
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowPeek(true)} title="Schedule">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowNotes(true)} title="Notes">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes</span><span className="sos-side-label" style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+          <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
@@ -4361,11 +4413,11 @@ Today is ${today()}.`;
           )}
         </div>
         <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
-          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.chevronLeft(12)} <span style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
+          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Topbar mode">{Icon.chevronLeft(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
           {user ? (
-            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.logout(12)} <span style={{flex:1,textAlign:'left'}}>Sign out</span></button>
+            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
           ) : (
-            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.messageCircle(12)} <span style={{flex:1,textAlign:'left'}}>Sign in</span></button>
+            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
           )}
         </div>
       </aside>}
@@ -4373,7 +4425,8 @@ Today is ${today()}.`;
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
+          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="assets/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -4383,12 +4436,44 @@ Today is ${today()}.`;
           <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
+          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
         </div>
       </div>}
 
+      {activePanel === 'settings' ? (
+        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
+          <div className="settings-view" style={{animation:'slideUp .28s ease'}}>
+            <div className="settings-card">
+              <div className="settings-title">Settings</div>
+              <div className="settings-sub">Customize your workspace layout and keep the controls for topbar/sidebar behavior in one place.</div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between topbar and sidebar navigation.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setLayoutMode(layoutMode==='topbar'?'sidebar':'topbar')}>{layoutMode==='topbar'?'Use sidebar':'Use topbar'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar collapsed</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Applies when sidebar mode is active.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setSidebarCollapsed(prev=>!prev)}>{sidebarCollapsed?'Expand':'Collapse'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back to chat</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the conversation view.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open chat</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* ── Chat Area ── */}
-      <div className="sos-chat-area" ref={chatAreaRef}>
+      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
         {viewingSavedChatId && (
           <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
             <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
@@ -4540,6 +4625,8 @@ Today is ${today()}.`;
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
+      </>
+      )}
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
@@ -4575,7 +4662,7 @@ Today is ${today()}.`;
           </div>
         </>
       )}
-      {showGoogleModal && isGoogleConnected() && (
+      {showGoogleModal && (
         <GoogleImportModal
           googleToken={googleToken}
           googleUser={googleUser}
@@ -4584,6 +4671,7 @@ Today is ${today()}.`;
           onImportDoc={handleImportGoogleDoc}
           onImportPdf={handleImportPdf}
           onDisconnect={()=>{ disconnectGoogle(); setShowGoogleModal(false); }}
+          onConnect={connectGoogle}
           calSyncEnabled={calSyncEnabled}
           calSyncStatus={calSyncStatus}
           calSyncLastAt={calSyncLastAt}
