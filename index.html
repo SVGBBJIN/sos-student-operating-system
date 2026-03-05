@@ -478,23 +478,6 @@ const Icon = {
 };
 
 
-function BrainLogo({ size = 30 }) {
-  return (
-    <svg className="sos-brand-logo" width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="brainGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#22D3EE"/>
-          <stop offset="1" stopColor="#335CFF"/>
-        </linearGradient>
-      </defs>
-      <path d="M24 13c-6 0-11 4-12 10-5 1-9 5-9 11 0 6 4 11 10 12 2 5 7 8 13 8h11c2 0 4-2 4-4 0-3-2-5-5-5h-8c-4 0-8-3-8-7 0-5 4-8 9-8h7c5 0 9-4 9-9 0-5-4-8-9-8h-1c-2-3-6-5-10-5z" stroke="url(#brainGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M40 13c6 0 11 4 12 10 5 1 9 5 9 11 0 6-4 11-10 12-2 5-7 8-13 8h-1" stroke="url(#brainGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M24 21c3 1 5 3 5 6m6-6c-3 1-5 3-5 6m12-1c-2 1-3 2-3 4m-14 8c2 2 5 3 8 3m0-14v14" stroke="url(#brainGrad)" strokeWidth="4" strokeLinecap="round"/>
-      <circle cx="35" cy="57" r="3" fill="#001A55"/>
-    </svg>
-  );
-}
-
 /* ═══════════════════════════════════════════════
    SUPABASE CONFIG
    ═══════════════════════════════════════════════ */
@@ -4387,7 +4370,7 @@ Today is ${today()}.`;
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand"><BrainLogo size={sidebarCollapsed ? 24 : 30} /></div>
+            <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="assets/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
               {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -4443,7 +4426,7 @@ Today is ${today()}.`;
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34}}><BrainLogo size={30} /></div>
+          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="assets/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
