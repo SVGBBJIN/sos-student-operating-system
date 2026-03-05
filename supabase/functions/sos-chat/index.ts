@@ -41,72 +41,6 @@ async function callGroq(
   return { content };
 }
 
-/* ── Gemini generateContent ── */
-async function callGemini(
-  apiKey: string,
-  systemPrompt: string,
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  imageBase64?: string,
-  imageMimeType?: string
-): Promise<{ content: string }> {
-  // Build Gemini contents array — merge consecutive same-role messages
-  const merged: { role: string; parts: unknown[] }[] = [];
-
-  // System instruction goes first as a user turn (Gemini convention)
-  // Then alternate user/model
-  for (const msg of messages) {
-    const geminiRole = msg.role === "assistant" ? "model" : "user";
-    const last = merged[merged.length - 1];
-    if (last && last.role === geminiRole) {
-      last.parts.push({ text: "\n" + msg.content });
-    } else {
-      merged.push({ role: geminiRole, parts: [{ text: msg.content }] });
-    }
-  }
-
-  // Ensure first message is from user (Gemini requirement)
-  if (merged.length > 0 && merged[0].role !== "user") {
-    merged.unshift({ role: "user", parts: [{ text: "(context)" }] });
-  }
-
-  // Attach image to the last user message if provided
-  if (imageBase64 && imageMimeType) {
-    const lastUser = [...merged].reverse().find((m) => m.role === "user");
-    if (lastUser) {
-      lastUser.parts.push({
-        inlineData: { mimeType: imageMimeType, data: imageBase64 },
-      });
-    }
-  }
-
-  const body = {
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: merged,
-    generationConfig: {
-      maxOutputTokens: maxTokens,
-      temperature: 0.7,
-    },
-  };
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini error ${res.status}: ${errText}`);
-  }
-
-  const data = await res.json();
-  const content =
-    data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
-  return { content };
-}
-
 /* ── Rate limiting for content generation ── */
 async function checkContentRateLimit(
   userId: string
@@ -231,7 +165,6 @@ serve(async (req: Request) => {
     }
 
     // ── Chat completion path ──
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     const {
       systemPrompt,
@@ -263,52 +196,13 @@ serve(async (req: Request) => {
 
     let result: { content: string };
 
-    if (provider === "gemini") {
-      if (!GEMINI_API_KEY) {
-        // No Gemini key — fall back to llama-3.3-70b-versatile via Groq (full tier-2 prompt preserved)
-        console.warn("No GEMINI_API_KEY, falling back to llama-3.3-70b-versatile via Groq");
-        result = await callGroq(
-          GROQ_API_KEY,
-          "llama-3.3-70b-versatile",
-          systemPrompt,
-          messages,
-          maxTokens
-        );
-      } else {
-        try {
-          result = await callGemini(
-            GEMINI_API_KEY,
-            systemPrompt,
-            messages,
-            maxTokens,
-            imageBase64,
-            imageMimeType
-          );
-        } catch (geminiErr) {
-          // FALLBACK: Gemini failed → llama-3.3-70b-versatile via Groq (full tier-2 prompt preserved)
-          console.warn(
-            "Gemini failed, falling back to llama-3.3-70b-versatile via Groq:",
-            (geminiErr as Error).message
-          );
-          result = await callGroq(
-            GROQ_API_KEY,
-            "llama-3.3-70b-versatile",
-            systemPrompt,
-            messages,
-            maxTokens
-          );
-        }
-      }
-    } else {
-      // Groq provider
-      result = await callGroq(
-        GROQ_API_KEY,
-        model || "llama-3.1-8b-instant",
-        systemPrompt,
-        messages,
-        maxTokens
-      );
-    }
+    result = await callGroq(
+      GROQ_API_KEY,
+      model || "openai/gpt-oss-20b",
+      systemPrompt,
+      messages,
+      maxTokens
+    );
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

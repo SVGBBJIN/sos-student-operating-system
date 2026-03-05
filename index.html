@@ -20,7 +20,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0a0a0a;--bg2:#0f0f1a;--card:#1a1a2e;--accent:#6C63FF;--accent-dim:#4a44b3;--accent-glow:rgba(108,99,255,0.15);--text:#e0e0e0;--text-dim:#888;--border:#2a2a4e;--danger:#ff4757;--success:#2ed573;--warning:#ffa502;--green:#2ed573;--blue:#45aaf2;--orange:#fd9644;--pink:#fc5c65;--teal:#2bcbba;--radius:14px;--shadow:0 4px 20px rgba(0,0,0,0.4);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
-body{background:linear-gradient(160deg,#0a0a0a 0%,#0d0d1f 30%,#0a0a14 60%,#08080f 100%);color:var(--text);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;min-height:100vh}
+body{background:linear-gradient(160deg,#040408 0%,#070712 35%,#06060e 70%,#030306 100%);color:var(--text);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;min-height:100vh}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -56,10 +56,21 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
-.sos-app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
-.sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(108,99,255,0.15);background:linear-gradient(180deg,#1a1a2e 0%,#12122a 100%);flex-shrink:0;z-index:10;animation:fadeIn .4s ease}
-.sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth;background:transparent}
-.sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,#12122a 0%,#1a1a2e 100%);padding:8px 16px 12px;animation:fadeIn .3s ease}
+.sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,#05050a 0%,#070711 35%,#05050c 70%,#040408 100%);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:all .35s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
+.sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
+.sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
+.sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
+.sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
+.sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
+.sos-side-meta{font-size:0.73rem;color:var(--text-dim);display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
+.sos-side-list{flex:1;overflow-y:auto;padding-right:2px;position:relative;z-index:1}
+.sos-main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
+.sos-main::before{content:'';position:absolute;inset:-20% -10%;background:radial-gradient(ellipse at 70% 25%, rgba(108,99,255,0.14), transparent 45%),radial-gradient(ellipse at 30% 78%, rgba(43,203,186,0.1), transparent 42%),linear-gradient(120deg,rgba(69,170,242,0.05),rgba(108,99,255,0.08),rgba(43,203,186,0.05));filter:blur(14px);pointer-events:none}
+.sos-header{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,#111124 0%,#0b0b18 100%);flex-shrink:0;z-index:10;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
+.sos-chat-area{flex:1;overflow-y:auto;padding:16px 0;scroll-behavior:smooth;background:transparent;position:relative;z-index:1}
+.sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.1);background:linear-gradient(180deg,#0d0d1c 0%,#121224 100%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg-ai{justify-content:flex-start;animation:slideInLeft .3s cubic-bezier(0.16,1,0.3,1)}
@@ -314,6 +325,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 
 /* Responsive */
 @media(max-width:768px){
+  .sos-app{flex-direction:column}
+  .sos-sidebar{width:100%;height:auto;max-height:42vh;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
@@ -1127,7 +1140,7 @@ You: "nice work! ✅ marked it done."
 
 User: "I have swim practice every Mon Wed Fri"
 You: "got it — added swim practice for every Monday, Wednesday, and Friday 🏊"
-<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return d.toISOString().slice(0,10); })()}"}</action>
+<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return toDateStr(d); })()}"}</action>
 
 WRONG (never do this):
 User: "I have a math test on Friday"
@@ -1197,7 +1210,7 @@ async function parseActionsWithRecovery(rawContent, token) {
     const response = await fetch(EDGE_FN_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
+      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'openai/gpt-oss-20b', provider:'groq', isContentGen:false })
     });
     if (response.ok) {
       const data = await response.json();
@@ -1207,7 +1220,89 @@ async function parseActionsWithRecovery(rawContent, token) {
   } catch (e) { console.error('JSON recovery re-prompt failed:', e); }
   return actions;
 }
-function stripActionTags(text) { return text.replace(/<action>[\s\S]*?<\/action>/g, '').trim(); }
+function stripActionTags(text) {
+  return (text || '')
+    .replace(/<action>[\s\S]*?<\/action>/gi, '')
+    .replace(/<action[\s\S]*$/gi, '')
+    .trim();
+}
+
+function parseActionDecisionResponse(text) {
+  const raw = (text || '').trim();
+  if (!raw || /^no$/i.test(raw)) return [];
+
+  // Preferred format: command lines mapped into local templates
+  // Example: add_event; title=Math Test; date=2026-02-14; event_type=test; subject=Math
+  const parseScalar = (v) => {
+    const t = (v || '').trim();
+    if (!t) return '';
+    if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return t.slice(1, -1);
+    if (/^-?\d+$/.test(t)) return Number(t);
+    if (/^(true|false)$/i.test(t)) return /^true$/i.test(t);
+    return t;
+  };
+
+  const parseParams = (paramText) => {
+    const out = {};
+    for (const part of (paramText || '').split(';')) {
+      const seg = part.trim();
+      if (!seg) continue;
+      const idx = seg.indexOf('=');
+      if (idx === -1) continue;
+      const key = seg.slice(0, idx).trim();
+      const valueRaw = seg.slice(idx + 1).trim();
+      if (!key) continue;
+      if (key === 'days') {
+        out.days = valueRaw.replace(/^\[|\]$/g, '').split(',').map(s => s.trim()).filter(Boolean);
+        continue;
+      }
+      if (key === 'subtasks') {
+        try { out.subtasks = JSON.parse(valueRaw); } catch (_) { out.subtasks = []; }
+        continue;
+      }
+      out[key] = parseScalar(valueRaw);
+    }
+    return out;
+  };
+
+  const fromTemplate = (type, p) => {
+    switch ((type || '').trim()) {
+      case 'add_task': return { type:'add_task', title:p.title||'Untitled', subject:p.subject||'', due:p.due||today(), estimated_minutes:Number(p.estimated_minutes||30) };
+      case 'add_event': return { type:'add_event', title:p.title||'Event', date:p.date||today(), event_type:p.event_type||'event', subject:p.subject||'' };
+      case 'add_block': return { type:'add_block', activity:p.activity||'Block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00', category:p.category||'school' };
+      case 'complete_task': return { type:'complete_task', task_id:p.task_id||'' };
+      case 'delete_task': return { type:'delete_task', title:p.title||p.task_id||'' };
+      case 'delete_event': return { type:'delete_event', title:p.title||p.event_id||'' };
+      case 'update_event': return { type:'update_event', title:p.title||'', new_title:p.new_title||undefined, date:p.date||undefined, event_type:p.event_type||undefined, subject:p.subject };
+      case 'delete_block': return { type:'delete_block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00' };
+      case 'break_task': return { type:'break_task', parent_title:p.parent_title||p.title||'Task', subtasks:Array.isArray(p.subtasks)?p.subtasks:[] };
+      case 'add_recurring_event': return { type:'add_recurring_event', title:p.title||'Recurring Event', event_type:p.event_type||'practice', subject:p.subject||'', days:Array.isArray(p.days)?p.days:[], start_date:p.start_date||today(), end_date:p.end_date||today() };
+      case 'clear_all': return { type:'clear_all' };
+      default: return null;
+    }
+  };
+
+  const commandActions = raw.split(/\|\|/).map(s => s.trim()).filter(Boolean).map(cmd => {
+    const [typePart, ...rest] = cmd.split(';');
+    const type = (typePart || '').trim().toLowerCase();
+    const params = parseParams(rest.join(';'));
+    return fromTemplate(type, params);
+  }).filter(Boolean);
+  if (commandActions.length > 0) return commandActions;
+
+  const tagged = parseActions(raw);
+  if (tagged.length > 0) return tagged;
+
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return [parsed];
+  } catch (e) {
+    console.warn('Failed to parse action decision JSON:', e);
+  }
+  return [];
+}
 
 /* ─── Google Docs text extractor (shared by import modal + daily brief) ─── */
 function extractDocsText(doc) {
@@ -1248,20 +1343,20 @@ const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','cr
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
   }
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
   if (actionSignals.test(text)) {
-    return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
   }
-  // All messages use Gemini tier 2 so every model has full capabilities (flashcards, calendar, commands)
-  return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+  // All messages use GPT-OSS so one model handles chat + actions + content.
+  return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
 }
 
-/* LLM-based classifier using llama-3.1-8b-instant (with regex fallback) */
+/* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
 async function classifyMessage(text) {
   try {
     const session = await sb.auth.getSession();
@@ -1283,7 +1378,7 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
         systemPrompt:classifyPrompt,
         messages:[{role:'user',content:text}],
         maxTokens:32,
-        model:'llama-3.1-8b-instant',
+        model:'openai/gpt-oss-20b',
         provider:'groq',
         isContentGen:false
       })
@@ -1294,11 +1389,11 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
     const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
     const result = JSON.parse(jsonStr);
     switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
-      // CHAT and all other categories also use Gemini tier 2 so every model has full capabilities
-      default:            return { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:1024 };
+      case 'CONTENT_GEN': return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
+      case 'NOTES_REF':   return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
+      case 'ACTION':      return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      // CHAT and all other categories also use GPT-OSS so every capability stays available
+      default:            return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
@@ -1350,6 +1445,11 @@ function inferActionFromMessage(text) {
   // ── Check for remove/delete intent FIRST (before add logic) ──
   const removeSignals = /\b(cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|cut|forget|nevermind|never\s*mind)\b/i;
   const removePhrases = /\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out|get\s+rid\s+of)\b/i;
+  const clearAllSignals = /\b(clear|delete|remove|wipe|reset|nuke)\b[\s\S]{0,24}\b(all|everything)\b|\b(start\s+over|clean\s+slate|wipe\s+it\s+all|clear\s+everything)\b/i;
+
+  if (clearAllSignals.test(text)) {
+    return { type:'clear_all' };
+  }
 
   if (removeSignals.test(text) || removePhrases.test(text)) {
     let removeTitle = text.trim()
@@ -1561,11 +1661,14 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
       case 'delete_block': return { icon:Icon.trash(16), label:'Remove Block', badge:'remove', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
         { key:'date', label:'Date', value:action.date?fmt(action.date):'?' }, { key:'time', label:'Time', value:(action.start||'?')+' — '+(action.end||'?') }
       ]};
+      case 'clear_all': return { icon:Icon.alertTriangle(16), label:'Clear Everything', badge:'danger', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
+        { key:'scope', label:'Scope', value:'Tasks, events, and schedule blocks will be removed.' }
+      ]};
       default: return { icon:Icon.zap(16), label:'Action', badge:'action', badgeColor:'var(--accent)', borderColor:'var(--accent)', fields: Object.entries(action).filter(([k])=>k!=='type').map(([k,v])=>({key:k,label:k,value:String(v)})) };
     }
   }
   const info = getCardInfo();
-  const isDanger = ['delete_task','delete_event','delete_block'].includes(action.type);
+  const isDanger = ['delete_task','delete_event','delete_block','clear_all'].includes(action.type);
 
   return (
     <div className="confirm-card" style={{borderLeftColor:info.borderColor}}>
@@ -1632,7 +1735,7 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   function toggleAll() { const v=!selectAll; setSelectAll(v); setChecked(actions.map(()=>v)); }
 
   function getActionLabel(a) {
-    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring' };
+    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring', clear_all:'Clear Everything' };
     return (labels[a.type]||'Action')+': '+(a.title||a.activity||a.parent_title||'Untitled');
   }
   function getBadgeColor(a) {
@@ -1689,9 +1792,9 @@ function RecurringEventPopup({ action, onConfirm, onCancel }) {
   useEffect(() => {
     const dayNameToIndex = { Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6 };
     const dayIndices = (action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-    const start = new Date(action.start_date || new Date().toISOString().slice(0,10));
+    const start = new Date(action.start_date || today());
     const endDefault = new Date(); endDefault.setMonth(endDefault.getMonth()+3);
-    const end = new Date(action.end_date || endDefault.toISOString().slice(0,10));
+    const end = new Date(action.end_date || toDateStr(endDefault));
     const generated = [];
     const cursor = new Date(start);
     while (cursor <= end && generated.length < 100) {
@@ -1958,6 +2061,9 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
 function DailyBriefCard({ brief, onAction }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   if (!brief) return null;
+  const scheduleItems = (brief.schedule_items || []).filter(item => (item?.event_name || '').trim() || (item?.time || '').trim());
+  const isScheduleBlank = scheduleItems.length === 0;
+  const allClearMsg = 'all clear for now go have some fun';
 
   return (
     <div style={{
@@ -1967,9 +2073,10 @@ function DailyBriefCard({ brief, onAction }) {
       padding:0,
       maxWidth:480,
       width:'100%',
-      overflow:'hidden',
+      maxHeight:'70vh',
+      overflowY:'auto',
+      overflowX:'hidden',
       boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-      animation:'floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'
     }}>
       {/* Header */}
       <div style={{
@@ -2006,23 +2113,24 @@ function DailyBriefCard({ brief, onAction }) {
         lineHeight:1.5,
         fontWeight:500
       }}>
-        {brief.summary}
+        {isScheduleBlank ? allClearMsg : (brief.summary || allClearMsg)}
       </div>
 
       {/* Schedule Items */}
-      {brief.schedule_items && brief.schedule_items.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
-          {brief.schedule_items.map((item, i) => (
+      <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
+        {isScheduleBlank ? (
+          <div style={{fontSize:'0.84rem', color:'var(--text-dim)', lineHeight:1.5}}>{allClearMsg}</div>
+        ) : scheduleItems.map((item, i) => (
             <div key={i} style={{
               display:'flex', alignItems:'center', gap:10,
               padding:'6px 0',
-              borderBottom: i < brief.schedule_items.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
+              borderBottom: i < scheduleItems.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
             }}>
               <span style={{
                 fontSize:'0.78rem', fontWeight:700, color:'var(--teal)',
                 minWidth:72, fontVariantNumeric:'tabular-nums'
-              }}>{item.time}</span>
+              }}>{item.time || '—'}</span>
               <span style={{fontSize:'0.84rem', color:'var(--text)', flex:1}}>{item.event_name}</span>
               {item.related_doc_id && (
                 <span style={{display:'flex', color:'var(--accent)', opacity:0.6}} title="Linked document">
@@ -2031,8 +2139,7 @@ function DailyBriefCard({ brief, onAction }) {
               )}
             </div>
           ))}
-        </div>
-      )}
+      </div>
 
       {/* Plan of Action */}
       {brief.plan_of_action && brief.plan_of_action.length > 0 && (
@@ -2944,6 +3051,7 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -2973,6 +3081,7 @@ function App() {
   const ring4Ref = useRef(null);
 
   // Daily Brief state
+  const DAILY_BRIEF_ENABLED = false;
   const [dailyBrief, setDailyBrief] = useState(null);
   const briefRequestedRef = useRef(false);
 
@@ -3127,7 +3236,11 @@ function App() {
   }
 
   // ── Auto-scroll ──
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages, isLoading, pendingActions, pendingContent]);
+  useEffect(() => {
+    const chatEl = chatAreaRef.current;
+    if (!chatEl) return;
+    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+  }, [messages, isLoading, pendingActions, pendingContent]);
 
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
@@ -3303,6 +3416,18 @@ function App() {
               return { ...prev, dates:newDates };
             });
             if (user && delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(delDate, key, null, user.id))));
+          }
+          break;
+        case 'clear_all':
+          setTasks([]);
+          setEvents([]);
+          setBlocks({ dates:{} });
+          if (user) {
+            syncOp(() => Promise.all([
+              sb.from('tasks').delete().eq('user_id', user.id),
+              sb.from('events').delete().eq('user_id', user.id),
+              sb.from('date_blocks').delete().eq('user_id', user.id)
+            ]));
           }
           break;
         default: console.warn('Unknown action type:', action.type);
@@ -3493,11 +3618,28 @@ function App() {
 
   // ── Daily Brief: Context Aggregator ──
   async function getMorningContext() {
-    if (!isGoogleConnected()) return null;
     try {
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const endOfDay = new Date(startOfDay.getTime() + 86400000);
+      const localTodayEvents = events
+        .filter(ev => ev.date === today())
+        .slice(0, 25)
+        .map(ev => ({
+          id: ev.id,
+          title: ev.title,
+          time: 'Scheduled',
+          description: '',
+          attachments: []
+        }));
+
+      const docContents = {};
+      let calendarEvents = localTodayEvents;
+
+      if (!isGoogleConnected()) {
+        return { calendarEvents, docContents };
+      }
+
       const params = new URLSearchParams({
         timeMin: startOfDay.toISOString(),
         timeMax: endOfDay.toISOString(),
@@ -3509,11 +3651,11 @@ function App() {
         'https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params,
         { headers: { 'Authorization': 'Bearer ' + googleToken } }
       );
-      if (!res.ok) return null;
+      if (!res.ok) return { calendarEvents, docContents };
       const data = await res.json();
       const items = (data.items || []).filter(e => e.summary);
 
-      const calendarEvents = items.map(e => ({
+      calendarEvents = items.map(e => ({
         id: e.id,
         title: e.summary,
         time: e.start?.dateTime
@@ -3534,7 +3676,6 @@ function App() {
       });
 
       // Fetch first 3000 chars of each linked Google Doc
-      const docContents = {};
       await Promise.all([...docIds].map(async (docId) => {
         try {
           const docRes = await fetch(
@@ -3556,8 +3697,9 @@ function App() {
     }
   }
 
-  // ── Daily Brief: Generator (single Gemini API call) ──
+  // ── Daily Brief: Generator (single GPT-OSS API call) ──
   async function generateDailyBrief() {
+    if (!DAILY_BRIEF_ENABLED) return;
     if (briefRequestedRef.current) return;
     briefRequestedRef.current = true;
     setIsLoading(true);
@@ -3607,8 +3749,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'gemini-2.5-flash',
-          provider: 'gemini',
+          model: 'openai/gpt-oss-20b',
+          provider: 'groq',
           isContentGen: false
         })
       });
@@ -3629,13 +3771,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setIsLoading(false);
   }
 
-  // ── Daily Brief: Auto-trigger on fresh session with Google connected ──
+  // ── Daily Brief: Auto-trigger on fresh session when the page opens ──
   useEffect(() => {
-    if (dataLoaded && isGoogleConnected() && messages.length === 0
-        && !briefRequestedRef.current && !viewingSavedChatId) {
-      generateDailyBrief();
-    }
-  }, [dataLoaded, googleToken, messages.length, viewingSavedChatId]);
+    if (!DAILY_BRIEF_ENABLED) return;
+    if (!dataLoaded || !googleToken) return;
+    if (messages.length > 0 || viewingSavedChatId) return;
+    if (!events || events.length === 0) return;
+    generateDailyBrief();
+  }, [DAILY_BRIEF_ENABLED, dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
 
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
@@ -3756,43 +3899,103 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Force Gemini tier 2 when photo is attached (Llama can't do vision)
-    const routing = photo
-      ? { provider:'gemini', model:'gemini-2.5-flash', tier:2, isContentGen:false, maxTokens:2048 }
-      : await classifyMessage(text);
-
     try {
       const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
-      const systemPrompt = buildSystemPrompt(tasks, blocks, events, notes, routing.tier);
+      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 1);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      const fetchBody = {
-        systemPrompt,
+      const actionPrompt = `You decide whether the user's latest message requires an SOS action command.
+
+Return exactly one of these outputs:
+1) no
+2) command line(s) that map to prewritten local JSON templates
+
+If the message is conversational only, return: no
+If an action is needed, use one of:
+- add_task
+- add_event
+- add_block
+- complete_task
+- delete_task
+- delete_event
+- update_event
+- delete_block
+- break_task
+- add_recurring_event
+- clear_all
+
+Formatting rules (strict):
+- Output MUST be exactly one line.
+- Output MUST be either the single word no OR command format.
+- Command format: action_type; key=value; key=value
+- For multiple actions, join commands with: ||
+- No markdown, no code fences, no commentary.
+
+Examples:
+- add_task; title=History essay; subject=History; due=2026-03-12; estimated_minutes=45
+- add_event; title=Math Test; date=2026-03-15; event_type=test; subject=Math
+- delete_event; title=Math Test
+- add_recurring_event; title=Swim Practice; event_type=practice; days=Monday,Wednesday,Friday; start_date=2026-03-05; end_date=2026-06-05
+- clear_all
+
+Today is ${today()}.`;
+
+      const actionDecisionPromise = photo
+        ? Promise.resolve({ actions: [], actionDecisionText: '' })
+        : (async () => {
+            let actions = [];
+            let actionDecisionText = '';
+            try {
+              const actionResponse = await fetch(EDGE_FN_URL, {
+                method:'POST',
+                headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
+                body:JSON.stringify({
+                  systemPrompt: actionPrompt,
+                  messages:[{ role:'user', content: msgContent }],
+                  maxTokens: 512,
+                  model:'openai/gpt-oss-20b',
+                  provider:'groq',
+                  isContentGen:false
+                })
+              });
+              if (actionResponse.ok) {
+                const actionData = await actionResponse.json();
+                actionDecisionText = (actionData?.content || '').trim();
+                actions = parseActionDecisionResponse(actionDecisionText);
+              }
+            } catch (actionErr) {
+              console.warn('Action decision call failed:', actionErr);
+            }
+            return { actions, actionDecisionText };
+          })();
+
+      const chatBody = {
+        systemPrompt: chatPrompt,
         messages: historyForApi,
-        maxTokens: routing.maxTokens,
-        model: routing.model,
-        provider: routing.provider,
-        isContentGen: routing.isContentGen
+        maxTokens: 1024,
+        model: 'openai/gpt-oss-20b',
+        provider: 'groq',
+        isContentGen: false
       };
       if (photo) {
-        fetchBody.imageBase64 = photo.base64;
-        fetchBody.imageMimeType = photo.mimeType;
+        chatBody.imageBase64 = photo.base64;
+        chatBody.imageMimeType = photo.mimeType;
       }
 
-      const response = await fetch(EDGE_FN_URL, {
+      const chatResponse = await fetch(EDGE_FN_URL, {
         method:'POST',
         headers: {
           'Content-Type':'application/json',
           'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
         },
-        body: JSON.stringify(fetchBody)
+        body: JSON.stringify(chatBody)
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        if (response.status === 429 && errData?.rateLimited) {
+      if (!chatResponse.ok) {
+        const errData = await chatResponse.json().catch(() => ({}));
+        if (chatResponse.status === 429 && errData?.rateLimited) {
           const limitMsg = "hey, you've used all 5 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -3801,44 +4004,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           setIsLoading(false);
           return;
         }
-        throw new Error(errData?.error || 'AI request failed: ' + response.status);
+        throw new Error(errData?.error || 'AI request failed: ' + chatResponse.status);
       }
 
-      const data = await response.json();
-      const rawContent = data?.content || "hmm, didn't get a response. try again?";
+      const chatData = await chatResponse.json();
+      const displayContent = stripActionTags(chatData?.content || "hmm, didn't get a response. try again?");
 
-      if (routing.isContentGen) {
-        setContentGenUsed(prev => prev + 1);
-      }
+      // Show Llama conversational response immediately.
+      // Action processing continues afterward so OSS-20B can return without blocking chat UX.
+      const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', displayContent, user.id);
 
-      let actions = await parseActionsWithRecovery(rawContent, token);
-      const displayContent = stripActionTags(rawContent);
-
-      // ── JSON Recovery: Tier 2 action request but AI returned no action tags ──
-      // Re-prompt the model to generate the missing action tags before falling back to regex
-      if (routing.tier === 2 && !routing.isContentGen && actions.length === 0 && !photo) {
-        try {
-          const recoveryPrompt = 'The user said: "' + text + '"\nYour previous response was: "' + displayContent + '"\n\nYou were supposed to include an <action>JSON</action> tag but you didn\'t.\nBased on the user\'s message, generate ONLY the action tag(s) that should have been included.\nDo NOT include any conversational text \u2014 ONLY the <action>...</action> tag(s).\n\nAvailable action types: add_task, add_event, add_block, complete_task, delete_task, delete_event, update_event, delete_block, break_task, add_recurring_event\nToday is ' + today() + '.';
-          const recoveryResponse = await fetch(EDGE_FN_URL, {
-            method:'POST',
-            headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-            body:JSON.stringify({ systemPrompt:recoveryPrompt, messages:[{role:'user',content:text}], maxTokens:256, model:routing.model, provider:routing.provider, isContentGen:false })
-          });
-          if (recoveryResponse.ok) {
-            const recoveryData = await recoveryResponse.json();
-            actions = parseActions(recoveryData?.content || '');
-          }
-        } catch (recoveryErr) { console.warn('JSON recovery re-prompt failed:', recoveryErr); }
-
-        // Final fallback: client-side regex inference
-        if (actions.length === 0) {
-          const fallback = inferActionFromMessage(text);
-          if (fallback) { actions = [fallback]; }
-        }
+      const actionDecision = await actionDecisionPromise;
+      let actions = actionDecision.actions;
+      if (actions.length === 0 && actionDecision.actionDecisionText && !/^no$/i.test(actionDecision.actionDecisionText)) {
+        const fallback = inferActionFromMessage(text);
+        if (fallback) actions = [fallback];
       }
 
       // ── Resolve actions: translate AI names → real IDs using resolveEvent/resolveTask ──
-      let resolutionFailed = false; // tracks if any action couldn't be resolved — suppresses AI response if so
       const resolved = [];
       for (const a of actions) {
         if (a.type === 'delete_event' || a.type === 'update_event') {
@@ -3846,7 +4031,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, event_id: match.id, title: match.title });
           } else {
-            resolutionFailed = true;
             const msg = { role:'assistant', content: a.type === 'delete_event'
               ? "hmm, I couldn't find that event to remove. what's the exact name?"
               : "I couldn't find that event to update. which one did you mean?", timestamp:Date.now() };
@@ -3859,7 +4043,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
           } else {
-            resolutionFailed = true;
             const msg = { role:'assistant', content:"hmm, I couldn't find that task. what's the exact name?", timestamp:Date.now() };
             setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           }
@@ -3875,7 +4058,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (actions.length > 0) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
@@ -3884,13 +4067,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
       }
 
-      // Only show AI's text response if resolution didn't fail.
-      // If it failed, the "not found" error message is already shown — don't also show the AI saying "got it, removed it!"
-      if (!resolutionFailed) {
-        const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
-        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-        if (user) dbInsertChatMsg('assistant', displayContent, user.id);
-      }
+      // We intentionally keep the initial conversational reply above even if action resolution fails.
+      // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
       console.error('Chat error:', err);
       setChatError(err.message || "couldn't reach the server — check your connection");
@@ -4112,6 +4290,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
+  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4137,42 +4316,76 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className="sos-app">
-      {/* ── Header ── */}
-      <div className="sos-header">
+    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      {layoutMode === 'sidebar' && <aside className="sos-sidebar">
+        <div className="sos-sidebar-head">
+          <div className="sos-sidebar-brand">SOS</div>
+          {user && <div style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
+            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
+            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
+          </div>}
+        </div>
+        <div className="sos-side-actions">
+          <button className="sos-side-btn" onClick={clearChat}>{Icon.plus(14)} <span style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowPeek(true)}>{Icon.clipboard(14)} <span style={{flex:1,textAlign:'left'}}>Schedule</span></button>
+          <button className="sos-side-btn" onClick={()=>setShowNotes(true)}>{Icon.fileText(14)} <span style={{flex:1,textAlign:'left'}}>Notes</span><span style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
+          {isGoogleConnected() ? (
+            <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)}>{Icon.link(14)} <span style={{flex:1,textAlign:'left'}}>Import</span></button>
+          ) : (
+            <button className="sos-side-btn" onClick={connectGoogle}><span style={{fontWeight:900,fontSize:'0.86rem'}}>G</span> <span style={{flex:1,textAlign:'left'}}>Connect Google</span></button>
+          )}
+        </div>
+        <div className="sos-side-meta">
+          <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
+          <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
+        </div>
+        <div className="sos-side-list">
+          {savedChats.length === 0 ? (
+            <div className="chat-sidebar-empty" style={{paddingTop:24}}>
+              <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
+              <div>No saved conversations yet</div>
+            </div>
+          ) : (
+            <div className="chat-sidebar-list">
+              {savedChats.map(chat => (
+                <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
+                  onClick={() => loadSavedChat(chat.id)}>
+                  <div className="chat-sidebar-item-title">{chat.title}</div>
+                  <div className="chat-sidebar-item-meta">
+                    <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
+                    <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
+          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.chevronLeft(12)} <span style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
+          {user ? (
+            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.logout(12)} <span style={{flex:1,textAlign:'left'}}>Sign out</span></button>
+          ) : (
+            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}}>{Icon.messageCircle(12)} <span style={{flex:1,textAlign:'left'}}>Sign in</span></button>
+          )}
+        </div>
+      </aside>}
+
+      <div className="sos-main">
+      {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',animation:'gradientShift 4s ease infinite'}}>SOS</div>
+          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
           </div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          {activeTaskCount>0&&<div style={{fontSize:'0.75rem',color:overdueCount>0?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span style={{width:8,height:8,borderRadius:4,background:overdueCount>0?'var(--danger)':'var(--accent)',display:'inline-block'}}/>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0&&<span style={{color:'var(--danger)'}}>({overdueCount} overdue)</span>}</div>}
-          <button onClick={()=>setShowPeek(true)} title="View schedule (S)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} title="View notes (N)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.fileText(14)} Notes{notes.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{notes.length}</span>}</button>
-          <button onClick={()=>setShowChatSidebar(true)} title="Chat history (H)" style={{background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--accent)',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.78rem',fontWeight:600,transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.messageCircle(14)} History{savedChats.length>0&&<span style={{fontSize:'0.68rem',background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',borderRadius:8,padding:'1px 5px',fontWeight:700}}>{savedChats.length}</span>}</button>
-          {isGoogleConnected() ? (
-            <button onClick={()=>setShowGoogleModal(true)} className="g-hdr-btn connected" title="Import from Google Calendar, Docs, or Drive">
-              {Icon.link(14)} Import
-            </button>
-          ) : (
-            <button onClick={connectGoogle} className="g-hdr-btn" title="Connect your Google account to import calendar events, docs, and PDFs">
-              <span style={{fontWeight:900,fontSize:'0.85rem'}}>G</span> Connect
-            </button>
-          )}
-          <div title="Content generations remaining today" style={{fontSize:'0.72rem',color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span style={{display:'flex',color:'var(--accent)'}}>{Icon.sparkles(14)}</span>
-            <span style={{fontWeight:600}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
-          </div>
-          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:600,fontSize:'0.82rem'}}>{Math.round(weatherData.current.temperature_2m)}°</span></div>}
-          {user ? (
-            <button onClick={handleLogout} title="Sign out" style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:'pointer',borderRadius:8,padding:'5px 8px',fontSize:'0.72rem',transition:'all .2s',display:'flex',alignItems:'center',gap:4}}>{Icon.logout(12)} Sign out</button>
-          ) : (
-            <button onClick={()=>setShowAuthModal(true)} title="Sign in" style={{background:'linear-gradient(135deg,var(--accent),#5a54d4)',border:'none',color:'#fff',cursor:'pointer',borderRadius:8,padding:'5px 10px',fontSize:'0.72rem',fontWeight:600,transition:'all .2s'}}>Sign in</button>
-          )}
+          <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
+          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
+          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
         </div>
-      </div>
+      </div>}
 
       {/* ── Chat Area ── */}
       <div className="sos-chat-area" ref={chatAreaRef}>
@@ -4183,17 +4396,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
-          // Show Daily Brief card when available
-          if (dailyBrief) {
-            return (
-              <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',height:'100%',padding:'24px 16px',overflowY:'auto'}}>
-                <div style={{position:'absolute',top:'10%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite'}}/>
-                <div style={{fontSize:'1.8rem',marginBottom:4,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-0.5px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.5s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-                <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:16,animation:'textReveal 0.4s ease 0.1s both'}}>Here's your game plan for today</div>
-                <DailyBriefCard brief={dailyBrief} onAction={(text) => sendChip(text)} />
-              </div>
-            );
-          }
           // Default welcome screen
           const wv = welcomeVariants[welcomeIdx];
           return (
@@ -4233,9 +4435,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   if(pa.action.type==='add_recurring_event'){
                     const dayNameToIndex={Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6};
                     const dayIndices=(pa.action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-                    const start=new Date(pa.action.start_date||new Date().toISOString().slice(0,10));
+                    const start=new Date(pa.action.start_date||today());
                     const endDef=new Date();endDef.setMonth(endDef.getMonth()+3);
-                    const end=new Date(pa.action.end_date||endDef.toISOString().slice(0,10));
+                    const end=new Date(pa.action.end_date||toDateStr(endDef));
                     const cursor=new Date(start);let count=0;
                     while(cursor<=end&&count<100){
                       if(dayIndices.includes(cursor.getDay())){
@@ -4337,6 +4539,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+      </div>
       </div>
 
       {showPeek&&<SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/>}
