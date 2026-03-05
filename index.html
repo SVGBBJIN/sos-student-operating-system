@@ -4411,6 +4411,7 @@ Today is ${today()}.`;
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
           <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
@@ -4421,7 +4422,6 @@ Today is ${today()}.`;
           <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setLayoutMode('sidebar')} className="g-hdr-btn">{Icon.chevronRight(14)} Sidebar</button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
         </div>
       </div>}
