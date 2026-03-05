@@ -53,6 +53,10 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .fade-in{animation:fadeIn .3s ease}
 .slide-up{animation:slideUp .3s ease}
 .card-pop{animation:cardPop .25s ease}
+.entrance-rise{animation:floatUp .5s cubic-bezier(0.16,1,0.3,1) both}
+.entrance-slide{animation:slideDown .45s cubic-bezier(0.16,1,0.3,1) both}
+.entrance-delay-1{animation-delay:.08s}
+.entrance-delay-2{animation-delay:.16s}
 
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
@@ -61,6 +65,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
 .sos-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 10px;border-bottom:1px solid rgba(108,99,255,0.12);position:relative;z-index:1}
 .sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
+.sos-sidebar-tagline{font-size:0.68rem;color:var(--text-dim);letter-spacing:0.42px;text-transform:uppercase;margin-top:2px;animation:textReveal .5s ease .1s both}
 .sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
 .sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
 .sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
@@ -1586,7 +1591,7 @@ function AuthModal({ onAuth, onClose }) {
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
           <div>
             <div style={{fontSize:'1.1rem',fontWeight:700}}>{mode === 'login' ? 'Welcome back' : 'Create your account'}</div>
-            <div style={{fontSize:'0.8rem',color:'var(--text-dim)',marginTop:2}}>Sign in to save your data across devices</div>
+            <div style={{fontSize:'0.8rem',color:'var(--text-dim)',marginTop:2}}>Sign in to your Student Operating System account to save your data across devices</div>
           </div>
           <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
         </div>
@@ -4298,6 +4303,7 @@ Today is ${today()}.`;
       <div className="auth-screen" style={{position:'relative'}}>
         <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none',animation:'breathe 3s ease-in-out infinite'}}/>
         <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
+        <div style={{fontSize:'0.82rem',letterSpacing:'0.45px',textTransform:'uppercase',color:'var(--text-dim)',marginBottom:10,animation:'textReveal 0.45s ease .12s both'}}>Student Operating System</div>
         <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
         <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)',position:'relative',animation:'textReveal 0.4s ease 0.2s both'}}>Loading your data...</div>
       </div>
@@ -4310,6 +4316,7 @@ Today is ${today()}.`;
       <div className="auth-screen" style={{position:'relative'}}>
         <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
         <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
+        <div style={{fontSize:'0.82rem',letterSpacing:'0.45px',textTransform:'uppercase',color:'var(--text-dim)',marginBottom:10,animation:'textReveal 0.45s ease .12s both'}}>Student Operating System</div>
         <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
       </div>
     );
@@ -4319,7 +4326,7 @@ Today is ${today()}.`;
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
       {layoutMode === 'sidebar' && <aside className="sos-sidebar">
         <div className="sos-sidebar-head">
-          <div className="sos-sidebar-brand">SOS</div>
+          <div className="entrance-slide"><div className="sos-sidebar-brand">SOS</div><div className="sos-sidebar-tagline">Student Operating System</div></div>
           {user && <div style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -4373,7 +4380,7 @@ Today is ${today()}.`;
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+          <div className="entrance-slide" style={{display:'flex',flexDirection:'column',gap:2}}><div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div><div style={{fontSize:'0.66rem',letterSpacing:'0.35px',textTransform:'uppercase',color:'var(--text-dim)'}}>Student Operating System</div></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -4401,9 +4408,10 @@ Today is ${today()}.`;
           return (
           <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
             <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
+            <div style={{fontSize:'3.2rem',marginBottom:8,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
+            <div className="entrance-rise entrance-delay-1" style={{fontSize:'0.8rem',letterSpacing:'0.55px',textTransform:'uppercase',color:'var(--text-dim)',marginBottom:10}}>Student Operating System</div>
+            <div className="entrance-rise entrance-delay-1" style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
+            <div className="entrance-rise entrance-delay-2" style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
               {wv.chips.map((s,i)=>(
                 <button key={s} className="sos-chip" style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>
