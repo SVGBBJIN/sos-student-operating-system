@@ -71,7 +71,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .topbar-sidebar-btn{width:34px;height:34px;border-radius:11px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.03);color:rgba(240,240,255,0.9);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s ease;flex-shrink:0}
 .topbar-sidebar-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);transform:translateY(-1px)}
 .topbar-sidebar-btn:active{transform:translateY(0) scale(0.97)}
-.sos-sidebar-brand{font-size:1.15rem;font-weight:800;letter-spacing:-0.4px;background:linear-gradient(135deg,#7B6CFF,var(--teal),#45aaf2);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:gradientShift 4s ease infinite}
+.sos-sidebar-brand{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0}
+.sos-brand-logo{display:block;filter:drop-shadow(0 4px 12px rgba(42,168,255,0.22))}
 .sos-side-btn{width:100%;border:1px solid rgba(108,99,255,0.2);background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(43,203,186,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
 .sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(108,99,255,0.18)}
 .sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
@@ -475,6 +476,24 @@ const Icon = {
   micOff:(s=18)=>I(['M1 1l22 22','M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6','M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17','M12 19v4','M8 23h8'],s),
   panel:(s=18)=>I([{tag:'rect',x:'3',y:'3',width:'18',height:'18',rx:'5',ry:'5'},'M10 3v18'],s),
 };
+
+
+function BrainLogo({ size = 30 }) {
+  return (
+    <svg className="sos-brand-logo" width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="brainGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#22D3EE"/>
+          <stop offset="1" stopColor="#335CFF"/>
+        </linearGradient>
+      </defs>
+      <path d="M24 13c-6 0-11 4-12 10-5 1-9 5-9 11 0 6 4 11 10 12 2 5 7 8 13 8h11c2 0 4-2 4-4 0-3-2-5-5-5h-8c-4 0-8-3-8-7 0-5 4-8 9-8h7c5 0 9-4 9-9 0-5-4-8-9-8h-1c-2-3-6-5-10-5z" stroke="url(#brainGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M40 13c6 0 11 4 12 10 5 1 9 5 9 11 0 6-4 11-10 12-2 5-7 8-13 8h-1" stroke="url(#brainGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M24 21c3 1 5 3 5 6m6-6c-3 1-5 3-5 6m12-1c-2 1-3 2-3 4m-14 8c2 2 5 3 8 3m0-14v14" stroke="url(#brainGrad)" strokeWidth="4" strokeLinecap="round"/>
+      <circle cx="35" cy="57" r="3" fill="#001A55"/>
+    </svg>
+  );
+}
 
 /* ═══════════════════════════════════════════════
    SUPABASE CONFIG
@@ -4368,7 +4387,7 @@ Today is ${today()}.`;
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand">{sidebarCollapsed ? 'S' : 'SOS'}</div>
+            <div className="sos-sidebar-brand"><BrainLogo size={sidebarCollapsed ? 24 : 30} /></div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
               {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -4424,7 +4443,7 @@ Today is ${today()}.`;
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div style={{fontSize:'1.15rem',fontWeight:800,letterSpacing:'-0.5px',background:'linear-gradient(135deg, #7B6CFF, var(--teal), #45aaf2)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SOS</div>
+          <div className="sos-sidebar-brand" style={{width:34,height:34}}><BrainLogo size={30} /></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
