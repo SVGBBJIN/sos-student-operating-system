@@ -1,12 +1,15 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="1536" height="1536" viewBox="0 0 1536 1536" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1536" height="1536" fill="#160414"/>
   <defs>
-    <linearGradient id="brainGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+    <linearGradient id="brainGrad" x1="240" y1="220" x2="1280" y2="1320" gradientUnits="userSpaceOnUse">
       <stop stop-color="#22D3EE"/>
       <stop offset="1" stop-color="#335CFF"/>
     </linearGradient>
   </defs>
-  <path d="M24 13c-6 0-11 4-12 10-5 1-9 5-9 11 0 6 4 11 10 12 2 5 7 8 13 8h11c2 0 4-2 4-4 0-3-2-5-5-5h-8c-4 0-8-3-8-7 0-5 4-8 9-8h7c5 0 9-4 9-9 0-5-4-8-9-8h-1c-2-3-6-5-10-5z" stroke="url(#brainGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M40 13c6 0 11 4 12 10 5 1 9 5 9 11 0 6-4 11-10 12-2 5-7 8-13 8h-1" stroke="url(#brainGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M24 21c3 1 5 3 5 6m6-6c-3 1-5 3-5 6m12-1c-2 1-3 2-3 4m-14 8c2 2 5 3 8 3m0-14v14" stroke="url(#brainGrad)" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="35" cy="57" r="3" fill="#001A55"/>
+  <g stroke="url(#brainGrad)" stroke-width="120" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M580 380c-140 0-250 95-275 220-120 35-200 135-200 265 0 160 120 285 280 295 55 120 170 200 305 200h240c60 0 110-50 110-110 0-100-75-170-180-170H650c-135 0-240-105-240-230 0-150 120-250 270-250h200c140 0 250-110 250-250S1020 300 880 300h-25c-55-85-155-140-275-140z"/>
+    <path d="M980 380c140 0 250 95 275 220 120 35 200 135 200 265 0 160-120 285-280 295-55 120-170 200-305 200h-20"/>
+    <path d="M560 570c80 25 140 90 140 180m190-180c-80 25-140 90-140 180m350-35c-55 20-90 60-90 120m-430 250c65 55 150 85 240 85m0-420v420"/>
+  </g>
+  <circle cx="1035" cy="1310" r="34" fill="#001A55"/>
 </svg>
