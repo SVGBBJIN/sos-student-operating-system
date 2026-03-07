@@ -1,0 +1,17 @@
+{
+  "name": "SOS — Student Operating System",
+  "short_name": "SOS",
+  "description": "Your AI study sidekick — manage tasks, notes, and schedule with AI assistance.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "/assets/brain-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

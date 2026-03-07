@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service | SOS Student Operating System</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; }
+        h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        h2 { color: #2c3e50; margin-top: 30px; }
+        .footer { margin-top: 50px; font-size: 0.9em; color: #666; }
+    </style>
+</head>
+<body>
+
+    <h1>Terms of Service</h1>
+    <p><strong>Last Updated:</strong> February 20, 2026</p>
+
+    <p>Welcome to <strong>SOS Student Operating System</strong> ("the App"). By using our services, you agree to the following terms. Please read them carefully.</p>
+
+    <h2>1. Description of Service</h2>
+    <p>The App is a productivity tool designed to help students organize study schedules and manage notes. We provide integration with Google Services (Calendar and Docs) to sync data and generate summaries.</p>
+
+    <h2>2. Use of Google Services</h2>
+    <p>Our App integrates with Google APIs. By using these features, you are also bound by the <a href="https://www.google.com/intl/en/policies/terms/" target="_blank">Google Terms of Service</a>. We are not responsible for the availability or security of Google’s infrastructure.</p>
+
+    <h2>3. User Responsibilities</h2>
+    <p>You agree to use the App only for lawful purposes. You are responsible for any content you summarize or create using our tools. You must not attempt to abuse our API connections or interfere with the App's hosting on GitHub Pages, Netlify, or Supabase.</p>
+
+    <h2>4. Limitation of Liability</h2>
+    <p>The App is provided "as is" without any warranties. As a personal project, we do not guarantee 100% uptime or that the AI-generated summaries will be perfectly accurate. We are not liable for any data loss occurring within your Google Account.</p>
+
+    <h2>5. Termination</h2>
+    <p>We reserve the right to stop providing the service at any time. You can stop using the App and revoke its access to your Google Account at any time via your Google Security settings.</p>
+
+    <h2>6. Changes to Terms</h2>
+    <p>We may update these terms from time to time. Continued use of the App after changes constitutes acceptance of the new terms.</p>
+
+    <div class="footer">
+        <p>If you have any questions, contact us at: <strong>babyjin2012@gmail.com</strong></p>
+    </div>
+
+</body>
+</html>
