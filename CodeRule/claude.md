@@ -1,18 +1,32 @@
-shipyard/
-├── protocols/              <-- The "Laws" (Fills prompting gaps)
-│   ├── ui_standards.md     
-│   ├── code_hygiene.md     
-│   └── architecture.md     
-├── blueprints/             <-- Feature templates (Pre-configured sets)
-│   ├── auth_flow.md
-│   └── landing_hero.md
-├── workflows/              <-- The "Assembly Lines"
-│   └── launch_project.md   
-└── tools/                  <-- The "Machinery"
-    └── provisioner.py
+
+#General protocols
+# Agent Directive: Interceptor (Lean Refinement)
+
+## 🎯 Primary Goal
+Execute surgical feature implementation and logic optimization. Minimize token burn and maximize code recycling. **The code diff is the summary.**
+
+## 🔋 Surgical Token Protocol (STP)
+- **Zero Redundancy:** Never rewrite an entire file. Output ONLY the lines being changed (Diffs).
+- **Context Thrift:** Use `grep` to locate logic. Do not read files >50 lines unless necessary.
+- **Memory Check:** Cache `database.types.ts` and `package.json` in your internal state.
+
+## 🧼 Code Hygiene (DRY)
+- **Recycle:** Search `src/lib/` for existing utilities before writing new functions.
+- **Injection:** Use `tools/feature_injector.py` to create file shells; manually wire logic.
+- **Vibe Audit:** Run `tools/audit_vibe.py` after CSS changes to ensure protocol compliance.
+
+## 🗄️ Data Evolution
+- **No Ghost Tables:** Every DB change requires a new migration file.
+- **Type-Safety:** Regenerate Supabase types IMMEDIATELY after schema tweaks.
+
+## 🚦 Refinement Workflow
+1. **Locate:** `grep` for relevant components.
+2. **Inject:** Run `tools/feature_injector.py`.
+3. **Weld:** Apply surgical diffs to integrate logic.
+4. **Audit:** Run `tools/audit_vibe.py` to verify the "High-Tech Blue" standard.
 
 
-# Shipyard Master Context (CLAUDE.md)
+# Context (CLAUDE.md)
 
 ## 🛠️ Integrated Tech Stack Protocols
 
@@ -36,3 +50,4 @@ shipyard/
 - **Triggering:** Use `tools/zap_trigger.py` to send data to Zapier Webhooks.
 - **Logic:** Use Zapier for "Glue Logic" (e.g., sending emails, Slack alerts, or syncing to Google Sheets).
 - **Naming:** Always name Zaps as `[Project Name] - [Action Name]`.
+
