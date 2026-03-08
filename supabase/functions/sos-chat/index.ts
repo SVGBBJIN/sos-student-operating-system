@@ -7,62 +7,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Gemini generateContent ── */
-async function callGemini(
-  apiKey: string,
-  systemPrompt: string,
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  imageBase64?: string,
-  imageMimeType?: string
-): Promise<{ content: string }> {
-  const merged: { role: string; parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] }[] = [];
-
-  for (const msg of messages) {
-    const geminiRole = msg.role === "assistant" ? "model" : "user";
-    const last = merged[merged.length - 1];
-    if (last && last.role === geminiRole) {
-      last.parts.push({ text: "\n" + msg.content });
-    } else {
-      merged.push({ role: geminiRole, parts: [{ text: msg.content }] });
-    }
-  }
-
-  if (merged.length > 0 && merged[0].role !== "user") {
-    merged.unshift({ role: "user", parts: [{ text: "(context)" }] });
-  }
-
-  if (imageBase64 && imageMimeType) {
-    const lastUser = [...merged].reverse().find((m) => m.role === "user");
-    if (lastUser) {
-      lastUser.parts.push({ inlineData: { mimeType: imageMimeType, data: imageBase64 } });
-    }
-  }
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: merged,
-        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini error ${res.status}: ${errText}`);
-  }
-
-  const data = await res.json();
-  const content =
-    data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
-  return { content };
-}
-
 /* ── Groq chat completion ── */
 async function callGroq(
   apiKey: string,
@@ -159,7 +103,6 @@ serve(async (req: Request) => {
 
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     if (!GROQ_API_KEY) {
       return new Response(
@@ -233,10 +176,7 @@ serve(async (req: Request) => {
       messages,
       maxTokens = 1024,
       model,
-      provider,
       isContentGen,
-      imageBase64,
-      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -256,25 +196,7 @@ serve(async (req: Request) => {
       }
     }
 
-    let result: { content: string };
-
-    if (provider === "gemini") {
-      if (!GEMINI_API_KEY) {
-        // No Gemini key — fall back to llama-3.3-70b-versatile via Groq
-        console.warn("No GEMINI_API_KEY, falling back to llama-3.3-70b-versatile via Groq");
-        result = await callGroq(GROQ_API_KEY, "llama-3.3-70b-versatile", systemPrompt, messages, maxTokens);
-      } else {
-        try {
-          result = await callGemini(GEMINI_API_KEY, systemPrompt, messages, maxTokens, imageBase64, imageMimeType);
-        } catch (geminiErr) {
-          // Gemini failed → fall back to Groq
-          console.warn("Gemini failed, falling back to llama-3.3-70b-versatile:", (geminiErr as Error).message);
-          result = await callGroq(GROQ_API_KEY, "llama-3.3-70b-versatile", systemPrompt, messages, maxTokens);
-        }
-      }
-    } else {
-      result = await callGroq(GROQ_API_KEY, model || "llama-3.1-8b-instant", systemPrompt, messages, maxTokens);
-    }
+    const result = await callGroq(GROQ_API_KEY, model || "llama-3.1-8b-instant", systemPrompt, messages, maxTokens);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

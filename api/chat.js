@@ -1,5 +1,5 @@
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
-// Reads GROQ_API_KEY, GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
+// Reads GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -29,55 +29,6 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens) {
 
   const data = await res.json();
   return { content: data.choices?.[0]?.message?.content ?? "" };
-}
-
-/* ── Gemini generateContent ── */
-async function callGemini(apiKey, systemPrompt, messages, maxTokens, imageBase64, imageMimeType) {
-  const merged = [];
-
-  for (const msg of messages) {
-    const geminiRole = msg.role === "assistant" ? "model" : "user";
-    const last = merged[merged.length - 1];
-    if (last && last.role === geminiRole) {
-      last.parts.push({ text: "\n" + msg.content });
-    } else {
-      merged.push({ role: geminiRole, parts: [{ text: msg.content }] });
-    }
-  }
-
-  if (merged.length > 0 && merged[0].role !== "user") {
-    merged.unshift({ role: "user", parts: [{ text: "(context)" }] });
-  }
-
-  if (imageBase64 && imageMimeType) {
-    const lastUser = [...merged].reverse().find((m) => m.role === "user");
-    if (lastUser) {
-      lastUser.parts.push({ inlineData: { mimeType: imageMimeType, data: imageBase64 } });
-    }
-  }
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: merged,
-        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini error ${res.status}: ${errText}`);
-  }
-
-  const data = await res.json();
-  const content =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  return { content };
 }
 
 /* ── Extract user ID from JWT ── */
@@ -141,7 +92,6 @@ module.exports = async function handler(req, res) {
   }
 
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -202,10 +152,7 @@ module.exports = async function handler(req, res) {
       messages,
       maxTokens = 1024,
       model,
-      provider,
       isContentGen,
-      imageBase64,
-      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -223,53 +170,13 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    let result;
-
-    if (provider === "gemini") {
-      if (!GEMINI_API_KEY) {
-        // No Gemini key — fall back to llama-3.3-70b-versatile via Groq
-        console.warn("No GEMINI_API_KEY, falling back to llama-3.3-70b-versatile via Groq");
-        result = await callGroq(
-          GROQ_API_KEY,
-          "llama-3.3-70b-versatile",
-          systemPrompt,
-          messages,
-          maxTokens
-        );
-      } else {
-        try {
-          result = await callGemini(
-            GEMINI_API_KEY,
-            systemPrompt,
-            messages,
-            maxTokens,
-            imageBase64,
-            imageMimeType
-          );
-        } catch (geminiErr) {
-          // Gemini failed → fall back to llama-3.3-70b-versatile via Groq
-          console.warn(
-            "Gemini failed, falling back to llama-3.3-70b-versatile:",
-            geminiErr.message
-          );
-          result = await callGroq(
-            GROQ_API_KEY,
-            "llama-3.3-70b-versatile",
-            systemPrompt,
-            messages,
-            maxTokens
-          );
-        }
-      }
-    } else {
-      result = await callGroq(
-        GROQ_API_KEY,
-        model || "llama-3.1-8b-instant",
-        systemPrompt,
-        messages,
-        maxTokens
-      );
-    }
+    const result = await callGroq(
+      GROQ_API_KEY,
+      model || "llama-3.1-8b-instant",
+      systemPrompt,
+      messages,
+      maxTokens
+    );
 
     return res.status(200).json(result);
   } catch (err) {
