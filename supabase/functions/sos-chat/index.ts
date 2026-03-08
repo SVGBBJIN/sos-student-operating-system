@@ -130,11 +130,16 @@ serve(async (req: Request) => {
       const binaryStr = atob(audioBase64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const audioBlob = new Blob([bytes], { type: audioMimeType || "audio/webm" });
-      const audioFile = new File([audioBlob], "voice.webm", { type: audioMimeType || "audio/webm" });
+      const effectiveMime = audioMimeType || "audio/webm";
+      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
+        : effectiveMime.includes("ogg") ? "ogg"
+        : effectiveMime.includes("mp3") ? "mp3"
+        : "webm";
+      const audioBlob = new Blob([bytes], { type: effectiveMime });
+      const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
 
       const groqForm = new FormData();
-      groqForm.append("file", audioFile, "voice.webm");
+      groqForm.append("file", audioFile, `voice.${audioExt}`);
       groqForm.append("model", "whisper-large-v3-turbo");
       groqForm.append("response_format", "json");
       groqForm.append("language", "en");
@@ -171,10 +176,7 @@ serve(async (req: Request) => {
       messages,
       maxTokens = 1024,
       model,
-      provider,
       isContentGen,
-      imageBase64,
-      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -194,15 +196,7 @@ serve(async (req: Request) => {
       }
     }
 
-    let result: { content: string };
-
-    result = await callGroq(
-      GROQ_API_KEY,
-      model || "openai/gpt-oss-20b",
-      systemPrompt,
-      messages,
-      maxTokens
-    );
+    const result = await callGroq(GROQ_API_KEY, model || "llama-3.1-8b-instant", systemPrompt, messages, maxTokens);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
