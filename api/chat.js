@@ -160,14 +160,17 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: "No audio data provided" });
       }
 
+      const effectiveMime = audioMimeType || "audio/webm";
+      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
+        : effectiveMime.includes("ogg") ? "ogg"
+        : effectiveMime.includes("mp3") ? "mp3"
+        : "webm";
       const audioBuffer = Buffer.from(audioBase64, "base64");
-      const audioBlob = new Blob([audioBuffer], { type: audioMimeType || "audio/webm" });
-      const audioFile = new File([audioBlob], "voice.webm", {
-        type: audioMimeType || "audio/webm",
-      });
+      const audioBlob = new Blob([audioBuffer], { type: effectiveMime });
+      const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
 
       const groqForm = new FormData();
-      groqForm.append("file", audioFile, "voice.webm");
+      groqForm.append("file", audioFile, `voice.${audioExt}`);
       groqForm.append("model", "whisper-large-v3-turbo");
       groqForm.append("response_format", "json");
       groqForm.append("language", "en");

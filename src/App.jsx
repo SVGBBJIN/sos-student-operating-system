@@ -220,7 +220,7 @@ async function loadAllFromSupabase(userId) {
     const tasks = (tasksRes.data || []).map(dbTaskToApp);
     const events = (eventsRes.data || []).map(dbEventToApp);
     const notes = (notesRes.data || []).map(dbNoteToApp);
-    const messages = (chatRes.data || []).map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.created_at).getTime(), photoUrl: m.photo_url || null }));
+    const messages = (chatRes.data || []).map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.created_at).getTime(), photoUrl: m.photo_url || null, fromDB: true }));
 
     // Reconstruct blocks object from recurring_blocks + date_blocks
     const recurring = (recurringRes.data || []).map(rb => ({
@@ -3970,8 +3970,8 @@ Today is ${today()}.`;
     speechTranscriptRef.current = '';
 
     if (transcript) {
-      setInput(prev => prev ? prev + ' ' + transcript : transcript);
-      inputRef.current?.focus();
+      // Auto-send the transcribed message directly
+      sendMessage(transcript);
     } else {
       setToastMsg("Couldn't catch that — try speaking louder or closer");
     }
