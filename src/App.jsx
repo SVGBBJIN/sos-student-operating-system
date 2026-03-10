@@ -611,16 +611,8 @@ RULES:
 6. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
 7. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
 8. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
-9. If the student asks for a high-level summary, project brief, or structured study document, respond with ONLY valid JSON (no markdown/code fences) using:
-   {
-     "type": "STRUCTURED_DOC",
-     "title": "...",
-     "summary": "...",
-     "sections": [{"heading": "...", "points": ["...", "..."]}],
-     "action_items": ["..."],
-     "dropdown_options": ["..."]
-   }
-   Keep dropdown_options actionable so they can be used as follow-on prompts.
+9. If the student asks for a high-level summary, project brief, or structured study document, you MUST return JSON-only output using the STRUCTURED_DOC contract below (no markdown/code fences):
+${buildStructuredDocPrompt('STRUCTURED_DOC')}
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -3704,7 +3696,9 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
       if (actions.length > 0 || parsedStructured) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
         let contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
-        if (parsedStructured) contentActions = [...contentActions, parsedStructured];
+        if (parsedStructured && !contentActions.some(a => a.type === 'create_structured_doc' && (a.title || '') === (parsedStructured.title || '') && (a.summary || '') === (parsedStructured.summary || ''))) {
+          contentActions = [...contentActions, parsedStructured];
+        }
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
         if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
