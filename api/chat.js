@@ -98,7 +98,7 @@ async function checkContentRateLimit(userId, supabaseUrl, serviceKey) {
 }
 
 /* ── Main handler ── */
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 
   if (req.method === "OPTIONS") {
