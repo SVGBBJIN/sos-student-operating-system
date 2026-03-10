@@ -12,7 +12,7 @@ async function callGroq(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  messages: { role: string; content: string }[],
+  messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
   maxTokens: number
 ): Promise<{ content: string }> {
   const body = {
@@ -177,6 +177,8 @@ serve(async (req: Request) => {
       maxTokens = 1024,
       model,
       isContentGen,
+      imageBase64,
+      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -196,7 +198,24 @@ serve(async (req: Request) => {
       }
     }
 
-    const result = await callGroq(GROQ_API_KEY, model || "llama-3.1-8b-instant", systemPrompt, messages, maxTokens);
+    const effectiveModel = imageBase64
+      ? "meta-llama/llama-4-scout-17b-16e-instruct"
+      : (model || "llama-3.1-8b-instant");
+
+    const preparedMessages = [...messages];
+    if (imageBase64 && preparedMessages.length > 0) {
+      const lastIdx = preparedMessages.length - 1;
+      const lastMsg = preparedMessages[lastIdx];
+      preparedMessages[lastIdx] = {
+        role: lastMsg.role,
+        content: [
+          { type: "text", text: lastMsg.content as string },
+          { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
+        ],
+      };
+    }
+
+    const result = await callGroq(GROQ_API_KEY, effectiveModel, systemPrompt, preparedMessages, maxTokens);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
