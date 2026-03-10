@@ -3621,12 +3621,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     try {
       // Strip any legacy <action> tags from history — old DB messages may contain them,
       // causing the model to mimic the pattern and output action-only responses (empty text bug).
-      const historyForApi = updated.slice(-12).map(m => {
+      // For image requests: send only last 2 messages to keep payload small for vision model.
+      const rawHistory = updated.slice(photo ? -2 : -12).map(m => {
         const content = m.role === 'assistant'
           ? (stripActionTags(m.content || '') || m.content || '')
           : (m.content || '');
         return { role: m.role, content };
       });
+      const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 1);
 
       const session = await sb.auth.getSession();
@@ -3730,7 +3732,7 @@ Today is ${today()}.`;
           setIsLoading(false);
           return;
         }
-        throw new Error(errData?.error || 'AI request failed: ' + chatResponse.status);
+        throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
       }
 
       const chatData = await chatResponse.json();
@@ -4207,6 +4209,7 @@ Today is ${today()}.`;
                 {(msg.photoUrl||msg.photoPreview)&&(
                   <img src={msg.photoUrl||msg.photoPreview} alt="photo"
                     onClick={()=>setLightboxUrl(msg.photoUrl||msg.photoPreview)}
+                    onError={(e)=>{e.target.style.display='none';}}
                     style={{maxWidth:240,maxHeight:200,borderRadius:10,marginBottom:msg.content?8:0,cursor:'pointer',display:'block'}}/>
                 )}
                 {msg.content&&<span>{msg.content}</span>}

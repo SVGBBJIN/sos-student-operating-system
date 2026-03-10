@@ -202,31 +202,43 @@ serve(async (req: Request) => {
       ? "meta-llama/llama-4-scout-17b-16e-instruct"
       : (model || "llama-3.1-8b-instant");
 
-    const preparedMessages = [...messages];
-    if (imageBase64 && preparedMessages.length > 0) {
-      const lastIdx = preparedMessages.length - 1;
-      const lastMsg = preparedMessages[lastIdx];
-      const textContent = (lastMsg.content as string) || "What do you see in this image?";
-      preparedMessages[lastIdx] = {
-        role: lastMsg.role,
-        content: [
-          { type: "text", text: textContent },
-          { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
-        ],
-      };
+    // For vision requests: use lean prompt + minimal history to avoid payload bloat & contamination
+    let effectivePrompt = systemPrompt;
+    let preparedMessages = [...messages];
+
+    if (imageBase64) {
+      effectivePrompt = "You are SOS, a chill study sidekick. The student sent you a photo. Describe what you see and help with any school-related content visible (homework, assignments, schedules, textbook pages, etc.). Be casual and brief (2-4 sentences). If you can identify specific tasks or deadlines, mention them clearly.";
+
+      // Only keep last 2 messages (current user msg + optional prior context) — vision doesn't need full history
+      preparedMessages = preparedMessages
+        .filter((m: { content: string }) => m.content && (typeof m.content !== 'string' || m.content.trim()))
+        .slice(-2);
+
+      if (preparedMessages.length > 0) {
+        const lastIdx = preparedMessages.length - 1;
+        const lastMsg = preparedMessages[lastIdx];
+        const textContent = (lastMsg.content as string) || "What do you see in this image?";
+        preparedMessages[lastIdx] = {
+          role: lastMsg.role,
+          content: [
+            { type: "text", text: textContent },
+            { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
+          ],
+        };
+      }
     }
 
-    const result = await callGroq(GROQ_API_KEY, effectiveModel, systemPrompt, preparedMessages, maxTokens);
+    const result = await callGroq(GROQ_API_KEY, effectiveModel, effectivePrompt, preparedMessages, maxTokens);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("sos-chat error:", err);
+    const errMsg = (err as Error).message || "Internal server error";
+    const errStack = (err as Error).stack || "";
+    console.error("sos-chat error:", errMsg, errStack);
     return new Response(
-      JSON.stringify({
-        error: (err as Error).message || "Internal server error",
-      }),
+      JSON.stringify({ error: errMsg }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
