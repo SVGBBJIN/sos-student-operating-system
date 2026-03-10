@@ -7,29 +7,331 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Groq chat completion ── */
+/* ── Tool definitions for Groq (OpenAI function-calling format) ── */
+const ACTION_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "add_event",
+      description:
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title" },
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: {
+            type: "string",
+            description: "School subject (e.g., Math, Biology, English)",
+          },
+        },
+        required: ["title", "date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_task",
+      description:
+        "Add a homework assignment or task to the student's to-do list.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Task title" },
+          subject: { type: "string", description: "School subject" },
+          due: { type: "string", description: "Due date in YYYY-MM-DD format" },
+          estimated_minutes: {
+            type: "number",
+            description: "Estimated time to complete in minutes",
+          },
+        },
+        required: ["title", "due"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_event",
+      description:
+        "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the event to delete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_task",
+      description:
+        "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to delete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_event",
+      description:
+        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Current event title to look up" },
+          new_title: { type: "string", description: "New title (omit if not changing name)" },
+          date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: { type: "string" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "complete_task",
+      description:
+        "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to mark complete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_block",
+      description:
+        "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          start: { type: "string", description: "Start time in HH:MM 24-hour format (e.g. 14:00)" },
+          end: { type: "string", description: "End time in HH:MM 24-hour format (e.g. 15:30)" },
+          activity: { type: "string", description: "Activity name" },
+          category: {
+            type: "string",
+            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+          },
+        },
+        required: ["date", "start", "end", "activity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_block",
+      description: "Remove a time block from the student's schedule.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
+          start: { type: "string", description: "Start time of the block (HH:MM)" },
+          end: { type: "string", description: "End time of the block (HH:MM, optional)" },
+        },
+        required: ["date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_note",
+      description: "Save a note or important information to the student's notes.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_name: { type: "string", description: "Name for the note tab" },
+          content: { type: "string", description: "Content to save" },
+        },
+        required: ["tab_name", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "break_task",
+      description:
+        "Break a large task into smaller, manageable subtasks spread across multiple days.",
+      parameters: {
+        type: "object",
+        properties: {
+          parent_title: { type: "string", description: "Title of the task to break up" },
+          subtasks: {
+            type: "array",
+            description: "List of subtasks",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                due: { type: "string", description: "YYYY-MM-DD" },
+                estimated_minutes: { type: "number" },
+              },
+            },
+          },
+        },
+        required: ["parent_title", "subtasks"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_recurring_event",
+      description:
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          event_type: {
+            type: "string",
+            enum: ["test", "practice", "game", "match", "event", "other"],
+          },
+          subject: { type: "string" },
+          days: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday",
+              ],
+            },
+            description: "Days of the week this event repeats",
+          },
+          start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
+          end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
+        },
+        required: ["title", "days", "start_date", "end_date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_all",
+      description:
+        "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+];
+
+/* ── Groq chat + function calling ── */
 async function callGroq(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  messages: { role: string; content: string }[],
-  maxTokens: number
-): Promise<{ content: string }> {
-  const body = {
-    model,
-    messages: [{ role: "system", content: systemPrompt }, ...messages],
+  messages: {
+    role: string;
+    content:
+      | string
+      | { type: string; text?: string; image_url?: { url: string } }[];
+  }[],
+  maxTokens: number,
+  imageBase64?: string,
+  imageMimeType?: string,
+  includeTools = true
+): Promise<{ content: string; actions: Record<string, unknown>[] }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const groqMessages: any[] = [{ role: "system", content: systemPrompt }];
+
+  if (imageBase64) {
+    // Vision: use Llama 4 Scout (vision-capable) and image_url format
+    const effectiveMime = imageMimeType || "image/jpeg";
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const textContent =
+      lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
+        ? lastUser.content.trim()
+        : "What do you see in this image?";
+    groqMessages.push({
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
+        },
+        { type: "text", text: textContent },
+      ],
+    });
+  } else {
+    for (const m of messages) {
+      const text = typeof m.content === "string" ? m.content.trim() : "";
+      if (text) groqMessages.push({ role: m.role, content: text });
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body: any = {
+    model: imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model,
+    messages: groqMessages,
     max_tokens: maxTokens,
-    temperature: 0.7,
   };
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  if (includeTools && !imageBase64) {
+    body.tools = ACTION_TOOLS;
+    body.tool_choice = "auto";
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  let res: Response;
+  try {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`Groq ${model} request timed out after 30s`);
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -37,8 +339,60 @@ async function callGroq(
   }
 
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content ?? "";
-  return { content };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const message = (data.choices?.[0] as any)?.message;
+  const textContent: string = message?.content || "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actions: Record<string, unknown>[] = (message?.tool_calls || []).map((tc: any) => ({
+    type: tc.function.name,
+    ...JSON.parse(tc.function.arguments),
+  }));
+
+  return { content: textContent.trim(), actions };
+}
+
+/* ── Groq chat completion (kept for voice transcription only) ── */
+async function callGroqWhisper(
+  apiKey: string,
+  audioBase64: string,
+  audioMimeType: string
+): Promise<string> {
+  const binaryStr = atob(audioBase64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+  const effectiveMime = audioMimeType || "audio/webm";
+  const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
+    ? "m4a"
+    : effectiveMime.includes("ogg")
+    ? "ogg"
+    : effectiveMime.includes("mp3")
+    ? "mp3"
+    : "webm";
+  const audioBlob = new Blob([bytes], { type: effectiveMime });
+  const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
+
+  const groqForm = new FormData();
+  groqForm.append("file", audioFile, `voice.${audioExt}`);
+  groqForm.append("model", "whisper-large-v3-turbo");
+  groqForm.append("response_format", "json");
+  groqForm.append("language", "en");
+
+  const groqRes = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: groqForm,
+    }
+  );
+
+  if (!groqRes.ok) {
+    const errText = await groqRes.text();
+    throw new Error(`Groq Whisper error ${groqRes.status}: ${errText}`);
+  }
+
+  const result = await groqRes.json();
+  return result.text || "";
 }
 
 /* ── Rate limiting for content generation ── */
@@ -74,7 +428,6 @@ async function checkContentRateLimit(
     return { allowed: false, used };
   }
 
-  // Increment
   await sb.from("content_generations").upsert(
     { user_id: userId, date: todayEST, count: used + 1 },
     { onConflict: "user_id,date" }
@@ -104,6 +457,40 @@ serve(async (req: Request) => {
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 
+    const body = await req.json();
+
+    // ── Voice transcription path (Groq Whisper) ──
+    if (body.mode === "voice") {
+      if (!GROQ_API_KEY) {
+        return new Response(
+          JSON.stringify({ error: "GROQ_API_KEY not configured" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      const { audioBase64, audioMimeType } = body;
+      if (!audioBase64) {
+        return new Response(
+          JSON.stringify({ error: "No audio data provided" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      try {
+        const text = await callGroqWhisper(GROQ_API_KEY, audioBase64, audioMimeType || "audio/webm");
+        return new Response(
+          JSON.stringify({ text }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (err) {
+        const errMsg = (err as Error).message || "Transcription failed";
+        console.error("Voice transcription error:", errMsg);
+        return new Response(
+          JSON.stringify({ error: errMsg }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // ── Chat completion path (Groq) ──
     if (!GROQ_API_KEY) {
       return new Response(
         JSON.stringify({ error: "GROQ_API_KEY not configured" }),
@@ -114,69 +501,13 @@ serve(async (req: Request) => {
       );
     }
 
-    const body = await req.json();
-
-    // ── Voice transcription path ──
-    if (body.mode === "voice") {
-      const { audioBase64, audioMimeType } = body;
-      if (!audioBase64) {
-        return new Response(
-          JSON.stringify({ error: "No audio data provided" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Decode base64 → binary → Blob → File for Groq
-      const binaryStr = atob(audioBase64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const effectiveMime = audioMimeType || "audio/webm";
-      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
-        : effectiveMime.includes("ogg") ? "ogg"
-        : effectiveMime.includes("mp3") ? "mp3"
-        : "webm";
-      const audioBlob = new Blob([bytes], { type: effectiveMime });
-      const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
-
-      const groqForm = new FormData();
-      groqForm.append("file", audioFile, `voice.${audioExt}`);
-      groqForm.append("model", "whisper-large-v3-turbo");
-      groqForm.append("response_format", "json");
-      groqForm.append("language", "en");
-
-      const groqRes = await fetch(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-          body: groqForm,
-        }
-      );
-
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        console.error("Groq Whisper error:", groqRes.status, errText);
-        return new Response(
-          JSON.stringify({ error: "Transcription failed", details: errText }),
-          { status: groqRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const whisperResult = await groqRes.json();
-      return new Response(
-        JSON.stringify({ text: whisperResult.text || "" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ── Chat completion path ──
-
     const {
       systemPrompt,
       messages,
       maxTokens = 1024,
-      model,
       isContentGen,
+      imageBase64,
+      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -196,17 +527,32 @@ serve(async (req: Request) => {
       }
     }
 
-    const result = await callGroq(GROQ_API_KEY, model || "llama-3.1-8b-instant", systemPrompt, messages, maxTokens);
+    // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
+    const model = "llama-3.3-70b-versatile";
+
+    // Don't pass tools for content generation (flashcards, study guides, etc.)
+    const includeTools = !isContentGen;
+
+    const result = await callGroq(
+      GROQ_API_KEY,
+      model,
+      systemPrompt,
+      messages,
+      maxTokens,
+      imageBase64,
+      imageMimeType,
+      includeTools
+    );
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("sos-chat error:", err);
+    const errMsg = (err as Error).message || "Internal server error";
+    const errStack = (err as Error).stack || "";
+    console.error("sos-chat error:", errMsg, errStack);
     return new Response(
-      JSON.stringify({
-        error: (err as Error).message || "Internal server error",
-      }),
+      JSON.stringify({ error: errMsg }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

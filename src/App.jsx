@@ -555,11 +555,10 @@ NOTES: ${noteNames}
 
 RULES:
 1. NEVER invent specific tasks, deadlines, or events. If it's not explicitly listed above, it doesn't exist — do not make it up.
-2. Do NOT output any <action> tags. This is a chat-only response.
-3. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
-4. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
-5. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help (which will route to the full AI).
-6. Stay warm, brief, and casual.`;
+2. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
+3. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
+4. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help.
+5. Stay warm, brief, and casual.`;
   }
 
   return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
@@ -601,129 +600,28 @@ COMPLETED THIS WEEK: ${doneThisWeek} tasks
 ${notesSection ? `STUDENT'S NOTES & REFERENCE DOCUMENTS:
 ${notesSection}` : 'NOTES: (none)'}
 
-ACTIONS — you can modify the student's data using XML action tags. Always put ONE action tag at the very end of your message. Never list or describe these actions in your visible text — just use them silently.
-
-FORMAT: <action>JSON_HERE</action>
-
-AVAILABLE ACTIONS:
-add_task: {"type":"add_task","title":"...","subject":"...","due":"YYYY-MM-DD","estimated_minutes":30}
-complete_task: {"type":"complete_task","task_id":"..."}
-update_task: {"type":"update_task","task_id":"...","title":"...","due":"YYYY-MM-DD","estimated_minutes":30}
-add_block: {"type":"add_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","activity":"...","category":"school"}
-add_event: {"type":"add_event","title":"...","date":"YYYY-MM-DD","event_type":"test","subject":"..."}
-add_note: {"type":"add_note","tab_name":"...","content":"..."}
-break_task: {"type":"break_task","parent_title":"...","subtasks":[{"title":"...","due":"YYYY-MM-DD","estimated_minutes":20}]}
-delete_task: {"type":"delete_task","title":"..."}
-delete_event: {"type":"delete_event","title":"..."}
-update_event: {"type":"update_event","title":"...","new_title":"(optional new name)","date":"YYYY-MM-DD"}
-delete_block: {"type":"delete_block","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM"}
-add_recurring_event: {"type":"add_recurring_event","title":"...","event_type":"practice","subject":"...","days":["Monday","Wednesday","Friday"],"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}
-make_plan: {"type":"make_plan","title":"Study Plan for Finals","steps":[{"title":"Review Ch.1 notes","date":"YYYY-MM-DD","time":"16:00-17:00","estimated_minutes":60},{"title":"Practice problems","date":"YYYY-MM-DD","time":"15:00-16:00","estimated_minutes":60}]}
+TOOLS — you have built-in tools to manage the student's calendar, tasks, blocks, and notes. Use them whenever the student mentions anything actionable. Keep your text response natural and brief — just mention what you did casually, don't explain the action in detail.
 
 RULES:
-1. ALWAYS output the <action> tag. Never describe what you "could" do — just do it.
-2. NEVER repeat or list these action definitions in your reply. The student should never see raw JSON or action syntax.
-3. Any mention of a task, event, test, quiz, practice, homework, deadline, project = generate the tag immediately.
-4. Even casual phrasing counts: "got a calc test fri" = add_event. "gotta finish essay by thursday" = add_task.
-5. Best-guess missing details. Guessing > not acting. Today is ${todayKey}.
-6. For day names, calculate the real YYYY-MM-DD date.
-7. Respond naturally ("got it — added your test for Friday") but the <action> tag at the end is what actually does it.
-8. Categories: school, swim, debate, free time, sleep, other. Event types: homework, test, practice, event, other.
-9. For delete/update: just include the "title" of the event or task — the system will find the right one automatically. You do NOT need to guess IDs.
-10. If a student mentions something that ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT create a duplicate — just acknowledge it.
-
-WHEN TO USE EACH ACTION:
-- "add/create/schedule/I have a test/exam/practice/I got a" → add_event or add_task
-- "done/finished/turned in/submitted/completed" → complete_task
-- "cancel/remove/delete/clear/scratch/drop/ditch/wipe/axe/nix/scrap/erase/trash/toss/yeet/bin/forget/nevermind/never mind/cut/pull/kill/purge/dump/strike" + anything → delete_event or delete_task
-- "[event] got cancelled/called off/isn't happening/no longer happening/scratch that/off the books/not gonna happen" → delete_event
-- "take [X] off/cross out [X]/wipe [X]/erase [X]" → delete_event or delete_task
-- "move/push/reschedule/change/bump/switch" + date → update_event
-- "rename/call it/change name of" + event → update_event with new_title
-- "remind me/note this/save this/remember" → add_task or add_note
-- "every Monday/Wednesday/Friday" or "Mon/Wed/Fri weekly" or "practice on Tuesdays and Thursdays" → add_recurring_event (use start_date = today, end_date = 3 months from today unless specified)
-- "make me a plan/help me plan/plan out/schedule my study/build a plan" → make_plan (create a structured step-by-step plan with dates, times, and estimated minutes for each step. Consider existing blocks and events to avoid conflicts.)
-
-EXAMPLES:
-
-User: "I have a math test on Friday"
-You: "got it, marked your math test for Friday — make sure to review Wednesday night! 📝"
-<action>{"type":"add_event","title":"Math Test","date":"2025-01-17","event_type":"test","subject":"Math"}</action>
-
-User: "the math test got cancelled"
-You: "got it, removed it 🗑"
-<action>{"type":"delete_event","title":"Math Test"}</action>
-
-User: "move bio test to friday"
-You: "done — moved your bio test to Friday 📅"
-<action>{"type":"update_event","title":"Bio Test","date":"2025-01-17"}</action>
-
-User: "nevermind about the history essay"
-You: "no worries, removed it ✓"
-<action>{"type":"delete_task","title":"History essay"}</action>
-
-User: "scratch the calc test"
-You: "scratched it ✓"
-<action>{"type":"delete_event","title":"Calc Test"}</action>
-
-User: "ditch the history essay"
-You: "dropped it 🗑"
-<action>{"type":"delete_task","title":"History essay"}</action>
-
-User: "clear my bio lab"
-You: "cleared it 🗑"
-<action>{"type":"delete_event","title":"Bio Lab"}</action>
-
-User: "the swim meet got called off"
-You: "got it, wiped it from the calendar 🗑"
-<action>{"type":"delete_event","title":"Swim Meet"}</action>
-
-User: "I finished the bio homework"
-You: "nice work! ✅ marked it done."
-<action>{"type":"complete_task","task_id":"[id from ACTIVE TASKS]"}</action>
-
-User: "I have swim practice every Mon Wed Fri"
-You: "got it — added swim practice for every Monday, Wednesday, and Friday 🏊"
-<action>{"type":"add_recurring_event","title":"Swim Practice","event_type":"practice","subject":"","days":["Monday","Wednesday","Friday"],"start_date":"${todayKey}","end_date":"${(() => { const d = new Date(); d.setMonth(d.getMonth()+3); return toDateStr(d); })()}"}</action>
-
-WRONG (never do this):
-User: "I have a math test on Friday"
-Bad: "I can add that to your calendar! Would you like me to?"
-^ WRONG. You described adding instead of actually adding. Always include the <action> tag.
-
-CONTENT CREATION — When the student asks for study materials, flashcards, outlines, quizzes, etc., generate them using these action tags at the END of your response:
-
-- Flashcards: <action>{"type":"create_flashcards","title":"...","subject":"...","cards":[{"q":"question","a":"answer"}]}</action>
-- Outline: <action>{"type":"create_outline","title":"...","subject":"...","sections":[{"heading":"...","points":["..."]}]}</action>
-- Summary: <action>{"type":"create_summary","title":"...","subject":"...","bullets":["..."]}</action>
-- Study plan: <action>{"type":"create_study_plan","title":"...","subject":"...","steps":[{"step":"...","time_minutes":20,"day":"..."}]}</action>
-- Quiz: <action>{"type":"create_quiz","title":"...","subject":"...","questions":[{"q":"...","choices":["A","B","C","D"],"answer":"B"}]}</action>
-- Project breakdown: <action>{"type":"create_project_breakdown","title":"...","subject":"...","phases":[{"phase":"...","tasks":["..."],"deadline":"YYYY-MM-DD"}]}</action>
-
-CONTENT RULES:
-- Generate 5-10 flashcards, 3-5 outline sections, 4-6 summary bullets, 3-5 study plan steps, 4-6 quiz questions (4 choices each), 2-4 project phases by default.
-- Keep content accurate and appropriate for a middle school student.
-- ALWAYS include a short friendly message WITH the action tag — don't just send the raw content tag.
-- If the topic is too vague to generate good content, ask ONE short clarifying question instead of guessing.
-- For study plans, reference the student's existing schedule and upcoming tasks when suggesting timing.
-- The "answer" field in quiz questions must exactly match one of the "choices".
-- Make flashcard answers concise (1-2 sentences max). Make quiz distractors plausible but clearly wrong.
+1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" — just do it.
+2. Even casual phrasing counts: "got a calc test fri" = add_event. "gotta finish essay by thursday" = add_task.
+3. Best-guess missing details (date, subject, time). Guessing is always better than not acting. Today is ${todayKey}.
+4. For day names, calculate the real YYYY-MM-DD date.
+5. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
+6. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
+7. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
+8. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
 
 PHOTO ANALYSIS:
-When the student sends a photo/image with their message:
+When the student sends a photo/image:
 1. DESCRIBE what you see first — "looks like a syllabus for..." or "I see a quadratic equation..."
 2. SCHEDULE DETECTION: If you see dates, due dates, assignments, syllabi, planners, or calendars:
    - Extract EVERY date and assignment you can read
-   - Generate an <action> tag for EACH one (add_event for tests/exams/events, add_task for homework/assignments)
+   - Call add_event for tests/exams/events, add_task for homework/assignments — one tool call per item
    - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
    - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
-3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, diagram, or any schoolwork:
-   - Help solve or explain it step by step
-   - Keep the explanation casual but thorough
-   - If it's a multi-step problem, number your steps
-4. NOTES/REFERENCE: If you see typed or handwritten notes, summarize the key points
-5. If the image is unclear or you can't read it, say so honestly: "the photo's a bit blurry, can you retake it?"
-6. Always respond naturally about the photo FIRST, then include any <action> tags at the end as usual.`;
+3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
+4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"`;
 }
 
 /* ─── Action parser ─── */
@@ -754,7 +652,7 @@ async function parseActionsWithRecovery(rawContent, token) {
     const response = await fetch(EDGE_FN_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'openai/gpt-oss-20b', provider:'groq', isContentGen:false })
+      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
     });
     if (response.ok) {
       const data = await response.json();
@@ -887,17 +785,17 @@ const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','cr
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
+    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
+    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:2048 };
   }
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
   if (actionSignals.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
   }
   // All messages use GPT-OSS so one model handles chat + actions + content.
-  return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+  return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
 }
 
 /* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
@@ -922,7 +820,7 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
         systemPrompt:classifyPrompt,
         messages:[{role:'user',content:text}],
         maxTokens:32,
-        model:'openai/gpt-oss-20b',
+        model:'llama-3.1-8b-instant',
         provider:'groq',
         isContentGen:false
       })
@@ -933,11 +831,11 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
     const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
     const result = JSON.parse(jsonStr);
     switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      case 'CONTENT_GEN': return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
+      case 'NOTES_REF':   return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:2048 };
+      case 'ACTION':      return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
       // CHAT and all other categories also use GPT-OSS so every capability stays available
-      default:            return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
@@ -2687,6 +2585,7 @@ function App() {
   const [chatError, setChatError] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
+  const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
@@ -3463,7 +3362,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'openai/gpt-oss-20b',
+          model: 'llama-3.1-8b-instant',
           provider: 'groq',
           isContentGen: false
         })
@@ -3619,84 +3518,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
 
     try {
-      const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 1);
+      // For image requests: send only last 2 messages to keep payload small for vision model.
+      const rawHistory = updated.slice(photo ? -2 : -12).map(m => ({
+        role: m.role,
+        content: m.content || '',
+      }));
+      const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
+      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      const actionPrompt = `You decide whether the user's latest message requires an SOS action command.
-
-Return exactly one of these outputs:
-1) no
-2) command line(s) that map to prewritten local JSON templates
-
-If the message is conversational only, return: no
-If an action is needed, use one of:
-- add_task
-- add_event
-- add_block
-- complete_task
-- delete_task
-- delete_event
-- update_event
-- delete_block
-- break_task
-- add_recurring_event
-- clear_all
-
-Formatting rules (strict):
-- Output MUST be exactly one line.
-- Output MUST be either the single word no OR command format.
-- Command format: action_type; key=value; key=value
-- For multiple actions, join commands with: ||
-- No markdown, no code fences, no commentary.
-
-Examples:
-- add_task; title=History essay; subject=History; due=2026-03-12; estimated_minutes=45
-- add_event; title=Math Test; date=2026-03-15; event_type=test; subject=Math
-- delete_event; title=Math Test
-- add_recurring_event; title=Swim Practice; event_type=practice; days=Monday,Wednesday,Friday; start_date=2026-03-05; end_date=2026-06-05
-- clear_all
-
-Today is ${today()}.`;
-
-      const actionDecisionPromise = photo
-        ? Promise.resolve({ actions: [], actionDecisionText: '' })
-        : (async () => {
-            let actions = [];
-            let actionDecisionText = '';
-            try {
-              const actionResponse = await fetch(EDGE_FN_URL, {
-                method:'POST',
-                headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-                body:JSON.stringify({
-                  systemPrompt: actionPrompt,
-                  messages:[{ role:'user', content: msgContent }],
-                  maxTokens: 512,
-                  model:'openai/gpt-oss-20b',
-                  provider:'groq',
-                  isContentGen:false
-                })
-              });
-              if (actionResponse.ok) {
-                const actionData = await actionResponse.json();
-                actionDecisionText = (actionData?.content || '').trim();
-                actions = parseActionDecisionResponse(actionDecisionText);
-              }
-            } catch (actionErr) {
-              console.warn('Action decision call failed:', actionErr);
-            }
-            return { actions, actionDecisionText };
-          })();
+      // Detect content generation requests (for rate limiting + model upgrade)
+      const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
 
       const chatBody = {
         systemPrompt: chatPrompt,
         messages: historyForApi,
-        maxTokens: 1024,
-        model: 'openai/gpt-oss-20b',
-        provider: 'groq',
-        isContentGen: false
+        maxTokens: isContentGen ? 4096 : 1024,
+        isContentGen,
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -3723,24 +3563,18 @@ Today is ${today()}.`;
           setIsLoading(false);
           return;
         }
-        throw new Error(errData?.error || 'AI request failed: ' + chatResponse.status);
+        throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
       }
 
       const chatData = await chatResponse.json();
-      const displayContent = stripActionTags(chatData?.content || "hmm, didn't get a response. try again?");
+      const displayContent = chatData?.content || "hmm, didn't get a response. try again?";
 
-      // Show Llama conversational response immediately.
-      // Action processing continues afterward so OSS-20B can return without blocking chat UX.
       const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
       setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-      if (user) dbInsertChatMsg('assistant', displayContent, user.id);
+      if (user && displayContent) dbInsertChatMsg('assistant', displayContent, user.id);
 
-      const actionDecision = await actionDecisionPromise;
-      let actions = actionDecision.actions;
-      if (actions.length === 0 && actionDecision.actionDecisionText && !/^no$/i.test(actionDecision.actionDecisionText)) {
-        const fallback = inferActionFromMessage(text);
-        if (fallback) actions = [fallback];
-      }
+      // Actions come back as structured tool_use results — no text parsing needed
+      let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
       // ── Resolve actions: translate AI names → real IDs using resolveEvent/resolveTask ──
       const resolved = [];
@@ -3767,6 +3601,16 @@ Today is ${today()}.`;
           }
           continue;
         }
+        if (a.type === 'complete_task') {
+          const match = resolveTask(a.title || a.task_id, tasks);
+          if (match) {
+            resolved.push({ ...a, task_id: match.id, title: match.title });
+          } else {
+            const msg = { role:'assistant', content:"hmm, I couldn't find that task to mark done. what's the exact name?", timestamp:Date.now() };
+            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          }
+          continue;
+        }
         if (a.type === 'add_event') {
           const dupTitle = (a.title||'').toLowerCase();
           const dupDate = a.date || today();
@@ -3778,12 +3622,18 @@ Today is ${today()}.`;
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
-        const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
-        if (needsConfirm.length > 0) setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
         if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
+        const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
+        if (needsConfirm.length > 0) {
+          if (aiAutoApprove) {
+            needsConfirm.forEach(executeAction);
+          } else {
+            setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
+          }
+        }
       }
 
       // We intentionally keep the initial conversational reply above even if action resolution fails.
@@ -4139,6 +3989,13 @@ Today is ${today()}.`;
               </div>
               <div className="settings-row">
                 <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back to chat</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the conversation view.</div>
                 </div>
@@ -4199,6 +4056,7 @@ Today is ${today()}.`;
                 {(msg.photoUrl||msg.photoPreview)&&(
                   <img src={msg.photoUrl||msg.photoPreview} alt="photo"
                     onClick={()=>setLightboxUrl(msg.photoUrl||msg.photoPreview)}
+                    onError={(e)=>{e.target.style.display='none';}}
                     style={{maxWidth:240,maxHeight:200,borderRadius:10,marginBottom:msg.content?8:0,cursor:'pointer',display:'block'}}/>
                 )}
                 {msg.content&&<span>{msg.content}</span>}

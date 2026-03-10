@@ -1,26 +1,319 @@
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
-// Reads GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
+// Reads ANTHROPIC_API_KEY, GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Groq chat completion ── */
-async function callGroq(apiKey, model, systemPrompt, messages, maxTokens) {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+/* ── Tool definitions for Groq (OpenAI function-calling format) ── */
+const ACTION_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "add_event",
+      description:
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title" },
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: {
+            type: "string",
+            description: "School subject (e.g., Math, Biology, English)",
+          },
+        },
+        required: ["title", "date"],
+      },
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    }),
-  });
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_task",
+      description:
+        "Add a homework assignment or task to the student's to-do list.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Task title" },
+          subject: { type: "string", description: "School subject" },
+          due: { type: "string", description: "Due date in YYYY-MM-DD format" },
+          estimated_minutes: {
+            type: "number",
+            description: "Estimated time to complete in minutes",
+          },
+        },
+        required: ["title", "due"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_event",
+      description:
+        "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the event to delete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_task",
+      description:
+        "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to delete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_event",
+      description:
+        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Current event title to look up" },
+          new_title: { type: "string", description: "New title (omit if not changing name)" },
+          date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: { type: "string" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "complete_task",
+      description:
+        "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to mark complete" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_block",
+      description:
+        "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          start: { type: "string", description: "Start time in HH:MM 24-hour format (e.g. 14:00)" },
+          end: { type: "string", description: "End time in HH:MM 24-hour format (e.g. 15:30)" },
+          activity: { type: "string", description: "Activity name" },
+          category: {
+            type: "string",
+            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+          },
+        },
+        required: ["date", "start", "end", "activity"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_block",
+      description: "Remove a time block from the student's schedule.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
+          start: { type: "string", description: "Start time of the block (HH:MM)" },
+          end: { type: "string", description: "End time of the block (HH:MM, optional)" },
+        },
+        required: ["date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_note",
+      description: "Save a note or important information to the student's notes.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_name: { type: "string", description: "Name for the note tab" },
+          content: { type: "string", description: "Content to save" },
+        },
+        required: ["tab_name", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "break_task",
+      description:
+        "Break a large task into smaller, manageable subtasks spread across multiple days.",
+      parameters: {
+        type: "object",
+        properties: {
+          parent_title: { type: "string", description: "Title of the task to break up" },
+          subtasks: {
+            type: "array",
+            description: "List of subtasks",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                due: { type: "string", description: "YYYY-MM-DD" },
+                estimated_minutes: { type: "number" },
+              },
+            },
+          },
+        },
+        required: ["parent_title", "subtasks"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_recurring_event",
+      description:
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          event_type: {
+            type: "string",
+            enum: ["test", "practice", "game", "match", "event", "other"],
+          },
+          subject: { type: "string" },
+          days: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday",
+              ],
+            },
+            description: "Days of the week this event repeats",
+          },
+          start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
+          end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
+        },
+        required: ["title", "days", "start_date", "end_date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_all",
+      description:
+        "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+];
+
+/* ── Groq chat + function calling ── */
+async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true) {
+  const groqMessages = [{ role: "system", content: systemPrompt }];
+
+  if (imageBase64) {
+    const effectiveMime = imageMimeType || "image/jpeg";
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const textContent =
+      lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
+        ? lastUser.content.trim()
+        : "What do you see in this image?";
+    groqMessages.push({
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
+        },
+        { type: "text", text: textContent },
+      ],
+    });
+  } else {
+    for (const m of messages) {
+      const text = typeof m.content === "string" ? m.content.trim() : "";
+      if (text) groqMessages.push({ role: m.role, content: text });
+    }
+  }
+
+  const body = {
+    model: imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model,
+    messages: groqMessages,
+    max_tokens: maxTokens,
+  };
+
+  if (includeTools && !imageBase64) {
+    body.tools = ACTION_TOOLS;
+    body.tool_choice = "auto";
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  let res;
+  try {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`Groq ${model} request timed out after 30s`);
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -28,7 +321,14 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens) {
   }
 
   const data = await res.json();
-  return { content: data.choices?.[0]?.message?.content ?? "" };
+  const message = data.choices?.[0]?.message;
+  const textContent = message?.content || "";
+  const actions = (message?.tool_calls || []).map((tc) => ({
+    type: tc.function.name,
+    ...JSON.parse(tc.function.arguments),
+  }));
+
+  return { content: textContent.trim(), actions };
 }
 
 /* ── Extract user ID from JWT ── */
@@ -84,7 +384,7 @@ async function checkContentRateLimit(userId, supabaseUrl, serviceKey) {
 }
 
 /* ── Main handler ── */
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 
   if (req.method === "OPTIONS") {
@@ -96,24 +396,26 @@ module.exports = async function handler(req, res) {
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!GROQ_API_KEY) {
-    return res.status(500).json({ error: "GROQ_API_KEY not configured" });
-  }
-
   try {
     const body = req.body;
 
-    // ── Voice transcription path ──
+    // ── Voice transcription path (Groq Whisper) ──
     if (body.mode === "voice") {
+      if (!GROQ_API_KEY) {
+        return res.status(500).json({ error: "GROQ_API_KEY not configured" });
+      }
       const { audioBase64, audioMimeType } = body;
       if (!audioBase64) {
         return res.status(400).json({ error: "No audio data provided" });
       }
 
       const effectiveMime = audioMimeType || "audio/webm";
-      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
-        : effectiveMime.includes("ogg") ? "ogg"
-        : effectiveMime.includes("mp3") ? "mp3"
+      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
+        ? "m4a"
+        : effectiveMime.includes("ogg")
+        ? "ogg"
+        : effectiveMime.includes("mp3")
+        ? "mp3"
         : "webm";
       const audioBuffer = Buffer.from(audioBase64, "base64");
       const audioBlob = new Blob([audioBuffer], { type: effectiveMime });
@@ -137,22 +439,25 @@ module.exports = async function handler(req, res) {
       if (!groqRes.ok) {
         const errText = await groqRes.text();
         console.error("Groq Whisper error:", groqRes.status, errText);
-        return res
-          .status(groqRes.status)
-          .json({ error: "Transcription failed", details: errText });
+        return res.status(groqRes.status).json({ error: "Transcription failed", details: errText });
       }
 
       const whisperResult = await groqRes.json();
       return res.status(200).json({ text: whisperResult.text || "" });
     }
 
-    // ── Chat completion path ──
+    // ── Chat completion path (Groq) ──
+    if (!GROQ_API_KEY) {
+      return res.status(500).json({ error: "GROQ_API_KEY not configured" });
+    }
+
     const {
       systemPrompt,
       messages,
       maxTokens = 1024,
-      model,
       isContentGen,
+      imageBase64,
+      imageMimeType,
     } = body;
 
     // Rate limiting for content generation
@@ -170,12 +475,19 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
+    const model = "llama-3.3-70b-versatile";
+    const includeTools = !isContentGen;
+
     const result = await callGroq(
       GROQ_API_KEY,
-      model || "llama-3.1-8b-instant",
+      model,
       systemPrompt,
       messages,
-      maxTokens
+      maxTokens,
+      imageBase64,
+      imageMimeType,
+      includeTools
     );
 
     return res.status(200).json(result);
@@ -183,4 +495,4 @@ module.exports = async function handler(req, res) {
     console.error("api/chat error:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
   }
-};
+}
