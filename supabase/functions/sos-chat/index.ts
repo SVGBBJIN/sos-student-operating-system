@@ -7,249 +7,255 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Tool definitions for Claude — one per supported action ── */
+/* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
   {
-    name: "add_event",
-    description:
-      "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Event title" },
-        date: { type: "string", description: "Date in YYYY-MM-DD format" },
-        event_type: {
-          type: "string",
-          enum: [
-            "test", "exam", "quiz", "practice", "game", "match", "meet",
-            "tournament", "event", "other",
-          ],
+    type: "function",
+    function: {
+      name: "add_event",
+      description:
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title" },
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: {
+            type: "string",
+            description: "School subject (e.g., Math, Biology, English)",
+          },
         },
-        subject: {
-          type: "string",
-          description: "School subject (e.g., Math, Biology, English)",
-        },
+        required: ["title", "date"],
       },
-      required: ["title", "date"],
     },
   },
   {
-    name: "add_task",
-    description:
-      "Add a homework assignment or task to the student's to-do list.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Task title" },
-        subject: { type: "string", description: "School subject" },
-        due: { type: "string", description: "Due date in YYYY-MM-DD format" },
-        estimated_minutes: {
-          type: "number",
-          description: "Estimated time to complete in minutes",
+    type: "function",
+    function: {
+      name: "add_task",
+      description:
+        "Add a homework assignment or task to the student's to-do list.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Task title" },
+          subject: { type: "string", description: "School subject" },
+          due: { type: "string", description: "Due date in YYYY-MM-DD format" },
+          estimated_minutes: {
+            type: "number",
+            description: "Estimated time to complete in minutes",
+          },
         },
+        required: ["title", "due"],
       },
-      required: ["title", "due"],
     },
   },
   {
-    name: "delete_event",
-    description:
-      "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Title of the event to delete" },
+    type: "function",
+    function: {
+      name: "delete_event",
+      description:
+        "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the event to delete" },
+        },
+        required: ["title"],
       },
-      required: ["title"],
     },
   },
   {
-    name: "delete_task",
-    description:
-      "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Title of the task to delete" },
+    type: "function",
+    function: {
+      name: "delete_task",
+      description:
+        "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to delete" },
+        },
+        required: ["title"],
       },
-      required: ["title"],
     },
   },
   {
-    name: "update_event",
-    description:
-      "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: {
-          type: "string",
-          description: "Current event title to look up",
+    type: "function",
+    function: {
+      name: "update_event",
+      description:
+        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Current event title to look up" },
+          new_title: { type: "string", description: "New title (omit if not changing name)" },
+          date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
+          event_type: {
+            type: "string",
+            enum: [
+              "test", "exam", "quiz", "practice", "game", "match", "meet",
+              "tournament", "event", "other",
+            ],
+          },
+          subject: { type: "string" },
         },
-        new_title: {
-          type: "string",
-          description: "New title (omit if not changing name)",
-        },
-        date: {
-          type: "string",
-          description: "New date in YYYY-MM-DD format (omit if not changing)",
-        },
-        event_type: {
-          type: "string",
-          enum: [
-            "test", "exam", "quiz", "practice", "game", "match", "meet",
-            "tournament", "event", "other",
-          ],
-        },
-        subject: { type: "string" },
+        required: ["title"],
       },
-      required: ["title"],
     },
   },
   {
-    name: "complete_task",
-    description:
-      "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: {
-          type: "string",
-          description: "Title of the task to mark complete",
+    type: "function",
+    function: {
+      name: "complete_task",
+      description:
+        "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the task to mark complete" },
         },
+        required: ["title"],
       },
-      required: ["title"],
     },
   },
   {
-    name: "add_block",
-    description:
-      "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
-    input_schema: {
-      type: "object",
-      properties: {
-        date: { type: "string", description: "Date in YYYY-MM-DD format" },
-        start: {
-          type: "string",
-          description: "Start time in HH:MM 24-hour format (e.g. 14:00)",
+    type: "function",
+    function: {
+      name: "add_block",
+      description:
+        "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          start: { type: "string", description: "Start time in HH:MM 24-hour format (e.g. 14:00)" },
+          end: { type: "string", description: "End time in HH:MM 24-hour format (e.g. 15:30)" },
+          activity: { type: "string", description: "Activity name" },
+          category: {
+            type: "string",
+            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+          },
         },
-        end: {
-          type: "string",
-          description: "End time in HH:MM 24-hour format (e.g. 15:30)",
-        },
-        activity: { type: "string", description: "Activity name" },
-        category: {
-          type: "string",
-          enum: ["school", "swim", "debate", "free time", "sleep", "other"],
-        },
+        required: ["date", "start", "end", "activity"],
       },
-      required: ["date", "start", "end", "activity"],
     },
   },
   {
-    name: "delete_block",
-    description: "Remove a time block from the student's schedule.",
-    input_schema: {
-      type: "object",
-      properties: {
-        date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
-        start: { type: "string", description: "Start time of the block (HH:MM)" },
-        end: {
-          type: "string",
-          description: "End time of the block (HH:MM, optional)",
+    type: "function",
+    function: {
+      name: "delete_block",
+      description: "Remove a time block from the student's schedule.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
+          start: { type: "string", description: "Start time of the block (HH:MM)" },
+          end: { type: "string", description: "End time of the block (HH:MM, optional)" },
         },
+        required: ["date"],
       },
-      required: ["date"],
     },
   },
   {
-    name: "add_note",
-    description: "Save a note or important information to the student's notes.",
-    input_schema: {
-      type: "object",
-      properties: {
-        tab_name: { type: "string", description: "Name for the note tab" },
-        content: { type: "string", description: "Content to save" },
+    type: "function",
+    function: {
+      name: "add_note",
+      description: "Save a note or important information to the student's notes.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_name: { type: "string", description: "Name for the note tab" },
+          content: { type: "string", description: "Content to save" },
+        },
+        required: ["tab_name", "content"],
       },
-      required: ["tab_name", "content"],
     },
   },
   {
-    name: "break_task",
-    description:
-      "Break a large task into smaller, manageable subtasks spread across multiple days.",
-    input_schema: {
-      type: "object",
-      properties: {
-        parent_title: {
-          type: "string",
-          description: "Title of the task to break up",
-        },
-        subtasks: {
-          type: "array",
-          description: "List of subtasks",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              due: { type: "string", description: "YYYY-MM-DD" },
-              estimated_minutes: { type: "number" },
+    type: "function",
+    function: {
+      name: "break_task",
+      description:
+        "Break a large task into smaller, manageable subtasks spread across multiple days.",
+      parameters: {
+        type: "object",
+        properties: {
+          parent_title: { type: "string", description: "Title of the task to break up" },
+          subtasks: {
+            type: "array",
+            description: "List of subtasks",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                due: { type: "string", description: "YYYY-MM-DD" },
+                estimated_minutes: { type: "number" },
+              },
             },
           },
         },
+        required: ["parent_title", "subtasks"],
       },
-      required: ["parent_title", "subtasks"],
     },
   },
   {
-    name: "add_recurring_event",
-    description:
-      "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        event_type: {
-          type: "string",
-          enum: ["test", "practice", "game", "match", "event", "other"],
-        },
-        subject: { type: "string" },
-        days: {
-          type: "array",
-          items: {
+    type: "function",
+    function: {
+      name: "add_recurring_event",
+      description:
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          event_type: {
             type: "string",
-            enum: [
-              "Monday", "Tuesday", "Wednesday", "Thursday",
-              "Friday", "Saturday", "Sunday",
-            ],
+            enum: ["test", "practice", "game", "match", "event", "other"],
           },
-          description: "Days of the week this event repeats",
+          subject: { type: "string" },
+          days: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday",
+              ],
+            },
+            description: "Days of the week this event repeats",
+          },
+          start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
+          end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
         },
-        start_date: {
-          type: "string",
-          description: "YYYY-MM-DD — first occurrence",
-        },
-        end_date: {
-          type: "string",
-          description: "YYYY-MM-DD — last occurrence",
-        },
+        required: ["title", "days", "start_date", "end_date"],
       },
-      required: ["title", "days", "start_date", "end_date"],
     },
   },
   {
-    name: "clear_all",
-    description:
-      "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
-    input_schema: {
-      type: "object",
-      properties: {},
+    type: "function",
+    function: {
+      name: "clear_all",
+      description:
+        "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
     },
   },
 ];
 
-/* ── Anthropic Claude chat + tool use ── */
-async function callClaude(
+/* ── Groq chat + function calling ── */
+async function callGroq(
   apiKey: string,
   model: string,
   systemPrompt: string,
@@ -264,76 +270,44 @@ async function callClaude(
   imageMimeType?: string,
   includeTools = true
 ): Promise<{ content: string; actions: Record<string, unknown>[] }> {
-  // Convert messages to Anthropic format
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let anthropicMessages: any[] = messages.map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: typeof m.content === "string" ? m.content : "",
-  }));
+  const groqMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Vision: replace messages with single image+text block
   if (imageBase64) {
-    const effectiveMime = (imageMimeType || "image/jpeg") as
-      | "image/jpeg"
-      | "image/png"
-      | "image/gif"
-      | "image/webp";
-    const lastUser = [...messages]
-      .reverse()
-      .find((m) => m.role === "user");
+    // Vision: use Llama 4 Scout (vision-capable) and image_url format
+    const effectiveMime = imageMimeType || "image/jpeg";
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const textContent =
       lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
         ? lastUser.content.trim()
         : "What do you see in this image?";
-    anthropicMessages = [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: effectiveMime, data: imageBase64 },
-          },
-          { type: "text", text: textContent },
-        ],
-      },
-    ];
-  }
-
-  // Filter out messages with empty content
-  anthropicMessages = anthropicMessages.filter((m) => {
-    if (typeof m.content === "string") return m.content.trim().length > 0;
-    if (Array.isArray(m.content)) return m.content.length > 0;
-    return false;
-  });
-
-  // Ensure messages alternate correctly (Anthropic requirement)
-  const deduped: typeof anthropicMessages = [];
-  for (const m of anthropicMessages) {
-    if (deduped.length > 0 && deduped[deduped.length - 1].role === m.role) {
-      // Merge same-role consecutive messages
-      const prev = deduped[deduped.length - 1];
-      if (typeof prev.content === "string" && typeof m.content === "string") {
-        prev.content = prev.content + "\n" + m.content;
-      }
-    } else {
-      deduped.push({ ...m });
+    groqMessages.push({
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
+        },
+        { type: "text", text: textContent },
+      ],
+    });
+  } else {
+    for (const m of messages) {
+      const text = typeof m.content === "string" ? m.content.trim() : "";
+      if (text) groqMessages.push({ role: m.role, content: text });
     }
-  }
-  // First message must be user
-  while (deduped.length > 0 && deduped[0].role !== "user") {
-    deduped.shift();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body: any = {
-    model,
+    model: imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model,
+    messages: groqMessages,
     max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: deduped,
   };
 
   if (includeTools && !imageBase64) {
     body.tools = ACTION_TOOLS;
+    body.tool_choice = "auto";
   }
 
   const controller = new AbortController();
@@ -341,12 +315,11 @@ async function callClaude(
 
   let res: Response;
   try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -354,7 +327,7 @@ async function callClaude(
   } catch (err) {
     clearTimeout(timeoutId);
     if ((err as Error).name === "AbortError") {
-      throw new Error(`Claude ${model} request timed out after 30s`);
+      throw new Error(`Groq ${model} request timed out after 30s`);
     }
     throw err;
   }
@@ -362,22 +335,18 @@ async function callClaude(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Claude ${model} error ${res.status}: ${errText}`);
+    throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
-
-  let textContent = "";
-  const actions: Record<string, unknown>[] = [];
-
-  for (const block of data.content || []) {
-    if (block.type === "text") {
-      textContent += block.text;
-    } else if (block.type === "tool_use") {
-      // Map tool_use block → action object that executeAction() understands
-      actions.push({ type: block.name, ...block.input });
-    }
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const message = (data.choices?.[0] as any)?.message;
+  const textContent: string = message?.content || "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actions: Record<string, unknown>[] = (message?.tool_calls || []).map((tc: any) => ({
+    type: tc.function.name,
+    ...JSON.parse(tc.function.arguments),
+  }));
 
   return { content: textContent.trim(), actions };
 }
@@ -486,7 +455,6 @@ serve(async (req: Request) => {
   }
 
   try {
-    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 
     const body = await req.json();
@@ -522,10 +490,10 @@ serve(async (req: Request) => {
       }
     }
 
-    // ── Chat completion path (Claude) ──
-    if (!ANTHROPIC_API_KEY) {
+    // ── Chat completion path (Groq) ──
+    if (!GROQ_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }),
+        JSON.stringify({ error: "GROQ_API_KEY not configured" }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -559,14 +527,14 @@ serve(async (req: Request) => {
       }
     }
 
-    // Model selection: use Sonnet for content gen, Haiku for everything else
-    const model = isContentGen ? "claude-sonnet-4-6" : "claude-haiku-4-5";
+    // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
+    const model = "llama-3.3-70b-versatile";
 
     // Don't pass tools for content generation (flashcards, study guides, etc.)
     const includeTools = !isContentGen;
 
-    const result = await callClaude(
-      ANTHROPIC_API_KEY,
+    const result = await callGroq(
+      GROQ_API_KEY,
       model,
       systemPrompt,
       messages,
