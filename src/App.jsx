@@ -817,11 +817,12 @@ Make dropdown_options useful follow-on actions for the student.`;
 }
 
 /* ─── Multi-model message classifier ─── */
+const CONTENT_GEN_REQUEST_RE = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet|high[-\s]*level\s+summary|project\s+brief|study\s+document/i;
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan','create_structured_doc'];
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
-  if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet|high[-\s]*level\s+summary|project\s+brief|study\s+document/i.test(text)) {
+  if (CONTENT_GEN_REQUEST_RE.test(text)) {
     return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
@@ -3589,7 +3590,7 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
       const token = session?.data?.session?.access_token;
 
       // Detect content generation requests (for rate limiting + model upgrade)
-      const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
+      const isContentGen = CONTENT_GEN_REQUEST_RE.test(text || '');
 
       const chatBody = {
         systemPrompt: chatPrompt,
@@ -3633,7 +3634,15 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
         const cleaned = rawAssistant.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
         const maybe = JSON.parse(cleaned);
         if (maybe?.type === 'STRUCTURED_DOC') {
-          parsedStructured = { ...maybe, type: 'create_structured_doc' };
+          parsedStructured = {
+            ...maybe,
+            type: 'create_structured_doc',
+            title: maybe.title || 'Structured Document',
+            summary: maybe.summary || '',
+            sections: Array.isArray(maybe.sections) ? maybe.sections : [],
+            action_items: Array.isArray(maybe.action_items) ? maybe.action_items : [],
+            dropdown_options: Array.isArray(maybe.dropdown_options) ? maybe.dropdown_options : []
+          };
           displayContent = 'done — i generated a structured doc card for you below.';
         }
       } catch (_) {}
