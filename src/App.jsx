@@ -2236,7 +2236,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 /* ═══════════════════════════════════════════════
    SCHEDULE PEEK PANEL (with fullscreen calendar)
    ═══════════════════════════════════════════════ */
-function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
+function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false }) {
   const todayKey = today(); const todayDow = new Date().getDay();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [calYear, setCalYear] = useState(new Date().getFullYear());
@@ -2342,8 +2342,8 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
   const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   return (<>
-    <div className="peek-overlay" onClick={onClose}/>
-    <div className={'peek-panel' + (isFullscreen ? ' fullscreen' : '')}>
+    {!embedded && <div className="peek-overlay" onClick={onClose}/>}
+    <div className={'peek-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
       {!isFullscreen && <div className="peek-handle"/>}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
@@ -2352,7 +2352,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
           <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen calendar'}>
             {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
           </button>
-          <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
+          {!embedded && <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>}
         </div>
       </div>
 
@@ -2423,7 +2423,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose }) {
 /* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }) {
+function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -2571,8 +2571,8 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
 
   return (
     <>
-      <div className="peek-overlay" onClick={onClose}/>
-      <div className={'notes-panel' + (isFullscreen ? ' fullscreen' : '')}>
+      {!embedded && <div className="peek-overlay" onClick={onClose}/>}
+      <div className={'notes-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
         {!isFullscreen && <div className="peek-handle"/>}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -2585,7 +2585,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote }
             <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
               {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
             </button>
-            <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
+            {!embedded && <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>}
           </div>
         </div>
 
@@ -2733,6 +2733,7 @@ function App() {
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const showSideBySide = showPeek && showNotes;
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
@@ -4500,8 +4501,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       </div>
 
-      {showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
-      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showSideBySide && (
+        <>
+          <div className="peek-overlay" onClick={() => { setShowPeek(false); setShowNotes(false); }}/>
+          <div className="split-workspace">
+            <div className="split-workspace-head">
+              <div style={{display:'flex',alignItems:'center',gap:8,fontWeight:700}}>{Icon.panel(16)} Notes + Schedule</div>
+              <button className="g-modal-close" onClick={() => { setShowPeek(false); setShowNotes(false); }}>{Icon.x(16)}</button>
+            </div>
+            <div className="split-workspace-grid">
+              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+              <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+            </div>
+          </div>
+        </>
+      )}
+      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
+      {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
       {showChatSidebar&&(
         <>
           <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
@@ -4560,6 +4576,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button className="sos-bottom-btn" onClick={()=>setShowNotes(true)}>
             {Icon.fileText(14)} Notes
             <span className="sos-bottom-count">{notes.length}</span>
+          </button>
+          <button className="sos-bottom-btn" onClick={()=>{setShowPeek(true);setShowNotes(true);}}>
+            {Icon.panel(14)} Side by side
           </button>
         </div>
       )}
