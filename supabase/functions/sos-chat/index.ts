@@ -223,23 +223,24 @@ serve(async (req: Request) => {
     if (imageBase64) {
       effectivePrompt = "You are SOS, a chill study sidekick. The student sent you a photo. Describe what you see and help with any school-related content visible (homework, assignments, schedules, textbook pages, etc.). Be casual and brief (2-4 sentences). If you can identify specific tasks or deadlines, mention them clearly.";
 
-      // Only keep last 2 messages (current user msg + optional prior context) — vision doesn't need full history
-      preparedMessages = preparedMessages
-        .filter((m: { content: string }) => m.content && (typeof m.content !== 'string' || m.content.trim()))
-        .slice(-2);
+      // For vision: send only a single user message with the image — no history.
+      // Including history (especially assistant messages) causes Groq 400s because
+      // the vision model only allows string content for non-user roles.
+      const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === "user");
+      const textContent =
+        lastUserMsg && typeof lastUserMsg.content === "string" && lastUserMsg.content.trim()
+          ? lastUserMsg.content.trim()
+          : "What do you see in this image?";
 
-      if (preparedMessages.length > 0) {
-        const lastIdx = preparedMessages.length - 1;
-        const lastMsg = preparedMessages[lastIdx];
-        const textContent = (lastMsg.content as string) || "What do you see in this image?";
-        preparedMessages[lastIdx] = {
-          role: lastMsg.role,
+      preparedMessages = [
+        {
+          role: "user",
           content: [
             { type: "text", text: textContent },
             { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
           ],
-        };
-      }
+        },
+      ];
     }
 
     const result = await callGroq(GROQ_API_KEY, effectiveModel, effectivePrompt, preparedMessages, maxTokens);
