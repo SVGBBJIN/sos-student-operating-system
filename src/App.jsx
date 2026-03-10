@@ -3682,7 +3682,7 @@ Today is ${today()}.`;
                 body:JSON.stringify({
                   systemPrompt: actionPrompt,
                   messages: historyForApi.slice(-5),
-                  maxTokens: 128,
+                  maxTokens: 300,
                   model:'openai/gpt-oss-20b',
                   provider:'groq',
                   isContentGen:false
