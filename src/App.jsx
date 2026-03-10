@@ -611,6 +611,16 @@ RULES:
 6. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
 7. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
 8. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
+9. If the student asks for a high-level summary, project brief, or structured study document, respond with ONLY valid JSON (no markdown/code fences) using:
+   {
+     "type": "STRUCTURED_DOC",
+     "title": "...",
+     "summary": "...",
+     "sections": [{"heading": "...", "points": ["...", "..."]}],
+     "action_items": ["..."],
+     "dropdown_options": ["..."]
+   }
+   Keep dropdown_options actionable so they can be used as follow-on prompts.
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -779,12 +789,47 @@ function parseDocId(input) {
   return null;
 }
 
+function buildStructuredDocPrompt(kind, context = '') {
+  const prefix = context ? context + '\n\n' : '';
+  if (kind === 'DAILY_BRIEF') {
+    return `${prefix}Respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
+{
+  "type": "DAILY_BRIEF",
+  "summary": "One sentence overview of the day",
+  "schedule_items": [{"time": "HH:MM AM/PM", "event_name": "...", "related_doc_id": "..." or null}],
+  "plan_of_action": ["Specific action item 1", "Specific action item 2", "...3-5 items total"],
+  "dropdown_options": ["Quick action label 1", "Quick action label 2", "...3-5 options total"],
+  "encouragement": "Short motivational sign-off"
+}
+
+Make plan_of_action items specific and reference actual events/tasks (e.g. "Review Chapter 4 before 2 PM Bio Lab").
+Make dropdown_options actionable quick-actions (e.g. "Generate Study Guide for Bio", "Reschedule Conflicts", "Break down project into subtasks").
+If there are no events, base the brief on the student's tasks and suggest a productive plan.`;
+  }
+  if (kind === 'STRUCTURED_DOC') {
+    return `${prefix}Respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
+{
+  "type": "STRUCTURED_DOC",
+  "title": "...",
+  "summary": "...",
+  "sections": [{"heading": "...", "points": ["...", "..."]}],
+  "action_items": ["Specific next step 1", "Specific next step 2"],
+  "dropdown_options": ["Quick action label 1", "Quick action label 2", "...3-5 options total"]
+}
+
+Keep sections concise and actionable.
+Make action_items concrete enough to convert into tasks.
+Make dropdown_options useful follow-on actions for the student.`;
+  }
+  return prefix + 'Respond with ONLY valid JSON.';
+}
+
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan','create_structured_doc'];
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
-  if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
+  if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet|high[-\s]*level\s+summary|project\s+brief|study\s+document/i.test(text)) {
     return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
@@ -806,7 +851,7 @@ async function classifyMessage(text) {
     const classifyPrompt = `You are a message classifier for a student planner app. Classify the user message into exactly one category and return ONLY a JSON object.
 
 Categories:
-- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets
+- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets, high-level summaries, project briefs, structured study documents
 - NOTES_REF: Questions about the student's own notes, reference docs, PDFs, or looking things up in saved documents
 - ACTION: Any scheduling, task, event, block, calendar, or organizational request. Includes mentions of dates, times, school subjects, activities, verbs like add/delete/schedule/cancel/move, and slang equivalents
 - CHAT: General conversation, greetings, questions, or anything with no scheduling or content generation intent
@@ -1428,7 +1473,7 @@ function QuizDisplay({ data, onSave, onDismiss }) {
   );
 }
 
-function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentColor }) {
+function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentColor, onAction, onApplyPlan }) {
   const ac = accentColor || 'var(--teal)';
   const formatted = (() => {
     try {
@@ -1441,6 +1486,12 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
           return (data.steps||[]).map((s,i) => ({ type:'step', num:i+1, text:s.step, meta:(s.time_minutes||20)+'min'+(s.day?' · '+s.day:'') }));
         case 'create_project_breakdown':
           return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
+        case 'create_structured_doc':
+          return [
+            ...(data.summary ? [{ type:'summary', text:data.summary }] : []),
+            ...((data.sections||[]).flatMap(s => [{ type:'heading', text:s.heading }, ...(s.points||[]).map(pt => ({ type:'point', text:pt }))])),
+            ...((data.action_items||[]).map((item,i) => ({ type:'step', num:i+1, text:item, meta:'action item' })))
+          ];
         default: return [{ type:'bullet', text:'(content generated)' }];
       }
     } catch(e) { return [{ type:'bullet', text:'(error displaying content)' }]; }
@@ -1453,9 +1504,24 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
           if (item.type==='heading') return <div key={i} style={{ fontWeight:700, color:ac, marginTop: i > 0 ? 10 : 0, marginBottom:4, fontSize:'0.86rem', display:'flex', alignItems:'center', gap:6 }}><span style={{width:3,height:14,borderRadius:2,background:ac,flexShrink:0}}/>{item.text}</div>;
           if (item.type==='step') return <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.03)' }}><span style={{width:22,height:22,borderRadius:6,background:`color-mix(in srgb, ${ac} 10%, transparent)`,border:`1px solid color-mix(in srgb, ${ac} 20%, transparent)`,color:ac,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.72rem',fontWeight:700,flexShrink:0}}>{item.num}</span><div><div style={{color:'var(--text)',fontWeight:500}}>{item.text}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginTop:1}}>{item.meta}</div></div></div>;
           if (item.type==='point') return <div key={i} style={{ padding:'3px 0 3px 14px', color:'var(--text)', borderLeft:`2px solid color-mix(in srgb, ${ac} 25%, transparent)`, marginLeft:2 }}>• {item.text}</div>;
+          if (item.type==='summary') return <div key={i} style={{ padding:'6px 10px', marginBottom:8, borderRadius:10, background:'rgba(108,99,255,0.08)', color:'var(--text)', fontWeight:500 }}>{item.text}</div>;
           return <div key={i} style={{ padding:'4px 0', color:'var(--text)', display:'flex', alignItems:'flex-start', gap:8 }}><span style={{width:5,height:5,borderRadius:'50%',background:ac,marginTop:7,flexShrink:0}}/>{item.text}</div>;
         })}
       </div>
+      {data.type==='create_structured_doc' && Array.isArray(data.action_items) && data.action_items.length > 0 && (
+        <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+          <button className="confirm-btn confirm-btn-yes" onClick={() => onApplyPlan && onApplyPlan(data.action_items)}>
+            {Icon.check(12)} Add action items as tasks
+          </button>
+        </div>
+      )}
+      {Array.isArray(data.dropdown_options) && data.dropdown_options.length > 0 && (
+        <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+          {data.dropdown_options.slice(0,5).map((opt, i) => (
+            <button key={i} className="sos-chip" onClick={() => onAction && onAction(opt)}>{opt}</button>
+          ))}
+        </div>
+      )}
     </ContentCard>
   );
 }
@@ -1500,7 +1566,7 @@ function PlanCard({ data, onApply, onSave, onDismiss }) {
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onAction }) {
   switch (content.type) {
     case 'make_plan':
       return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} />;
@@ -1509,15 +1575,17 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
     case 'create_quiz':
       return <QuizDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_outline':
-      return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" />;
+      return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" onAction={onAction} onApplyPlan={onApplyPlan} />;
     case 'create_summary':
-      return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
+      return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" onAction={onAction} onApplyPlan={onApplyPlan} />;
     case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
+      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" onAction={onAction} onApplyPlan={onApplyPlan} />;
     case 'create_project_breakdown':
-      return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
+      return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" onAction={onAction} onApplyPlan={onApplyPlan} />;
+    case 'create_structured_doc':
+      return <GenericContentDisplay data={content} icon={Icon.fileText(16)} label="Structured Doc" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" onAction={onAction} onApplyPlan={onApplyPlan} />;
     default:
-      return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
+      return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" onAction={onAction} onApplyPlan={onApplyPlan} />;
   }
 }
 
@@ -3076,6 +3144,14 @@ function App() {
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
         case 'make_plan':
           return '# ' + (c.title||'Plan') + '\n\n' + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
+        case 'create_structured_doc':
+          return [
+            '# ' + (c.title || 'Structured Document'),
+            c.summary ? ('\n' + c.summary) : '',
+            ...(c.sections || []).map(sec => '\n## ' + sec.heading + '\n' + (sec.points || []).map(p => '- ' + p).join('\n')),
+            (c.action_items || []).length ? ('\n## Action Items\n' + (c.action_items || []).map(a => '- [ ] ' + a).join('\n')) : '',
+            (c.dropdown_options || []).length ? ('\n## Quick Actions\n' + (c.dropdown_options || []).map(a => '- ' + a).join('\n')) : ''
+          ].filter(Boolean).join('\n');
         default: return JSON.stringify(c, null, 2);
       }
     } catch(e) { return JSON.stringify(c, null, 2); }
@@ -3090,11 +3166,15 @@ function App() {
   }
   function handleDismissContent(idx) { setPendingContent(prev => prev.filter((_,i) => i !== idx)); }
   function handleApplyPlan(idx, steps) {
-    steps.forEach(step => {
+    const normalized = (steps || []).map(step => typeof step === 'string'
+      ? { title: step, date: today(), estimated_minutes: 30 }
+      : { title: step.title || 'Task', date: step.date || today(), estimated_minutes: step.estimated_minutes || 30 }
+    );
+    normalized.forEach(step => {
       executeAction({ type:'add_task', title:step.title, subject:'', due:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
-    setToastMsg('Added ' + steps.length + ' tasks from plan');
+    setToastMsg('Added ' + normalized.length + ' tasks from plan');
   }
 
   // ── Google import handlers ──
@@ -3323,7 +3403,7 @@ function App() {
       const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
       const activeTasks = tasks.filter(t => t.status !== 'done').slice(0, 10);
 
-      const briefPrompt = `You are SOS, a student's proactive daily planner. Based on the student's calendar and linked documents for today, generate a structured daily brief.
+      const briefContext = `You are SOS, a student's proactive daily planner. Based on the student's calendar and linked documents for today, generate a structured daily brief.
 
 TODAY: ${todayStr}
 
@@ -3334,21 +3414,8 @@ LINKED DOCUMENT EXCERPTS:
 ${Object.entries(context.docContents).map(([id, text]) => '[Doc ' + id + ']: ' + text.slice(0, 500) + '...').join('\n\n') || '(no linked docs)'}
 
 STUDENT'S TASKS:
-${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') + ' due ' + fmt(t.dueDate)).join('\n') || '(no active tasks)'}
-
-Respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
-{
-  "type": "DAILY_BRIEF",
-  "summary": "One sentence overview of the day",
-  "schedule_items": [{"time": "HH:MM AM/PM", "event_name": "...", "related_doc_id": "..." or null}],
-  "plan_of_action": ["Specific action item 1", "Specific action item 2", "...3-5 items total"],
-  "dropdown_options": ["Quick action label 1", "Quick action label 2", "...3-5 options total"],
-  "encouragement": "Short motivational sign-off"
-}
-
-Make plan_of_action items specific and reference actual events/tasks (e.g. "Review Chapter 4 before 2 PM Bio Lab").
-Make dropdown_options actionable quick-actions (e.g. "Generate Study Guide for Bio", "Reschedule Conflicts", "Break down project into subtasks").
-If there are no events, base the brief on the student's tasks and suggest a productive plan.`;
+${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') + ' due ' + fmt(t.dueDate)).join('\n') || '(no active tasks)'}`;
+      const briefPrompt = buildStructuredDocPrompt('DAILY_BRIEF', briefContext);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -3567,7 +3634,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
 
       const chatData = await chatResponse.json();
-      const displayContent = chatData?.content || "hmm, didn't get a response. try again?";
+      const rawAssistant = chatData?.content || "hmm, didn't get a response. try again?";
+      let displayContent = rawAssistant;
+      let parsedStructured = null;
+      try {
+        const cleaned = rawAssistant.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+        const maybe = JSON.parse(cleaned);
+        if (maybe?.type === 'STRUCTURED_DOC') {
+          parsedStructured = { ...maybe, type: 'create_structured_doc' };
+          displayContent = 'done — i generated a structured doc card for you below.';
+        }
+      } catch (_) {}
 
       const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
       setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -3616,13 +3693,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           const dupDate = a.date || today();
           if (events.some(ev => ev.title.toLowerCase() === dupTitle && ev.date === dupDate)) continue;
         }
+        if (a.type === 'STRUCTURED_DOC') {
+          resolved.push({ ...a, type:'create_structured_doc' });
+          continue;
+        }
         resolved.push(a);
       }
       actions = resolved;
 
-      if (actions.length > 0) {
+      if (actions.length > 0 || parsedStructured) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
-        const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        let contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        if (parsedStructured) contentActions = [...contentActions, parsedStructured];
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
         if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
@@ -3859,6 +3941,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     { label:'My schedule', action:()=>setShowPeek(true) },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
+    { label:'Project brief', msg:'Make a project brief for what I should focus on this week' },
     { label:'Notes', action:()=>setShowNotes(true) },
     { label:'Import', action:()=>setShowGoogleModal(true) },
     { label:'Settings', action:()=>setActivePanel('settings') },
@@ -4114,7 +4197,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onAction={sendChip}/>
           </div>
         ))}
         {isLoading&&<TypingDots/>}
