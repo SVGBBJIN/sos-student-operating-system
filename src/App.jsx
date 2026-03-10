@@ -3627,11 +3627,23 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
       }
 
       const chatData = await chatResponse.json();
-      const rawAssistant = chatData?.content || "hmm, didn't get a response. try again?";
-      let displayContent = rawAssistant;
+      // Actions come back as structured tool_use results — no text parsing needed
+      let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
+
+      const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
+      const actionAckByType = {
+        update_event: 'got it — I can update that event.',
+        add_block: 'got it — I can add that block.',
+        add_event: 'got it — I can add that event.',
+        add_task: 'got it — I can add that task.',
+        delete_event: 'got it — I can remove that event.',
+        delete_task: 'got it — I can remove that task.',
+        complete_task: 'got it — I can mark that complete.',
+      };
+
       let parsedStructured = null;
       try {
-        const cleaned = rawAssistant.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+        const cleaned = rawContent.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
         const maybe = JSON.parse(cleaned);
         if (maybe?.type === 'STRUCTURED_DOC') {
           parsedStructured = {
@@ -3643,16 +3655,20 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
             action_items: Array.isArray(maybe.action_items) ? maybe.action_items : [],
             dropdown_options: Array.isArray(maybe.dropdown_options) ? maybe.dropdown_options : []
           };
-          displayContent = 'done — i generated a structured doc card for you below.';
         }
       } catch (_) {}
+
+      const displayContent = parsedStructured
+        ? 'done — i generated a structured doc card for you below.'
+        : (rawContent
+          ? rawContent
+          : actions.length > 0
+            ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
+            : "hmm, didn't get a response. try again?");
 
       const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
       setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
       if (user && displayContent) dbInsertChatMsg('assistant', displayContent, user.id);
-
-      // Actions come back as structured tool_use results — no text parsing needed
-      let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
       // ── Resolve actions: translate AI names → real IDs using resolveEvent/resolveTask ──
       const resolved = [];
@@ -3703,7 +3719,7 @@ ${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : ''
       actions = resolved;
 
       if (actions.length > 0 || parsedStructured) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all'];
         let contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         if (parsedStructured && !contentActions.some(a => a.type === 'create_structured_doc' && (a.title || '') === (parsedStructured.title || '') && (a.summary || '') === (parsedStructured.summary || ''))) {
           contentActions = [...contentActions, parsedStructured];
