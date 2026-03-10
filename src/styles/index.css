@@ -71,6 +71,11 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .settings-row:first-of-type{border-top:none;padding-top:0}
 .settings-toggle{border:1px solid rgba(108,99,255,0.22);background:rgba(108,99,255,0.1);color:var(--text);padding:8px 12px;border-radius:12px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s ease}
 .settings-toggle:hover{border-color:var(--accent);background:rgba(108,99,255,0.16)}
+
+.sos-bottom-actions{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:58;display:flex;gap:10px;padding:8px;background:rgba(10,10,18,0.92);border:1px solid rgba(108,99,255,0.2);border-radius:16px;backdrop-filter:blur(10px);box-shadow:0 10px 26px rgba(0,0,0,0.35)}
+.sos-bottom-btn{border:1px solid rgba(108,99,255,0.24);background:linear-gradient(135deg,rgba(108,99,255,0.14),rgba(43,203,186,0.1));color:var(--text);border-radius:12px;padding:9px 12px;font-size:0.8rem;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;transition:all .2s}
+.sos-bottom-btn:hover{border-color:var(--accent);transform:translateY(-1px)}
+.sos-bottom-count{font-size:0.7rem;opacity:0.85;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,0.08)}
 .sos-input-area{flex-shrink:0;border-top:1px solid rgba(108,99,255,0.1);background:linear-gradient(180deg,#0d0d1c 0%,#121224 100%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
@@ -328,6 +333,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 @media(max-width:768px){
   .sos-app{flex-direction:column}
   .sos-sidebar{width:100%;height:auto;max-height:42vh;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
+  .sos-bottom-actions{left:12px;right:12px;transform:none;bottom:12px;justify-content:space-between}
+  .sos-bottom-btn{flex:1;justify-content:center}
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
