@@ -1,36 +1,306 @@
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
-// Reads GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
+// Reads ANTHROPIC_API_KEY, GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Groq chat completion ── */
-async function callGroq(apiKey, model, systemPrompt, messages, maxTokens) {
+/* ── Tool definitions for Claude — one per supported action ── */
+const ACTION_TOOLS = [
+  {
+    name: "add_event",
+    description:
+      "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Event title" },
+        date: { type: "string", description: "Date in YYYY-MM-DD format" },
+        event_type: {
+          type: "string",
+          enum: [
+            "test", "exam", "quiz", "practice", "game", "match", "meet",
+            "tournament", "event", "other",
+          ],
+        },
+        subject: {
+          type: "string",
+          description: "School subject (e.g., Math, Biology, English)",
+        },
+      },
+      required: ["title", "date"],
+    },
+  },
+  {
+    name: "add_task",
+    description:
+      "Add a homework assignment or task to the student's to-do list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Task title" },
+        subject: { type: "string", description: "School subject" },
+        due: { type: "string", description: "Due date in YYYY-MM-DD format" },
+        estimated_minutes: {
+          type: "number",
+          description: "Estimated time to complete in minutes",
+        },
+      },
+      required: ["title", "due"],
+    },
+  },
+  {
+    name: "delete_event",
+    description:
+      "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Title of the event to delete" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "delete_task",
+    description:
+      "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Title of the task to delete" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "update_event",
+    description:
+      "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Current event title to look up" },
+        new_title: { type: "string", description: "New title (omit if not changing name)" },
+        date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
+        event_type: {
+          type: "string",
+          enum: [
+            "test", "exam", "quiz", "practice", "game", "match", "meet",
+            "tournament", "event", "other",
+          ],
+        },
+        subject: { type: "string" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description:
+      "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Title of the task to mark complete" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "add_block",
+    description:
+      "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date in YYYY-MM-DD format" },
+        start: { type: "string", description: "Start time in HH:MM 24-hour format (e.g. 14:00)" },
+        end: { type: "string", description: "End time in HH:MM 24-hour format (e.g. 15:30)" },
+        activity: { type: "string", description: "Activity name" },
+        category: {
+          type: "string",
+          enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+        },
+      },
+      required: ["date", "start", "end", "activity"],
+    },
+  },
+  {
+    name: "delete_block",
+    description: "Remove a time block from the student's schedule.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
+        start: { type: "string", description: "Start time of the block (HH:MM)" },
+        end: { type: "string", description: "End time of the block (HH:MM, optional)" },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "add_note",
+    description: "Save a note or important information to the student's notes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tab_name: { type: "string", description: "Name for the note tab" },
+        content: { type: "string", description: "Content to save" },
+      },
+      required: ["tab_name", "content"],
+    },
+  },
+  {
+    name: "break_task",
+    description:
+      "Break a large task into smaller, manageable subtasks spread across multiple days.",
+    input_schema: {
+      type: "object",
+      properties: {
+        parent_title: { type: "string", description: "Title of the task to break up" },
+        subtasks: {
+          type: "array",
+          description: "List of subtasks",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              due: { type: "string", description: "YYYY-MM-DD" },
+              estimated_minutes: { type: "number" },
+            },
+          },
+        },
+      },
+      required: ["parent_title", "subtasks"],
+    },
+  },
+  {
+    name: "add_recurring_event",
+    description:
+      "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        event_type: {
+          type: "string",
+          enum: ["test", "practice", "game", "match", "event", "other"],
+        },
+        subject: { type: "string" },
+        days: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "Monday", "Tuesday", "Wednesday", "Thursday",
+              "Friday", "Saturday", "Sunday",
+            ],
+          },
+          description: "Days of the week this event repeats",
+        },
+        start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
+        end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
+      },
+      required: ["title", "days", "start_date", "end_date"],
+    },
+  },
+  {
+    name: "clear_all",
+    description:
+      "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
+];
+
+/* ── Anthropic Claude chat + tool use ── */
+async function callClaude(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true) {
+  // Convert messages to Anthropic format
+  let anthropicMessages = messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === "string" ? m.content : "",
+  }));
+
+  // Vision: replace messages with single image+text block
+  if (imageBase64) {
+    const effectiveMime = imageMimeType || "image/jpeg";
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const textContent =
+      lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
+        ? lastUser.content.trim()
+        : "What do you see in this image?";
+    anthropicMessages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: effectiveMime, data: imageBase64 },
+          },
+          { type: "text", text: textContent },
+        ],
+      },
+    ];
+  }
+
+  // Filter out messages with empty content
+  anthropicMessages = anthropicMessages.filter((m) => {
+    if (typeof m.content === "string") return m.content.trim().length > 0;
+    if (Array.isArray(m.content)) return m.content.length > 0;
+    return false;
+  });
+
+  // Ensure messages alternate correctly (Anthropic requirement)
+  const deduped = [];
+  for (const m of anthropicMessages) {
+    if (deduped.length > 0 && deduped[deduped.length - 1].role === m.role) {
+      const prev = deduped[deduped.length - 1];
+      if (typeof prev.content === "string" && typeof m.content === "string") {
+        prev.content = prev.content + "\n" + m.content;
+      }
+    } else {
+      deduped.push({ ...m });
+    }
+  }
+  // First message must be user
+  while (deduped.length > 0 && deduped[0].role !== "user") {
+    deduped.shift();
+  }
+
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: deduped,
+  };
+
+  if (includeTools && !imageBase64) {
+    body.tools = ACTION_TOOLS;
+  }
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   let res;
   try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "system", content: systemPrompt }, ...messages],
-        max_completion_tokens: maxTokens,
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
   } catch (err) {
     clearTimeout(timeoutId);
     if (err.name === "AbortError") {
-      throw new Error(`Groq ${model} request timed out after 25s`);
+      throw new Error(`Claude ${model} request timed out after 30s`);
     }
     throw err;
   }
@@ -38,11 +308,23 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    throw new Error(`Claude ${model} error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
-  return { content: data.choices?.[0]?.message?.content ?? "" };
+
+  let textContent = "";
+  const actions = [];
+
+  for (const block of data.content || []) {
+    if (block.type === "text") {
+      textContent += block.text;
+    } else if (block.type === "tool_use") {
+      actions.push({ type: block.name, ...block.input });
+    }
+  }
+
+  return { content: textContent.trim(), actions };
 }
 
 /* ── Extract user ID from JWT ── */
@@ -105,29 +387,32 @@ export default async function handler(req, res) {
     return res.status(200).end("ok");
   }
 
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!GROQ_API_KEY) {
-    return res.status(500).json({ error: "GROQ_API_KEY not configured" });
-  }
-
   try {
     const body = req.body;
 
-    // ── Voice transcription path ──
+    // ── Voice transcription path (Groq Whisper) ──
     if (body.mode === "voice") {
+      if (!GROQ_API_KEY) {
+        return res.status(500).json({ error: "GROQ_API_KEY not configured" });
+      }
       const { audioBase64, audioMimeType } = body;
       if (!audioBase64) {
         return res.status(400).json({ error: "No audio data provided" });
       }
 
       const effectiveMime = audioMimeType || "audio/webm";
-      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
-        : effectiveMime.includes("ogg") ? "ogg"
-        : effectiveMime.includes("mp3") ? "mp3"
+      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
+        ? "m4a"
+        : effectiveMime.includes("ogg")
+        ? "ogg"
+        : effectiveMime.includes("mp3")
+        ? "mp3"
         : "webm";
       const audioBuffer = Buffer.from(audioBase64, "base64");
       const audioBlob = new Blob([audioBuffer], { type: effectiveMime });
@@ -151,21 +436,22 @@ export default async function handler(req, res) {
       if (!groqRes.ok) {
         const errText = await groqRes.text();
         console.error("Groq Whisper error:", groqRes.status, errText);
-        return res
-          .status(groqRes.status)
-          .json({ error: "Transcription failed", details: errText });
+        return res.status(groqRes.status).json({ error: "Transcription failed", details: errText });
       }
 
       const whisperResult = await groqRes.json();
       return res.status(200).json({ text: whisperResult.text || "" });
     }
 
-    // ── Chat completion path ──
+    // ── Chat completion path (Claude) ──
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+    }
+
     const {
       systemPrompt,
       messages,
       maxTokens = 1024,
-      model,
       isContentGen,
       imageBase64,
       imageMimeType,
@@ -186,43 +472,19 @@ export default async function handler(req, res) {
       }
     }
 
-    const effectiveModel = imageBase64
-      ? "meta-llama/llama-4-scout-17b-16e-instruct"
-      : (model || "llama-3.1-8b-instant");
+    // Model selection: Sonnet for content gen, Haiku for everything else
+    const model = isContentGen ? "claude-sonnet-4-6" : "claude-haiku-4-5";
+    const includeTools = !isContentGen;
 
-    // For vision requests: use lean prompt + minimal history to avoid payload bloat & contamination
-    let effectivePrompt = systemPrompt;
-    let preparedMessages = [...messages];
-
-    if (imageBase64) {
-      effectivePrompt = "You are SOS, a chill study sidekick. The student sent you a photo. Describe what you see and help with any school-related content visible (homework, assignments, schedules, textbook pages, etc.). Be casual and brief (2-4 sentences). If you can identify specific tasks or deadlines, mention them clearly.";
-
-      // For vision: send only a single user message with the image — no history.
-      // Including history (especially assistant messages) causes Groq 400s because
-      // the vision model only allows string content for non-user roles.
-      const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
-      const textContent =
-        lastUserMsg && typeof lastUserMsg.content === "string" && lastUserMsg.content.trim()
-          ? lastUserMsg.content.trim()
-          : "What do you see in this image?";
-
-      preparedMessages = [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: textContent },
-            { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
-          ],
-        },
-      ];
-    }
-
-    const result = await callGroq(
-      GROQ_API_KEY,
-      effectiveModel,
-      effectivePrompt,
-      preparedMessages,
-      maxTokens
+    const result = await callClaude(
+      ANTHROPIC_API_KEY,
+      model,
+      systemPrompt,
+      messages,
+      maxTokens,
+      imageBase64,
+      imageMimeType,
+      includeTools
     );
 
     return res.status(200).json(result);
@@ -230,4 +492,4 @@ export default async function handler(req, res) {
     console.error("api/chat error:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
   }
-};
+}

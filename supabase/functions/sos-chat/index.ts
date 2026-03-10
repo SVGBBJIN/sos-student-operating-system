@@ -7,31 +7,346 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-/* ── Groq chat completion ── */
-async function callGroq(
+/* ── Tool definitions for Claude — one per supported action ── */
+const ACTION_TOOLS = [
+  {
+    name: "add_event",
+    description:
+      "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Event title" },
+        date: { type: "string", description: "Date in YYYY-MM-DD format" },
+        event_type: {
+          type: "string",
+          enum: [
+            "test", "exam", "quiz", "practice", "game", "match", "meet",
+            "tournament", "event", "other",
+          ],
+        },
+        subject: {
+          type: "string",
+          description: "School subject (e.g., Math, Biology, English)",
+        },
+      },
+      required: ["title", "date"],
+    },
+  },
+  {
+    name: "add_task",
+    description:
+      "Add a homework assignment or task to the student's to-do list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Task title" },
+        subject: { type: "string", description: "School subject" },
+        due: { type: "string", description: "Due date in YYYY-MM-DD format" },
+        estimated_minutes: {
+          type: "number",
+          description: "Estimated time to complete in minutes",
+        },
+      },
+      required: ["title", "due"],
+    },
+  },
+  {
+    name: "delete_event",
+    description:
+      "Delete or cancel an event from the student's calendar. Use when the student says an event is cancelled, not happening, or asks to remove it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Title of the event to delete" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "delete_task",
+    description:
+      "Delete a task from the student's task list. Use when the student says to remove, drop, or forget a task.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Title of the task to delete" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "update_event",
+    description:
+      "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Current event title to look up",
+        },
+        new_title: {
+          type: "string",
+          description: "New title (omit if not changing name)",
+        },
+        date: {
+          type: "string",
+          description: "New date in YYYY-MM-DD format (omit if not changing)",
+        },
+        event_type: {
+          type: "string",
+          enum: [
+            "test", "exam", "quiz", "practice", "game", "match", "meet",
+            "tournament", "event", "other",
+          ],
+        },
+        subject: { type: "string" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description:
+      "Mark a task as done/completed. Use when the student says they finished, submitted, or completed something.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Title of the task to mark complete",
+        },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "add_block",
+    description:
+      "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date in YYYY-MM-DD format" },
+        start: {
+          type: "string",
+          description: "Start time in HH:MM 24-hour format (e.g. 14:00)",
+        },
+        end: {
+          type: "string",
+          description: "End time in HH:MM 24-hour format (e.g. 15:30)",
+        },
+        activity: { type: "string", description: "Activity name" },
+        category: {
+          type: "string",
+          enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+        },
+      },
+      required: ["date", "start", "end", "activity"],
+    },
+  },
+  {
+    name: "delete_block",
+    description: "Remove a time block from the student's schedule.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date of the block (YYYY-MM-DD)" },
+        start: { type: "string", description: "Start time of the block (HH:MM)" },
+        end: {
+          type: "string",
+          description: "End time of the block (HH:MM, optional)",
+        },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "add_note",
+    description: "Save a note or important information to the student's notes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tab_name: { type: "string", description: "Name for the note tab" },
+        content: { type: "string", description: "Content to save" },
+      },
+      required: ["tab_name", "content"],
+    },
+  },
+  {
+    name: "break_task",
+    description:
+      "Break a large task into smaller, manageable subtasks spread across multiple days.",
+    input_schema: {
+      type: "object",
+      properties: {
+        parent_title: {
+          type: "string",
+          description: "Title of the task to break up",
+        },
+        subtasks: {
+          type: "array",
+          description: "List of subtasks",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              due: { type: "string", description: "YYYY-MM-DD" },
+              estimated_minutes: { type: "number" },
+            },
+          },
+        },
+      },
+      required: ["parent_title", "subtasks"],
+    },
+  },
+  {
+    name: "add_recurring_event",
+    description:
+      "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        event_type: {
+          type: "string",
+          enum: ["test", "practice", "game", "match", "event", "other"],
+        },
+        subject: { type: "string" },
+        days: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "Monday", "Tuesday", "Wednesday", "Thursday",
+              "Friday", "Saturday", "Sunday",
+            ],
+          },
+          description: "Days of the week this event repeats",
+        },
+        start_date: {
+          type: "string",
+          description: "YYYY-MM-DD — first occurrence",
+        },
+        end_date: {
+          type: "string",
+          description: "YYYY-MM-DD — last occurrence",
+        },
+      },
+      required: ["title", "days", "start_date", "end_date"],
+    },
+  },
+  {
+    name: "clear_all",
+    description:
+      "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
+];
+
+/* ── Anthropic Claude chat + tool use ── */
+async function callClaude(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
-  maxTokens: number
-): Promise<{ content: string }> {
-  const body = {
+  messages: {
+    role: string;
+    content:
+      | string
+      | { type: string; text?: string; image_url?: { url: string } }[];
+  }[],
+  maxTokens: number,
+  imageBase64?: string,
+  imageMimeType?: string,
+  includeTools = true
+): Promise<{ content: string; actions: Record<string, unknown>[] }> {
+  // Convert messages to Anthropic format
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let anthropicMessages: any[] = messages.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: typeof m.content === "string" ? m.content : "",
+  }));
+
+  // Vision: replace messages with single image+text block
+  if (imageBase64) {
+    const effectiveMime = (imageMimeType || "image/jpeg") as
+      | "image/jpeg"
+      | "image/png"
+      | "image/gif"
+      | "image/webp";
+    const lastUser = [...messages]
+      .reverse()
+      .find((m) => m.role === "user");
+    const textContent =
+      lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
+        ? lastUser.content.trim()
+        : "What do you see in this image?";
+    anthropicMessages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: effectiveMime, data: imageBase64 },
+          },
+          { type: "text", text: textContent },
+        ],
+      },
+    ];
+  }
+
+  // Filter out messages with empty content
+  anthropicMessages = anthropicMessages.filter((m) => {
+    if (typeof m.content === "string") return m.content.trim().length > 0;
+    if (Array.isArray(m.content)) return m.content.length > 0;
+    return false;
+  });
+
+  // Ensure messages alternate correctly (Anthropic requirement)
+  const deduped: typeof anthropicMessages = [];
+  for (const m of anthropicMessages) {
+    if (deduped.length > 0 && deduped[deduped.length - 1].role === m.role) {
+      // Merge same-role consecutive messages
+      const prev = deduped[deduped.length - 1];
+      if (typeof prev.content === "string" && typeof m.content === "string") {
+        prev.content = prev.content + "\n" + m.content;
+      }
+    } else {
+      deduped.push({ ...m });
+    }
+  }
+  // First message must be user
+  while (deduped.length > 0 && deduped[0].role !== "user") {
+    deduped.shift();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body: any = {
     model,
-    messages: [{ role: "system", content: systemPrompt }, ...messages],
-    max_completion_tokens: maxTokens,
-    temperature: 0.7,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: deduped,
   };
 
+  if (includeTools && !imageBase64) {
+    body.tools = ACTION_TOOLS;
+  }
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   let res: Response;
   try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -39,7 +354,7 @@ async function callGroq(
   } catch (err) {
     clearTimeout(timeoutId);
     if ((err as Error).name === "AbortError") {
-      throw new Error(`Groq ${model} request timed out after 25s`);
+      throw new Error(`Claude ${model} request timed out after 30s`);
     }
     throw err;
   }
@@ -47,12 +362,68 @@ async function callGroq(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    throw new Error(`Claude ${model} error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content ?? "";
-  return { content };
+
+  let textContent = "";
+  const actions: Record<string, unknown>[] = [];
+
+  for (const block of data.content || []) {
+    if (block.type === "text") {
+      textContent += block.text;
+    } else if (block.type === "tool_use") {
+      // Map tool_use block → action object that executeAction() understands
+      actions.push({ type: block.name, ...block.input });
+    }
+  }
+
+  return { content: textContent.trim(), actions };
+}
+
+/* ── Groq chat completion (kept for voice transcription only) ── */
+async function callGroqWhisper(
+  apiKey: string,
+  audioBase64: string,
+  audioMimeType: string
+): Promise<string> {
+  const binaryStr = atob(audioBase64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+  const effectiveMime = audioMimeType || "audio/webm";
+  const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
+    ? "m4a"
+    : effectiveMime.includes("ogg")
+    ? "ogg"
+    : effectiveMime.includes("mp3")
+    ? "mp3"
+    : "webm";
+  const audioBlob = new Blob([bytes], { type: effectiveMime });
+  const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
+
+  const groqForm = new FormData();
+  groqForm.append("file", audioFile, `voice.${audioExt}`);
+  groqForm.append("model", "whisper-large-v3-turbo");
+  groqForm.append("response_format", "json");
+  groqForm.append("language", "en");
+
+  const groqRes = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: groqForm,
+    }
+  );
+
+  if (!groqRes.ok) {
+    const errText = await groqRes.text();
+    throw new Error(`Groq Whisper error ${groqRes.status}: ${errText}`);
+  }
+
+  const result = await groqRes.json();
+  return result.text || "";
 }
 
 /* ── Rate limiting for content generation ── */
@@ -88,7 +459,6 @@ async function checkContentRateLimit(
     return { allowed: false, used };
   }
 
-  // Increment
   await sb.from("content_generations").upsert(
     { user_id: userId, date: todayEST, count: used + 1 },
     { onConflict: "user_id,date" }
@@ -116,22 +486,19 @@ serve(async (req: Request) => {
   }
 
   try {
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-
-    if (!GROQ_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "GROQ_API_KEY not configured" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
 
     const body = await req.json();
 
-    // ── Voice transcription path ──
+    // ── Voice transcription path (Groq Whisper) ──
     if (body.mode === "voice") {
+      if (!GROQ_API_KEY) {
+        return new Response(
+          JSON.stringify({ error: "GROQ_API_KEY not configured" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       const { audioBase64, audioMimeType } = body;
       if (!audioBase64) {
         return new Response(
@@ -139,57 +506,37 @@ serve(async (req: Request) => {
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
-      // Decode base64 → binary → Blob → File for Groq
-      const binaryStr = atob(audioBase64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const effectiveMime = audioMimeType || "audio/webm";
-      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac") ? "m4a"
-        : effectiveMime.includes("ogg") ? "ogg"
-        : effectiveMime.includes("mp3") ? "mp3"
-        : "webm";
-      const audioBlob = new Blob([bytes], { type: effectiveMime });
-      const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
-
-      const groqForm = new FormData();
-      groqForm.append("file", audioFile, `voice.${audioExt}`);
-      groqForm.append("model", "whisper-large-v3-turbo");
-      groqForm.append("response_format", "json");
-      groqForm.append("language", "en");
-
-      const groqRes = await fetch(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-          body: groqForm,
-        }
-      );
-
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        console.error("Groq Whisper error:", groqRes.status, errText);
+      try {
+        const text = await callGroqWhisper(GROQ_API_KEY, audioBase64, audioMimeType || "audio/webm");
         return new Response(
-          JSON.stringify({ error: "Transcription failed", details: errText }),
-          { status: groqRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ text }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (err) {
+        const errMsg = (err as Error).message || "Transcription failed";
+        console.error("Voice transcription error:", errMsg);
+        return new Response(
+          JSON.stringify({ error: errMsg }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
-      const whisperResult = await groqRes.json();
-      return new Response(
-        JSON.stringify({ text: whisperResult.text || "" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
-    // ── Chat completion path ──
+    // ── Chat completion path (Claude) ──
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "ANTHROPIC_API_KEY not configured" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     const {
       systemPrompt,
       messages,
       maxTokens = 1024,
-      model,
       isContentGen,
       imageBase64,
       imageMimeType,
@@ -212,38 +559,22 @@ serve(async (req: Request) => {
       }
     }
 
-    const effectiveModel = imageBase64
-      ? "meta-llama/llama-4-scout-17b-16e-instruct"
-      : (model || "llama-3.1-8b-instant");
+    // Model selection: use Sonnet for content gen, Haiku for everything else
+    const model = isContentGen ? "claude-sonnet-4-6" : "claude-haiku-4-5";
 
-    // For vision requests: use lean prompt + minimal history to avoid payload bloat & contamination
-    let effectivePrompt = systemPrompt;
-    let preparedMessages = [...messages];
+    // Don't pass tools for content generation (flashcards, study guides, etc.)
+    const includeTools = !isContentGen;
 
-    if (imageBase64) {
-      effectivePrompt = "You are SOS, a chill study sidekick. The student sent you a photo. Describe what you see and help with any school-related content visible (homework, assignments, schedules, textbook pages, etc.). Be casual and brief (2-4 sentences). If you can identify specific tasks or deadlines, mention them clearly.";
-
-      // For vision: send only a single user message with the image — no history.
-      // Including history (especially assistant messages) causes Groq 400s because
-      // the vision model only allows string content for non-user roles.
-      const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === "user");
-      const textContent =
-        lastUserMsg && typeof lastUserMsg.content === "string" && lastUserMsg.content.trim()
-          ? lastUserMsg.content.trim()
-          : "What do you see in this image?";
-
-      preparedMessages = [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: textContent },
-            { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
-          ],
-        },
-      ];
-    }
-
-    const result = await callGroq(GROQ_API_KEY, effectiveModel, effectivePrompt, preparedMessages, maxTokens);
+    const result = await callClaude(
+      ANTHROPIC_API_KEY,
+      model,
+      systemPrompt,
+      messages,
+      maxTokens,
+      imageBase64,
+      imageMimeType,
+      includeTools
+    );
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
