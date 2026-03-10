@@ -2761,6 +2761,7 @@ function App() {
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
+  const [bottomQuickActions, setBottomQuickActions] = useState(() => localStorage.getItem('sos_bottom_quick_actions') !== 'false');
   const [activePanel, setActivePanel] = useState('chat');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
@@ -4171,6 +4172,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
+  useEffect(() => { localStorage.setItem('sos_bottom_quick_actions', String(bottomQuickActions)); }, [bottomQuickActions]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4212,8 +4214,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowPeek(true)} title="Schedule">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowNotes(true)} title="Notes">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes</span><span className="sos-side-label" style={{fontSize:'0.72rem',opacity:0.8}}>{notes.length}</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4296,6 +4296,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Bottom quick actions</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show Notes and Schedule controls in a bottom bar when using sidebar layout.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setBottomQuickActions(prev=>!prev)}>{bottomQuickActions ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
@@ -4544,6 +4551,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onToggleCalSync={toggleCalSync}
           onSyncNow={()=>syncCalendarRef.current()}
         />
+      )}
+      {layoutMode === 'sidebar' && bottomQuickActions && (
+        <div className="sos-bottom-actions">
+          <button className="sos-bottom-btn" onClick={()=>setShowPeek(true)}>
+            {Icon.clipboard(14)} Schedule
+          </button>
+          <button className="sos-bottom-btn" onClick={()=>setShowNotes(true)}>
+            {Icon.fileText(14)} Notes
+            <span className="sos-bottom-count">{notes.length}</span>
+          </button>
+        </div>
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
