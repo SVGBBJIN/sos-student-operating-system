@@ -288,6 +288,42 @@ const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "ask_clarification",
+      description:
+        "Ask the student a focused follow-up question when required details are missing or ambiguous before taking any schedule/task action.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "Direct clarification question for the student",
+          },
+          options: {
+            type: "array",
+            description: "Suggested answer options the student can tap/select",
+            items: { type: "string" },
+          },
+          multi_select: {
+            type: "boolean",
+            description: "Whether the student may choose multiple options",
+          },
+          context_action: {
+            type: "string",
+            description: "Optional action this clarification is about (for example add_event)",
+          },
+          missing_fields: {
+            type: "array",
+            description: "Optional list of required fields that are currently missing",
+            items: { type: "string" },
+          },
+        },
+        required: ["question", "options", "multi_select"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "clear_all",
       description:
         "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
@@ -369,12 +405,30 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
   const data = await res.json();
   const message = data.choices?.[0]?.message;
   const textContent = message?.content || "";
-  const actions = (message?.tool_calls || []).map((tc) => ({
-    type: tc.function.name,
-    ...JSON.parse(tc.function.arguments),
-  }));
+  let clarification = null;
+  const actions = (message?.tool_calls || []).flatMap((tc) => {
+    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
 
-  return { content: textContent.trim(), actions };
+    if (tc.function.name === "ask_clarification") {
+      clarification = {
+        question: parsedArgs.question || "",
+        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
+        multi_select: Boolean(parsedArgs.multi_select),
+        ...(parsedArgs.context_action ? { context_action: parsedArgs.context_action } : {}),
+        ...(Array.isArray(parsedArgs.missing_fields)
+          ? { missing_fields: parsedArgs.missing_fields }
+          : {}),
+      };
+      return [];
+    }
+
+    return [{
+      type: tc.function.name,
+      ...parsedArgs,
+    }];
+  });
+
+  return { content: textContent.trim(), actions, clarification };
 }
 
 /* ── Extract user ID from JWT ── */
