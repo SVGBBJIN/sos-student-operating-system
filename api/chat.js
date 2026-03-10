@@ -167,6 +167,52 @@ const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "convert_event_to_block",
+      description:
+        "Convert a date-only event into a scheduled time block on the same date.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title to convert" },
+          event_id: { type: "string", description: "Event id to convert (optional if title provided)" },
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
+          end: { type: "string", description: "End time in HH:MM 24-hour format" },
+          category: {
+            type: "string",
+            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
+          },
+        },
+        required: ["date", "start", "end"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "convert_block_to_event",
+      description:
+        "Convert an existing scheduled block range into a calendar event.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
+          end: { type: "string", description: "End time in HH:MM 24-hour format (optional)" },
+          title: { type: "string", description: "Event title" },
+          event_type: {
+            type: "string",
+            enum: ["test", "exam", "quiz", "practice", "game", "match", "meet", "tournament", "event", "other"],
+          },
+          subject: { type: "string", description: "School subject" },
+        },
+        required: ["date", "start", "title", "event_type", "subject"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "add_note",
       description: "Save a note or important information to the student's notes.",
       parameters: {

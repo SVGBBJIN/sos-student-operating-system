@@ -315,6 +315,50 @@ function resolveTask(nameOrId, tasksList) {
   return bestScore >= 30 ? best : null;
 }
 
+function addThirtyMinutes(timeStr) {
+  const [h, m] = (timeStr || '00:00').split(':').map(Number);
+  const d = new Date();
+  d.setHours(h || 0, m || 0, 0, 0);
+  d.setMinutes(d.getMinutes() + 30);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function resolveBlockRange(action, blocksState) {
+  const date = action?.date;
+  if (!date) return null;
+  const daySlots = blocksState?.dates?.[date] || {};
+  const sortedSlots = Object.keys(daySlots).sort((a, b) => a.localeCompare(b));
+  if (sortedSlots.length === 0) return null;
+
+  let start = action?.start;
+  if (!start && action?.activity) {
+    let bestSlot = null;
+    let bestScore = 0;
+    for (const key of sortedSlots) {
+      const score = matchScore(action.activity, daySlots[key]?.name || '');
+      if (score > bestScore) {
+        bestScore = score;
+        bestSlot = key;
+      }
+    }
+    if (bestScore >= 30) start = bestSlot;
+  }
+  if (!start || !daySlots[start]) return null;
+
+  const slotData = daySlots[start];
+  const end = action?.end || (() => {
+    let cursor = start;
+    while (true) {
+      const next = addThirtyMinutes(cursor);
+      const nextData = daySlots[next];
+      if (!nextData || nextData.name !== slotData.name || nextData.category !== slotData.category) return next;
+      cursor = next;
+    }
+  })();
+
+  return { date, start, end, name: slotData.name, category: slotData.category || 'school' };
+}
+
 /* ── Individual save helpers (fire-and-forget) ── */
 async function dbUpsertTask(task, userId) {
   const { error } = await sb.from('tasks').upsert(appTaskToDb(task, userId), { onConflict: 'id' });
@@ -327,6 +371,10 @@ async function dbDeleteTask(taskId, userId) {
 async function dbUpsertEvent(event, userId) {
   const { error } = await sb.from('events').upsert(appEventToDb(event, userId), { onConflict: 'id' });
   if (error) console.error('Event upsert error:', error);
+}
+async function dbDeleteEvent(eventId, userId) {
+  const { error } = await sb.from('events').delete().eq('id', eventId).eq('user_id', userId);
+  if (error) console.error('Event delete error:', error);
 }
 async function dbUpsertNote(note, userId) {
   const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
@@ -611,6 +659,8 @@ RULES:
 6. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
 7. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
 8. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
+9. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
+10. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -717,6 +767,8 @@ function parseActionDecisionResponse(text) {
       case 'delete_event': return { type:'delete_event', title:p.title||p.event_id||'' };
       case 'update_event': return { type:'update_event', title:p.title||'', new_title:p.new_title||undefined, date:p.date||undefined, event_type:p.event_type||undefined, subject:p.subject };
       case 'delete_block': return { type:'delete_block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00' };
+      case 'convert_event_to_block': return { type:'convert_event_to_block', title:p.title||p.event_id||'', event_id:p.event_id||undefined, date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00', category:p.category||'school' };
+      case 'convert_block_to_event': return { type:'convert_block_to_event', date:p.date||today(), start:p.start||'16:00', end:p.end||undefined, title:p.title||'Event', event_type:p.event_type||'event', subject:p.subject||'' };
       case 'break_task': return { type:'break_task', parent_title:p.parent_title||p.title||'Task', subtasks:Array.isArray(p.subtasks)?p.subtasks:[] };
       case 'add_recurring_event': return { type:'add_recurring_event', title:p.title||'Recurring Event', event_type:p.event_type||'practice', subject:p.subject||'', days:Array.isArray(p.days)?p.days:[], start_date:p.start_date||today(), end_date:p.end_date||today() };
       case 'clear_all': return { type:'clear_all' };
@@ -1109,6 +1161,19 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
       case 'delete_block': return { icon:Icon.trash(16), label:'Remove Block', badge:'remove', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
         { key:'date', label:'Date', value:action.date?fmt(action.date):'?' }, { key:'time', label:'Time', value:(action.start||'?')+' — '+(action.end||'?') }
       ]};
+      case 'convert_event_to_block': return { icon:Icon.calendarClock(16), label:'Convert Event to Block', badge:'convert', badgeColor:'var(--blue)', borderColor:'var(--blue)', bgTint:'rgba(69,170,242,0.03)', fields: [
+        { key:'title', label:'Event', value:action.title||action.event_id||'Unknown', editable:true },
+        { key:'date', label:'Date', value:action.date?fmt(action.date):'?', editable:true },
+        { key:'time', label:'Time', value:(action.start||'?')+' — '+(action.end||'?') },
+        { key:'category', label:'Category', value:action.category||'school' }
+      ]};
+      case 'convert_block_to_event': return { icon:Icon.calendar(16), label:'Convert Block to Event', badge:'convert', badgeColor:'var(--teal)', borderColor:'var(--teal)', bgTint:'rgba(43,203,186,0.03)', fields: [
+        { key:'title', label:'Event', value:action.title||'Event', editable:true },
+        { key:'date', label:'Date', value:action.date?fmt(action.date):'?', editable:true },
+        { key:'time', label:'Time', value:(action.start||'?')+' — '+(action.end||'(auto)') },
+        { key:'event_type', label:'Type', value:action.event_type||'event' },
+        { key:'subject', label:'Class', value:action.subject||'—' }
+      ]};
       case 'clear_all': return { icon:Icon.alertTriangle(16), label:'Clear Everything', badge:'danger', badgeColor:'var(--danger)', borderColor:'var(--danger)', fields: [
         { key:'scope', label:'Scope', value:'Tasks, events, and schedule blocks will be removed.' }
       ]};
@@ -1201,7 +1266,7 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   function toggleAll() { const v=!selectAll; setSelectAll(v); setChecked(actions.map(()=>v)); }
 
   function getActionLabel(a) {
-    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', add_recurring_event:'Recurring', clear_all:'Clear Everything' };
+    const labels = { add_task:'Task', add_event:'Event', add_block:'Block', delete_task:'Delete Task', delete_event:'Delete Event', update_event:'Update', break_task:'Split', delete_block:'Remove Block', convert_event_to_block:'Convert Event → Block', convert_block_to_event:'Convert Block → Event', add_recurring_event:'Recurring', clear_all:'Clear Everything' };
     return (labels[a.type]||'Action')+': '+(a.title||a.activity||a.parent_title||'Untitled');
   }
   function getBadgeColor(a) {
@@ -2981,7 +3046,7 @@ function App() {
           setEvents(prev => {
             const match = resolveEvent(action.title || action.event_id, prev);
             if (!match) return prev;
-            if (user) syncOp(() => sb.from('events').delete().eq('id', match.id).eq('user_id', user.id));
+            if (user) syncOp(() => dbDeleteEvent(match.id, user.id));
             if (match.googleId && isGoogleConnected() && calSyncEnabled) {
               deleteEventFromGoogle(match.googleId, googleToken);
             }
@@ -3031,6 +3096,92 @@ function App() {
             if (user && delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(delDate, key, null, user.id))));
           }
           break;
+        case 'convert_event_to_block': {
+          let sourceEvent = null;
+          setEvents(prev => {
+            const match = resolveEvent(action.title || action.event_id, prev);
+            if (!match) return prev;
+            sourceEvent = match;
+            return prev.filter(ev => ev.id !== match.id);
+          });
+          if (!sourceEvent) break;
+
+          const date = action.date || sourceEvent.date || today();
+          const [sh, sm] = (action.start || '16:00').split(':').map(Number);
+          const [eh, em] = (action.end || addThirtyMinutes(action.start || '16:00')).split(':').map(Number);
+          const slotOps = [];
+          setBlocks(prev => {
+            const newDates = { ...(prev.dates || {}) };
+            const dayBlocks = { ...(newDates[date] || {}) };
+            let ch = sh, cm = sm;
+            while (ch < eh || (ch === eh && cm < em)) {
+              const key = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+              const data = { name: sourceEvent.title, category: action.category || 'school' };
+              dayBlocks[key] = data;
+              slotOps.push({ date, key, data });
+              cm += 30;
+              if (cm >= 60) { ch++; cm = 0; }
+            }
+            newDates[date] = dayBlocks;
+            return { ...prev, dates: newDates };
+          });
+          if (user) {
+            syncOp(() => dbDeleteEvent(sourceEvent.id, user.id));
+            if (slotOps.length > 0) syncOp(() => Promise.all(slotOps.map(s => dbUpsertDateBlock(s.date, s.key, s.data, user.id))));
+          }
+          if (sourceEvent.googleId && isGoogleConnected() && calSyncEnabled) {
+            deleteEventFromGoogle(sourceEvent.googleId, googleToken);
+          }
+          break;
+        }
+        case 'convert_block_to_event': {
+          const range = resolveBlockRange(action, blocks);
+          if (!range) break;
+
+          const ev = {
+            id: uid(),
+            title: action.title || range.name || 'Event',
+            type: action.event_type || 'event',
+            subject: action.subject || '',
+            date: range.date,
+            recurring: 'none',
+            createdAt: new Date().toISOString(),
+            source: 'manual',
+            googleId: null
+          };
+          setEvents(prev => [...prev, ev]);
+
+          const [dsh, dsm] = (range.start).split(':').map(Number);
+          const [deh, dem] = (range.end || addThirtyMinutes(range.start)).split(':').map(Number);
+          const delOps = [];
+          setBlocks(prev => {
+            const newDates = { ...(prev.dates || {}) };
+            const dayBlks = { ...(newDates[range.date] || {}) };
+            let dch = dsh, dcm = dsm;
+            while (dch < deh || (dch === deh && dcm < dem)) {
+              const key = String(dch).padStart(2, '0') + ':' + String(dcm).padStart(2, '0');
+              delete dayBlks[key];
+              delOps.push(key);
+              dcm += 30; if (dcm >= 60) { dch++; dcm = 0; }
+            }
+            newDates[range.date] = dayBlks;
+            return { ...prev, dates: newDates };
+          });
+
+          if (user) {
+            syncOp(() => dbUpsertEvent(ev, user.id));
+            if (delOps.length > 0) syncOp(() => Promise.all(delOps.map(key => dbUpsertDateBlock(range.date, key, null, user.id))));
+          }
+          if (isGoogleConnected() && calSyncEnabled) {
+            pushEventToGoogle(ev, googleToken).then(gid => {
+              if (gid) {
+                setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, googleId: gid } : e));
+                if (user) syncOp(() => dbUpsertEvent({ ...ev, googleId: gid }, user.id));
+              }
+            });
+          }
+          break;
+        }
         case 'clear_all':
           setTasks([]);
           setEvents([]);
@@ -3576,17 +3727,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Actions come back as structured tool_use results — no text parsing needed
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
-      // ── Resolve actions: translate AI names → real IDs using resolveEvent/resolveTask ──
+      // ── Resolve actions: translate AI names → real IDs/ranges using resolveEvent/resolveTask helpers ──
       const resolved = [];
       for (const a of actions) {
-        if (a.type === 'delete_event' || a.type === 'update_event') {
+        if (a.type === 'delete_event' || a.type === 'update_event' || a.type === 'convert_event_to_block') {
           const match = resolveEvent(a.title || a.event_id, events);
           if (match) {
-            resolved.push({ ...a, event_id: match.id, title: match.title });
+            resolved.push({ ...a, event_id: match.id, title: match.title, date: a.date || match.date });
           } else {
             const msg = { role:'assistant', content: a.type === 'delete_event'
               ? "hmm, I couldn't find that event to remove. what's the exact name?"
-              : "I couldn't find that event to update. which one did you mean?", timestamp:Date.now() };
+              : a.type === 'update_event'
+                ? "I couldn't find that event to update. which one did you mean?"
+                : "I couldn't find that event to convert. which one did you mean?", timestamp:Date.now() };
+            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          }
+          continue;
+        }
+        if (a.type === 'convert_block_to_event') {
+          const range = resolveBlockRange(a, blocks);
+          if (range) {
+            resolved.push({ ...a, date: range.date, start: range.start, end: a.end || range.end, title: a.title || range.name || 'Event' });
+          } else {
+            const msg = { role:'assistant', content:"I couldn't find that block to convert. can you share the date/time?", timestamp:Date.now() };
             setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           }
           continue;
@@ -3621,7 +3784,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (actions.length > 0) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','add_recurring_event','clear_all'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all'];
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
