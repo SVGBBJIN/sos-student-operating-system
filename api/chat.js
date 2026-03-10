@@ -180,10 +180,11 @@ module.exports = async function handler(req, res) {
     if (imageBase64 && preparedMessages.length > 0) {
       const lastIdx = preparedMessages.length - 1;
       const lastMsg = preparedMessages[lastIdx];
+      const textContent = lastMsg.content || "What do you see in this image?";
       preparedMessages[lastIdx] = {
         role: lastMsg.role,
         content: [
-          { type: "text", text: lastMsg.content },
+          { type: "text", text: textContent },
           { type: "image_url", image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` } },
         ],
       };

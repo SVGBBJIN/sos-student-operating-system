@@ -3619,7 +3619,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
 
     try {
-      const historyForApi = updated.slice(-12).map(m => ({ role:m.role, content:m.content }));
+      // Strip any legacy <action> tags from history — old DB messages may contain them,
+      // causing the model to mimic the pattern and output action-only responses (empty text bug).
+      const historyForApi = updated.slice(-12).map(m => {
+        const content = m.role === 'assistant'
+          ? (stripActionTags(m.content || '') || m.content || '')
+          : (m.content || '');
+        return { role: m.role, content };
+      });
       const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 1);
 
       const session = await sb.auth.getSession();
@@ -3727,13 +3734,14 @@ Today is ${today()}.`;
       }
 
       const chatData = await chatResponse.json();
-      const displayContent = stripActionTags(chatData?.content || "hmm, didn't get a response. try again?");
+      const stripped = stripActionTags(chatData?.content || "hmm, didn't get a response. try again?");
+      const displayContent = stripped || "hmm, didn't get a response. try again?";
 
       // Show Llama conversational response immediately.
       // Action processing continues afterward so OSS-20B can return without blocking chat UX.
       const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
       setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-      if (user) dbInsertChatMsg('assistant', displayContent, user.id);
+      if (user && displayContent) dbInsertChatMsg('assistant', displayContent, user.id);
 
       const actionDecision = await actionDecisionPromise;
       let actions = actionDecision.actions;
