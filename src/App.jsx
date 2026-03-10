@@ -1313,6 +1313,82 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   );
 }
 
+function ClarificationCard({ clarification, onSubmit }) {
+  const [selected, setSelected] = useState([]);
+  const [otherText, setOtherText] = useState('');
+
+  useEffect(() => {
+    setSelected([]);
+    setOtherText('');
+  }, [clarification]);
+
+  const options = Array.isArray(clarification?.options) ? clarification.options : [];
+  const multiSelect = !!clarification?.multiSelect;
+
+  function normalizeOption(option, idx) {
+    if (typeof option === 'string') return { id: 'opt_' + idx, label: option };
+    return {
+      id: option?.id || 'opt_' + idx,
+      label: option?.label || option?.text || option?.value || ('Option ' + (idx + 1)),
+      allowOther: !!option?.allowOther,
+      metadata: option?.metadata,
+    };
+  }
+
+  const normalizedOptions = options.map(normalizeOption);
+  const hasSelected = selected.length > 0;
+  const selectedAllowOther = selected.some(id => normalizedOptions.find(o => o.id === id)?.allowOther) || !!clarification?.allowOther;
+  const canSubmit = hasSelected && (!selectedAllowOther || !!otherText.trim());
+
+  function toggleOption(id) {
+    if (!multiSelect) {
+      setSelected([id]);
+      return;
+    }
+    setSelected(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  }
+
+  return (
+    <div className="confirm-card" style={{maxWidth:420,borderLeftColor:'var(--teal)'}}>
+      <div className="confirm-card-hdr">
+        <div className="confirm-card-hdr-left">
+          <div className="confirm-card-hdr-icon" style={{background:'rgba(43,203,186,0.1)',borderColor:'rgba(43,203,186,0.2)',color:'var(--teal)'}}>{Icon.helpCircle(16)}</div>
+          <span className="confirm-card-hdr-title">Need one quick detail</span>
+        </div>
+      </div>
+      <div className="confirm-card-body" style={{display:'flex',flexDirection:'column',gap:10}}>
+        <div style={{fontSize:'0.86rem',lineHeight:1.45,fontWeight:600}}>{clarification?.question || 'Can you clarify?'}</div>
+        {normalizedOptions.map((opt) => (
+          <label key={opt.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:'0.82rem',cursor:'pointer'}}>
+            <input
+              type={multiSelect ? 'checkbox' : 'radio'}
+              checked={selected.includes(opt.id)}
+              name="clarification-option"
+              onChange={() => toggleOption(opt.id)}
+            />
+            <span>{opt.label}</span>
+          </label>
+        ))}
+        {selectedAllowOther && (
+          <input
+            type="text"
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+            placeholder={clarification?.otherPlaceholder || 'Add details'}
+            className="auth-input"
+            style={{margin:0,fontSize:'0.8rem'}}
+          />
+        )}
+      </div>
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-yes" onClick={() => onSubmit({ selected, options: normalizedOptions, otherText })} disabled={!canSubmit}>
+          {Icon.send(14)} Submit
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════
    RECURRING EVENT POPUP
    ═══════════════════════════════════════════════ */
@@ -2650,6 +2726,7 @@ function App() {
   const [chatError, setChatError] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
+  const [pendingClarification, setPendingClarification] = useState(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -2789,6 +2866,7 @@ function App() {
         setUser(null);
         setDataLoaded(false);
         setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
+        setPendingClarification(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
         handleAuth(session.user);
@@ -2872,7 +2950,7 @@ function App() {
     const chatEl = chatAreaRef.current;
     if (!chatEl) return;
     chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
-  }, [messages, isLoading, pendingActions, pendingContent]);
+  }, [messages, isLoading, pendingActions, pendingContent, pendingClarification]);
 
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
@@ -3592,7 +3670,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setSavedChats(prev => [{ id: chatId, ...chatData }, ...prev]);
     // Clear current chat
-    setMessages([]); setPendingActions([]); setChatError(null);
+    setMessages([]); setPendingActions([]); setPendingClarification(null); setChatError(null);
     if (user) dbClearChat(user.id);
     setToastMsg('Chat saved');
   }
@@ -3631,18 +3709,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   function autoConfirmPending() {
+    if (pendingClarification) return;
     if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
     if (pendingContent.length > 0) { pendingContent.forEach((c,i) => { const formatted = formatContentForNote(c); executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted }); }); setPendingContent([]); }
   }
 
   // ── Send message via Edge Function (multi-model routing) ──
-  async function sendMessage(text) {
+  async function sendMessage(text, opts = {}) {
+    const fromClarification = !!opts.fromClarification;
     // Capture pending photo and clear it immediately
     const photo = pendingPhoto;
     setPendingPhoto(null);
 
     if ((!text?.trim() && !photo) || isLoading) return;
-    autoConfirmPending();
+    if (!fromClarification) autoConfirmPending();
     setChatError(null);
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
@@ -3719,6 +3799,30 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       const chatData = await chatResponse.json();
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
+      const clarificationPayload = chatData?.clarification && typeof chatData.clarification === 'object'
+        ? chatData.clarification
+        : (chatData?.clarification_payload && typeof chatData.clarification_payload === 'object' ? chatData.clarification_payload : null);
+
+      if (clarificationPayload?.question && Array.isArray(clarificationPayload?.options) && clarificationPayload.options.length > 0) {
+        const assistantPrompt = (
+          typeof clarificationPayload.prompt === 'string' && clarificationPayload.prompt.trim()
+            ? clarificationPayload.prompt.trim()
+            : "I need one quick clarification before I continue."
+        ) + '\n\n' + clarificationPayload.question;
+        const assistantMsg = { role:'assistant', content:assistantPrompt, timestamp:Date.now() };
+        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', assistantPrompt, user.id);
+
+        setPendingClarification({
+          question: clarificationPayload.question,
+          options: clarificationPayload.options,
+          multiSelect: !!clarificationPayload.multiSelect,
+          metadata: clarificationPayload.metadata || clarificationPayload.context || null,
+          allowOther: !!clarificationPayload.allowOther,
+          otherPlaceholder: clarificationPayload.otherPlaceholder,
+        });
+        return;
+      }
 
       const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
       const actionAckByType = {
@@ -3736,9 +3840,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
           : "hmm, didn't get a response. try again?";
 
-      const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
-      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-      if (user && displayContent) dbInsertChatMsg('assistant', displayContent, user.id);
+      if (displayContent) {
+        const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', displayContent, user.id);
+      }
 
       // Actions come back as structured tool_use results — no text parsing needed
 
@@ -3801,12 +3907,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all'];
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
-        const autoExec = actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
+        const blockExecution = pendingClarification && !fromClarification;
+        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
-        if (contentActions.length > 0) setPendingContent(prev => [...prev, ...contentActions]);
+        if (contentActions.length > 0 && !blockExecution) setPendingContent(prev => [...prev, ...contentActions]);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
-          if (aiAutoApprove) {
+          if (aiAutoApprove && !blockExecution) {
             needsConfirm.forEach(executeAction);
           } else {
             setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
@@ -3820,6 +3927,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       console.error('Chat error:', err);
       setChatError(err.message || "couldn't reach the server — check your connection");
     } finally { setIsLoading(false); }
+  }
+
+  function handleClarificationSubmit(payload) {
+    if (!pendingClarification) return;
+    const selectedOptions = (payload?.selected || []).map(id => (payload?.options || []).find(o => o.id === id)).filter(Boolean);
+    const response = {
+      type: 'clarification_response',
+      question: pendingClarification.question,
+      selected: selectedOptions.map(o => ({ id: o.id, label: o.label, metadata: o.metadata || null })),
+      other: payload?.otherText?.trim() || null,
+      metadata: pendingClarification.metadata || null,
+      multiSelect: !!pendingClarification.multiSelect,
+    };
+    setPendingClarification(null);
+    sendMessage(JSON.stringify(response), { fromClarification: true });
   }
 
   function handleSubmit(e) { if(e)e.preventDefault(); if(viewingSavedChatId)return; if(!user){setShowAuthModal(true);return;} sendMessage(input); }
@@ -4008,7 +4130,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
 
   function clearChat() {
-    setMessages([]); setPendingActions([]); setChatError(null);
+    setMessages([]); setPendingActions([]); setPendingClarification(null); setChatError(null);
     if (user) dbClearChat(user.id);
   }
 
@@ -4243,7 +4365,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           </React.Fragment>
         ))}
-        {pendingActions.length > 1 ? (
+        {pendingClarification && (
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} />
+          </div>
+        )}
+        {!pendingClarification && pendingActions.length > 1 ? (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             <BulkConfirmationCard
               actions={pendingActions}
@@ -4273,7 +4400,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               onCancel={()=>setPendingActions([])}
             />
           </div>
-        ) : pendingActions.map((pa,idx)=>(
+        ) : !pendingClarification && pendingActions.map((pa,idx)=>(
           <div key={'pa-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             {pa.action.type==='add_recurring_event' ? (
               <RecurringEventPopup
