@@ -18,7 +18,7 @@ async function callGroq(
   const body = {
     model,
     messages: [{ role: "system", content: systemPrompt }, ...messages],
-    max_tokens: maxTokens,
+    max_completion_tokens: maxTokens,
     temperature: 0.7,
   };
 
