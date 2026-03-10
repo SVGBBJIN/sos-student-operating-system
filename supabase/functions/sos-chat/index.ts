@@ -289,6 +289,42 @@ const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "ask_clarification",
+      description:
+        "Ask the student a focused follow-up question when required details are missing or ambiguous before taking any schedule/task action.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "Direct clarification question for the student",
+          },
+          options: {
+            type: "array",
+            description: "Suggested answer options the student can tap/select",
+            items: { type: "string" },
+          },
+          multi_select: {
+            type: "boolean",
+            description: "Whether the student may choose multiple options",
+          },
+          context_action: {
+            type: "string",
+            description: "Optional action this clarification is about (for example add_event)",
+          },
+          missing_fields: {
+            type: "array",
+            description: "Optional list of required fields that are currently missing",
+            items: { type: "string" },
+          },
+        },
+        required: ["question", "options", "multi_select"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "clear_all",
       description:
         "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
@@ -315,7 +351,11 @@ async function callGroq(
   imageBase64?: string,
   imageMimeType?: string,
   includeTools = true
-): Promise<{ content: string; actions: Record<string, unknown>[] }> {
+): Promise<{
+  content: string;
+  actions: Record<string, unknown>[];
+  clarification: Record<string, unknown> | null;
+}> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const groqMessages: any[] = [{ role: "system", content: systemPrompt }];
 
@@ -388,13 +428,31 @@ async function callGroq(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const message = (data.choices?.[0] as any)?.message;
   const textContent: string = message?.content || "";
+  let clarification: Record<string, unknown> | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const actions: Record<string, unknown>[] = (message?.tool_calls || []).map((tc: any) => ({
-    type: tc.function.name,
-    ...JSON.parse(tc.function.arguments),
-  }));
+  const actions: Record<string, unknown>[] = (message?.tool_calls || []).flatMap((tc: any) => {
+    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
 
-  return { content: textContent.trim(), actions };
+    if (tc.function.name === "ask_clarification") {
+      clarification = {
+        question: typeof parsedArgs.question === "string" ? parsedArgs.question : "",
+        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
+        multi_select: Boolean(parsedArgs.multi_select),
+        ...(parsedArgs.context_action ? { context_action: parsedArgs.context_action } : {}),
+        ...(Array.isArray(parsedArgs.missing_fields)
+          ? { missing_fields: parsedArgs.missing_fields }
+          : {}),
+      };
+      return [];
+    }
+
+    return [{
+      type: tc.function.name,
+      ...parsedArgs,
+    }];
+  });
+
+  return { content: textContent.trim(), actions, clarification };
 }
 
 /* ── Groq chat completion (kept for voice transcription only) ── */
