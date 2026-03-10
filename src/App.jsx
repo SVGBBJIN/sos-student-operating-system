@@ -754,7 +754,7 @@ async function parseActionsWithRecovery(rawContent, token) {
     const response = await fetch(EDGE_FN_URL, {
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'openai/gpt-oss-20b', provider:'groq', isContentGen:false })
+      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
     });
     if (response.ok) {
       const data = await response.json();
@@ -887,17 +887,17 @@ const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','cr
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
   if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
+    return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
+    return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:2048 };
   }
   const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
   if (actionSignals.test(text)) {
-    return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+    return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:1024 };
   }
   // All messages use GPT-OSS so one model handles chat + actions + content.
-  return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+  return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:1024 };
 }
 
 /* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
@@ -922,7 +922,7 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
         systemPrompt:classifyPrompt,
         messages:[{role:'user',content:text}],
         maxTokens:32,
-        model:'openai/gpt-oss-20b',
+        model:'llama-3.1-8b-instant',
         provider:'groq',
         isContentGen:false
       })
@@ -933,11 +933,11 @@ Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"categor
     const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
     const result = JSON.parse(jsonStr);
     switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      case 'CONTENT_GEN': return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:true, maxTokens:4096 };
+      case 'NOTES_REF':   return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:2048 };
+      case 'ACTION':      return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:1024 };
       // CHAT and all other categories also use GPT-OSS so every capability stays available
-      default:            return { provider:'groq', model:'openai/gpt-oss-20b', tier:2, isContentGen:false, maxTokens:1024 };
+      default:            return { provider:'groq', model:'llama-3.3-70b-versatile', tier:2, isContentGen:false, maxTokens:1024 };
     }
   } catch (e) {
     console.warn('LLM classification failed, using regex fallback:', e);
@@ -3463,7 +3463,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'openai/gpt-oss-20b',
+          model: 'llama-3.3-70b-versatile',
           provider: 'groq',
           isContentGen: false
         })
@@ -3681,9 +3681,9 @@ Today is ${today()}.`;
                 headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
                 body:JSON.stringify({
                   systemPrompt: actionPrompt,
-                  messages:[{ role:'user', content: msgContent }],
+                  messages: historyForApi.slice(-5),
                   maxTokens: 512,
-                  model:'openai/gpt-oss-20b',
+                  model:'llama-3.1-8b-instant',
                   provider:'groq',
                   isContentGen:false
                 })
@@ -3703,7 +3703,7 @@ Today is ${today()}.`;
         systemPrompt: chatPrompt,
         messages: historyForApi,
         maxTokens: 1024,
-        model: 'openai/gpt-oss-20b',
+        model: 'llama-3.3-70b-versatile',
         provider: 'groq',
         isContentGen: false
       };
