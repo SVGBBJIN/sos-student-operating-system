@@ -271,6 +271,16 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 /* Fullscreen panels */
 .notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
 
+
+
+/* Split workspace */
+.split-workspace{position:fixed;inset:16px;z-index:101;background:linear-gradient(180deg,#101021 0%,#09090f 100%);border:1px solid rgba(108,99,255,0.24);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 42px rgba(0,0,0,0.45)}
+.split-workspace-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid rgba(108,99,255,0.15);background:rgba(11,11,19,0.92)}
+.split-workspace-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;flex:1;min-height:0}
+.peek-panel.embedded,.notes-panel.embedded{position:relative;inset:auto;left:auto;right:auto;bottom:auto;z-index:auto;max-height:none;height:100%;border-radius:0;border-top:none;animation:none}
+.peek-panel.embedded{border-right:1px solid rgba(108,99,255,0.15)}
+.peek-panel.embedded .peek-handle,.notes-panel.embedded .peek-handle{display:none}
+
 /* Notes editing */
 .notes-new-btn{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);background-size:200% 200%;color:#fff;border:none;border-radius:14px;padding:7px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s cubic-bezier(0.16,1,0.3,1);display:flex;align-items:center;gap:5px;box-shadow:0 2px 8px rgba(108,99,255,0.2);animation:gradientShift 4s ease infinite}
 .notes-new-btn:hover{filter:brightness(1.1)}
@@ -338,6 +348,9 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
+  .split-workspace{inset:0;border-radius:0}
+  .split-workspace-grid{grid-template-columns:1fr}
+  .peek-panel.embedded{border-right:none;border-bottom:1px solid rgba(108,99,255,0.15)}
   .cal-cell{min-height:55px}
   .cal-cell-event{font-size:0.6rem}
 }
