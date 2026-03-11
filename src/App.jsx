@@ -2733,8 +2733,21 @@ function App() {
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'sidebar');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
+  const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
+  const [activePanel, setActivePanel] = useState('chat');
+  const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
+  const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
+  const detectCompanionIntent = useCallback((text) => {
+    const msg = (text || '').toLowerCase();
+    if (!msg) return null;
+    if (/\b(notes?|document|docs?|pdf|reference|summarize my notes|in my notes)\b/.test(msg)) return 'notes';
+    if (/\b(calendar|schedule|planner|plan my day|today\'s plan|timetable|due date)\b/.test(msg)) return 'schedule';
+    return null;
+  }, []);
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
@@ -2761,10 +2774,6 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
-  const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'none');
-  const [activePanel, setActivePanel] = useState('chat');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -3733,6 +3742,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
     const msgContent = text?.trim() || '';
+    const requestedCompanion = detectCompanionIntent(msgContent);
+    if (requestedCompanion) {
+      if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+      setSidebarCompanionPanel(requestedCompanion);
+      setCompanionCollapsed(false);
+      if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
+    }
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
@@ -4175,6 +4191,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
+  useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
+  useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4216,8 +4234,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4296,6 +4314,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar in notes/schedule mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat or Schedule + chat, collapse the left sidebar automatically.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
                 </div>
@@ -4307,8 +4332,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('schedule')}>Schedule</button>
-                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('notes')}>Notes</button>
+                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Schedule</button>
+                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Notes</button>
                   <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('none')}>Off</button>
                 </div>
               </div>
@@ -4330,7 +4355,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       ) : (
       <>
-      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '')}>
+      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
@@ -4505,14 +4530,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
-      {showSidebarCompanion && sidebarCompanionPanel === 'schedule' && (
-        <div className="sos-chat-companion">
-          <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
-        </div>
-      )}
-      {showSidebarCompanion && sidebarCompanionPanel === 'notes' && (
-        <div className="sos-chat-companion">
-          <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+      {showSidebarCompanion && (
+        <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
+          <button
+            className="sos-companion-toggle"
+            onClick={() => setCompanionCollapsed(prev => !prev)}
+            title={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
+            aria-label={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
+          >
+            <span>{Icon.panel(14)}</span>
+            <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>
+          </button>
+          {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
+            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+          )}
+          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
+            <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+          )}
         </div>
       )}
       </div>
