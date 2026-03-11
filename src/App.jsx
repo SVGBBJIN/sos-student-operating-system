@@ -4160,6 +4160,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     await sb.auth.signOut();
   }
 
+  function openSidebarCompanion(panel) {
+    setActivePanel('chat');
+    setSidebarCompanionPanel(panel);
+    setCompanionCollapsed(false);
+    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
+    setShowPeek(false);
+    setShowNotes(false);
+  }
+
+  function closeSidebarCompanion() {
+    setSidebarCompanionPanel('none');
+    setCompanionCollapsed(true);
+  }
+
   // ── Keyboard shortcuts ──
   useEffect(()=>{
     function handleKey(e){
@@ -4167,8 +4181,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(tag==='input'||tag==='textarea'||tag==='select')return;
       const key=e.key.toLowerCase();
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
-      else if(key==='s'){e.preventDefault();setShowPeek(p=>!p)}
-      else if(key==='n'){e.preventDefault();setShowNotes(p=>!p)}
+      else if(key==='s'&&e.shiftKey){e.preventDefault();closeSidebarCompanion()}
+      else if(key==='s'){e.preventDefault();openSidebarCompanion('schedule')}
+      else if(key==='n'){e.preventDefault();openSidebarCompanion('notes')}
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
@@ -4234,8 +4249,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'schedule' ? ' active' : '')} onClick={()=>openSidebarCompanion('schedule')} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'notes' ? ' active' : '')} onClick={()=>openSidebarCompanion('notes')} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'none' ? ' active' : '')} onClick={closeSidebarCompanion} title="Close side panel">{Icon.x(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Close panel</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4332,9 +4348,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Schedule</button>
-                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Notes</button>
-                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('none')}>Off</button>
+                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('schedule')}>Schedule</button>
+                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('notes')}>Notes</button>
+                  <button className="settings-toggle" onClick={closeSidebarCompanion}>Off</button>
                 </div>
               </div>
               <div className="settings-row">
@@ -4528,7 +4544,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
           </form>
         )}
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
       {showSidebarCompanion && (
         <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
@@ -4541,6 +4557,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <span>{Icon.panel(14)}</span>
             <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>
           </button>
+          {!companionCollapsed && (sidebarCompanionPanel === 'schedule' || sidebarCompanionPanel === 'notes') && (
+            <div style={{padding:'6px 10px 0'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                <div style={{fontSize:'0.76rem',fontWeight:700,color:'var(--text-dim)',letterSpacing:'0.02em',textTransform:'uppercase'}}>
+                  {sidebarCompanionPanel === 'schedule' ? 'Schedule workflows' : 'Notes workflows'}
+                </div>
+                <button className="settings-toggle" onClick={closeSidebarCompanion} style={{padding:'4px 8px',fontSize:'0.68rem'}}>Close panel</button>
+              </div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                {sidebarCompanionPanel === 'schedule' && ['Plan today','Find free block','Due soon'].map((chip) => (
+                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
+                ))}
+                {sidebarCompanionPanel === 'notes' && ['Summarize note','Make flashcards','Quiz me'].map((chip) => (
+                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
             <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
           )}
