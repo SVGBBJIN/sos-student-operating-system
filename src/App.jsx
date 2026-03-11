@@ -2734,6 +2734,7 @@ function App() {
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const showSideBySide = showPeek && showNotes;
+  const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
@@ -2762,7 +2763,7 @@ function App() {
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'topbar');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
-  const [bottomQuickActions, setBottomQuickActions] = useState(() => localStorage.getItem('sos_bottom_quick_actions') !== 'false');
+  const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'none');
   const [activePanel, setActivePanel] = useState('chat');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
@@ -4173,7 +4174,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_bottom_quick_actions', String(bottomQuickActions)); }, [bottomQuickActions]);
+  useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4215,6 +4216,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4300,10 +4303,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Bottom quick actions</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show Notes and Schedule controls in a bottom bar when using sidebar layout.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar split panel</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>setBottomQuickActions(prev=>!prev)}>{bottomQuickActions ? 'On' : 'Off'}</button>
+                <div style={{display:'flex',gap:8}}>
+                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('schedule')}>Schedule</button>
+                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('notes')}>Notes</button>
+                  <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('none')}>Off</button>
+                </div>
               </div>
               <div className="settings-row">
                 <div>
@@ -4323,6 +4330,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       ) : (
       <>
+      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '')}>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
@@ -4497,6 +4505,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
+      {showSidebarCompanion && sidebarCompanionPanel === 'schedule' && (
+        <div className="sos-chat-companion">
+          <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+        </div>
+      )}
+      {showSidebarCompanion && sidebarCompanionPanel === 'notes' && (
+        <div className="sos-chat-companion">
+          <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+        </div>
+      )}
+      </div>
       </>
       )}
       </div>
@@ -4567,20 +4586,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onToggleCalSync={toggleCalSync}
           onSyncNow={()=>syncCalendarRef.current()}
         />
-      )}
-      {layoutMode === 'sidebar' && bottomQuickActions && (
-        <div className="sos-bottom-actions">
-          <button className="sos-bottom-btn" onClick={()=>setShowPeek(true)}>
-            {Icon.clipboard(14)} Schedule
-          </button>
-          <button className="sos-bottom-btn" onClick={()=>setShowNotes(true)}>
-            {Icon.fileText(14)} Notes
-            <span className="sos-bottom-count">{notes.length}</span>
-          </button>
-          <button className="sos-bottom-btn" onClick={()=>{setShowPeek(true);setShowNotes(true);}}>
-            {Icon.panel(14)} Side by side
-          </button>
-        </div>
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
