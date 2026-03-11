@@ -2739,6 +2739,7 @@ function App() {
   const [activePanel, setActivePanel] = useState('chat');
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
+  const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const detectCompanionIntent = useCallback((text) => {
@@ -4193,6 +4194,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
+  useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4339,10 +4341,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back to chat</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Companion toggle style</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the old horizontal bar and the compact icon-only toggle.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setCompactCompanionToggle(prev=>!prev)}>{compactCompanionToggle ? 'Compact' : 'Classic'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the conversation view.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open chat</button>
+                <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open</button>
               </div>
             </div>
             {/* P4.3: Privacy/Terms links */}
@@ -4356,13 +4365,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       ) : (
       <>
       <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
+      <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
         {viewingSavedChatId && (
           <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
             <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
-            <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back to chat</button>
+            <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
@@ -4478,7 +4488,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
             {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back to chat</button>}
+            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
             <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
           </div>
         )}
@@ -4521,7 +4531,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               {Icon.mic(18)}
             </button>
             <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={viewingSavedChatId?"viewing saved chat — click 'Back to chat' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+              placeholder={viewingSavedChatId?"viewing saved chat — click 'Back' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
               disabled={isLoading||!!viewingSavedChatId}
               style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
@@ -4530,16 +4540,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
+      </div>
       {showSidebarCompanion && (
         <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
           <button
-            className="sos-companion-toggle"
+            className={'sos-companion-toggle' + (compactCompanionToggle ? ' icon-only' : ' classic-bar')}
             onClick={() => setCompanionCollapsed(prev => !prev)}
             title={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
             aria-label={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
           >
             <span>{Icon.panel(14)}</span>
-            <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>
+            {!compactCompanionToggle && <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>}
           </button>
           {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
             <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
