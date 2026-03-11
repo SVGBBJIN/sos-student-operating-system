@@ -4356,6 +4356,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       ) : (
       <>
       <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
+      <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
@@ -4529,6 +4530,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ to focus input</span><span>S for schedule</span><span>N for notes</span><span>H for history</span><span>Cam for photo</span><span>Mic for voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+      </div>
       </div>
       {showSidebarCompanion && (
         <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
