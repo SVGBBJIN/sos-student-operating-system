@@ -2738,6 +2738,7 @@ function App() {
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
+  const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const detectCompanionIntent = useCallback((text) => {
@@ -3746,6 +3747,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
       setSidebarCompanionPanel(requestedCompanion);
       setCompanionCollapsed(false);
+      if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
     }
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
@@ -4190,6 +4192,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
+  useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -4231,8 +4234,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setCompanionCollapsed(false); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setCompanionCollapsed(false); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'schedule' ? 'none' : 'schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); setSidebarCompanionPanel(prev => prev === 'notes' ? 'none' : 'notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true); setShowPeek(false); setShowNotes(false); }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4311,6 +4314,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar in notes/schedule mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat or Schedule + chat, collapse the left sidebar automatically.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
                 </div>
@@ -4322,8 +4332,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('schedule'); setCompanionCollapsed(false);}}>Schedule</button>
-                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('notes'); setCompanionCollapsed(false);}}>Notes</button>
+                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('schedule'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Schedule</button>
+                  <button className="settings-toggle" onClick={()=>{setSidebarCompanionPanel('notes'); setCompanionCollapsed(false); if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);}}>Notes</button>
                   <button className="settings-toggle" onClick={()=>setSidebarCompanionPanel('none')}>Off</button>
                 </div>
               </div>
