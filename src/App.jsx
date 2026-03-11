@@ -2742,6 +2742,28 @@ function App() {
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
+  const getWorkspaceContext = useCallback((overridePanel = null) => {
+    const effectivePanel = overridePanel || sidebarCompanionPanel;
+    if (layoutMode === 'sidebar' && activePanel === 'chat' && !companionCollapsed) {
+      if (effectivePanel === 'schedule') return 'schedule';
+      if (effectivePanel === 'notes') return 'notes';
+    }
+    return activePanel === 'chat' ? 'chat' : 'none';
+  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed]);
+  const workspaceContext = getWorkspaceContext();
+  const workspaceModeLabel = workspaceContext === 'schedule'
+    ? 'Schedule mode'
+    : workspaceContext === 'notes'
+      ? 'Notes mode'
+      : null;
+  const openCompanionPanel = useCallback((panel) => {
+    setActivePanel('chat');
+    setSidebarCompanionPanel(panel);
+    setCompanionCollapsed(false);
+    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
+    setShowPeek(false);
+    setShowNotes(false);
+  }, [autoCollapseSidebarCompanion]);
   const detectCompanionIntent = useCallback((text) => {
     const msg = (text || '').toLowerCase();
     if (!msg) return null;
@@ -3746,10 +3768,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     const requestedCompanion = detectCompanionIntent(msgContent);
     if (requestedCompanion) {
       if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
-      setSidebarCompanionPanel(requestedCompanion);
-      setCompanionCollapsed(false);
-      if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
+      openCompanionPanel(requestedCompanion);
     }
+    const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
@@ -3791,6 +3812,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         messages: historyForApi,
         maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
+        workspaceContext: effectiveWorkspaceContext,
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -4182,14 +4204,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(tag==='input'||tag==='textarea'||tag==='select')return;
       const key=e.key.toLowerCase();
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
-      else if(key==='s'&&e.shiftKey){e.preventDefault();closeSidebarCompanion()}
-      else if(key==='s'){e.preventDefault();openSidebarCompanion('schedule')}
-      else if(key==='n'){e.preventDefault();openSidebarCompanion('notes')}
+      else if(key==='s'){
+        e.preventDefault();
+        if (activePanel === 'chat') {
+          if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+          openCompanionPanel('schedule');
+        } else {
+          setShowPeek(p=>!p);
+        }
+      }
+      else if(key==='n'){
+        e.preventDefault();
+        if (activePanel === 'chat') {
+          if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+          openCompanionPanel('notes');
+        } else {
+          setShowNotes(p=>!p);
+        }
+      }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,activePanel]);
+  },[showPeek,showNotes,showChatSidebar,activePanel,layoutMode,openCompanionPanel]);
 
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
@@ -4251,9 +4288,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'schedule' ? ' active' : '')} onClick={()=>openSidebarCompanion('schedule')} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'notes' ? ' active' : '')} onClick={()=>openSidebarCompanion('notes')} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className={'sos-side-btn' + (sidebarCompanionPanel === 'none' ? ' active' : '')} onClick={closeSidebarCompanion} title="Close side panel">{Icon.x(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Close panel</span></button>
+          <button className="sos-side-btn" onClick={()=>openCompanionPanel('schedule')} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>openCompanionPanel('notes')} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -4538,6 +4574,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           /* ── Normal chat input form ── */
           <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
             <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
+            {workspaceModeLabel && (
+              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
+            )}
             <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
               style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
               {Icon.camera(18)}
