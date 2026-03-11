@@ -558,6 +558,7 @@ export default async function handler(req, res) {
       isContentGen,
       imageBase64,
       imageMimeType,
+      workspaceContext,
     } = body;
 
     // Rate limiting for content generation
@@ -575,6 +576,12 @@ export default async function handler(req, res) {
       }
     }
 
+    const normalizedWorkspaceContext = typeof workspaceContext === "string"
+      ? workspaceContext.trim().toLowerCase()
+      : "chat";
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
+
     // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
     const model = "llama-3.3-70b-versatile";
     const includeTools = !isContentGen;
@@ -582,7 +589,7 @@ export default async function handler(req, res) {
     const result = await callGroq(
       GROQ_API_KEY,
       model,
-      systemPrompt,
+      effectiveSystemPrompt,
       messages,
       maxTokens,
       imageBase64,
