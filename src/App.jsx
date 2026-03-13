@@ -1604,21 +1604,40 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
   );
 }
 
-function PlanCard({ data, onApply, onSave, onDismiss }) {
+function PlanCard({ data, onApply, onSave, onDismiss, onStartTask }) {
   const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
+  const [mode, setMode] = useState('breakdown');
+  const [activeIdx, setActiveIdx] = useState(null);
   const steps = data.steps || [];
   const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
   const checkedCount = checked.filter(Boolean).length;
+
+  function startTask(i) {
+    if (!steps[i]) return;
+    setActiveIdx(i);
+    if (!checked[i]) toggle(i);
+    onStartTask?.(steps[i], i);
+  }
+
+  function startNextTask() {
+    const nextIdx = steps.findIndex((_, i) => checked[i] && i !== activeIdx);
+    if (nextIdx >= 0) startTask(nextIdx);
+  }
+
   return (
     <div className="plan-card">
       <div className="plan-card-hdr">
         <div className="plan-card-hdr-icon">{Icon.listTree(18)}</div>
         <div className="plan-card-hdr-title">{data.title||'Plan'}</div>
+        <div className="plan-mode-toggle" role="tablist" aria-label="Planning mode">
+          <button className={'plan-mode-btn' + (mode === 'breakdown' ? ' active' : '')} onClick={() => setMode('breakdown')}>Breakdown</button>
+          <button className={'plan-mode-btn' + (mode === 'start' ? ' active' : '')} onClick={() => setMode('start')}>Start task</button>
+        </div>
         <span style={{fontSize:'0.7rem',fontWeight:700,padding:'2px 8px',borderRadius:6,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
       </div>
       <div className="plan-card-body">
         {steps.map((step,i) => (
-          <div key={i} className="plan-step" onClick={() => toggle(i)}>
+          <div key={i} className={'plan-step' + (activeIdx === i ? ' active' : '')} onClick={() => mode === 'start' ? startTask(i) : toggle(i)}>
             <div className={'plan-step-check' + (checked[i] ? ' checked' : '')}>
               {checked[i] && Icon.check(12)}
             </div>
@@ -1630,13 +1649,24 @@ function PlanCard({ data, onApply, onSave, onDismiss }) {
                 {step.estimated_minutes && <span>{step.estimated_minutes}min</span>}
               </div>
             </div>
+            {mode === 'start' && (
+              <button className={'plan-step-start' + (activeIdx === i ? ' active' : '')} onClick={(e) => { e.stopPropagation(); startTask(i); }}>
+                {activeIdx === i ? 'In progress' : 'Start'}
+              </button>
+            )}
           </div>
         ))}
       </div>
       <div className="plan-card-footer">
-        <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={() => onApply(steps.filter((_,i) => checked[i]))}>
-          {Icon.check(14)} Add {checkedCount} as tasks
-        </button>
+        {mode === 'breakdown' ? (
+          <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={() => onApply(steps.filter((_,i) => checked[i]))}>
+            {Icon.check(14)} Add {checkedCount} as tasks
+          </button>
+        ) : (
+          <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={startNextTask}>
+            {Icon.arrowRight(14)} Start next task
+          </button>
+        )}
         <button className="confirm-btn confirm-btn-edit" onClick={onSave}>Save to notes</button>
         <button className="confirm-btn confirm-btn-cancel" onClick={onDismiss}>{Icon.x(12)}</button>
       </div>
@@ -1644,10 +1674,10 @@ function PlanCard({ data, onApply, onSave, onDismiss }) {
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan }) {
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask }) {
   switch (content.type) {
     case 'make_plan':
-      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} />;
+      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} />;
     case 'create_flashcards':
       return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_quiz':
@@ -3027,7 +3057,7 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:action.due||today(), estTime:action.estimated_minutes||30, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:action.due||today(), estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -3362,6 +3392,26 @@ function App() {
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     setToastMsg('Added ' + steps.length + ' tasks from plan');
+  }
+
+  function handleStartPlanTask(step) {
+    if (!step?.title) return;
+    const dueDate = step.date || today();
+    const existing = tasks.find(t => t.title.toLowerCase() === step.title.toLowerCase() && t.dueDate === dueDate);
+    if (existing) {
+      updateTask(existing.id, { status: 'in_progress' });
+      setToastMsg('Started "' + existing.title + '"');
+      return;
+    }
+    executeAction({
+      type:'add_task',
+      title:step.title,
+      subject:'',
+      due:dueDate,
+      estimated_minutes:step.estimated_minutes||30,
+      status:'in_progress'
+    });
+    setToastMsg('Started "' + step.title + '"');
   }
 
   // ── Google import handlers ──
@@ -4525,7 +4575,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)}/>
           </div>
         ))}
         {isLoading&&<TypingDots/>}
