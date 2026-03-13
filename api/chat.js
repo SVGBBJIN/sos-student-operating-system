@@ -290,10 +290,14 @@ const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student a focused follow-up question when required details are missing or ambiguous before taking any schedule/task action.",
+        "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. Use this proactively — don't guess when asking would be better. Also use for content generation requests that lack a topic or scope.",
       parameters: {
         type: "object",
         properties: {
+          reason: {
+            type: "string",
+            description: "Brief explanation of WHY you need clarification (shown to the student, e.g. 'I want to make sure I create the right study plan for you')",
+          },
           question: {
             type: "string",
             description: "Direct clarification question for the student",
@@ -317,7 +321,7 @@ const ACTION_TOOLS = [
             items: { type: "string" },
           },
         },
-        required: ["question", "options", "multi_select"],
+        required: ["reason", "question", "options", "multi_select"],
       },
     },
   },
@@ -336,7 +340,7 @@ const ACTION_TOOLS = [
 ];
 
 /* ── Groq chat + function calling ── */
-async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true) {
+async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null) {
   const groqMessages = [{ role: "system", content: systemPrompt }];
 
   if (imageBase64) {
@@ -369,8 +373,9 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
     max_tokens: maxTokens,
   };
 
-  if (includeTools && !imageBase64) {
-    body.tools = ACTION_TOOLS;
+  const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+  if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
+    body.tools = effectiveTools;
     body.tool_choice = "auto";
   }
 
@@ -411,6 +416,7 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
 
     if (tc.function.name === "ask_clarification") {
       clarification = {
+        reason: parsedArgs.reason || "",
         question: parsedArgs.question || "",
         options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
         multi_select: Boolean(parsedArgs.multi_select),
@@ -585,6 +591,9 @@ export default async function handler(req, res) {
     // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
     const model = "llama-3.3-70b-versatile";
     const includeTools = !isContentGen;
+    const clarificationOnlyTools = isContentGen
+      ? ACTION_TOOLS.filter((t) => t.function.name === "ask_clarification")
+      : null;
 
     const result = await callGroq(
       GROQ_API_KEY,
@@ -594,7 +603,8 @@ export default async function handler(req, res) {
       maxTokens,
       imageBase64,
       imageMimeType,
-      includeTools
+      includeTools,
+      clarificationOnlyTools
     );
 
     return res.status(200).json(result);
