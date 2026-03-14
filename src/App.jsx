@@ -661,7 +661,7 @@ RULES:
    - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
    - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
    - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
-4. Clarifications should be multiple choice whenever possible: 2-5 options max, one question at a time, include an "Other" option when uncertainty is high, and wait for the student's selection before proceeding. Always include a brief reason explaining WHY you need to ask.
+4. When asking for clarification, ask about ALL missing fields in a SINGLE ask_clarification call. Combine them into one question. For example, if activity, date, and time are all missing, ask: "What would you like to schedule, and when? I need: 1) the activity name, 2) the date, 3) the start and end time." Provide helpful options when possible (2-5 options), include an "Other" option when uncertainty is high, and always include a brief reason. NEVER ask for one field, wait for a response, then ask for another — get everything you need in one shot.
 5. PROACTIVE CLARIFICATION — also use ask_clarification when:
    - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
    - The student asks for content generation (flashcards, study plan, quiz, etc.) but hasn't specified the topic or scope
@@ -686,7 +686,7 @@ RULES:
    - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
    - subject: For academic items, did the student mention the subject? If not → ask_clarification.
    - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
-   If ANY important field would require you to guess, call ask_clarification FIRST. Ask about the most critical missing field. One question at a time.
+   If ANY important field would require you to guess, call ask_clarification FIRST. Ask about ALL missing fields together in one clarification call — never split them across multiple rounds.
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -4667,7 +4667,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
       console.error('Chat error:', err);
-      setChatError(err.message || "couldn't reach the server — check your connection");
+      const msg = err.message || '';
+      if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
+        setChatError("I'm getting a lot of requests right now — give me a few seconds and try again!");
+      } else {
+        setChatError(msg || "couldn't reach the server — check your connection");
+      }
     } finally { setIsLoading(false); }
   }
 

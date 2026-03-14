@@ -406,32 +406,46 @@ async function callGroq(
     body.tool_choice = "auto";
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
+  // Retry logic for 429 rate limits (up to 3 retries with exponential backoff)
+  const MAX_RETRIES = 3;
   let res: Response;
-  try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if ((err as Error).name === "AbortError") {
-      throw new Error(`Groq ${model} request timed out after 30s`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if ((err as Error).name === "AbortError") {
+        throw new Error(`Groq ${model} request timed out after 30s`);
+      }
+      throw err;
     }
-    throw err;
-  }
-  clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      // Parse retry-after from error or use exponential backoff
+      const errBody = await res.text().catch(() => "");
+      const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
+      const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : (2 ** attempt) * 2;
+      console.warn(`Groq 429 rate limit hit, retrying in ${waitSec}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      continue;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    }
+    break;
   }
 
   const data = await res.json();
