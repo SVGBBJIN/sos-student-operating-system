@@ -674,6 +674,15 @@ RULES:
 13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
 14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
 15. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
+16. EVENT FIELD VALIDATION — before calling add_event, review every field:
+   - title: Must be specific and meaningful (not just "event" or a generic placeholder).
+   - date: Must be a real, unambiguous YYYY-MM-DD date. Resolve "Friday" or "next week" from today's date. If truly unclear, ask.
+   - time: Ask if the event likely has a specific time (tests, appointments, meetings). Omit for all-day events (deadlines, due dates).
+   - description: Optional — include if the student mentioned relevant details (chapters covered, materials needed, etc.).
+   - location: Ask if location matters for this event type (exam room, field, clinic address). Skip for generic events.
+   - priority: Infer from context (final exam = high, optional club meeting = low). Only ask if genuinely unclear.
+   - subject: Required for academic events (tests, quizzes, exams, homework). Always resolve from context or ask.
+   For each field that is MISSING and important for this event type, ask ONE clarification question (most important field first). If a field uses a default/placeholder, replace with the real value from context or ask. If ambiguous, ask ONE focused question to clarify.
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -3609,7 +3618,7 @@ function App() {
           break;
         }
         case 'add_event': {
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -4661,16 +4670,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function handleClarificationSubmit(payload) {
     if (!pendingClarification) return;
     const selectedOptions = (payload?.selected || []).map(id => (payload?.options || []).find(o => o.id === id)).filter(Boolean);
-    const response = {
-      type: 'clarification_response',
-      question: pendingClarification.question,
-      selected: selectedOptions.map(o => ({ id: o.id, label: o.label, metadata: o.metadata || null })),
-      other: payload?.otherText?.trim() || null,
-      metadata: pendingClarification.metadata || null,
-      multiSelect: !!pendingClarification.multiSelect,
-    };
+    const selectedLabels = selectedOptions.map(o => o.label);
+    const otherTxt = payload?.otherText?.trim() || '';
+    // Build a human-readable response instead of raw JSON
+    const parts = [];
+    if (selectedLabels.length > 0) parts.push(selectedLabels.join(', '));
+    if (otherTxt) parts.push(otherTxt);
+    const readableResponse = parts.join(' — ') || 'No selection';
     setPendingClarification(null);
-    sendMessage(JSON.stringify(response), { fromClarification: true });
+    sendMessage(readableResponse, { fromClarification: true });
   }
 
   function handleSubmit(e) { if(e)e.preventDefault(); if(viewingSavedChatId)return; if(!user){setShowAuthModal(true);return;} sendMessage(input); }

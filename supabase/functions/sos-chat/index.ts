@@ -20,6 +20,10 @@ const ACTION_TOOLS = [
         properties: {
           title: { type: "string", description: "Event title" },
           date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          time: { type: "string", description: "Start time in HH:MM 24h format (e.g. 14:30). Omit for all-day events." },
+          description: { type: "string", description: "Brief description or notes about the event (chapters covered, materials needed, etc.)" },
+          location: { type: "string", description: "Where the event takes place (room, building, address)" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level — infer from context (exams/finals = high, optional meetings = low)" },
           event_type: {
             type: "string",
             enum: [
