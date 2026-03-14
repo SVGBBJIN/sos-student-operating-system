@@ -661,7 +661,7 @@ RULES:
    - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
    - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
    - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
-4. When asking for clarification, ask about ALL missing fields in a SINGLE ask_clarification call. Combine them into one question. For example, if activity, date, and time are all missing, ask: "What would you like to schedule, and when? I need: 1) the activity name, 2) the date, 3) the start and end time." Provide helpful options when possible (2-5 options), include an "Other" option when uncertainty is high, and always include a brief reason. NEVER ask for one field, wait for a response, then ask for another — get everything you need in one shot.
+4. When multiple fields are missing, make a SEPARATE ask_clarification tool call for EACH missing field — all in the same response. For example, if activity, date, and time are all unknown, make THREE ask_clarification calls: one asking "What activity?", one asking "What date?", one asking "What time?". Each call should have its own focused options. The system will display them all at once as individual question cards. NEVER split them across multiple conversation turns — call them all in the same response.
 5. PROACTIVE CLARIFICATION — also use ask_clarification when:
    - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
    - The student asks for content generation (flashcards, study plan, quiz, etc.) but hasn't specified the topic or scope
@@ -686,7 +686,7 @@ RULES:
    - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
    - subject: For academic items, did the student mention the subject? If not → ask_clarification.
    - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
-   If ANY important field would require you to guess, call ask_clarification FIRST. Ask about ALL missing fields together in one clarification call — never split them across multiple rounds.
+   If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -1353,17 +1353,16 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
 }
 
 function ClarificationCard({ clarification, onSubmit }) {
-  const [selected, setSelected] = useState([]);
-  const [otherText, setOtherText] = useState('');
+  // Support both single clarification and array of clarifications
+  const clarifications = Array.isArray(clarification) ? clarification : [clarification];
+  const questionCount = clarifications.length;
+
+  // Per-question state: selected options and free-form text
+  const [answers, setAnswers] = useState(() => clarifications.map(() => ({ selected: [], otherText: '' })));
 
   useEffect(() => {
-    setSelected([]);
-    setOtherText('');
+    setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
   }, [clarification]);
-
-  const options = Array.isArray(clarification?.options) ? clarification.options : [];
-  const multiSelect = !!clarification?.multiSelect;
-  const reason = clarification?.reason || '';
 
   function normalizeOption(option, idx) {
     if (typeof option === 'string') return { id: 'opt_' + idx, label: option };
@@ -1376,17 +1375,56 @@ function ClarificationCard({ clarification, onSubmit }) {
     };
   }
 
-  const normalizedOptions = options.map(normalizeOption);
-  const hasSelected = selected.length > 0;
-  const canSubmit = hasSelected || !!otherText.trim();
-
-  function toggleOption(id) {
-    if (!multiSelect) {
-      setSelected([id]);
-      return;
-    }
-    setSelected(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  function toggleOption(qIdx, optId, multiSelect) {
+    setAnswers(prev => {
+      const next = [...prev];
+      const cur = { ...next[qIdx] };
+      if (!multiSelect) {
+        cur.selected = [optId];
+      } else {
+        cur.selected = cur.selected.includes(optId)
+          ? cur.selected.filter(v => v !== optId)
+          : [...cur.selected, optId];
+      }
+      next[qIdx] = cur;
+      return next;
+    });
   }
+
+  function setOtherText(qIdx, text) {
+    setAnswers(prev => {
+      const next = [...prev];
+      next[qIdx] = { ...next[qIdx], otherText: text };
+      return next;
+    });
+  }
+
+  // Check if every question has at least one answer (selected option or text)
+  const allAnswered = answers.every((a, i) => {
+    const opts = Array.isArray(clarifications[i]?.options) ? clarifications[i].options : [];
+    // If question has no options (text-only), require text
+    if (opts.length === 0) return !!a.otherText.trim();
+    return a.selected.length > 0 || !!a.otherText.trim();
+  });
+
+  function handleSubmit() {
+    // Build per-question payloads
+    const payloads = clarifications.map((c, i) => {
+      const opts = Array.isArray(c?.options) ? c.options.map(normalizeOption) : [];
+      return {
+        selected: answers[i].selected,
+        options: opts,
+        otherText: answers[i].otherText,
+        question: c?.question || '',
+      };
+    });
+    onSubmit(payloads);
+  }
+
+  // Shared reason — show once if all share same reason, otherwise per-question
+  const sharedReason = questionCount > 1 && clarifications.every(c => c?.reason === clarifications[0]?.reason)
+    ? clarifications[0]?.reason || ''
+    : '';
 
   return (
     <div style={{
@@ -1418,12 +1456,14 @@ function ClarificationCard({ clarification, onSubmit }) {
           {Icon.helpCircle(16)}
         </div>
         <div>
-          <div style={{fontWeight:800, fontSize:'0.9rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Quick question</div>
+          <div style={{fontWeight:800, fontSize:'0.9rem', color:'var(--text)', letterSpacing:'-0.3px'}}>
+            {questionCount > 1 ? `A few quick questions` : 'Quick question'}
+          </div>
         </div>
       </div>
 
-      {/* Reason banner */}
-      {reason && (
+      {/* Shared reason banner */}
+      {sharedReason && (
         <div style={{
           padding:'10px 18px',
           background:'rgba(43,203,186,0.04)',
@@ -1433,112 +1473,144 @@ function ClarificationCard({ clarification, onSubmit }) {
           lineHeight:1.5,
           fontStyle:'italic'
         }}>
-          {reason}
+          {sharedReason}
         </div>
       )}
 
-      {/* Question */}
-      <div style={{
-        padding:'14px 18px',
-        borderBottom:'1px solid rgba(255,255,255,0.04)',
-        fontSize:'0.88rem',
-        color:'var(--text)',
-        lineHeight:1.5,
-        fontWeight:600
-      }}>
-        {clarification?.question || 'Can you clarify?'}
-      </div>
+      {/* Individual question sections */}
+      {clarifications.map((c, qIdx) => {
+        const options = Array.isArray(c?.options) ? c.options : [];
+        const multiSelect = !!c?.multiSelect || !!c?.multi_select;
+        const reason = !sharedReason ? (c?.reason || '') : '';
+        const normalizedOptions = options.map(normalizeOption);
+        const answer = answers[qIdx] || { selected: [], otherText: '' };
 
-      {/* Options */}
-      <div style={{padding:'10px 18px'}}>
-        {normalizedOptions.map((opt) => {
-          const isSelected = selected.includes(opt.id);
-          return (
-            <div key={opt.id}
-              onClick={() => toggleOption(opt.id)}
-              style={{
-                display:'flex', alignItems:'center', gap:10,
-                padding:'10px 12px',
-                marginBottom:6,
-                borderRadius:10,
-                cursor:'pointer',
-                border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.06)',
-                background: isSelected ? 'rgba(43,203,186,0.08)' : 'rgba(255,255,255,0.02)',
-                transition:'all .15s'
-              }}>
+        return (
+          <div key={qIdx} style={{
+            borderBottom: qIdx < questionCount - 1 ? '1px solid rgba(43,203,186,0.12)' : 'none',
+          }}>
+            {/* Per-question reason */}
+            {reason && (
               <div style={{
-                width:20, height:20, borderRadius: multiSelect ? 4 : 10,
-                border: isSelected ? '2px solid var(--teal)' : '2px solid rgba(255,255,255,0.15)',
-                background: isSelected ? 'var(--teal)' : 'transparent',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                flexShrink:0,
-                transition:'all .15s'
+                padding:'8px 18px',
+                background:'rgba(43,203,186,0.04)',
+                borderBottom:'1px solid rgba(255,255,255,0.04)',
+                fontSize:'0.78rem',
+                color:'var(--text-dim)',
+                lineHeight:1.5,
+                fontStyle:'italic'
               }}>
-                {isSelected && Icon.check(12)}
+                {reason}
               </div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight:500}}>{opt.label}</div>
-                {opt.description && (
-                  <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
-                )}
-              </div>
+            )}
+
+            {/* Question label */}
+            <div style={{
+              padding:'12px 18px 6px',
+              fontSize:'0.86rem',
+              color:'var(--text)',
+              lineHeight:1.5,
+              fontWeight:600
+            }}>
+              {questionCount > 1 && <span style={{color:'var(--teal)', marginRight:6, fontWeight:800}}>{qIdx + 1}.</span>}
+              {c?.question || 'Can you clarify?'}
             </div>
-          );
-        })}
-      </div>
 
-      {/* Other / free-form text input — always visible */}
-      <div style={{padding:'0 18px 12px'}}>
-        <input
-          type="text"
-          value={otherText}
-          onChange={(e) => setOtherText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) onSubmit({ selected, options: normalizedOptions, otherText }); }}
-          placeholder={clarification?.otherPlaceholder || 'Or type your own answer...'}
-          style={{
-            width:'100%',
-            background:'rgba(255,255,255,0.04)',
-            border:'1px solid rgba(255,255,255,0.08)',
-            borderRadius:10,
-            padding:'10px 12px',
-            color:'var(--text)',
-            fontSize:'0.82rem',
-            outline:'none',
-            transition:'border-color .15s',
-            boxSizing:'border-box'
-          }}
-          onFocus={e => e.target.style.borderColor='rgba(43,203,186,0.3)'}
-          onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.08)'}
-        />
-      </div>
+            {/* Options for this question */}
+            {normalizedOptions.length > 0 && (
+              <div style={{padding:'6px 18px 4px'}}>
+                {normalizedOptions.map((opt) => {
+                  const isSelected = answer.selected.includes(opt.id);
+                  return (
+                    <div key={opt.id}
+                      onClick={() => toggleOption(qIdx, opt.id, multiSelect)}
+                      style={{
+                        display:'flex', alignItems:'center', gap:10,
+                        padding:'9px 12px',
+                        marginBottom:5,
+                        borderRadius:10,
+                        cursor:'pointer',
+                        border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                        background: isSelected ? 'rgba(43,203,186,0.08)' : 'rgba(255,255,255,0.02)',
+                        transition:'all .15s'
+                      }}>
+                      <div style={{
+                        width:18, height:18, borderRadius: multiSelect ? 4 : 9,
+                        border: isSelected ? '2px solid var(--teal)' : '2px solid rgba(255,255,255,0.15)',
+                        background: isSelected ? 'var(--teal)' : 'transparent',
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                        flexShrink:0,
+                        transition:'all .15s'
+                      }}>
+                        {isSelected && Icon.check(10)}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:'0.82rem', color:'var(--text)', fontWeight:500}}>{opt.label}</div>
+                        {opt.description && (
+                          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
-      {/* Submit */}
+            {/* Free-form text input */}
+            <div style={{padding:'2px 18px 10px'}}>
+              <input
+                type="text"
+                value={answer.otherText}
+                onChange={(e) => setOtherText(qIdx, e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && allAnswered) handleSubmit(); }}
+                placeholder={c?.otherPlaceholder || 'Or type your own answer...'}
+                style={{
+                  width:'100%',
+                  background:'rgba(255,255,255,0.04)',
+                  border:'1px solid rgba(255,255,255,0.08)',
+                  borderRadius:10,
+                  padding:'9px 12px',
+                  color:'var(--text)',
+                  fontSize:'0.8rem',
+                  outline:'none',
+                  transition:'border-color .15s',
+                  boxSizing:'border-box'
+                }}
+                onFocus={e => e.target.style.borderColor='rgba(43,203,186,0.3)'}
+                onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.08)'}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Submit all */}
       <div style={{
         padding:'10px 18px 14px',
-        borderTop:'1px solid rgba(255,255,255,0.04)'
+        borderTop:'1px solid rgba(255,255,255,0.06)'
       }}>
         <button
-          onClick={() => onSubmit({ selected, options: normalizedOptions, otherText })}
-          disabled={!canSubmit}
+          onClick={handleSubmit}
+          disabled={!allAnswered}
           style={{
             width:'100%',
-            background: canSubmit ? 'linear-gradient(135deg, var(--teal), rgba(43,203,186,0.8))' : 'rgba(255,255,255,0.05)',
+            background: allAnswered ? 'linear-gradient(135deg, var(--teal), rgba(43,203,186,0.8))' : 'rgba(255,255,255,0.05)',
             border:'none',
             borderRadius:10,
             padding:'10px 16px',
-            color: canSubmit ? '#fff' : 'var(--text-dim)',
+            color: allAnswered ? '#fff' : 'var(--text-dim)',
             fontSize:'0.84rem',
             fontWeight:700,
-            cursor: canSubmit ? 'pointer' : 'default',
+            cursor: allAnswered ? 'pointer' : 'default',
             display:'flex',
             alignItems:'center',
             justifyContent:'center',
             gap:6,
             transition:'all .15s',
-            opacity: canSubmit ? 1 : 0.5
+            opacity: allAnswered ? 1 : 0.5
           }}
         >
-          {Icon.send(14)} Submit
+          {Icon.send(14)} {questionCount > 1 ? 'Submit All' : 'Submit'}
         </button>
       </div>
     </div>
@@ -4537,32 +4609,40 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         }
       }
 
-      const clarificationPayload = chatData?.clarification && typeof chatData.clarification === 'object'
-        ? chatData.clarification
-        : (chatData?.clarification_payload && typeof chatData.clarification_payload === 'object' ? chatData.clarification_payload : null);
+      // Support multiple clarifications (array) or single (object)
+      const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
+        ? chatData.clarifications
+        : (chatData?.clarification && typeof chatData.clarification === 'object' && chatData.clarification.question
+          ? [chatData.clarification]
+          : (chatData?.clarification_payload && typeof chatData.clarification_payload === 'object' && chatData.clarification_payload.question
+            ? [chatData.clarification_payload]
+            : []));
 
-      if (clarificationPayload?.question && Array.isArray(clarificationPayload?.options) && clarificationPayload.options.length > 0) {
-        const reasonText = typeof clarificationPayload.reason === 'string' && clarificationPayload.reason.trim()
-          ? clarificationPayload.reason.trim() + ' '
-          : '';
-        const assistantPrompt = (
-          typeof clarificationPayload.prompt === 'string' && clarificationPayload.prompt.trim()
-            ? clarificationPayload.prompt.trim()
-            : reasonText || "I need one quick clarification before I continue."
-        ) + '\n\n' + clarificationPayload.question;
+      const validClarifications = clarificationsArr.filter(c => c?.question && Array.isArray(c?.options) && c.options.length > 0);
+
+      if (validClarifications.length > 0) {
+        // Build assistant message summarizing all questions
+        const questionTexts = validClarifications.map((c, i) => {
+          const prefix = validClarifications.length > 1 ? `${i + 1}. ` : '';
+          return prefix + c.question;
+        });
+        const reasonText = validClarifications[0].reason ? validClarifications[0].reason.trim() + ' ' : '';
+        const assistantPrompt = (reasonText || "I need a few details before I continue.") + '\n\n' + questionTexts.join('\n');
         const assistantMsg = { role:'assistant', content:assistantPrompt, timestamp:Date.now() };
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) dbInsertChatMsg('assistant', assistantPrompt, user.id);
 
-        setPendingClarification({
-          reason: clarificationPayload.reason || null,
-          question: clarificationPayload.question,
-          options: clarificationPayload.options,
-          multiSelect: !!clarificationPayload.multiSelect || !!clarificationPayload.multi_select,
-          metadata: clarificationPayload.metadata || clarificationPayload.context || null,
+        // Store all clarifications — ClarificationCard handles arrays
+        const mapped = validClarifications.map(c => ({
+          reason: c.reason || null,
+          question: c.question,
+          options: c.options,
+          multiSelect: !!c.multiSelect || !!c.multi_select,
+          metadata: c.metadata || c.context || null,
           allowOther: true,
-          otherPlaceholder: clarificationPayload.otherPlaceholder,
-        });
+          otherPlaceholder: c.otherPlaceholder,
+        }));
+        setPendingClarification(mapped.length === 1 ? mapped[0] : mapped);
         return;
       }
 
@@ -4678,14 +4758,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function handleClarificationSubmit(payload) {
     if (!pendingClarification) return;
-    const selectedOptions = (payload?.selected || []).map(id => (payload?.options || []).find(o => o.id === id)).filter(Boolean);
-    const selectedLabels = selectedOptions.map(o => o.label);
-    const otherTxt = payload?.otherText?.trim() || '';
-    // Build a human-readable response instead of raw JSON
-    const parts = [];
-    if (selectedLabels.length > 0) parts.push(selectedLabels.join(', '));
-    if (otherTxt) parts.push(otherTxt);
-    const readableResponse = parts.join(' — ') || 'No selection';
+    // payload is either a single object { selected, options, otherText } or an array of them
+    const payloads = Array.isArray(payload) ? payload : [payload];
+    const responseParts = payloads.map(p => {
+      const selectedOptions = (p?.selected || []).map(id => (p?.options || []).find(o => o.id === id)).filter(Boolean);
+      const selectedLabels = selectedOptions.map(o => o.label);
+      const otherTxt = p?.otherText?.trim() || '';
+      const parts = [];
+      if (selectedLabels.length > 0) parts.push(selectedLabels.join(', '));
+      if (otherTxt) parts.push(otherTxt);
+      const answer = parts.join(' — ') || '';
+      // Include the question for context if multi-question
+      if (payloads.length > 1 && p?.question) return `${p.question}: ${answer}`;
+      return answer;
+    }).filter(Boolean);
+    const readableResponse = responseParts.join('\n') || 'No selection';
     setPendingClarification(null);
     sendMessage(readableResponse, { fromClarification: true });
   }

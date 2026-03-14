@@ -427,12 +427,12 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
   const data = await res.json();
   const message = data.choices?.[0]?.message;
   const textContent = message?.content || "";
-  let clarification = null;
+  const clarifications = [];
   const actions = (message?.tool_calls || []).flatMap((tc) => {
     const parsedArgs = JSON.parse(tc.function.arguments || "{}");
 
     if (tc.function.name === "ask_clarification") {
-      clarification = {
+      clarifications.push({
         reason: parsedArgs.reason || "",
         question: parsedArgs.question || "",
         options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
@@ -441,7 +441,7 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
         ...(Array.isArray(parsedArgs.missing_fields)
           ? { missing_fields: parsedArgs.missing_fields }
           : {}),
-      };
+      });
       return [];
     }
 
@@ -451,7 +451,9 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
     }];
   });
 
-  return { content: textContent.trim(), actions, clarification };
+  // Return single clarification for backward compat, plus full array
+  const clarification = clarifications.length > 0 ? clarifications[0] : null;
+  return { content: textContent.trim(), actions, clarification, clarifications };
 }
 
 /* ── Extract user ID from JWT ── */

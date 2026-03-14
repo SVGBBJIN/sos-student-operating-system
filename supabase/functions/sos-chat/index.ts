@@ -452,13 +452,13 @@ async function callGroq(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const message = (data.choices?.[0] as any)?.message;
   const textContent: string = message?.content || "";
-  let clarification: Record<string, unknown> | null = null;
+  const clarifications: Record<string, unknown>[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actions: Record<string, unknown>[] = (message?.tool_calls || []).flatMap((tc: any) => {
     const parsedArgs = JSON.parse(tc.function.arguments || "{}");
 
     if (tc.function.name === "ask_clarification") {
-      clarification = {
+      clarifications.push({
         reason: typeof parsedArgs.reason === "string" ? parsedArgs.reason : "",
         question: typeof parsedArgs.question === "string" ? parsedArgs.question : "",
         options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
@@ -467,7 +467,7 @@ async function callGroq(
         ...(Array.isArray(parsedArgs.missing_fields)
           ? { missing_fields: parsedArgs.missing_fields }
           : {}),
-      };
+      });
       return [];
     }
 
@@ -477,7 +477,9 @@ async function callGroq(
     }];
   });
 
-  return { content: textContent.trim(), actions, clarification };
+  // Return single clarification for backward compat, plus full array
+  const clarification = clarifications.length > 0 ? clarifications[0] : null;
+  return { content: textContent.trim(), actions, clarification, clarifications };
 }
 
 /* ── Groq chat completion (kept for voice transcription only) ── */
