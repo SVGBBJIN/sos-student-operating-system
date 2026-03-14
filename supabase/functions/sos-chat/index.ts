@@ -344,6 +344,57 @@ const ACTION_TOOLS = [
   },
 ];
 
+/* ── Parse Groq's malformed tool calls from failed_generation ── */
+function parseFailedGeneration(failedGen: string): { name: string; arguments: Record<string, unknown> }[] {
+  const results: { name: string; arguments: Record<string, unknown> }[] = [];
+  // Matches: <function=tool_name {json}></function> or <function=tool_name>{json}</function>
+  const regex = /<function=(\w+)\s*>?\s*(\{[\s\S]*?\})\s*<\/function>/g;
+  let match;
+  while ((match = regex.exec(failedGen)) !== null) {
+    try {
+      const args = JSON.parse(match[2]);
+      results.push({ name: match[1], arguments: args });
+    } catch (_) { /* skip unparseable entries */ }
+  }
+  return results;
+}
+
+/* ── Parse LLM response into actions/clarifications ── */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseLlmResponse(data: any): { content: string; actions: Record<string, unknown>[]; clarification: Record<string, unknown> | null; clarifications: Record<string, unknown>[] } {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const message = (data.choices?.[0] as any)?.message;
+  const textContent: string = message?.content || "";
+  const clarifications: Record<string, unknown>[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actions: Record<string, unknown>[] = (message?.tool_calls || []).flatMap((tc: any) => {
+    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
+
+    if (tc.function.name === "ask_clarification") {
+      clarifications.push({
+        reason: typeof parsedArgs.reason === "string" ? parsedArgs.reason : "",
+        question: typeof parsedArgs.question === "string" ? parsedArgs.question : "",
+        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
+        multi_select: Boolean(parsedArgs.multi_select),
+        ...(parsedArgs.context_action ? { context_action: parsedArgs.context_action } : {}),
+        ...(Array.isArray(parsedArgs.missing_fields)
+          ? { missing_fields: parsedArgs.missing_fields }
+          : {}),
+      });
+      return [];
+    }
+
+    return [{
+      type: tc.function.name,
+      ...parsedArgs,
+    }];
+  });
+
+  // Return single clarification for backward compat, plus full array
+  const clarification = clarifications.length > 0 ? clarifications[0] : null;
+  return { content: textContent.trim(), actions, clarification, clarifications };
+}
+
 /* ── Groq chat + function calling ── */
 async function callGroq(
   apiKey: string,
@@ -364,6 +415,7 @@ async function callGroq(
   content: string;
   actions: Record<string, unknown>[];
   clarification: Record<string, unknown> | null;
+  clarifications: Record<string, unknown>[];
 }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const groqMessages: any[] = [{ role: "system", content: systemPrompt }];
@@ -441,6 +493,28 @@ async function callGroq(
       continue;
     }
 
+    // Recover from Groq's malformed tool call errors (400 tool_use_failed)
+    if (res.status === 400) {
+      const errText = await res.text().catch(() => "");
+      let errData: Record<string, unknown> | null = null;
+      try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errObj = errData?.error as any;
+      if (errObj?.code === "tool_use_failed" && errObj?.failed_generation) {
+        const recovered = parseFailedGeneration(errObj.failed_generation as string);
+        if (recovered.length > 0) {
+          const syntheticToolCalls = recovered.map((r, i) => ({
+            id: `recovered_${i}`,
+            type: "function" as const,
+            function: { name: r.name, arguments: JSON.stringify(r.arguments) },
+          }));
+          return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
+        }
+      }
+      throw new Error(`Groq ${model} error 400: ${errText}`);
+    }
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
@@ -449,37 +523,7 @@ async function callGroq(
   }
 
   const data = await res.json();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message = (data.choices?.[0] as any)?.message;
-  const textContent: string = message?.content || "";
-  const clarifications: Record<string, unknown>[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const actions: Record<string, unknown>[] = (message?.tool_calls || []).flatMap((tc: any) => {
-    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
-
-    if (tc.function.name === "ask_clarification") {
-      clarifications.push({
-        reason: typeof parsedArgs.reason === "string" ? parsedArgs.reason : "",
-        question: typeof parsedArgs.question === "string" ? parsedArgs.question : "",
-        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
-        multi_select: Boolean(parsedArgs.multi_select),
-        ...(parsedArgs.context_action ? { context_action: parsedArgs.context_action } : {}),
-        ...(Array.isArray(parsedArgs.missing_fields)
-          ? { missing_fields: parsedArgs.missing_fields }
-          : {}),
-      });
-      return [];
-    }
-
-    return [{
-      type: tc.function.name,
-      ...parsedArgs,
-    }];
-  });
-
-  // Return single clarification for backward compat, plus full array
-  const clarification = clarifications.length > 0 ? clarifications[0] : null;
-  return { content: textContent.trim(), actions, clarification, clarifications };
+  return parseLlmResponse(data);
 }
 
 /* ── Groq chat completion (kept for voice transcription only) ── */

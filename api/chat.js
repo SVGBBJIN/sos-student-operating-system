@@ -343,6 +343,21 @@ const ACTION_TOOLS = [
   },
 ];
 
+/* ── Parse Groq's malformed tool calls from failed_generation ── */
+function parseFailedGeneration(failedGen) {
+  const results = [];
+  // Matches: <function=tool_name {json}></function> or <function=tool_name>{json}</function>
+  const regex = /<function=(\w+)\s*>?\s*(\{[\s\S]*?\})\s*<\/function>/g;
+  let match;
+  while ((match = regex.exec(failedGen)) !== null) {
+    try {
+      const args = JSON.parse(match[2]);
+      results.push({ name: match[1], arguments: args });
+    } catch (_) { /* skip unparseable entries */ }
+  }
+  return results;
+}
+
 /* ── Groq chat + function calling ── */
 async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null) {
   const groqMessages = [{ role: "system", content: systemPrompt }];
@@ -417,6 +432,28 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
       continue;
     }
 
+    // Recover from Groq's malformed tool call errors (400 tool_use_failed)
+    if (res.status === 400) {
+      const errText = await res.text().catch(() => "");
+      let errData;
+      try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
+
+      if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
+        const recovered = parseFailedGeneration(errData.error.failed_generation);
+        if (recovered.length > 0) {
+          // Build synthetic tool_calls matching the normal response format
+          const syntheticToolCalls = recovered.map((r, i) => ({
+            id: `recovered_${i}`,
+            type: "function",
+            function: { name: r.name, arguments: JSON.stringify(r.arguments) },
+          }));
+          // Construct a synthetic response and skip to parsing
+          return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
+        }
+      }
+      throw new Error(`Groq ${model} error 400: ${errText}`);
+    }
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
@@ -425,6 +462,10 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
   }
 
   const data = await res.json();
+  return parseLlmResponse(data);
+}
+
+function parseLlmResponse(data) {
   const message = data.choices?.[0]?.message;
   const textContent = message?.content || "";
   const clarifications = [];
