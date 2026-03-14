@@ -448,11 +448,16 @@ async function callGroq(
     }
   }
 
+  const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model;
+  const isGptOss = effectiveModel.startsWith("openai/gpt-oss");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body: any = {
-    model: imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model,
+    model: effectiveModel,
     messages: groqMessages,
-    max_tokens: maxTokens,
+    // gpt-oss models require max_completion_tokens (not max_tokens)
+    ...(isGptOss
+      ? { max_completion_tokens: maxTokens, reasoning_effort: "low" }
+      : { max_tokens: maxTokens }),
   };
 
   const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
