@@ -14,7 +14,7 @@ const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, use ask_clarification FIRST. NEVER invent or guess values.",
       parameters: {
         type: "object",
         properties: {
@@ -45,7 +45,7 @@ const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a homework assignment or task to the student's to-do list.",
+        "Add a homework assignment or task to the student's to-do list. IMPORTANT: Only call this when the student has explicitly stated what the task is. If the title or key details are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -136,7 +136,7 @@ const ACTION_TOOLS = [
     function: {
       name: "add_block",
       description:
-        "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, use ask_clarification FIRST to ask for the missing details. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
