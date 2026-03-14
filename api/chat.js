@@ -232,6 +232,35 @@ const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "edit_note",
+      description: "Replace the content of an existing note. Use when the student asks to update, rewrite, or change a note's content.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_name: { type: "string", description: "Name of the note to edit" },
+          new_content: { type: "string", description: "The new content to replace the existing content with" },
+        },
+        required: ["tab_name", "new_content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_note",
+      description: "Delete a note from the student's notes. Use when the student asks to remove or delete a specific note.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab_name: { type: "string", description: "Name of the note to delete" },
+        },
+        required: ["tab_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "break_task",
       description:
         "Break a large task into smaller, manageable subtasks spread across multiple days.",
@@ -390,14 +419,10 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
   }
 
   const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model;
-  const isGptOss = effectiveModel.startsWith("openai/gpt-oss");
   const body = {
     model: effectiveModel,
     messages: groqMessages,
-    // gpt-oss models require max_completion_tokens (not max_tokens)
-    ...(isGptOss
-      ? { max_completion_tokens: maxTokens, reasoning_effort: "low" }
-      : { max_tokens: maxTokens }),
+    max_tokens: maxTokens,
   };
 
   const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
@@ -656,9 +681,9 @@ export default async function handler(req, res) {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Model: openai/gpt-oss-20b for text (fast, strong tool calling); vision model auto-selected in callGroq
-    const model = "openai/gpt-oss-20b";
-    const includeTools = !isContentGen;
+    // Model: llama-3.3-70b-versatile for text (reliable tool calling); vision model auto-selected in callGroq
+    const model = body.noTools ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile";
+    const includeTools = !isContentGen && !body.noTools;
     const clarificationOnlyTools = isContentGen
       ? ACTION_TOOLS.filter((t) => t.function.name === "ask_clarification")
       : null;
