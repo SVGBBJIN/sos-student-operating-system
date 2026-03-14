@@ -347,8 +347,11 @@ const ACTION_TOOLS = [
 /* ── Parse Groq's malformed tool calls from failed_generation ── */
 function parseFailedGeneration(failedGen: string): { name: string; arguments: Record<string, unknown> }[] {
   const results: { name: string; arguments: Record<string, unknown> }[] = [];
-  // Matches: <function=tool_name {json}></function> or <function=tool_name>{json}</function>
-  const regex = /<function=(\w+)\s*>?\s*(\{[\s\S]*?\})\s*<\/function>/g;
+  // Matches both Groq malformed formats:
+  //   <function=tool_name {"key":"val"}></function>     (space-separated)
+  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
+  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
+  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
   let match;
   while ((match = regex.exec(failedGen)) !== null) {
     try {
@@ -709,8 +712,8 @@ serve(async (req: Request) => {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
-    const model = "llama-3.3-70b-versatile";
+    // Model: openai/gpt-oss-20b for text (fast, strong tool calling); vision model auto-selected in callGroq
+    const model = "openai/gpt-oss-20b";
 
     // For content generation, only pass clarification tool (not all action tools)
     const includeTools = !isContentGen;
