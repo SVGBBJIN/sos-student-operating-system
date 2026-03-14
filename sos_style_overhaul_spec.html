@@ -1,0 +1,397 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--color-background-tertiary); color: var(--color-text-primary); padding: 20px; }
+
+  .section { margin-bottom: 28px; }
+  .section-label { font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--color-text-tertiary); margin-bottom: 10px; }
+
+  /* MOCK APP SHELL */
+  .app-shell {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 0.5px solid var(--color-border-secondary);
+    background: #0c0e17;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+
+  /* TOPBAR */
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    background: #0c0e17;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .topbar-logo {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, #5B8DFF 0%, #A78BFA 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+  }
+  .topbar-name { font-size: 13px; font-weight: 600; color: #e0e4f0; letter-spacing: .02em; }
+  .topbar-tag { font-size: 10px; background: rgba(91,141,255,.15); color: #7fa8ff; border-radius: 4px; padding: 2px 6px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .topbar-spacer { flex: 1; }
+  .topbar-pill {
+    font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: 600;
+    background: rgba(255,255,255,.05); color: rgba(255,255,255,.4);
+    border: 0.5px solid rgba(255,255,255,.08);
+    cursor: pointer;
+  }
+  .topbar-pill.perf {
+    background: rgba(52,211,153,.12); color: #34d399;
+    border-color: rgba(52,211,153,.25);
+  }
+
+  /* SIDEBAR + MAIN */
+  .app-body { display: flex; height: 280px; }
+  .sidebar {
+    width: 160px; flex-shrink: 0;
+    background: #0a0c15;
+    border-right: 1px solid rgba(255,255,255,.05);
+    padding: 10px 8px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    font-size: 12px; font-weight: 500; color: rgba(224,228,240,.45);
+    cursor: pointer; transition: all .15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.04); color: rgba(224,228,240,.7); }
+  .nav-item.active {
+    background: rgba(91,141,255,.14);
+    color: #90b4ff;
+    font-weight: 600;
+  }
+  .nav-icon { font-size: 14px; width: 16px; text-align: center; }
+  .nav-section { font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.2); padding: 8px 10px 2px; }
+
+  /* MAIN CONTENT */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .main-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+  }
+  .main-title { font-size: 14px; font-weight: 600; color: #e0e4f0; }
+  .main-sub { font-size: 11px; color: rgba(255,255,255,.3); margin-top: 1px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; display: inline-block; margin-right: 5px; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .status-dot.off { background: rgba(255,255,255,.2); animation: none; }
+
+  /* CARDS */
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; flex: 1; }
+  .card {
+    border-radius: 10px;
+    border: 0.5px solid rgba(255,255,255,.07);
+    padding: 10px 12px;
+    background: rgba(255,255,255,.03);
+    cursor: pointer; transition: all .15s;
+  }
+  .card:hover { background: rgba(255,255,255,.06); border-color: rgba(91,141,255,.25); }
+  .card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.25); margin-bottom: 4px; }
+  .card-value { font-size: 20px; font-weight: 700; color: #e0e4f0; font-variant-numeric: tabular-nums; }
+  .card-sub { font-size: 11px; color: rgba(255,255,255,.3); margin-top: 2px; }
+  .card-accent-blue { border-left: 2px solid #5B8DFF; }
+  .card-accent-green { border-left: 2px solid #34d399; }
+  .card-accent-amber { border-left: 2px solid #f59e0b; }
+  .card-accent-purple { border-left: 2px solid #a78bfa; }
+
+  /* CHAT BUBBLE AREA */
+  .chat-preview { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .bubble { max-width: 80%; padding: 8px 12px; border-radius: 14px; font-size: 12px; line-height: 1.5; }
+  .bubble-ai { align-self: flex-start; background: rgba(255,255,255,.05); border: 0.5px solid rgba(255,255,255,.07); color: rgba(224,228,240,.8); border-radius: 14px 14px 14px 4px; }
+  .bubble-user { align-self: flex-end; background: linear-gradient(135deg, #3a60d4 0%, #5B8DFF 100%); color: #fff; border-radius: 14px 14px 4px 14px; }
+
+  /* INPUT BAR */
+  .input-bar {
+    margin: 8px 12px; padding: 8px 12px;
+    background: rgba(255,255,255,.05);
+    border: 0.5px solid rgba(255,255,255,.09);
+    border-radius: 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: rgba(255,255,255,.25);
+  }
+  .send-btn {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #5B8DFF; display: flex; align-items: center; justify-content: center;
+    margin-left: auto; flex-shrink: 0;
+    font-size: 11px; color: #fff;
+  }
+
+  /* COLOR SWATCHES */
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .swatch-dot { width: 32px; height: 32px; border-radius: 8px; }
+  .swatch-name { font-size: 10px; color: var(--color-text-tertiary); }
+
+  /* TYPOGRAPHY */
+  .type-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+  .type-label { font-size: 11px; color: var(--color-text-tertiary); width: 80px; flex-shrink: 0; }
+
+  /* PERF MODE DIFF */
+  .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .diff-card {
+    border-radius: 10px;
+    border: 0.5px solid var(--color-border-tertiary);
+    padding: 12px 14px;
+    background: var(--color-background-secondary);
+  }
+  .diff-title { font-size: 12px; font-weight: 500; margin-bottom: 8px; color: var(--color-text-primary); display: flex; align-items: center; gap: 6px; }
+  .mode-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+  .badge-full { background: rgba(91,141,255,.15); color: #5B8DFF; }
+  .badge-lite { background: rgba(52,211,153,.12); color: #34d399; }
+  .diff-list { font-size: 11px; color: var(--color-text-secondary); line-height: 1.7; }
+  .diff-list li { list-style: none; display: flex; gap: 6px; }
+  .diff-list li::before { content: '·'; color: var(--color-text-tertiary); }
+
+  /* FLASHCARD */
+  .fc-demo {
+    border-radius: 10px;
+    border: 0.5px solid rgba(255,255,255,.07);
+    background: rgba(255,255,255,.03);
+    padding: 14px 16px;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+  .fc-front-content { font-size: 13px; color: rgba(224,228,240,.7); line-height: 1.5; }
+  .fc-front-question { font-size: 15px; font-weight: 600; color: #e0e4f0; margin-bottom: 8px; }
+  .fc-chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .fc-chip { font-size: 11px; padding: 4px 10px; border-radius: 20px; cursor: pointer; font-weight: 500; }
+  .chip-know { background: rgba(52,211,153,.12); color: #34d399; border: 0.5px solid rgba(52,211,153,.25); }
+  .chip-unsure { background: rgba(245,158,11,.1); color: #f59e0b; border: 0.5px solid rgba(245,158,11,.25); }
+  .chip-nope { background: rgba(239,68,68,.1); color: #f87171; border: 0.5px solid rgba(239,68,68,.2); }
+
+  /* QUIZ ITEM */
+  .quiz-option {
+    padding: 8px 12px; border-radius: 8px; margin-bottom: 5px;
+    border: 0.5px solid rgba(255,255,255,.07);
+    background: rgba(255,255,255,.03);
+    font-size: 12px; color: rgba(224,228,240,.7);
+    cursor: pointer;
+  }
+  .quiz-option.correct { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.3); color: #34d399; }
+  .quiz-option.wrong { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.2); color: #f87171; }
+
+  /* FONT IMPORTS */
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+</style>
+</head>
+<body>
+
+<!-- ─── APP SHELL PREVIEW ─── -->
+<div class="section">
+  <div class="section-label">App shell — normal mode</div>
+  <div class="app-shell">
+    <div class="topbar">
+      <div class="topbar-logo">S</div>
+      <div>
+        <div class="topbar-name">Student OS</div>
+      </div>
+      <div class="topbar-tag">beta</div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-pill" id="perf-btn" onclick="togglePerf()">⚡ Low power</div>
+    </div>
+    <div class="app-body">
+      <div class="sidebar">
+        <div class="nav-section">Study</div>
+        <div class="nav-item active"><span class="nav-icon">◈</span>Dashboard</div>
+        <div class="nav-item"><span class="nav-icon">◉</span>Flashcards</div>
+        <div class="nav-item"><span class="nav-icon">◎</span>Quizzes</div>
+        <div class="nav-section">Tools</div>
+        <div class="nav-item"><span class="nav-icon">⊞</span>Calendar</div>
+        <div class="nav-item"><span class="nav-icon">≡</span>Notes</div>
+        <div class="nav-item"><span class="nav-icon">◷</span>Planner</div>
+      </div>
+      <div class="main" id="main-content">
+        <div class="main-header">
+          <div>
+            <div class="main-title">Good morning, Jeremy</div>
+            <div class="main-sub"><span class="status-dot" id="status-dot"></span><span id="status-text">Synced with Google</span></div>
+          </div>
+        </div>
+        <div class="card-grid" id="card-grid">
+          <div class="card card-accent-blue">
+            <div class="card-label">Due today</div>
+            <div class="card-value">4</div>
+            <div class="card-sub">2 debate, 2 math</div>
+          </div>
+          <div class="card card-accent-green">
+            <div class="card-label">Streak</div>
+            <div class="card-value">12d</div>
+            <div class="card-sub">Personal best 🔥</div>
+          </div>
+          <div class="card card-accent-amber">
+            <div class="card-label">Cards reviewed</div>
+            <div class="card-value">48</div>
+            <div class="card-sub">Last 7 days</div>
+          </div>
+          <div class="card card-accent-purple">
+            <div class="card-label">Next event</div>
+            <div class="card-value">2h</div>
+            <div class="card-sub">Harvard round 1</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── CHAT PREVIEW ─── -->
+<div class="section">
+  <div class="section-label">AI chat + input</div>
+  <div class="app-shell">
+    <div class="chat-preview">
+      <div class="bubble bubble-ai">Hey — you have a debate round in 2 hours. Want me to run a quick argument drill?</div>
+      <div class="bubble bubble-user">Yes, hit me with the neg case on sports betting</div>
+      <div class="bubble bubble-ai">Perfect. Here's your first flow point: <strong style="color:#90b4ff">integrity harms</strong> → the evidence on match-fixing in legalized markets is strong. Start with the Noam Scheiber card...</div>
+    </div>
+    <div class="input-bar">
+      Ask anything...
+      <div class="send-btn">↑</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── FLASHCARD PREVIEW ─── -->
+<div class="section">
+  <div class="section-label">Flashcard component</div>
+  <div class="fc-demo" style="background: #0c0e17;">
+    <div style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.25); margin-bottom: 10px;">Card 3 of 12 · Economics</div>
+    <div class="fc-front-question">What does "price elasticity of demand" measure?</div>
+    <div class="fc-front-content">How responsive quantity demanded is to a change in price — expressed as the % change in Qd divided by % change in price.</div>
+    <div class="fc-chips">
+      <div class="fc-chip chip-know">✓ Got it</div>
+      <div class="fc-chip chip-unsure">~ Almost</div>
+      <div class="fc-chip chip-nope">✗ Nope</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── QUIZ PREVIEW ─── -->
+<div class="section">
+  <div class="section-label">Quiz component</div>
+  <div class="fc-demo" style="background: #0c0e17;">
+    <div style="font-size: 13px; font-weight: 600; color: #e0e4f0; margin-bottom: 10px;">Which country first legalized sports betting nationally?</div>
+    <div class="quiz-option correct">✓ &nbsp;United Kingdom (1961)</div>
+    <div class="quiz-option wrong">✗ &nbsp;United States (2018)</div>
+    <div class="quiz-option">Australia (1983)</div>
+    <div class="quiz-option">Canada (1995)</div>
+  </div>
+</div>
+
+<!-- ─── COLOR PALETTE ─── -->
+<div class="section">
+  <div class="section-label">Color tokens</div>
+  <div class="swatches">
+    <div class="swatch"><div class="swatch-dot" style="background:#0c0e17"></div><div class="swatch-name">--bg</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#0a0c15"></div><div class="swatch-name">--bg2</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:rgba(255,255,255,.05)"></div><div class="swatch-name">--surface</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#5B8DFF"></div><div class="swatch-name">--blue</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#a78bfa"></div><div class="swatch-name">--violet</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#34d399"></div><div class="swatch-name">--green</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#f59e0b"></div><div class="swatch-name">--amber</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#f87171"></div><div class="swatch-name">--red</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:#e0e4f0"></div><div class="swatch-name">--text</div></div>
+    <div class="swatch"><div class="swatch-dot" style="background:rgba(224,228,240,.4)"></div><div class="swatch-name">--text-dim</div></div>
+  </div>
+</div>
+
+<!-- ─── TYPOGRAPHY ─── -->
+<div class="section">
+  <div class="section-label">Typography — DM Sans + DM Mono</div>
+  <div style="background: var(--color-background-secondary); border-radius: 10px; padding: 14px 16px; border: 0.5px solid var(--color-border-tertiary);">
+    <div class="type-row">
+      <div class="type-label" style="font-size:10px">H1 · 22px/700</div>
+      <div style="font-family:'DM Sans',sans-serif; font-size:22px; font-weight:700; color:var(--color-text-primary)">Good morning, Jeremy</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label" style="font-size:10px">H2 · 16px/600</div>
+      <div style="font-family:'DM Sans',sans-serif; font-size:16px; font-weight:600; color:var(--color-text-primary)">Debate prep · Harvard round</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label" style="font-size:10px">Body · 14px/400</div>
+      <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:var(--color-text-secondary)">Cards reviewed, streaks tracked, next up in your queue.</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label" style="font-size:10px">Mono · 12px</div>
+      <div style="font-family:'DM Mono',monospace; font-size:12px; color:var(--color-text-secondary)">price_elasticity = Δ%Qd / Δ%P</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label" style="font-size:10px">Label · 10px</div>
+      <div style="font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--color-text-tertiary)">Due today · Streak · Cards reviewed</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PERF MODE DIFF ─── -->
+<div class="section">
+  <div class="section-label">Performance mode: what changes</div>
+  <div class="diff-grid">
+    <div class="diff-card">
+      <div class="diff-title"><span class="mode-badge badge-full">Full</span> Normal mode</div>
+      <ul class="diff-list">
+        <li>Gradient background meshes</li>
+        <li>Animated glow / shimmer keyframes</li>
+        <li>backdrop-filter blur on modals</li>
+        <li>CSS box-shadows on cards</li>
+        <li>Animated gradient on accent buttons</li>
+        <li>Ambient radial orbs in sidebar</li>
+        <li>Smooth spring transitions (.38s)</li>
+        <li>Card-pop & float-up animations</li>
+      </ul>
+    </div>
+    <div class="diff-card">
+      <div class="diff-title"><span class="mode-badge badge-lite">Lite</span> Low-power mode</div>
+      <ul class="diff-list">
+        <li>Solid flat #0c0e17 background</li>
+        <li>All @keyframes disabled globally</li>
+        <li>backdrop-filter: none — opacity instead</li>
+        <li>box-shadow: none</li>
+        <li>Static solid-color accent buttons</li>
+        <li>Sidebar orbs removed from DOM</li>
+        <li>Transitions capped at .15s linear</li>
+        <li>will-change removed</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+let perf = false;
+function togglePerf() {
+  perf = !perf;
+  const btn = document.getElementById('perf-btn');
+  const shell = document.querySelector('.app-shell');
+  const dot = document.getElementById('status-dot');
+  const st = document.getElementById('status-text');
+  if (perf) {
+    btn.textContent = '✓ Low power ON';
+    btn.classList.add('perf');
+    // simulate perf mode on mock
+    document.querySelectorAll('.card').forEach(c => {
+      c.style.transition = 'none';
+      c.style.boxShadow = 'none';
+    });
+    document.querySelectorAll('.nav-item').forEach(n => n.style.transition = 'none');
+    dot.classList.add('off');
+    st.textContent = 'Low-power mode active';
+  } else {
+    btn.textContent = '⚡ Low power';
+    btn.classList.remove('perf');
+    document.querySelectorAll('.card').forEach(c => {
+      c.style.transition = '';
+      c.style.boxShadow = '';
+    });
+    document.querySelectorAll('.nav-item').forEach(n => n.style.transition = '');
+    dot.classList.remove('off');
+    st.textContent = 'Synced with Google';
+  }
+}
+</script>
+</body>
+</html>
