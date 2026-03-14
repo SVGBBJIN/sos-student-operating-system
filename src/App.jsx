@@ -651,19 +651,42 @@ ${notesSection}` : 'NOTES: (none)'}
 TOOLS — you have built-in tools to manage the student's calendar, tasks, blocks, and notes. Use them whenever the student mentions anything actionable. Keep your text response natural and brief — just mention what you did casually, don't explain the action in detail.
 
 RULES:
-1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" for confirmation — just do it when required details are clear.
-2. Even casual phrasing counts: "got a calc test fri" = add_event. "gotta finish essay by thursday" = add_task.
-3. If a required tool field is missing or ambiguous (like date, subject, time, or which task/event), ask ONE concise clarification question before any tool call.
-4. Clarifications should be multiple choice whenever possible: 2-5 options max, one question at a time, include an "Other" option when uncertainty is high, and wait for the student's selection before proceeding.
-5. Keep the same brief/casual voice for clarification questions and for tool follow-up.
-6. Only best-guess details when they're optional or low-risk; never guess required fields if that could create the wrong item. Today is ${todayKey}.
-7. For day names, calculate the real YYYY-MM-DD date.
-8. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
-9. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
-10. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
-11. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
-12. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
-13. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
+1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" for confirmation — just do it ONLY when ALL required details are explicitly stated by the student.
+2. Even casual phrasing counts: "got a calc test fri" = add_event (title: calc test, date: friday). "gotta finish essay by thursday" = add_task.
+3. *** HARD RULE — NEVER GUESS OR FABRICATE DETAILS ***: If the student's message does NOT explicitly contain the information needed for a tool field, you MUST call ask_clarification BEFORE calling any action tool. This is NON-NEGOTIABLE. Specifically:
+   - If the student did NOT say what the event/block/task IS (title/activity) → ASK. Never invent a generic name like "study session" or "event".
+   - If the student did NOT say WHEN (date) → ASK. Never guess today or tomorrow.
+   - If the student did NOT say what TIME (start/end for blocks) → ASK. Never invent times like "15:00-16:00".
+   - If the student did NOT say what SUBJECT → ASK for academic items. Never guess a subject.
+   - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
+   - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
+   - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
+4. When multiple fields are missing, make a SEPARATE ask_clarification tool call for EACH missing field — all in the same response. For example, if activity, date, and time are all unknown, make THREE ask_clarification calls: one asking "What activity?", one asking "What date?", one asking "What time?". Each call should have its own focused options. The system will display them all at once as individual question cards. NEVER split them across multiple conversation turns — call them all in the same response.
+5. PROACTIVE CLARIFICATION — also use ask_clarification when:
+   - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
+   - The student asks for content generation (flashcards, study plan, quiz, etc.) but hasn't specified the topic or scope
+   - Multiple reasonable interpretations exist and guessing wrong would waste their time
+   - The student seems unsure or mentions multiple subjects/topics without specifying which one
+6. DON'T ask for clarification ONLY when:
+   - ALL required details are explicitly stated in the student's message
+   - The student just said "yes" or confirmed something you already asked about
+   - The student is having a casual conversation (not requesting any action)
+7. Keep the same brief/casual voice for clarification questions and for tool follow-up.
+8. *** ZERO TOLERANCE FOR FABRICATION ***: If you call add_event, add_task, add_block, or any action tool with a value the student never said or clearly implied, that is a critical error. When in doubt, ALWAYS ask. The cost of one extra question is far less than creating a wrong item the student has to delete. Today is ${todayKey}.
+9. For day names, calculate the real YYYY-MM-DD date.
+10. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
+11. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
+12. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
+13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
+14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
+15. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
+16. EVENT/BLOCK FIELD VALIDATION — before calling add_event or add_block, check each field against what the student ACTUALLY said:
+   - title/activity: Did the student say what this is? If not → ask_clarification. Never use generic placeholders.
+   - date: Did the student specify or clearly imply a date? If not → ask_clarification.
+   - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
+   - subject: For academic items, did the student mention the subject? If not → ask_clarification.
+   - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
+   If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -674,7 +697,20 @@ When the student sends a photo/image:
    - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
    - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
 3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
-4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"`;
+4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"
+
+CONTENT GENERATION:
+When the student asks for study materials (flashcards, outlines, summaries, study plans, quizzes, project breakdowns), respond with ONLY a valid JSON object (no markdown, no code fences). Use these formats:
+
+For study plans: {"type":"make_plan","title":"Plan Title","summary":"One sentence overview of what this plan covers","steps":[{"title":"Step description","date":"YYYY-MM-DD","time":"HH:MM AM/PM","estimated_minutes":30}]}
+For flashcards: {"type":"create_flashcards","title":"Topic","cards":[{"q":"Question","a":"Answer"}]}
+For quizzes: {"type":"create_quiz","title":"Topic","questions":[{"q":"Question","choices":["A","B","C","D"],"answer":"A"}]}
+For outlines: {"type":"create_outline","title":"Topic","sections":[{"heading":"Section","points":["Point 1","Point 2"]}]}
+For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","Bullet 2"]}
+For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
+For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
+
+Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.`;
 }
 
 /* ─── Action parser ─── */
@@ -1317,75 +1353,264 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
 }
 
 function ClarificationCard({ clarification, onSubmit }) {
-  const [selected, setSelected] = useState([]);
-  const [otherText, setOtherText] = useState('');
+  // Support both single clarification and array of clarifications
+  const clarifications = Array.isArray(clarification) ? clarification : [clarification];
+  const questionCount = clarifications.length;
+
+  // Per-question state: selected options and free-form text
+  const [answers, setAnswers] = useState(() => clarifications.map(() => ({ selected: [], otherText: '' })));
 
   useEffect(() => {
-    setSelected([]);
-    setOtherText('');
+    setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
   }, [clarification]);
-
-  const options = Array.isArray(clarification?.options) ? clarification.options : [];
-  const multiSelect = !!clarification?.multiSelect;
 
   function normalizeOption(option, idx) {
     if (typeof option === 'string') return { id: 'opt_' + idx, label: option };
     return {
       id: option?.id || 'opt_' + idx,
       label: option?.label || option?.text || option?.value || ('Option ' + (idx + 1)),
+      description: option?.description || '',
       allowOther: !!option?.allowOther,
       metadata: option?.metadata,
     };
   }
 
-  const normalizedOptions = options.map(normalizeOption);
-  const hasSelected = selected.length > 0;
-  const selectedAllowOther = selected.some(id => normalizedOptions.find(o => o.id === id)?.allowOther) || !!clarification?.allowOther;
-  const canSubmit = hasSelected && (!selectedAllowOther || !!otherText.trim());
-
-  function toggleOption(id) {
-    if (!multiSelect) {
-      setSelected([id]);
-      return;
-    }
-    setSelected(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  function toggleOption(qIdx, optId, multiSelect) {
+    setAnswers(prev => {
+      const next = [...prev];
+      const cur = { ...next[qIdx] };
+      if (!multiSelect) {
+        cur.selected = [optId];
+      } else {
+        cur.selected = cur.selected.includes(optId)
+          ? cur.selected.filter(v => v !== optId)
+          : [...cur.selected, optId];
+      }
+      next[qIdx] = cur;
+      return next;
+    });
   }
 
+  function setOtherText(qIdx, text) {
+    setAnswers(prev => {
+      const next = [...prev];
+      next[qIdx] = { ...next[qIdx], otherText: text };
+      return next;
+    });
+  }
+
+  // Check if every question has at least one answer (selected option or text)
+  const allAnswered = answers.every((a, i) => {
+    const opts = Array.isArray(clarifications[i]?.options) ? clarifications[i].options : [];
+    // If question has no options (text-only), require text
+    if (opts.length === 0) return !!a.otherText.trim();
+    return a.selected.length > 0 || !!a.otherText.trim();
+  });
+
+  function handleSubmit() {
+    // Build per-question payloads
+    const payloads = clarifications.map((c, i) => {
+      const opts = Array.isArray(c?.options) ? c.options.map(normalizeOption) : [];
+      return {
+        selected: answers[i].selected,
+        options: opts,
+        otherText: answers[i].otherText,
+        question: c?.question || '',
+      };
+    });
+    onSubmit(payloads);
+  }
+
+  // Shared reason — show once if all share same reason, otherwise per-question
+  const sharedReason = questionCount > 1 && clarifications.every(c => c?.reason === clarifications[0]?.reason)
+    ? clarifications[0]?.reason || ''
+    : '';
+
   return (
-    <div className="confirm-card" style={{maxWidth:420,borderLeftColor:'var(--teal)'}}>
-      <div className="confirm-card-hdr">
-        <div className="confirm-card-hdr-left">
-          <div className="confirm-card-hdr-icon" style={{background:'rgba(43,203,186,0.1)',borderColor:'rgba(43,203,186,0.2)',color:'var(--teal)'}}>{Icon.helpCircle(16)}</div>
-          <span className="confirm-card-hdr-title">Need one quick detail</span>
+    <div style={{
+      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
+      border:'1px solid rgba(43,203,186,0.2)',
+      borderRadius:18,
+      padding:0,
+      maxWidth:440,
+      width:'100%',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(43,203,186,0.08)',
+    }}>
+      {/* Header */}
+      <div style={{
+        background:'linear-gradient(135deg, rgba(43,203,186,0.15), rgba(108,99,255,0.1))',
+        padding:'14px 18px',
+        borderBottom:'1px solid rgba(43,203,186,0.1)',
+        display:'flex',
+        alignItems:'center',
+        gap:10,
+        borderRadius:'18px 18px 0 0'
+      }}>
+        <div style={{
+          width:32, height:32, borderRadius:8,
+          background:'linear-gradient(135deg, var(--teal), var(--accent))',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          boxShadow:'0 4px 12px rgba(43,203,186,0.3)',
+          flexShrink:0
+        }}>
+          {Icon.helpCircle(16)}
+        </div>
+        <div>
+          <div style={{fontWeight:800, fontSize:'0.9rem', color:'var(--text)', letterSpacing:'-0.3px'}}>
+            {questionCount > 1 ? `A few quick questions` : 'Quick question'}
+          </div>
         </div>
       </div>
-      <div className="confirm-card-body" style={{display:'flex',flexDirection:'column',gap:10}}>
-        <div style={{fontSize:'0.86rem',lineHeight:1.45,fontWeight:600}}>{clarification?.question || 'Can you clarify?'}</div>
-        {normalizedOptions.map((opt) => (
-          <label key={opt.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:'0.82rem',cursor:'pointer'}}>
-            <input
-              type={multiSelect ? 'checkbox' : 'radio'}
-              checked={selected.includes(opt.id)}
-              name="clarification-option"
-              onChange={() => toggleOption(opt.id)}
-            />
-            <span>{opt.label}</span>
-          </label>
-        ))}
-        {selectedAllowOther && (
-          <input
-            type="text"
-            value={otherText}
-            onChange={(e) => setOtherText(e.target.value)}
-            placeholder={clarification?.otherPlaceholder || 'Add details'}
-            className="auth-input"
-            style={{margin:0,fontSize:'0.8rem'}}
-          />
-        )}
-      </div>
-      <div className="confirm-card-actions">
-        <button className="confirm-btn confirm-btn-yes" onClick={() => onSubmit({ selected, options: normalizedOptions, otherText })} disabled={!canSubmit}>
-          {Icon.send(14)} Submit
+
+      {/* Shared reason banner */}
+      {sharedReason && (
+        <div style={{
+          padding:'10px 18px',
+          background:'rgba(43,203,186,0.04)',
+          borderBottom:'1px solid rgba(255,255,255,0.04)',
+          fontSize:'0.8rem',
+          color:'var(--text-dim)',
+          lineHeight:1.5,
+          fontStyle:'italic'
+        }}>
+          {sharedReason}
+        </div>
+      )}
+
+      {/* Individual question sections */}
+      {clarifications.map((c, qIdx) => {
+        const options = Array.isArray(c?.options) ? c.options : [];
+        const multiSelect = !!c?.multiSelect || !!c?.multi_select;
+        const reason = !sharedReason ? (c?.reason || '') : '';
+        const normalizedOptions = options.map(normalizeOption);
+        const answer = answers[qIdx] || { selected: [], otherText: '' };
+
+        return (
+          <div key={qIdx} style={{
+            borderBottom: qIdx < questionCount - 1 ? '1px solid rgba(43,203,186,0.12)' : 'none',
+          }}>
+            {/* Per-question reason */}
+            {reason && (
+              <div style={{
+                padding:'8px 18px',
+                background:'rgba(43,203,186,0.04)',
+                borderBottom:'1px solid rgba(255,255,255,0.04)',
+                fontSize:'0.78rem',
+                color:'var(--text-dim)',
+                lineHeight:1.5,
+                fontStyle:'italic'
+              }}>
+                {reason}
+              </div>
+            )}
+
+            {/* Question label */}
+            <div style={{
+              padding:'12px 18px 6px',
+              fontSize:'0.86rem',
+              color:'var(--text)',
+              lineHeight:1.5,
+              fontWeight:600
+            }}>
+              {questionCount > 1 && <span style={{color:'var(--teal)', marginRight:6, fontWeight:800}}>{qIdx + 1}.</span>}
+              {c?.question || 'Can you clarify?'}
+            </div>
+
+            {/* Options for this question */}
+            {normalizedOptions.length > 0 && (
+              <div style={{padding:'6px 18px 4px'}}>
+                {normalizedOptions.map((opt) => {
+                  const isSelected = answer.selected.includes(opt.id);
+                  return (
+                    <div key={opt.id}
+                      onClick={() => toggleOption(qIdx, opt.id, multiSelect)}
+                      style={{
+                        display:'flex', alignItems:'center', gap:10,
+                        padding:'9px 12px',
+                        marginBottom:5,
+                        borderRadius:10,
+                        cursor:'pointer',
+                        border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                        background: isSelected ? 'rgba(43,203,186,0.08)' : 'rgba(255,255,255,0.02)',
+                        transition:'all .15s'
+                      }}>
+                      <div style={{
+                        width:18, height:18, borderRadius: multiSelect ? 4 : 9,
+                        border: isSelected ? '2px solid var(--teal)' : '2px solid rgba(255,255,255,0.15)',
+                        background: isSelected ? 'var(--teal)' : 'transparent',
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                        flexShrink:0,
+                        transition:'all .15s'
+                      }}>
+                        {isSelected && Icon.check(10)}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:'0.82rem', color:'var(--text)', fontWeight:500}}>{opt.label}</div>
+                        {opt.description && (
+                          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Free-form text input */}
+            <div style={{padding:'2px 18px 10px'}}>
+              <input
+                type="text"
+                value={answer.otherText}
+                onChange={(e) => setOtherText(qIdx, e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && allAnswered) handleSubmit(); }}
+                placeholder={c?.otherPlaceholder || 'Or type your own answer...'}
+                style={{
+                  width:'100%',
+                  background:'rgba(255,255,255,0.04)',
+                  border:'1px solid rgba(255,255,255,0.08)',
+                  borderRadius:10,
+                  padding:'9px 12px',
+                  color:'var(--text)',
+                  fontSize:'0.8rem',
+                  outline:'none',
+                  transition:'border-color .15s',
+                  boxSizing:'border-box'
+                }}
+                onFocus={e => e.target.style.borderColor='rgba(43,203,186,0.3)'}
+                onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.08)'}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Submit all */}
+      <div style={{
+        padding:'10px 18px 14px',
+        borderTop:'1px solid rgba(255,255,255,0.06)'
+      }}>
+        <button
+          onClick={handleSubmit}
+          disabled={!allAnswered}
+          style={{
+            width:'100%',
+            background: allAnswered ? 'linear-gradient(135deg, var(--teal), rgba(43,203,186,0.8))' : 'rgba(255,255,255,0.05)',
+            border:'none',
+            borderRadius:10,
+            padding:'10px 16px',
+            color: allAnswered ? '#fff' : 'var(--text-dim)',
+            fontSize:'0.84rem',
+            fontWeight:700,
+            cursor: allAnswered ? 'pointer' : 'default',
+            display:'flex',
+            alignItems:'center',
+            justifyContent:'center',
+            gap:6,
+            transition:'all .15s',
+            opacity: allAnswered ? 1 : 0.5
+          }}
+        >
+          {Icon.send(14)} {questionCount > 1 ? 'Submit All' : 'Submit'}
         </button>
       </div>
     </div>
@@ -1604,10 +1829,188 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
   );
 }
 
-function PlanCard({ data, onApply, onSave, onDismiss, onStartTask }) {
+/* ─── Plan Templates ─── */
+const PLAN_TEMPLATES = [
+  {
+    id: 'weekly_study', name: 'Weekly Study Plan', iconFn: Icon.calendar,
+    description: 'Plan your study sessions for the week',
+    skeleton: {
+      summary: 'A structured weekly study plan to stay on top of your coursework.',
+      steps: [
+        { title: 'Review notes from last week', estimated_minutes: 30 },
+        { title: 'Read new chapter material', estimated_minutes: 45 },
+        { title: 'Practice problems / exercises', estimated_minutes: 40 },
+        { title: 'Study group / peer review', estimated_minutes: 30 },
+        { title: 'Self-quiz / flashcard review', estimated_minutes: 20 },
+      ]
+    }
+  },
+  {
+    id: 'exam_prep', name: 'Exam Prep Plan', iconFn: Icon.target,
+    description: '3-5 day countdown to exam day',
+    skeleton: {
+      summary: 'A focused exam preparation plan to maximize your study time.',
+      steps: [
+        { title: 'Gather all study materials and past notes', estimated_minutes: 20 },
+        { title: 'Review key concepts and make a cheat sheet', estimated_minutes: 45 },
+        { title: 'Practice with past exams / sample questions', estimated_minutes: 60 },
+        { title: 'Focus on weak areas identified from practice', estimated_minutes: 45 },
+        { title: 'Final review and light practice', estimated_minutes: 30 },
+      ]
+    }
+  },
+  {
+    id: 'essay_plan', name: 'Essay Writing Plan', iconFn: Icon.fileText,
+    description: 'Research, outline, draft, revise',
+    skeleton: {
+      summary: 'Step-by-step plan to write a polished essay.',
+      steps: [
+        { title: 'Research and gather sources', estimated_minutes: 45 },
+        { title: 'Create outline with thesis and key points', estimated_minutes: 25 },
+        { title: 'Write first draft', estimated_minutes: 60 },
+        { title: 'Revise and strengthen arguments', estimated_minutes: 40 },
+        { title: 'Proofread and final edits', estimated_minutes: 20 },
+      ]
+    }
+  },
+  {
+    id: 'project_timeline', name: 'Project Timeline', iconFn: Icon.hammer,
+    description: 'Break a big project into phases',
+    skeleton: {
+      summary: 'A phased timeline to complete your project on schedule.',
+      steps: [
+        { title: 'Define project scope and requirements', estimated_minutes: 30 },
+        { title: 'Research and plan approach', estimated_minutes: 45 },
+        { title: 'Build / create core deliverables', estimated_minutes: 90 },
+        { title: 'Test, review, and iterate', estimated_minutes: 45 },
+        { title: 'Polish and submit final version', estimated_minutes: 30 },
+      ]
+    }
+  },
+  {
+    id: 'research_paper', name: 'Research Paper Plan', iconFn: Icon.search,
+    description: 'Literature review through final draft',
+    skeleton: {
+      summary: 'A structured approach to writing a thorough research paper.',
+      steps: [
+        { title: 'Choose topic and narrow focus', estimated_minutes: 20 },
+        { title: 'Literature review — find and read sources', estimated_minutes: 60 },
+        { title: 'Create annotated bibliography', estimated_minutes: 40 },
+        { title: 'Write introduction and methodology', estimated_minutes: 45 },
+        { title: 'Write body sections and analysis', estimated_minutes: 90 },
+        { title: 'Write conclusion and format citations', estimated_minutes: 30 },
+      ]
+    }
+  },
+];
+
+function PlanTemplateSelector({ onSelectTemplate, onCustomPlan, onDismiss }) {
+  return (
+    <div style={{
+      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
+      border:'1px solid rgba(108,99,255,0.2)',
+      borderRadius:18,
+      padding:0,
+      maxWidth:480,
+      width:'100%',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
+    }}>
+      {/* Header */}
+      <div style={{
+        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
+        padding:'16px 20px',
+        borderBottom:'1px solid rgba(108,99,255,0.1)',
+        display:'flex',
+        alignItems:'center',
+        gap:10
+      }}>
+        <div style={{
+          width:36, height:36, borderRadius:10,
+          background:'linear-gradient(135deg, var(--accent), var(--teal))',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
+        }}>
+          {Icon.listTree(18)}
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Choose a Plan Template</div>
+          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>Pick a starting point or create your own</div>
+        </div>
+        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
+      </div>
+
+      {/* Templates */}
+      <div style={{padding:'12px 16px'}}>
+        {PLAN_TEMPLATES.map(tmpl => (
+          <div key={tmpl.id}
+            onClick={() => onSelectTemplate(tmpl)}
+            style={{
+              display:'flex', alignItems:'center', gap:12,
+              padding:'12px 14px',
+              marginBottom:6,
+              borderRadius:12,
+              cursor:'pointer',
+              border:'1px solid rgba(255,255,255,0.06)',
+              background:'rgba(255,255,255,0.02)',
+              transition:'all .15s'
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background='rgba(108,99,255,0.08)'; e.currentTarget.style.borderColor='rgba(108,99,255,0.2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.06)'; }}>
+            <div style={{
+              width:32, height:32, borderRadius:8,
+              background:'rgba(108,99,255,0.1)',
+              border:'1px solid rgba(108,99,255,0.2)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              color:'var(--accent)', flexShrink:0
+            }}>
+              {tmpl.iconFn(16)}
+            </div>
+            <div>
+              <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--text)'}}>{tmpl.name}</div>
+              <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>{tmpl.description}</div>
+            </div>
+          </div>
+        ))}
+
+        {/* Custom Plan option */}
+        <div
+          onClick={onCustomPlan}
+          style={{
+            display:'flex', alignItems:'center', gap:12,
+            padding:'12px 14px',
+            borderRadius:12,
+            cursor:'pointer',
+            border:'1px solid rgba(43,203,186,0.15)',
+            background:'rgba(43,203,186,0.04)',
+            transition:'all .15s'
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background='rgba(43,203,186,0.1)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.3)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background='rgba(43,203,186,0.04)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.15)'; }}>
+          <div style={{
+            width:32, height:32, borderRadius:8,
+            background:'rgba(43,203,186,0.1)',
+            border:'1px solid rgba(43,203,186,0.2)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            color:'var(--teal)', flexShrink:0
+          }}>
+            {Icon.sparkles(16)}
+          </div>
+          <div>
+            <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--teal)'}}>Custom Plan</div>
+            <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>AI generates a unique plan from your description</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogleDocs, googleConnected }) {
   const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
   const [mode, setMode] = useState('breakdown');
   const [activeIdx, setActiveIdx] = useState(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [docSyncing, setDocSyncing] = useState(false);
   const steps = data.steps || [];
   const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
   const checkedCount = checked.filter(Boolean).length;
@@ -1624,60 +2027,227 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask }) {
     if (nextIdx >= 0) startTask(nextIdx);
   }
 
+  async function handleExportDocs() {
+    if (!onExportGoogleDocs) return;
+    setDocSyncing(true);
+    try { await onExportGoogleDocs(data); } finally { setDocSyncing(false); }
+  }
+
+  const hasDocId = !!data.googleDocId;
+
   return (
-    <div className="plan-card">
-      <div className="plan-card-hdr">
-        <div className="plan-card-hdr-icon">{Icon.listTree(18)}</div>
-        <div className="plan-card-hdr-title">{data.title||'Plan'}</div>
-        <div className="plan-mode-toggle" role="tablist" aria-label="Planning mode">
-          <button className={'plan-mode-btn' + (mode === 'breakdown' ? ' active' : '')} onClick={() => setMode('breakdown')}>Breakdown</button>
-          <button className={'plan-mode-btn' + (mode === 'start' ? ' active' : '')} onClick={() => setMode('start')}>Start task</button>
+    <div style={{
+      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
+      border:'1px solid rgba(108,99,255,0.2)',
+      borderRadius:18,
+      padding:0,
+      maxWidth:480,
+      width:'100%',
+      maxHeight:'70vh',
+      overflowY:'auto',
+      overflowX:'hidden',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
+    }}>
+      {/* Header */}
+      <div style={{
+        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
+        padding:'16px 20px',
+        borderBottom:'1px solid rgba(108,99,255,0.1)',
+        display:'flex',
+        alignItems:'center',
+        gap:10
+      }}>
+        <div style={{
+          width:36, height:36, borderRadius:10,
+          background:'linear-gradient(135deg, var(--accent), var(--teal))',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
+        }}>
+          {Icon.listTree(18)}
         </div>
-        <span style={{fontSize:'0.7rem',fontWeight:700,padding:'2px 8px',borderRadius:6,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>{data.title||'Plan'}</div>
+          {data.templateName && (
+            <div style={{fontSize:'0.68rem', color:'var(--accent)', marginTop:1, fontWeight:600}}>
+              {data.templateName}
+            </div>
+          )}
+        </div>
+        <span style={{fontSize:'0.7rem',fontWeight:700,padding:'3px 10px',borderRadius:8,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
+        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
       </div>
-      <div className="plan-card-body">
-        {steps.map((step,i) => (
-          <div key={i} className={'plan-step' + (activeIdx === i ? ' active' : '')} onClick={() => mode === 'start' ? startTask(i) : toggle(i)}>
-            <div className={'plan-step-check' + (checked[i] ? ' checked' : '')}>
-              {checked[i] && Icon.check(12)}
-            </div>
-            <div className="plan-step-content">
-              <div className={'plan-step-title' + (checked[i] ? '' : ' done')}>{step.title}</div>
-              <div className="plan-step-meta">
-                {step.date && <span>{Icon.calendar(10)} {fmt(step.date)}</span>}
-                {step.time && <span>{Icon.clock(10)} {step.time}</span>}
-                {step.estimated_minutes && <span>{step.estimated_minutes}min</span>}
+
+      {/* Summary */}
+      {data.summary && (
+        <div style={{
+          padding:'12px 20px',
+          background:'rgba(108,99,255,0.04)',
+          borderBottom:'1px solid rgba(255,255,255,0.04)',
+          fontSize:'0.86rem',
+          color:'var(--text)',
+          lineHeight:1.5,
+          fontWeight:500
+        }}>
+          {data.summary}
+        </div>
+      )}
+
+      {/* Mode Toggle */}
+      <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
+        <button onClick={() => setMode('breakdown')} style={{
+          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
+          background: mode === 'breakdown' ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)',
+          color: mode === 'breakdown' ? 'var(--accent)' : 'var(--text-dim)',
+          transition:'all .15s'
+        }}>Breakdown</button>
+        <button onClick={() => setMode('start')} style={{
+          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
+          background: mode === 'start' ? 'rgba(43,203,186,0.15)' : 'rgba(255,255,255,0.04)',
+          color: mode === 'start' ? 'var(--teal)' : 'var(--text-dim)',
+          transition:'all .15s'
+        }}>Start task</button>
+      </div>
+
+      {/* Steps */}
+      <div style={{padding:'8px 20px'}}>
+        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Steps</div>
+        {steps.map((step,i) => {
+          const isActive = activeIdx === i;
+          const isChecked = checked[i];
+          return (
+            <div key={i}
+              onClick={() => mode === 'start' ? startTask(i) : toggle(i)}
+              style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'8px 0',
+                borderBottom: i < steps.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
+                cursor:'pointer',
+                opacity: isChecked ? 1 : 0.5,
+              }}>
+              <span style={{
+                width:24, height:24, borderRadius:7, flexShrink:0,
+                background: isActive ? 'rgba(43,203,186,0.15)' : isChecked ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.04)',
+                border: isActive ? '1.5px solid var(--teal)' : isChecked ? '1.5px solid rgba(108,99,255,0.3)' : '1.5px solid rgba(255,255,255,0.1)',
+                color: isActive ? 'var(--teal)' : 'var(--accent)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                fontSize:'0.72rem', fontWeight:700,
+                transition:'all .15s'
+              }}>{isActive ? Icon.arrowRight(11) : isChecked ? (i + 1) : Icon.x(10)}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>{step.title}</div>
+                <div style={{display:'flex', gap:8, marginTop:2}}>
+                  {step.date && <span style={{fontSize:'0.72rem', color:'var(--teal)', fontWeight:600}}>{Icon.calendar(10)} {fmt(step.date)}</span>}
+                  {step.time && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{Icon.clock(10)} {step.time}</span>}
+                  {step.estimated_minutes && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{step.estimated_minutes}min</span>}
+                </div>
               </div>
+              {mode === 'start' && (
+                <span style={{
+                  fontSize:'0.72rem', fontWeight:700, padding:'3px 10px', borderRadius:6,
+                  background: isActive ? 'rgba(43,203,186,0.15)' : 'rgba(108,99,255,0.08)',
+                  color: isActive ? 'var(--teal)' : 'var(--accent)',
+                }}>{isActive ? 'In progress' : 'Start'}</span>
+              )}
             </div>
-            {mode === 'start' && (
-              <button className={'plan-step-start' + (activeIdx === i ? ' active' : '')} onClick={(e) => { e.stopPropagation(); startTask(i); }}>
-                {activeIdx === i ? 'In progress' : 'Start'}
+          );
+        })}
+      </div>
+
+      {/* Quick Actions Dropdown */}
+      <div style={{padding:'10px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
+        <button onClick={() => setActionsOpen(!actionsOpen)} style={{
+          width:'100%',
+          background:'rgba(108,99,255,0.08)',
+          border:'1px solid rgba(108,99,255,0.2)',
+          borderRadius:10,
+          padding:'10px 14px',
+          color:'var(--accent)',
+          fontSize:'0.84rem',
+          fontWeight:600,
+          cursor:'pointer',
+          display:'flex',
+          alignItems:'center',
+          justifyContent:'space-between',
+          transition:'all .15s'
+        }}>
+          <span style={{display:'flex',alignItems:'center',gap:6}}>
+            {Icon.zap(14)} Actions
+          </span>
+          <span style={{
+            display:'inline-flex',
+            transform: actionsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition:'transform .2s'
+          }}>
+            {Icon.arrowRight(12)}
+          </span>
+        </button>
+        {actionsOpen && (
+          <div style={{
+            marginTop:6,
+            borderRadius:10,
+            overflow:'hidden',
+            border:'1px solid rgba(108,99,255,0.15)',
+            background:'rgba(15,15,26,0.95)'
+          }}>
+            {mode === 'breakdown' ? (
+              <button onClick={() => { setActionsOpen(false); onApply(steps.filter((_,i) => checked[i])); }} style={{
+                width:'100%', background:'transparent', border:'none',
+                borderBottom:'1px solid rgba(255,255,255,0.04)',
+                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
+                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
+              }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.check(13)}</span>
+                Add {checkedCount} as tasks
+              </button>
+            ) : (
+              <button onClick={() => { setActionsOpen(false); startNextTask(); }} style={{
+                width:'100%', background:'transparent', border:'none',
+                borderBottom:'1px solid rgba(255,255,255,0.04)',
+                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
+                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
+              }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.arrowRight(13)}</span>
+                Start next task
               </button>
             )}
+            <button onClick={() => { setActionsOpen(false); onSave(); }} style={{
+              width:'100%', background:'transparent', border:'none',
+              borderBottom:'1px solid rgba(255,255,255,0.04)',
+              padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
+              display:'flex', alignItems:'center', gap:8, transition:'background .15s'
+            }}
+              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.fileText(13)}</span>
+              Save to notes
+            </button>
+            <button onClick={() => { setActionsOpen(false); handleExportDocs(); }} disabled={docSyncing} style={{
+              width:'100%', background:'transparent', border:'none',
+              padding:'10px 14px', color: googleConnected ? 'var(--text)' : 'var(--text-dim)', fontSize:'0.82rem',
+              cursor: docSyncing ? 'wait' : 'pointer', textAlign:'left',
+              display:'flex', alignItems:'center', gap:8, transition:'background .15s',
+              opacity: docSyncing ? 0.5 : 1
+            }}
+              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.externalLink(13)}</span>
+              {docSyncing ? 'Syncing...' : hasDocId ? 'Sync to Google Docs' : 'Export to Google Docs'}
+            </button>
           </div>
-        ))}
-      </div>
-      <div className="plan-card-footer">
-        {mode === 'breakdown' ? (
-          <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={() => onApply(steps.filter((_,i) => checked[i]))}>
-            {Icon.check(14)} Add {checkedCount} as tasks
-          </button>
-        ) : (
-          <button className="confirm-btn confirm-btn-yes" style={{flex:1}} onClick={startNextTask}>
-            {Icon.arrowRight(14)} Start next task
-          </button>
         )}
-        <button className="confirm-btn confirm-btn-edit" onClick={onSave}>Save to notes</button>
-        <button className="confirm-btn confirm-btn-cancel" onClick={onDismiss}>{Icon.x(12)}</button>
       </div>
     </div>
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask }) {
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
   switch (content.type) {
     case 'make_plan':
-      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} />;
+      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
     case 'create_flashcards':
       return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_quiz':
@@ -2759,6 +3329,7 @@ function App() {
   const [chatError, setChatError] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
+  const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
   const [pendingClarification, setPendingClarification] = useState(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
@@ -2957,6 +3528,7 @@ function App() {
             'https://www.googleapis.com/auth/calendar.events',
             'https://www.googleapis.com/auth/documents',
             'https://www.googleapis.com/auth/docs',
+            'https://www.googleapis.com/auth/drive.file',
             'https://www.googleapis.com/auth/userinfo.email',
           ].join(' '),
           callback: (resp) => {
@@ -3122,7 +3694,7 @@ function App() {
           break;
         }
         case 'add_event': {
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -3372,7 +3944,7 @@ function App() {
         case 'create_project_breakdown':
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
         case 'make_plan':
-          return '# ' + (c.title||'Plan') + '\n\n' + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
+          return '# ' + (c.title||'Plan') + '\n\n' + (c.summary ? c.summary + '\n\n' : '') + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
         default: return JSON.stringify(c, null, 2);
       }
     } catch(e) { return JSON.stringify(c, null, 2); }
@@ -3412,6 +3984,111 @@ function App() {
       status:'in_progress'
     });
     setToastMsg('Started "' + step.title + '"');
+  }
+
+  // ── Google Docs plan export (create + update) ──
+  async function syncPlanToGoogleDocs(planData, existingDocId, token) {
+    const title = planData.title || 'Study Plan';
+    const steps = planData.steps || [];
+
+    // Build plain text content for the doc
+    let body = title + '\n\n';
+    if (planData.summary) body += planData.summary + '\n\n';
+    body += 'Steps:\n';
+    steps.forEach((step, i) => {
+      body += (i + 1) + '. ' + step.title;
+      if (step.date) body += ' (' + step.date + ')';
+      if (step.time) body += ' at ' + step.time;
+      if (step.estimated_minutes) body += ' ~' + step.estimated_minutes + 'min';
+      body += '\n';
+    });
+
+    const authHdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+    if (existingDocId) {
+      // Update: get current doc length, delete all content, then re-insert
+      const getRes = await fetch('https://docs.googleapis.com/v1/documents/' + existingDocId, { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!getRes.ok) throw new Error('Failed to read Google Doc');
+      const docData = await getRes.json();
+      const endIndex = docData.body?.content?.slice(-1)?.[0]?.endIndex || 1;
+
+      const requests = [];
+      if (endIndex > 2) {
+        requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
+      }
+      requests.push({ insertText: { location: { index: 1 }, text: body } });
+
+      await fetch('https://docs.googleapis.com/v1/documents/' + existingDocId + ':batchUpdate', {
+        method: 'POST', headers: authHdr,
+        body: JSON.stringify({ requests })
+      });
+      return existingDocId;
+    } else {
+      // Create new doc
+      const createRes = await fetch('https://docs.googleapis.com/v1/documents', {
+        method: 'POST', headers: authHdr,
+        body: JSON.stringify({ title })
+      });
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        throw new Error('Failed to create Google Doc: ' + errText);
+      }
+      const newDoc = await createRes.json();
+      const docId = newDoc.documentId;
+
+      // Insert content
+      await fetch('https://docs.googleapis.com/v1/documents/' + docId + ':batchUpdate', {
+        method: 'POST', headers: authHdr,
+        body: JSON.stringify({
+          requests: [{ insertText: { location: { index: 1 }, text: body } }]
+        })
+      });
+      return docId;
+    }
+  }
+
+  async function handleExportPlanToGoogleDocs(idx, planData) {
+    if (!isGoogleConnected()) {
+      connectGoogle();
+      setToastMsg('Connect Google first, then try again');
+      return;
+    }
+    try {
+      const existingDocId = planData.googleDocId || null;
+      const docId = await syncPlanToGoogleDocs(planData, existingDocId, googleToken);
+      // Store the docId back on the content item for future syncs
+      setPendingContent(prev => prev.map((c, i) => i === idx ? { ...c, googleDocId: docId } : c));
+      const action = existingDocId ? 'Synced' : 'Exported';
+      setToastMsg(action + ' "' + (planData.title || 'Plan') + '" to Google Docs');
+    } catch (e) {
+      console.error('Google Docs export error:', e);
+      setToastMsg('Failed to export — ' + (e.message || 'try again'));
+    }
+  }
+
+  // ── Plan template handlers ──
+  function handleSelectTemplate(template, userContext) {
+    const title = (userContext || template.name);
+    const planContent = {
+      type: 'make_plan',
+      title,
+      summary: template.skeleton.summary,
+      steps: template.skeleton.steps.map(s => ({ ...s })),
+      templateName: template.name,
+    };
+    setPendingTemplateSelector(null);
+    setPendingContent(prev => [...prev, planContent]);
+    setToastMsg('Created plan from "' + template.name + '" template');
+  }
+
+  function handleCustomPlan() {
+    setPendingTemplateSelector(null);
+    // Send a message to the AI to generate a custom plan
+    sendMessage('Make me a custom study plan. Ask me what subject and details you need.');
+  }
+
+  function handleDismissTemplateSelector() {
+    setPendingTemplateSelector(null);
   }
 
   // ── Google import handlers ──
@@ -3815,6 +4492,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
     const msgContent = text?.trim() || '';
+
+    // Intercept vague plan requests and show template selector
+    const isPlanRequest = /^(make|create|build|give)\s*(me\s*)?(a\s*)?(study\s*)?plan$/i.test(msgContent)
+      || /^(i need|want)\s*(a\s*)?(study\s*)?plan$/i.test(msgContent)
+      || /^plan$/i.test(msgContent);
+    if (isPlanRequest && !fromClarification && !photo) {
+      const userMsg = { role:'user', content:msgContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,userMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      setInput('');
+      if (user) dbInsertChatMsg('user', msgContent, user.id);
+      const assistantMsg = { role:'assistant', content:"I've got a few plan templates ready — pick one or let me create something custom for you!", timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', assistantMsg.content, user.id);
+      setPendingTemplateSelector({ context: msgContent });
+      return;
+    }
     const requestedCompanion = detectCompanionIntent(msgContent);
     if (requestedCompanion) {
       if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
@@ -3894,28 +4587,62 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       const chatData = await chatResponse.json();
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
-      const clarificationPayload = chatData?.clarification && typeof chatData.clarification === 'object'
-        ? chatData.clarification
-        : (chatData?.clarification_payload && typeof chatData.clarification_payload === 'object' ? chatData.clarification_payload : null);
 
-      if (clarificationPayload?.question && Array.isArray(clarificationPayload?.options) && clarificationPayload.options.length > 0) {
-        const assistantPrompt = (
-          typeof clarificationPayload.prompt === 'string' && clarificationPayload.prompt.trim()
-            ? clarificationPayload.prompt.trim()
-            : "I need one quick clarification before I continue."
-        ) + '\n\n' + clarificationPayload.question;
+      // For content gen, parse content types from raw text response (AI outputs JSON when tools are disabled)
+      if (isContentGen && actions.length === 0 && chatData?.content) {
+        const raw = (chatData.content || '').trim();
+        // Try parsing as JSON (AI may output raw JSON object)
+        const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
+        try {
+          const parsed = JSON.parse(cleaned);
+          if (parsed && typeof parsed === 'object' && parsed.type && CONTENT_TYPES.includes(parsed.type)) {
+            actions = [parsed];
+          } else if (Array.isArray(parsed)) {
+            actions = parsed.filter(p => p && p.type && CONTENT_TYPES.includes(p.type));
+          }
+        } catch (_) {
+          // Also try parsing <action> tags from text
+          const taggedActions = parseActions(raw);
+          if (taggedActions.length > 0) {
+            actions = taggedActions.filter(a => CONTENT_TYPES.includes(a.type));
+          }
+        }
+      }
+
+      // Support multiple clarifications (array) or single (object)
+      const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
+        ? chatData.clarifications
+        : (chatData?.clarification && typeof chatData.clarification === 'object' && chatData.clarification.question
+          ? [chatData.clarification]
+          : (chatData?.clarification_payload && typeof chatData.clarification_payload === 'object' && chatData.clarification_payload.question
+            ? [chatData.clarification_payload]
+            : []));
+
+      const validClarifications = clarificationsArr.filter(c => c?.question && Array.isArray(c?.options) && c.options.length > 0);
+
+      if (validClarifications.length > 0) {
+        // Build assistant message summarizing all questions
+        const questionTexts = validClarifications.map((c, i) => {
+          const prefix = validClarifications.length > 1 ? `${i + 1}. ` : '';
+          return prefix + c.question;
+        });
+        const reasonText = validClarifications[0].reason ? validClarifications[0].reason.trim() + ' ' : '';
+        const assistantPrompt = (reasonText || "I need a few details before I continue.") + '\n\n' + questionTexts.join('\n');
         const assistantMsg = { role:'assistant', content:assistantPrompt, timestamp:Date.now() };
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) dbInsertChatMsg('assistant', assistantPrompt, user.id);
 
-        setPendingClarification({
-          question: clarificationPayload.question,
-          options: clarificationPayload.options,
-          multiSelect: !!clarificationPayload.multiSelect,
-          metadata: clarificationPayload.metadata || clarificationPayload.context || null,
-          allowOther: !!clarificationPayload.allowOther,
-          otherPlaceholder: clarificationPayload.otherPlaceholder,
-        });
+        // Store all clarifications — ClarificationCard handles arrays
+        const mapped = validClarifications.map(c => ({
+          reason: c.reason || null,
+          question: c.question,
+          options: c.options,
+          multiSelect: !!c.multiSelect || !!c.multi_select,
+          metadata: c.metadata || c.context || null,
+          allowOther: true,
+          otherPlaceholder: c.otherPlaceholder,
+        }));
+        setPendingClarification(mapped.length === 1 ? mapped[0] : mapped);
         return;
       }
 
@@ -4020,23 +4747,34 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
       console.error('Chat error:', err);
-      setChatError(err.message || "couldn't reach the server — check your connection");
+      const msg = err.message || '';
+      if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
+        setChatError("I'm getting a lot of requests right now — give me a few seconds and try again!");
+      } else {
+        setChatError(msg || "couldn't reach the server — check your connection");
+      }
     } finally { setIsLoading(false); }
   }
 
   function handleClarificationSubmit(payload) {
     if (!pendingClarification) return;
-    const selectedOptions = (payload?.selected || []).map(id => (payload?.options || []).find(o => o.id === id)).filter(Boolean);
-    const response = {
-      type: 'clarification_response',
-      question: pendingClarification.question,
-      selected: selectedOptions.map(o => ({ id: o.id, label: o.label, metadata: o.metadata || null })),
-      other: payload?.otherText?.trim() || null,
-      metadata: pendingClarification.metadata || null,
-      multiSelect: !!pendingClarification.multiSelect,
-    };
+    // payload is either a single object { selected, options, otherText } or an array of them
+    const payloads = Array.isArray(payload) ? payload : [payload];
+    const responseParts = payloads.map(p => {
+      const selectedOptions = (p?.selected || []).map(id => (p?.options || []).find(o => o.id === id)).filter(Boolean);
+      const selectedLabels = selectedOptions.map(o => o.label);
+      const otherTxt = p?.otherText?.trim() || '';
+      const parts = [];
+      if (selectedLabels.length > 0) parts.push(selectedLabels.join(', '));
+      if (otherTxt) parts.push(otherTxt);
+      const answer = parts.join(' — ') || '';
+      // Include the question for context if multi-question
+      if (payloads.length > 1 && p?.question) return `${p.question}: ${answer}`;
+      return answer;
+    }).filter(Boolean);
+    const readableResponse = responseParts.join('\n') || 'No selection';
     setPendingClarification(null);
-    sendMessage(JSON.stringify(response), { fromClarification: true });
+    sendMessage(readableResponse, { fromClarification: true });
   }
 
   function handleSubmit(e) { if(e)e.preventDefault(); if(viewingSavedChatId)return; if(!user){setShowAuthModal(true);return;} sendMessage(input); }
@@ -4521,6 +5259,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           </React.Fragment>
         ))}
+        {pendingTemplateSelector && (
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <PlanTemplateSelector
+              onSelectTemplate={(tmpl) => handleSelectTemplate(tmpl, pendingTemplateSelector.context)}
+              onCustomPlan={handleCustomPlan}
+              onDismiss={handleDismissTemplateSelector}
+            />
+          </div>
+        )}
         {pendingClarification && (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} />
@@ -4575,7 +5322,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
           </div>
         ))}
         {isLoading&&<TypingDots/>}

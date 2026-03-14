@@ -13,12 +13,16 @@ const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, use ask_clarification FIRST. NEVER invent or guess values.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "Event title" },
           date: { type: "string", description: "Date in YYYY-MM-DD format" },
+          time: { type: "string", description: "Start time in HH:MM 24h format (e.g. 14:30). Omit for all-day events." },
+          description: { type: "string", description: "Brief description or notes about the event (chapters covered, materials needed, etc.)" },
+          location: { type: "string", description: "Where the event takes place (room, building, address)" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level — infer from context (exams/finals = high, optional meetings = low)" },
           event_type: {
             type: "string",
             enum: [
@@ -40,7 +44,7 @@ const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a homework assignment or task to the student's to-do list.",
+        "Add a homework assignment or task to the student's to-do list. IMPORTANT: Only call this when the student has explicitly stated what the task is. If the title or key details are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -131,7 +135,7 @@ const ACTION_TOOLS = [
     function: {
       name: "add_block",
       description:
-        "Add a time block to the student's daily schedule (study session, practice slot, free time, etc.).",
+        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, use ask_clarification FIRST to ask for the missing details. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -290,10 +294,14 @@ const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student a focused follow-up question when required details are missing or ambiguous before taking any schedule/task action.",
+        "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. Use this proactively — don't guess when asking would be better. Also use for content generation requests that lack a topic or scope.",
       parameters: {
         type: "object",
         properties: {
+          reason: {
+            type: "string",
+            description: "Brief explanation of WHY you need clarification (shown to the student, e.g. 'I want to make sure I create the right study plan for you')",
+          },
           question: {
             type: "string",
             description: "Direct clarification question for the student",
@@ -317,7 +325,7 @@ const ACTION_TOOLS = [
             items: { type: "string" },
           },
         },
-        required: ["question", "options", "multi_select"],
+        required: ["reason", "question", "options", "multi_select"],
       },
     },
   },
@@ -335,8 +343,26 @@ const ACTION_TOOLS = [
   },
 ];
 
+/* ── Parse Groq's malformed tool calls from failed_generation ── */
+function parseFailedGeneration(failedGen) {
+  const results = [];
+  // Matches both Groq malformed formats:
+  //   <function=tool_name {"key":"val"}></function>     (space-separated)
+  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
+  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
+  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
+  let match;
+  while ((match = regex.exec(failedGen)) !== null) {
+    try {
+      const args = JSON.parse(match[2]);
+      results.push({ name: match[1], arguments: args });
+    } catch (_) { /* skip unparseable entries */ }
+  }
+  return results;
+}
+
 /* ── Groq chat + function calling ── */
-async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true) {
+async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null) {
   const groqMessages = [{ role: "system", content: systemPrompt }];
 
   if (imageBase64) {
@@ -363,54 +389,100 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
     }
   }
 
+  const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model;
+  const isGptOss = effectiveModel.startsWith("openai/gpt-oss");
   const body = {
-    model: imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model,
+    model: effectiveModel,
     messages: groqMessages,
-    max_tokens: maxTokens,
+    // gpt-oss models require max_completion_tokens (not max_tokens)
+    ...(isGptOss
+      ? { max_completion_tokens: maxTokens, reasoning_effort: "low" }
+      : { max_tokens: maxTokens }),
   };
 
-  if (includeTools && !imageBase64) {
-    body.tools = ACTION_TOOLS;
+  const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+  if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
+    body.tools = effectiveTools;
     body.tool_choice = "auto";
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
+  // Retry logic for 429 rate limits (up to 3 retries with exponential backoff)
+  const MAX_RETRIES = 3;
   let res;
-  try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === "AbortError") {
-      throw new Error(`Groq ${model} request timed out after 30s`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        throw new Error(`Groq ${model} request timed out after 30s`);
+      }
+      throw err;
     }
-    throw err;
-  }
-  clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const errBody = await res.text().catch(() => "");
+      const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
+      const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : (2 ** attempt) * 2;
+      console.warn(`Groq 429 rate limit hit, retrying in ${waitSec}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      continue;
+    }
+
+    // Recover from Groq's malformed tool call errors (400 tool_use_failed)
+    if (res.status === 400) {
+      const errText = await res.text().catch(() => "");
+      let errData;
+      try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
+
+      if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
+        const recovered = parseFailedGeneration(errData.error.failed_generation);
+        if (recovered.length > 0) {
+          // Build synthetic tool_calls matching the normal response format
+          const syntheticToolCalls = recovered.map((r, i) => ({
+            id: `recovered_${i}`,
+            type: "function",
+            function: { name: r.name, arguments: JSON.stringify(r.arguments) },
+          }));
+          // Construct a synthetic response and skip to parsing
+          return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
+        }
+      }
+      throw new Error(`Groq ${model} error 400: ${errText}`);
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
+    }
+    break;
   }
 
   const data = await res.json();
+  return parseLlmResponse(data);
+}
+
+function parseLlmResponse(data) {
   const message = data.choices?.[0]?.message;
   const textContent = message?.content || "";
-  let clarification = null;
+  const clarifications = [];
   const actions = (message?.tool_calls || []).flatMap((tc) => {
     const parsedArgs = JSON.parse(tc.function.arguments || "{}");
 
     if (tc.function.name === "ask_clarification") {
-      clarification = {
+      clarifications.push({
+        reason: parsedArgs.reason || "",
         question: parsedArgs.question || "",
         options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
         multi_select: Boolean(parsedArgs.multi_select),
@@ -418,7 +490,7 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
         ...(Array.isArray(parsedArgs.missing_fields)
           ? { missing_fields: parsedArgs.missing_fields }
           : {}),
-      };
+      });
       return [];
     }
 
@@ -428,7 +500,9 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
     }];
   });
 
-  return { content: textContent.trim(), actions, clarification };
+  // Return single clarification for backward compat, plus full array
+  const clarification = clarifications.length > 0 ? clarifications[0] : null;
+  return { content: textContent.trim(), actions, clarification, clarifications };
 }
 
 /* ── Extract user ID from JWT ── */
@@ -582,9 +656,12 @@ export default async function handler(req, res) {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Model: llama-3.3-70b-versatile for all text; vision model auto-selected in callGroq
-    const model = "llama-3.3-70b-versatile";
+    // Model: openai/gpt-oss-20b for text (fast, strong tool calling); vision model auto-selected in callGroq
+    const model = "openai/gpt-oss-20b";
     const includeTools = !isContentGen;
+    const clarificationOnlyTools = isContentGen
+      ? ACTION_TOOLS.filter((t) => t.function.name === "ask_clarification")
+      : null;
 
     const result = await callGroq(
       GROQ_API_KEY,
@@ -594,7 +671,8 @@ export default async function handler(req, res) {
       maxTokens,
       imageBase64,
       imageMimeType,
-      includeTools
+      includeTools,
+      clarificationOnlyTools
     );
 
     return res.status(200).json(result);
