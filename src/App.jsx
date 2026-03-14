@@ -3743,6 +3743,23 @@ function App() {
           });
           break;
         }
+        case 'edit_note': {
+          const noteId = action.note_id;
+          const newContent = action.new_content || '';
+          setNotes(prev => {
+            const updated = prev.map(n => n.id === noteId ? { ...n, content: newContent, updatedAt: new Date().toISOString() } : n);
+            const note = updated.find(n => n.id === noteId);
+            if (note && user) syncOp(() => dbUpsertNote(note, user.id));
+            return updated;
+          });
+          break;
+        }
+        case 'delete_note': {
+          const noteId = action.note_id;
+          setNotes(prev => prev.filter(n => n.id !== noteId));
+          if (user) syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+          break;
+        }
         case 'break_task': {
           const newTasks = (action.subtasks||[]).map(st => ({
             id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
@@ -4473,6 +4490,30 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
   }
 
+  function resumeSavedChat(chatId) {
+    const chat = savedChats.find(c => c.id === chatId);
+    if (!chat) return;
+    // Clear viewing lock so user can type
+    setViewingSavedChatId(null);
+    setMessages(chat.messages || []);
+    setShowChatSidebar(false);
+    setPendingActions([]);
+    setPendingClarification(null);
+    setChatError(null);
+    // Persist resumed messages as the new active chat in DB
+    if (user) {
+      dbClearChat(user.id).then(() => {
+        (chat.messages || []).forEach(m => {
+          dbInsertChatMsg(m.role, m.content, user.id, m.photoUrl || null);
+        });
+      });
+    }
+    // Remove from saved chats since it's now the active chat
+    setSavedChats(prev => prev.filter(c => c.id !== chatId));
+    if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
+    setToastMsg('Chat resumed');
+  }
+
   function autoConfirmPending() {
     if (pendingClarification) return;
     if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
@@ -4550,12 +4591,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Detect content generation requests (for rate limiting + model upgrade)
       const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
 
+      // Tier routing: pure conversational messages skip tools for lower latency
+      const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification
+        && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan)\b/i.test(msgContent)
+        && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task)\b/i.test(msgContent);
+
+      const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
       const chatBody = {
-        systemPrompt: chatPrompt,
+        systemPrompt: chatPromptFinal,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : 1024,
+        maxTokens: isContentGen ? 4096 : isConversational ? 512 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
+        ...(isConversational ? { noTools: true } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -4655,6 +4703,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         delete_event: 'got it — I can remove that event.',
         delete_task: 'got it — I can remove that task.',
         complete_task: 'got it — I can mark that complete.',
+        edit_note: 'got it — I can update that note.',
+        delete_note: 'got it — I can delete that note.',
       };
       const displayContent = rawContent
         ? rawContent
@@ -4717,6 +4767,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           }
           continue;
         }
+        if (a.type === 'edit_note' || a.type === 'delete_note') {
+          const noteName = (a.tab_name || '').toLowerCase();
+          const match = notes.find(n => n.name.toLowerCase() === noteName)
+            || notes.find(n => n.name.toLowerCase().includes(noteName))
+            || notes.find(n => noteName.includes(n.name.toLowerCase()));
+          if (match) {
+            resolved.push({ ...a, note_id: match.id, tab_name: match.name });
+          } else {
+            const msg = { role:'assistant', content:"I couldn't find that note. what's the exact name?", timestamp:Date.now() };
+            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          }
+          continue;
+        }
         if (a.type === 'add_event') {
           const dupTitle = (a.title||'').toLowerCase();
           const dupDate = a.date || today();
@@ -4727,7 +4790,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (actions.length > 0) {
-        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all'];
+        const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const blockExecution = pendingClarification && !fromClarification;
         const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
@@ -5099,7 +5162,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div className="chat-sidebar-item-title">{chat.title}</div>
                   <div className="chat-sidebar-item-meta">
                     <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
-                    <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                    <span style={{display:'flex',gap:4}}>
+                      <button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button>
+                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                    </span>
                   </div>
                 </div>
               ))}
@@ -5212,7 +5278,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         {viewingSavedChatId && (
           <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
             <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
-            <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
+            <div style={{display:'flex',gap:6}}>
+              <button onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'var(--teal,#2bd5ba)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Resume</button>
+              <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
+            </div>
           </div>
         )}
         {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
@@ -5337,6 +5406,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
             {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
+            {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
             <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
           </div>
@@ -5383,7 +5453,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               {Icon.mic(18)}
             </button>
             <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={viewingSavedChatId?"viewing saved chat — click 'Back' to resume":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+              placeholder={viewingSavedChatId?"viewing saved chat — click 'Resume' to continue":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
               disabled={isLoading||!!viewingSavedChatId}
               style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
@@ -5474,7 +5544,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     <div className="chat-sidebar-item-title">{chat.title}</div>
                     <div className="chat-sidebar-item-meta">
                       <span>{chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''} · {fmt(chat.savedAt)}</span>
-                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                      <span style={{display:'flex',gap:4}}>
+                        <button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button>
+                        <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                      </span>
                     </div>
                   </div>
                 ))}
