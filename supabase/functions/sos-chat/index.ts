@@ -611,16 +611,13 @@ async function checkContentRateLimit(
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(supabaseUrl, serviceKey);
 
-  // Midnight EST = 05:00 UTC
-  const now = new Date();
-  const estOffset = -5;
-  const estNow = new Date(now.getTime() + estOffset * 60 * 60 * 1000);
-  const todayEST =
-    estNow.getFullYear() +
-    "-" +
-    String(estNow.getMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(estNow.getDate()).padStart(2, "0");
+  const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const todayEST = dateFormatter.format(new Date());
 
   const { data } = await sb
     .from("content_generations")
