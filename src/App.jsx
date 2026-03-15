@@ -5228,6 +5228,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
+          <img src="assets/brain-logo.svg" alt="SOS" style={{width:32,height:32,borderRadius:6,flexShrink:0}} />
         </div>
       </div>}
 
