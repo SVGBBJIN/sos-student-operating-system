@@ -5,6 +5,7 @@ import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } f
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
+import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -1699,6 +1700,28 @@ function ContentCard({ icon, title, subject, onSave, onDismiss, children, accent
   );
 }
 
+function PerfPill() {
+  const [tier, setTier] = useState(() => getPerfTier());
+  useEffect(() => {
+    function onTier(e) { setTier(e.detail.tier); }
+    window.addEventListener('sos:perf-tier', onTier);
+    return () => window.removeEventListener('sos:perf-tier', onTier);
+  }, []);
+  const labels = { full: 'Full', mid: 'Mid', low: 'Lite' };
+  const cycle = () => {
+    const tiers = ['full', 'mid', 'low'];
+    const next = tiers[(tiers.indexOf(tier) + 1) % 3];
+    setPerfOverride(next);
+    setTier(next);
+  };
+  const pillClass = 'perf-pill' + (tier === 'full' ? ' tier-full' : tier === 'mid' ? ' tier-mid' : '');
+  return (
+    <button className={pillClass} onClick={cycle} title={`Performance: ${labels[tier]}. Click to cycle.`}>
+      {tier === 'full' ? '✦' : tier === 'mid' ? '⚡' : '⚡'} {labels[tier]}
+    </button>
+  );
+}
+
 function FlashcardDisplay({ data, onSave, onDismiss }) {
   const cards = data.cards || [];
   const [idx, setIdx] = useState(0);
@@ -1726,6 +1749,13 @@ function FlashcardDisplay({ data, onSave, onDismiss }) {
         <span className="fc-counter">{idx + 1} / {cards.length}</span>
         <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>{Icon.chevronRight(16)}</button>
       </div>
+      {flipped && (
+        <div className="fc-chips">
+          <button className="fc-chip chip-know" onClick={(e) => { e.stopPropagation(); goNext(); }}>✓ Got it</button>
+          <button className="fc-chip chip-unsure" onClick={(e) => { e.stopPropagation(); goNext(); }}>~ Almost</button>
+          <button className="fc-chip chip-nope" onClick={(e) => { e.stopPropagation(); goNext(); }}>✗ Nope</button>
+        </div>
+      )}
       <div className="fc-hint">tap card to flip</div>
     </ContentCard>
   );
@@ -5193,6 +5223,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <PerfPill />
           <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
@@ -5251,6 +5282,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the old horizontal bar and the compact icon-only toggle.</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>setCompactCompanionToggle(prev=>!prev)}>{compactCompanionToggle ? 'Compact' : 'Classic'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Auto adjusts based on device speed, or pick a fixed tier.</div>
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <button className="settings-toggle" onClick={()=>setPerfOverride(null)}>Auto</button>
+                  <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
+                  <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
+                </div>
               </div>
               <div className="settings-row">
                 <div>
