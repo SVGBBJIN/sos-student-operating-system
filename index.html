@@ -4,9 +4,32 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>SOS — Student Operating System</title>
+<!-- DM Sans + DM Mono -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+<!-- Static perf pre-detection — sets initial data-perf before JS bundle loads -->
+<!-- This prevents a flash of full-quality on Chromebooks. The adaptive      -->
+<!-- adjuster in src/lib/perfAdjuster.js takes over after React mounts.      -->
+<script>
+  (function() {
+    var s = localStorage.getItem('sos-perf-override');
+    if (s === 'low' || s === 'mid' || s === 'full') {
+      document.documentElement.setAttribute('data-perf', s);
+      return;
+    }
+    var score = 100;
+    if (/CrOS/.test(navigator.userAgent)) score -= 40;
+    if (navigator.hardwareConcurrency != null && navigator.hardwareConcurrency <= 2) score -= 30;
+    if (navigator.deviceMemory != null && navigator.deviceMemory <= 2) score -= 20;
+    if (navigator.deviceMemory != null && navigator.deviceMemory <= 1) score -= 20;
+    var tier = score < 40 ? 'low' : score < 70 ? 'mid' : 'full';
+    if (tier !== 'full') document.documentElement.setAttribute('data-perf', tier);
+  })();
+</script>
+<!-- Favicon + SEO -->
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="description" content="SOS — your AI-powered student operating system for notes, flashcards, calendar, and homework help.">
 <!-- Google Identity Services (OAuth for Calendar/Docs/Drive) -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
