@@ -716,6 +716,41 @@ For project breakdowns: {"type":"create_project_breakdown","title":"Project","ph
 Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.`;
 }
 
+/* ─── Tutor Mode System Prompt Addendum ─── */
+function buildTutorAddendum(attempts = 0) {
+  const offerSolution = attempts >= 3;
+  return `
+
+═══════════ TUTOR MODE ACTIVE ═══════════
+You are now operating as a Socratic tutor. Your mission is to help students LEARN, not just get answers.
+
+TUTOR RULES:
+1. NEVER give the final answer immediately — always guide with questions first.
+2. Break every problem into small, manageable steps.
+3. Ask one guiding question at a time. Check understanding before moving forward.
+4. Provide hints and frameworks, not solutions.
+5. Use an encouraging, educational tone. Celebrate attempts, not just correct answers.
+6. After a student solves a concept, generate a 2-3 question Review Quiz.
+7. If student asks for the solution explicitly${offerSolution ? ' (they have already tried multiple times)' : ''}: ${offerSolution ? 'Provide a controlled, step-by-step solution walkthrough rather than just the answer.' : 'Acknowledge the struggle, give a stronger hint, but still guide with questions.'}
+${attempts > 0 ? `\nNOTE: The student has sent ${attempts} message(s) on this topic. ${offerSolution ? 'They are struggling — give a more direct step-by-step walkthrough.' : 'Give progressively stronger hints.'}` : ''}
+
+RESPONSE FORMAT — ALWAYS respond with one of these JSON types in tutor mode (no plain text):
+
+For guiding a student step by step:
+{"type":"tutor_step","stepNumber":1,"stepLabel":"Step 1: Clarify the Task","content":"[your explanation or observation about the problem]","hint":"[a specific nudge to help them think]","guidingQuestion":"[a Socratic question to spark critical thinking]","strategyTip":"[optional: a study or problem-solving tip, or null]"}
+
+stepNumber options: 1=Clarify the Task, 2=Provide a Hint, 3=Guiding Question, 4=Strategy Tip
+
+For a review quiz after a concept is mastered:
+{"type":"tutor_quiz","conceptSummary":"[2-3 sentence summary of what was learned]","questions":[{"type":"computational","q":"[question text]","hint":"[optional hint or null]"},{"type":"conceptual","q":"[question text]","hint":null},{"type":"analysis","q":"[question text]","hint":null}]}
+
+Guidelines:
+- Use outlines for writing assignments, guided steps for math problems, frameworks for reading comprehension.
+- Mix computational, conceptual, and analysis questions based on the subject.
+- Adapt difficulty: if student answers well, include a challenge problem; if struggling, add review hints.
+═════════════════════════════════════════`;
+}
+
 /* ─── Action parser ─── */
 function parseActions(text) {
   const actions = []; const regex = /<action>([\s\S]*?)<\/action>/g; let match;
@@ -874,7 +909,7 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan','tutor_step','tutor_quiz'];
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
@@ -2348,9 +2383,152 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPla
       return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
+    case 'tutor_step':
+      return <TutorStepCard data={content} onDismiss={onDismiss} onNeedHelp={onDismiss} />;
+    case 'tutor_quiz':
+      return <TutorQuizCard data={content} onDismiss={onDismiss} />;
     default:
       return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
   }
+}
+
+/* ═══════════════════════════════════════════════
+   TUTOR STEP CARD
+   ═══════════════════════════════════════════════ */
+function TutorStepCard({ data, onDismiss, onNeedHelp }) {
+  const stepColors = { 1:'var(--accent)', 2:'#f59e0b', 3:'var(--teal)', 4:'#a78bfa' };
+  const stepIcons = { 1: Icon.helpCircle(16), 2: Icon.sparkles(16), 3: Icon.messageCircle(16), 4: Icon.bookOpen(16) };
+  const stepNum = data.stepNumber || 1;
+  const color = stepColors[stepNum] || 'var(--accent)';
+  return (
+    <div className="tutor-card" style={{borderLeftColor:color}}>
+      <div className="tutor-card-hdr">
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div className="tutor-card-icon" style={{background:`color-mix(in srgb, ${color} 12%, transparent)`,borderColor:`color-mix(in srgb, ${color} 25%, transparent)`,color}}>
+            {stepIcons[stepNum] || Icon.helpCircle(16)}
+          </div>
+          <span className="tutor-card-title">{data.stepLabel || 'Tutor Guidance'}</span>
+        </div>
+        <span className="tutor-step-badge" style={{background:`color-mix(in srgb, ${color} 10%, transparent)`,color,border:`1px solid color-mix(in srgb, ${color} 20%, transparent)`}}>
+          step {stepNum} / 4
+        </span>
+      </div>
+      <div className="tutor-card-body">
+        {data.content && <p className="tutor-content">{data.content}</p>}
+        {data.hint && (
+          <div className="tutor-hint-block">
+            <span style={{display:'flex',alignItems:'center',gap:5,fontWeight:700,fontSize:'0.78rem',color:'#f59e0b',marginBottom:4}}>
+              {Icon.sparkles(13)} Hint
+            </span>
+            <p>{data.hint}</p>
+          </div>
+        )}
+        {data.guidingQuestion && (
+          <div className="tutor-question-block">
+            <span style={{display:'flex',alignItems:'center',gap:5,fontWeight:700,fontSize:'0.78rem',color:'var(--teal)',marginBottom:4}}>
+              {Icon.messageCircle(13)} Guiding Question
+            </span>
+            <p>{data.guidingQuestion}</p>
+          </div>
+        )}
+        {data.strategyTip && (
+          <div className="tutor-strategy-tip">
+            <span style={{display:'flex',alignItems:'center',gap:5,fontWeight:700,fontSize:'0.78rem',color:'#a78bfa',marginBottom:4}}>
+              {Icon.bookOpen(13)} Strategy Tip
+            </span>
+            <p>{data.strategyTip}</p>
+          </div>
+        )}
+      </div>
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-cancel" onClick={onDismiss} style={{flex:'none'}}>{Icon.x(14)} Dismiss</button>
+        <button className="confirm-btn" onClick={onNeedHelp} style={{background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.2)',color:'#f59e0b',flex:1}}>
+          {Icon.helpCircle(14)} I need more help
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TUTOR QUIZ CARD
+   ═══════════════════════════════════════════════ */
+function TutorQuizCard({ data, onDismiss }) {
+  const [answers, setAnswers] = useState((data.questions || []).map(() => ''));
+  const [submitted, setSubmitted] = useState(false);
+  const [revealedHints, setRevealedHints] = useState([]);
+  function toggleHint(idx) {
+    setRevealedHints(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+  }
+  const typeColors = { computational:'var(--accent)', conceptual:'var(--teal)', analysis:'#f59e0b' };
+  return (
+    <div className="tutor-card" style={{borderLeftColor:'var(--teal)'}}>
+      <div className="tutor-card-hdr">
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div className="tutor-card-icon" style={{background:'rgba(52,211,153,0.12)',borderColor:'rgba(52,211,153,0.25)',color:'var(--teal)'}}>
+            {Icon.trophy(16)}
+          </div>
+          <span className="tutor-card-title">Review Quiz</span>
+        </div>
+        <span className="tutor-step-badge" style={{background:'rgba(52,211,153,0.1)',color:'var(--teal)',border:'1px solid rgba(52,211,153,0.2)'}}>
+          {(data.questions||[]).length} question{(data.questions||[]).length !== 1 ? 's' : ''}
+        </span>
+      </div>
+      {data.conceptSummary && (
+        <div style={{padding:'10px 16px',background:'rgba(52,211,153,0.04)',borderBottom:'1px solid rgba(52,211,153,0.1)'}}>
+          <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--teal)',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.5px',display:'flex',alignItems:'center',gap:4}}>
+            {Icon.checkCircle(12)} Concept Summary
+          </div>
+          <p style={{fontSize:'0.85rem',color:'var(--text)',lineHeight:1.55,margin:0}}>{data.conceptSummary}</p>
+        </div>
+      )}
+      <div className="tutor-card-body">
+        {(data.questions || []).map((q, idx) => {
+          const qColor = typeColors[q.type] || 'var(--accent)';
+          return (
+            <div key={idx} className="tutor-quiz-question">
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                <span style={{fontSize:'0.72rem',fontWeight:700,color:qColor,textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                  Q{idx+1} · {q.type || 'question'}
+                </span>
+                {q.hint && (
+                  <button onClick={()=>toggleHint(idx)} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'0.72rem',display:'flex',alignItems:'center',gap:3,padding:'2px 4px'}}>
+                    {Icon.sparkles(11)} {revealedHints.includes(idx) ? 'Hide hint' : 'Hint'}
+                  </button>
+                )}
+              </div>
+              <p style={{fontSize:'0.88rem',color:'var(--text)',margin:'0 0 8px',lineHeight:1.5}}>{q.q}</p>
+              {revealedHints.includes(idx) && q.hint && (
+                <div style={{fontSize:'0.8rem',color:'#f59e0b',background:'rgba(245,158,11,0.06)',border:'1px solid rgba(245,158,11,0.15)',borderRadius:8,padding:'6px 10px',marginBottom:8}}>
+                  {Icon.sparkles(12)} {q.hint}
+                </div>
+              )}
+              <textarea
+                value={answers[idx]}
+                onChange={e => setAnswers(prev => { const n=[...prev]; n[idx]=e.target.value; return n; })}
+                placeholder="Your answer..."
+                rows={2}
+                disabled={submitted}
+                className="tutor-quiz-input"
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="confirm-card-actions">
+        <button className="confirm-btn confirm-btn-cancel" onClick={onDismiss}>{Icon.x(14)} Dismiss</button>
+        {!submitted ? (
+          <button className="confirm-btn confirm-btn-yes" onClick={()=>setSubmitted(true)} disabled={answers.every(a=>!a.trim())}>
+            {Icon.check(14)} Submit Answers
+          </button>
+        ) : (
+          <div style={{flex:1,fontSize:'0.82rem',color:'var(--success)',fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
+            {Icon.checkCircle(14)} Submitted — ask SOS to review your answers!
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════════
@@ -3497,6 +3675,8 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
+  const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
+  const [tutorAttempts, setTutorAttempts] = useState(0);
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const getWorkspaceContext = useCallback((overridePanel = null) => {
@@ -4772,11 +4952,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
 
       const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
+      const chatPromptWithTutor = tutorMode ? chatPromptFinal + buildTutorAddendum(tutorAttempts) : chatPromptFinal;
+      if (tutorMode) setTutorAttempts(prev => prev + 1);
       const chatBody = {
-        systemPrompt: chatPromptFinal,
+        systemPrompt: chatPromptWithTutor,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : isConversational ? 512 : 1024,
+        maxTokens: isContentGen || tutorMode ? 4096 : isConversational ? 512 : 1024,
         isContentGen,
+        isTutorMode: tutorMode,
         workspaceContext: effectiveWorkspaceContext,
       };
       if (photo) {
@@ -4810,8 +4993,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const chatData = await chatResponse.json();
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
-      // For content gen, parse content types from raw text response (AI outputs JSON when tools are disabled)
-      if (isContentGen && actions.length === 0 && chatData?.content) {
+      // For content gen and tutor mode, parse content types from raw text response
+      if ((isContentGen || tutorMode) && actions.length === 0 && chatData?.content) {
         const raw = (chatData.content || '').trim();
         // Try parsing as JSON (AI may output raw JSON object)
         const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -5225,6 +5408,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function clearChat() {
     setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
+    setTutorAttempts(0);
     if (user) dbClearChat(user.id);
   }
 
@@ -5341,6 +5525,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>openCompanionPanel('schedule')} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>openCompanionPanel('notes')} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ const next=!tutorMode; setTutorMode(next); setTutorAttempts(0); localStorage.setItem('sos_tutor_mode',String(next)); }} title="Tutor mode" style={tutorMode?{background:'rgba(245,158,11,0.08)',borderColor:'rgba(245,158,11,0.2)'}:{}}>
+            {Icon.helpCircle(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Tutor mode</span>
+            {tutorMode && <span style={{fontSize:'0.66rem',background:'rgba(245,158,11,0.15)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)',borderRadius:99,padding:'1px 7px',flexShrink:0,fontWeight:700}}>ON</span>}
+          </button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -5629,6 +5817,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         {messages.length>0&&(
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
+            {tutorMode && <button className="sos-chip" style={{background:'rgba(245,158,11,0.08)',borderColor:'rgba(245,158,11,0.2)',color:'#f59e0b'}} onClick={()=>sendChip('Give me a hint')}>Give me a hint</button>}
+            {tutorMode && <button className="sos-chip" style={{background:'rgba(245,158,11,0.08)',borderColor:'rgba(245,158,11,0.2)',color:'#f59e0b'}} onClick={()=>sendChip('Break it down step by step')}>Break it down</button>}
+            {tutorMode && <button className="sos-chip" style={{background:'rgba(245,158,11,0.08)',borderColor:'rgba(245,158,11,0.2)',color:'#f59e0b'}} onClick={()=>{setTutorAttempts(prev=>prev+1);sendChip('I need more help, please guide me through it');}}>I need more help</button>}
             {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
@@ -5667,6 +5858,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
             {workspaceModeLabel && (
               <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
+            )}
+            {tutorMode && (
+              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'#f59e0b',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.24)',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                {Icon.helpCircle(12)} Tutor mode
+              </span>
             )}
             <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
               style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>

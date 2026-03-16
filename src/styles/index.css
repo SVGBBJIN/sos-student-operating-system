@@ -485,3 +485,22 @@ select option{background:#0f0f23;color:var(--text)}
 [data-perf="mid"] *{transition-duration:.2s!important}
 [data-perf="mid"] .sos-sidebar::before{display:none}
 [data-perf="mid"] .fc-inner{transition:transform .2s linear}
+
+/* ── Tutor Cards ── */
+.tutor-card{background:linear-gradient(160deg,rgba(26,26,46,0.98),rgba(15,15,26,0.95));border:1px solid rgba(255,255,255,0.07);border-left:3px solid var(--accent);border-radius:16px;max-width:480px;width:100%;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.25);animation:scaleIn .3s cubic-bezier(0.16,1,0.3,1)}
+.tutor-card-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.05)}
+.tutor-card-icon{width:30px;height:30px;border-radius:8px;border:1px solid;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tutor-card-title{font-weight:700;font-size:0.9rem;color:var(--text)}
+.tutor-step-badge{font-size:0.68rem;font-weight:700;padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:0.4px}
+.tutor-card-body{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.tutor-content{font-size:0.88rem;color:var(--text);line-height:1.6;margin:0}
+.tutor-hint-block{background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.18);border-radius:10px;padding:10px 12px}
+.tutor-hint-block p{font-size:0.85rem;color:var(--text);margin:0;line-height:1.55}
+.tutor-question-block{background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.18);border-radius:10px;padding:10px 12px}
+.tutor-question-block p{font-size:0.88rem;color:var(--text);margin:0;line-height:1.55;font-style:italic}
+.tutor-strategy-tip{background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.18);border-radius:10px;padding:10px 12px}
+.tutor-strategy-tip p{font-size:0.84rem;color:var(--text);margin:0;line-height:1.55}
+.tutor-quiz-question{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:12px 14px}
+.tutor-quiz-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:0.84rem;line-height:1.4;resize:vertical;outline:none;font-family:inherit;transition:border-color .2s;box-sizing:border-box}
+.tutor-quiz-input:focus{border-color:var(--teal)}
+.tutor-quiz-input:disabled{opacity:0.6;cursor:not-allowed}
