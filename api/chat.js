@@ -6,6 +6,12 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/* ── Model constants ── */
+// Primary: openai/gpt-oss-20b (cheaper, handles chat + tool calling in one pass)
+// Backup:  llama-3.3-70b-versatile (reliable fallback if primary is unavailable)
+const PRIMARY_MODEL = "openai/gpt-oss-20b";
+const BACKUP_MODEL  = "llama-3.3-70b-versatile";
+
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
   {
@@ -391,111 +397,124 @@ function parseFailedGeneration(failedGen) {
 }
 
 /* ── Groq chat + function calling ── */
-async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null) {
-  const groqMessages = [{ role: "system", content: systemPrompt }];
+async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null, backupModel = null) {
+  // Inner attempt: builds the request for a specific model and runs it with 429 retry logic.
+  async function attempt(mdl) {
+    const groqMessages = [{ role: "system", content: systemPrompt }];
 
-  if (imageBase64) {
-    const effectiveMime = imageMimeType || "image/jpeg";
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    const textContent =
-      lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
-        ? lastUser.content.trim()
-        : "What do you see in this image?";
-    groqMessages.push({
-      role: "user",
-      content: [
-        {
-          type: "image_url",
-          image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
-        },
-        { type: "text", text: textContent },
-      ],
-    });
-  } else {
-    for (const m of messages) {
-      const text = typeof m.content === "string" ? m.content.trim() : "";
-      if (text) groqMessages.push({ role: m.role, content: text });
-    }
-  }
-
-  const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : model;
-  const body = {
-    model: effectiveModel,
-    messages: groqMessages,
-    max_tokens: maxTokens,
-  };
-
-  const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-  if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
-    body.tools = effectiveTools;
-    body.tool_choice = "auto";
-  }
-
-  // Retry logic for 429 rate limits (up to 3 retries with exponential backoff)
-  const MAX_RETRIES = 3;
-  let res;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    try {
-      res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
+    if (imageBase64) {
+      const effectiveMime = imageMimeType || "image/jpeg";
+      const lastUser = [...messages].reverse().find((m) => m.role === "user");
+      const textContent =
+        lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
+          ? lastUser.content.trim()
+          : "What do you see in this image?";
+      groqMessages.push({
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
+          },
+          { type: "text", text: textContent },
+        ],
       });
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        throw new Error(`Groq ${model} request timed out after 30s`);
+    } else {
+      for (const m of messages) {
+        const text = typeof m.content === "string" ? m.content.trim() : "";
+        if (text) groqMessages.push({ role: m.role, content: text });
       }
-      throw err;
-    }
-    clearTimeout(timeoutId);
-
-    if (res.status === 429 && attempt < MAX_RETRIES) {
-      const errBody = await res.text().catch(() => "");
-      const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
-      const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : (2 ** attempt) * 2;
-      console.warn(`Groq 429 rate limit hit, retrying in ${waitSec}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
-      await new Promise((r) => setTimeout(r, waitSec * 1000));
-      continue;
     }
 
-    // Recover from Groq's malformed tool call errors (400 tool_use_failed)
-    if (res.status === 400) {
-      const errText = await res.text().catch(() => "");
-      let errData;
-      try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
+    // Vision requests always use the vision-capable model regardless of mdl
+    const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : mdl;
+    const body = {
+      model: effectiveModel,
+      messages: groqMessages,
+      max_tokens: maxTokens,
+    };
 
-      if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
-        const recovered = parseFailedGeneration(errData.error.failed_generation);
-        if (recovered.length > 0) {
-          // Build synthetic tool_calls matching the normal response format
-          const syntheticToolCalls = recovered.map((r, i) => ({
-            id: `recovered_${i}`,
-            type: "function",
-            function: { name: r.name, arguments: JSON.stringify(r.arguments) },
-          }));
-          // Construct a synthetic response and skip to parsing
-          return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
+    const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+    if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
+      body.tools = effectiveTools;
+      body.tool_choice = "auto";
+    }
+
+    // Retry loop: handles 429 rate limits with exponential backoff (up to 3 retries)
+    const MAX_RETRIES = 3;
+    let res;
+    for (let i = 0; i <= MAX_RETRIES; i++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      try {
+        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+          throw new Error(`Groq ${mdl} request timed out after 30s`);
         }
+        throw err;
       }
-      throw new Error(`Groq ${model} error 400: ${errText.slice(0, 200)}`);
+      clearTimeout(timeoutId);
+
+      if (res.status === 429 && i < MAX_RETRIES) {
+        const errBody = await res.text().catch(() => "");
+        const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
+        const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : (2 ** i) * 2;
+        console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        continue;
+      }
+
+      // Recover from Groq's malformed tool call errors (400 tool_use_failed)
+      if (res.status === 400) {
+        const errText = await res.text().catch(() => "");
+        let errData;
+        try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
+
+        if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
+          const recovered = parseFailedGeneration(errData.error.failed_generation);
+          if (recovered.length > 0) {
+            const syntheticToolCalls = recovered.map((r, k) => ({
+              id: `recovered_${k}`,
+              type: "function",
+              function: { name: r.name, arguments: JSON.stringify(r.arguments) },
+            }));
+            return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
+          }
+        }
+        throw new Error(`Groq ${mdl} error 400: ${errText.slice(0, 200)}`);
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+      }
+      break;
     }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Groq ${model} error ${res.status}: ${errText}`);
-    }
-    break;
+    const data = await res.json();
+    return parseLlmResponse(data);
   }
 
-  const data = await res.json();
-  return parseLlmResponse(data);
+  // Try primary model; on any failure fall back to backupModel if provided
+  try {
+    return await attempt(model);
+  } catch (primaryErr) {
+    if (backupModel && backupModel !== model) {
+      console.warn(`[callGroq] Primary model (${model}) failed: ${primaryErr.message} — retrying with backup ${backupModel}`);
+      return await attempt(backupModel);
+    }
+    throw primaryErr;
+  }
 }
 
 function parseLlmResponse(data) {
@@ -681,23 +700,20 @@ export default async function handler(req, res) {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Model: llama-3.3-70b-versatile for text (reliable tool calling); vision model auto-selected in callGroq
-    const model = body.noTools ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile";
-    const includeTools = !isContentGen && !body.noTools;
-    const clarificationOnlyTools = isContentGen
-      ? ACTION_TOOLS.filter((t) => t.function.name === "ask_clarification")
-      : null;
-
+    // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
+    // not regex-gated detection. openai/gpt-oss-20b handles chat + tool calling in one pass;
+    // llama-3.3-70b-versatile is the automatic backup if the primary model is unavailable.
     const result = await callGroq(
       GROQ_API_KEY,
-      model,
+      PRIMARY_MODEL,
       effectiveSystemPrompt,
       messages,
       maxTokens,
       imageBase64,
       imageMimeType,
-      includeTools,
-      clarificationOnlyTools
+      true,   // includeTools — always on; model decides when to call tools
+      null,   // toolsOverride — use full ACTION_TOOLS
+      BACKUP_MODEL
     );
 
     return res.status(200).json(result);
