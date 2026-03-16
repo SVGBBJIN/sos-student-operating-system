@@ -406,7 +406,13 @@ function parseLlmResponse(data: any): { content: string; actions: Record<string,
   const clarifications: Record<string, unknown>[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actions: Record<string, unknown>[] = (message?.tool_calls || []).flatMap((tc: any) => {
-    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
+    let parsedArgs: Record<string, unknown>;
+    try {
+      const raw = tc.function.arguments;
+      parsedArgs = (typeof raw === "object" && raw !== null) ? raw : JSON.parse(raw || "{}");
+    } catch (_) {
+      parsedArgs = {};
+    }
 
     if (tc.function.name === "ask_clarification") {
       clarifications.push({

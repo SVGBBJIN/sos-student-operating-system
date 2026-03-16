@@ -522,7 +522,13 @@ function parseLlmResponse(data) {
   const textContent = message?.content || "";
   const clarifications = [];
   const actions = (message?.tool_calls || []).flatMap((tc) => {
-    const parsedArgs = JSON.parse(tc.function.arguments || "{}");
+    let parsedArgs;
+    try {
+      const raw = tc.function.arguments;
+      parsedArgs = (typeof raw === "object" && raw !== null) ? raw : JSON.parse(raw || "{}");
+    } catch (_) {
+      parsedArgs = {};
+    }
 
     if (tc.function.name === "ask_clarification") {
       clarifications.push({
