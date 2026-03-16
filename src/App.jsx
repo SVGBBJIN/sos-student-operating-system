@@ -103,6 +103,7 @@ function weatherEmoji(code) {
 }
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
+const GUEST_DEMO_LIMIT = 3;
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -1050,6 +1051,41 @@ function AuthModal({ onAuth, onClose }) {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(0);
+
+  useEffect(() => {
+    if (rateLimitSeconds <= 0) return;
+    const t = setInterval(() => setRateLimitSeconds(s => s <= 1 ? 0 : s - 1), 1000);
+    return () => clearInterval(t);
+  }, [rateLimitSeconds]);
+
+  function fmtCountdown(s) {
+    const m = Math.floor(s / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return `${m}:${sec}`;
+  }
+
+  function friendlyAuthError(msg) {
+    if (!msg) return 'Something went wrong — please try again.';
+    const lower = msg.toLowerCase();
+    if ((lower.includes('invalid') && lower.includes('email')) || lower.includes('email address') || lower.includes('not authorized')) {
+      return "That email address wasn't accepted. Please try a different address or use Google sign-in.";
+    }
+    if (lower.includes('rate limit') || lower.includes('security purposes') || lower.includes('too many')) {
+      const match = msg.match(/(\d+)\s*second/i);
+      const secs = match ? parseInt(match[1], 10) : 300;
+      setRateLimitSeconds(secs);
+      const mins = Math.ceil(secs / 60);
+      return `Too many sign-up attempts — please wait ${mins} minute${mins !== 1 ? 's' : ''} before trying again.`;
+    }
+    if (lower.includes('already registered') || lower.includes('already in use') || lower.includes('user already')) {
+      return 'An account with that email already exists — try signing in instead.';
+    }
+    if (lower.includes('password') && lower.includes('short')) {
+      return 'Password must be at least 6 characters.';
+    }
+    return msg;
+  }
 
   async function handleGoogleSignIn() {
     setError(null);
@@ -1084,6 +1120,9 @@ function AuthModal({ onAuth, onClose }) {
             setError(null);
             setMode('check-email');
           }
+        } else {
+          // Supabase silently rejects the email (e.g. domain blocklist) without an error object
+          setError("We couldn't create an account with that email — please try a different address or use Google sign-in.");
         }
       } else {
         const { data, error: err } = await sb.auth.signInWithPassword({ email, password });
@@ -1091,7 +1130,7 @@ function AuthModal({ onAuth, onClose }) {
         if (data.user) onAuth(data.user);
       }
     } catch (err) {
-      setError(err.message || 'Something went wrong');
+      setError(friendlyAuthError(err.message));
     } finally {
       setLoading(false);
     }
@@ -1125,7 +1164,16 @@ function AuthModal({ onAuth, onClose }) {
           <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>
         </div>
 
-        {error && <div className="auth-error">{error}</div>}
+        {error && (
+          <div className="auth-error">
+            {error}
+            {rateLimitSeconds > 0 && (
+              <span style={{display:'block',marginTop:4,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>
+                Try again in {fmtCountdown(rateLimitSeconds)}
+              </span>
+            )}
+          </div>
+        )}
 
         <button type="button" onClick={handleGoogleSignIn} disabled={loading}
           style={{width:'100%',padding:'12px',borderRadius:10,border:'1px solid var(--border)',background:'var(--bg2)',color:'var(--text)',cursor:loading?'not-allowed':'pointer',fontWeight:600,fontSize:'0.92rem',display:'flex',alignItems:'center',justifyContent:'center',gap:10,transition:'all .15s',marginBottom:12,opacity:loading?0.6:1}}>
@@ -1142,8 +1190,8 @@ function AuthModal({ onAuth, onClose }) {
           <input className="auth-input" type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="email"/>
           <input className="auth-input" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={6} autoComplete={mode==='login'?'current-password':'new-password'}/>
 
-          <button className="auth-btn auth-btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Loading...' : (mode === 'login' ? 'Sign in' : 'Create account')}
+          <button className="auth-btn auth-btn-primary" type="submit" disabled={loading || rateLimitSeconds > 0}>
+            {loading ? 'Loading...' : rateLimitSeconds > 0 ? `Wait ${fmtCountdown(rateLimitSeconds)}` : (mode === 'login' ? 'Sign in' : 'Create account')}
           </button>
         </form>
 
@@ -3406,6 +3454,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
+  const [guestMsgCount, setGuestMsgCount] = useState(0);
   // Google OAuth state
   const [googleToken, setGoogleToken] = useState(() => {
     const t = sessionStorage.getItem('sos_google_token');
@@ -4870,8 +4919,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     sendMessage(readableResponse, { fromClarification: true });
   }
 
-  function handleSubmit(e) { if(e)e.preventDefault(); if(viewingSavedChatId)return; if(!user){setShowAuthModal(true);return;} sendMessage(input); }
-  function sendChip(text) { if(viewingSavedChatId)return; if(!user){setInput(text);setShowAuthModal(true);return;} setInput(''); sendMessage(text); }
+  function handleSubmit(e) {
+    if(e)e.preventDefault();
+    if(viewingSavedChatId)return;
+    if(!user){
+      if(guestMsgCount >= GUEST_DEMO_LIMIT){ setShowAuthModal(true); return; }
+      setGuestMsgCount(c => c + 1);
+    }
+    sendMessage(input);
+  }
+  function sendChip(text) {
+    if(viewingSavedChatId)return;
+    if(!user){
+      if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(text); setShowAuthModal(true); return; }
+      setGuestMsgCount(c => c + 1);
+      setInput('');
+      sendMessage(text);
+      return;
+    }
+    setInput(''); sendMessage(text);
+  }
 
   async function handlePhotoSelect(e) {
     const file = e.target.files?.[0];
@@ -5087,8 +5154,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){
         e.preventDefault();
-        if (activePanel === 'chat') {
-          if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+        if (layoutMode === 'topbar') {
+          setShowPeek(p=>!p);
+        } else if (activePanel === 'chat') {
           openCompanionPanel('schedule');
         } else {
           setShowPeek(p=>!p);
@@ -5096,8 +5164,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
       else if(key==='n'){
         e.preventDefault();
-        if (activePanel === 'chat') {
-          if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+        if (layoutMode === 'topbar') {
+          setShowNotes(p=>!p);
+        } else if (activePanel === 'chat') {
           openCompanionPanel('notes');
         } else {
           setShowNotes(p=>!p);
@@ -5442,6 +5511,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </div>
 
       </ErrorBoundary>
+      {/* ── Guest Demo Banner ── */}
+      {!user && (
+        <div style={{padding:'6px 16px 0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,fontSize:'0.8rem',color:'var(--text-dim)',animation:'fadeIn .3s ease'}}>
+          <span>
+            {guestMsgCount < GUEST_DEMO_LIMIT
+              ? <>Demo mode — <strong style={{color:'var(--accent)'}}>{GUEST_DEMO_LIMIT - guestMsgCount} free message{GUEST_DEMO_LIMIT - guestMsgCount !== 1 ? 's' : ''} left</strong></>
+              : <strong style={{color:'var(--warning)'}}>Demo limit reached — sign up to keep going</strong>
+            }
+          </span>
+          <button onClick={()=>setShowAuthModal(true)} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
+        </div>
+      )}
       {/* ── Input Area ── */}
       <div className="sos-input-area">
         {messages.length>0&&(

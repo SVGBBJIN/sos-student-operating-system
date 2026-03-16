@@ -372,12 +372,28 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 @media(max-width:500px){
   .sos-input-area{padding:6px 10px 10px}
   .sos-bubble{max-width:92%;font-size:0.88rem}
-  .sos-chip{font-size:0.78rem;padding:5px 11px}
+  .sos-chip{font-size:0.78rem;padding:5px 11px;min-height:44px;display:inline-flex;align-items:center}
   .auth-form{padding:24px 20px}
   .cal-cell{min-height:45px;padding:2px 3px}
   .cal-cell-date{font-size:0.68rem}
   .cal-cell-event{font-size:0.58rem}
   .notes-editor{min-height:120px}
+  /* Ensure 44px minimum tap targets on interactive elements */
+  .g-hdr-btn{min-height:44px;min-width:44px;padding:10px 8px}
+  .voice-bar-cancel,.voice-bar-send{min-width:44px;min-height:44px}
+  .sos-send-btn{min-width:44px;min-height:44px}
+  /* Prevent iOS font zoom on input focus */
+  .sos-input{font-size:16px!important}
+}
+@media(max-width:390px){
+  /* Extra-small phones (375px iPhone SE etc.) */
+  .sos-header{padding:8px 10px;gap:6px}
+  /* Hide button text labels in topbar to save space, show icons only */
+  .g-hdr-btn span{display:none}
+  .g-hdr-btn svg{display:block}
+  .sos-input-area{padding:8px 8px 12px}
+  .sos-input-row{gap:6px}
+  .sos-bubble{max-width:96%}
 }
 /* Photo in chat */
 .sos-bubble img[alt="photo"]{transition:opacity .15s}
