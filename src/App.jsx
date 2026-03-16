@@ -4959,6 +4959,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         messages: historyForApi,
         maxTokens: isContentGen || tutorMode ? 4096 : isConversational ? 512 : 1024,
         isContentGen,
+        isTutorMode: tutorMode,
         workspaceContext: effectiveWorkspaceContext,
       };
       if (photo) {

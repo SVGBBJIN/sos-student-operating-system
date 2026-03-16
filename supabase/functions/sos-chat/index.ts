@@ -737,6 +737,7 @@ serve(async (req: Request) => {
       messages,
       maxTokens = 1024,
       isContentGen,
+      isTutorMode,
       imageBase64,
       imageMimeType,
       workspaceContext,
@@ -765,9 +766,8 @@ serve(async (req: Request) => {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-20b handles chat + tool calling in one pass;
-    // llama-3.3-70b-versatile is the automatic backup if the primary model is unavailable.
+    // Tutor mode disables tool-calling so the model is free to respond with pure JSON text
+    // (tutor_step / tutor_quiz) without tool-call interference causing empty or broken responses.
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
@@ -776,8 +776,8 @@ serve(async (req: Request) => {
       maxTokens,
       imageBase64,
       imageMimeType,
-      true,        // includeTools — always on; model decides when to call tools
-      null,        // toolsOverride — use full ACTION_TOOLS
+      !isTutorMode,  // disable tools in tutor mode; always-on otherwise
+      null,          // toolsOverride — use full ACTION_TOOLS
       BACKUP_MODEL
     );
 
