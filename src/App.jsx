@@ -4743,6 +4743,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
+    // Detect content generation requests (for rate limiting + model upgrade)
+    const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
+
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
       // For content generation: limit to 6 messages to avoid context overflow on Groq.
@@ -4755,9 +4758,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-
-      // Detect content generation requests (for rate limiting + model upgrade)
-      const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
 
       // Tier routing: pure conversational messages use a lighter system prompt + token budget.
       // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
