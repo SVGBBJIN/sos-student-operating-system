@@ -103,7 +103,7 @@ function weatherEmoji(code) {
 }
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
-const GUEST_DEMO_LIMIT = 3;
+const GUEST_DEMO_LIMIT = 10;
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -678,6 +678,7 @@ RULES:
 9. For day names, calculate the real YYYY-MM-DD date.
 10. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
 11. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
+CORRECTION HANDLING: When the student's message contains correction signals — "actually", "wait", "i meant", "change that to", "make it [X] instead", "not [X]", "sorry", "oops", "wait no" — treat it as a correction to the most recent add/update action in conversation history. Re-parse the corrected field(s) (date, time, subject, title) and call the appropriate update_task or update_event tool with the corrected values. Briefly confirm what changed: "got it, updated to Friday ✓". Never ignore a correction — always acknowledge and apply it.
 12. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
 13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
 14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
@@ -1044,8 +1045,8 @@ function inferActionFromMessage(text) {
 /* ═══════════════════════════════════════════════
    AUTH SCREEN
    ═══════════════════════════════════════════════ */
-function AuthModal({ onAuth, onClose }) {
-  const [mode, setMode] = useState('login');
+function AuthModal({ onAuth, onClose, initialMode = 'login' }) {
+  const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -1401,16 +1402,23 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   );
 }
 
-function ClarificationCard({ clarification, onSubmit }) {
+function ClarificationCard({ clarification, onSubmit, savedAnswers, onAnswersChange }) {
   // Support both single clarification and array of clarifications
   const clarifications = Array.isArray(clarification) ? clarification : [clarification];
   const questionCount = clarifications.length;
 
   // Per-question state: selected options and free-form text
-  const [answers, setAnswers] = useState(() => clarifications.map(() => ({ selected: [], otherText: '' })));
+  // Initialize from savedAnswers if available (preserves state across panel navigation)
+  const [answers, setAnswers] = useState(() =>
+    savedAnswers && savedAnswers.length === clarifications.length
+      ? savedAnswers
+      : clarifications.map(() => ({ selected: [], otherText: '' }))
+  );
 
   useEffect(() => {
-    setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
+    if (!savedAnswers || savedAnswers.length !== clarifications.length) {
+      setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
+    }
   }, [clarification]);
 
   function normalizeOption(option, idx) {
@@ -1436,6 +1444,7 @@ function ClarificationCard({ clarification, onSubmit }) {
           : [...cur.selected, optId];
       }
       next[qIdx] = cur;
+      if (onAnswersChange) onAnswersChange(next);
       return next;
     });
   }
@@ -1444,6 +1453,7 @@ function ClarificationCard({ clarification, onSubmit }) {
     setAnswers(prev => {
       const next = [...prev];
       next[qIdx] = { ...next[qIdx], otherText: text };
+      if (onAnswersChange) onAnswersChange(next);
       return next;
     });
   }
@@ -2917,6 +2927,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false }) {
   const todayKey = today(); const todayDow = new Date().getDay();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [calView, setCalView] = useState('month');
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
 
@@ -3019,6 +3030,31 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
+  // ── Weekly view data ──
+  const weekDays = useMemo(() => {
+    const now = new Date();
+    const sunday = new Date(now); sunday.setDate(now.getDate() - now.getDay()); sunday.setHours(0,0,0,0);
+    return Array.from({length:7}, (_, i) => { const d = new Date(sunday); d.setDate(sunday.getDate() + i); return d; });
+  }, []);
+
+  const weekDayItems = useMemo(() => {
+    return weekDays.map(day => {
+      const ds = toDateStr(day);
+      const dow = day.getDay();
+      const dayBlocks = [];
+      const seen = new Set();
+      (blocks.recurring || []).forEach(rb => {
+        if (rb.days.includes(dow) && !seen.has(rb.name)) { seen.add(rb.name); dayBlocks.push({ title: rb.name, cls: 'block' }); }
+      });
+      Object.entries(blocks.dates?.[ds] || {}).forEach(([, slot]) => {
+        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); dayBlocks.push({ title: slot.name, cls: 'block' }); }
+      });
+      const dayTasks = tasks.filter(t => t.dueDate === ds && t.status !== 'done').map(t => ({ title: t.title, cls: daysUntil(t.dueDate) < 0 ? 'overdue' : 'task' }));
+      const dayEvents = events.filter(ev => ev.date === ds).map(ev => ({ title: ev.title, cls: 'event' }));
+      return { date: day, ds, items: [...dayBlocks, ...dayTasks, ...dayEvents] };
+    });
+  }, [weekDays, blocks, tasks, events]);
+
   return (<>
     {!embedded && <div className="peek-overlay" onClick={onClose}/>}
     <div className={'peek-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
@@ -3034,35 +3070,75 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
         </div>
       </div>
 
-      {/* ── Fullscreen: Month Calendar Grid ── */}
+      {/* ── Fullscreen: View Tabs + Calendar ── */}
       {isFullscreen && (
         <div style={{marginBottom:16}}>
-          <div className="cal-month-nav">
-            <button className="cal-nav-btn" onClick={prevMonth}>{Icon.chevronLeft(16)}</button>
-            <div style={{display:'flex',alignItems:'center',gap:10}}>
-              <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
-              <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
+          {/* View toggle tabs */}
+          <div style={{display:'flex',gap:6,marginBottom:12}}>
+            {['month','week'].map(v => (
+              <button key={v} onClick={()=>setCalView(v)}
+                style={{padding:'5px 14px',borderRadius:8,border:'1px solid',fontSize:'0.8rem',fontWeight:600,cursor:'pointer',transition:'all .15s',
+                  borderColor: calView===v ? 'var(--accent)' : 'var(--border)',
+                  background: calView===v ? 'rgba(108,99,255,0.18)' : 'transparent',
+                  color: calView===v ? 'var(--accent)' : 'var(--text-dim)'}}>
+                {v.charAt(0).toUpperCase()+v.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {calView === 'month' && (<>
+            <div className="cal-month-nav">
+              <button className="cal-nav-btn" onClick={prevMonth}>{Icon.chevronLeft(16)}</button>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
+                <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
+              </div>
+              <button className="cal-nav-btn" onClick={nextMonth}>{Icon.chevronRight(16)}</button>
             </div>
-            <button className="cal-nav-btn" onClick={nextMonth}>{Icon.chevronRight(16)}</button>
-          </div>
-          <div className="cal-grid">
-            {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
-            {calendarDays.map((cell, i) => {
-              const dateStr = toDateStr(cell.date);
-              const isToday = dateStr === todayKey;
-              const items = dateItemsMap[dateStr] || [];
-              const maxShow = 2;
-              return (
-                <div key={i} className={'cal-cell' + (cell.isCurrentMonth ? '' : ' other-month') + (isToday ? ' today' : '')}>
-                  <div className="cal-cell-date" style={isToday ? {color:'var(--accent)'} : {}}>{cell.day}</div>
-                  {items.slice(0, maxShow).map((item, j) => (
-                    <div key={j} className={'cal-cell-event ' + item.cls} title={item.title}>{item.title}</div>
-                  ))}
-                  {items.length > maxShow && <div className="cal-cell-more">+{items.length - maxShow} more</div>}
-                </div>
-              );
-            })}
-          </div>
+            <div className="cal-grid">
+              {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
+              {calendarDays.map((cell, i) => {
+                const dateStr = toDateStr(cell.date);
+                const isToday = dateStr === todayKey;
+                const items = dateItemsMap[dateStr] || [];
+                const maxShow = 2;
+                return (
+                  <div key={i} className={'cal-cell' + (cell.isCurrentMonth ? '' : ' other-month') + (isToday ? ' today' : '')}>
+                    <div className="cal-cell-date" style={isToday ? {color:'var(--accent)'} : {}}>{cell.day}</div>
+                    {items.slice(0, maxShow).map((item, j) => (
+                      <div key={j} className={'cal-cell-event ' + item.cls} title={item.title}>{item.title}</div>
+                    ))}
+                    {items.length > maxShow && <div className="cal-cell-more">+{items.length - maxShow} more</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </>)}
+
+          {calView === 'week' && (
+            <div>
+              <div style={{textAlign:'center',fontWeight:600,marginBottom:10,color:'var(--text-dim)',fontSize:'0.85rem'}}>
+                Week of {weekDays[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {weekDays[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
+                {weekDayItems.map(({date, ds, items}) => {
+                  const isToday = ds === todayKey;
+                  return (
+                    <div key={ds} style={{background: isToday ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.05)', border: isToday ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius:10, padding:'6px 4px', minHeight:90}}>
+                      <div style={{textAlign:'center',marginBottom:4}}>
+                        <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',fontWeight:600}}>{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]}</div>
+                        <div style={{fontSize:'0.85rem',fontWeight:700,color: isToday ? 'var(--accent)' : 'var(--text)'}}>{date.getDate()}</div>
+                      </div>
+                      {items.length === 0 && <div style={{fontSize:'0.62rem',color:'var(--text-dim)',textAlign:'center',marginTop:4}}>free</div>}
+                      {items.map((item, j) => (
+                        <div key={j} className={'cal-cell-event ' + item.cls} title={item.title} style={{marginBottom:2}}>{item.title}</div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3389,6 +3465,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
   const [authChecked, setAuthChecked] = useState(false);
 
   // ── Data stores ──
@@ -3409,6 +3486,7 @@ function App() {
   const [pendingContent, setPendingContent] = useState([]);
   const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
   const [pendingClarification, setPendingClarification] = useState(null);
+  const [pendingClarificationAnswers, setPendingClarificationAnswers] = useState(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -3584,7 +3662,7 @@ function App() {
         setUser(null);
         setDataLoaded(false);
         setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
-        setPendingClarification(null);
+        setPendingClarification(null); setPendingClarificationAnswers(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
         handleAuth(session.user);
@@ -4531,7 +4609,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setSavedChats(prev => [{ id: chatId, ...chatData }, ...prev]);
     // Clear current chat
-    setMessages([]); setPendingActions([]); setPendingClarification(null); setChatError(null);
+    setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
     if (user) dbClearChat(user.id);
     setToastMsg('Chat saved');
   }
@@ -4578,6 +4656,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setShowChatSidebar(false);
     setPendingActions([]);
     setPendingClarification(null);
+    setPendingClarificationAnswers(null);
     setChatError(null);
     // Persist resumed messages as the new active chat in DB
     if (user) {
@@ -4641,6 +4720,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setInput('');
     setIsLoading(true);
 
+    // Persist demo messages to localStorage so they're migrated to Supabase on sign-up
+    if (!user && msgContent) {
+      try {
+        const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+        demoChat.push({ role: 'user', content: msgContent });
+        localStorage.setItem('cc_chat', JSON.stringify(demoChat));
+      } catch (_) {}
+    }
+
     // Upload photo to storage in background + save chat msg with URL when done
     if (photo && user) {
       uploadPhotoToStorage(photo.base64, user.id).then(url => {
@@ -4657,7 +4745,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
-      const rawHistory = updated.slice(photo ? -2 : -12).map(m => ({
+      // For content generation: limit to 6 messages to avoid context overflow on Groq.
+      const rawHistory = updated.slice(photo ? -2 : isContentGen ? -6 : -12).map(m => ({
         role: m.role,
         content: m.content || '',
       }));
@@ -4671,7 +4760,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
 
       // Tier routing: pure conversational messages skip tools for lower latency
-      const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification
+      const hasCorrectionSignal = /\b(actually|i meant|wait no|change that|make it|not [a-z]+,|sorry,|oops)\b/i.test(msgContent);
+      const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification && !hasCorrectionSignal
         && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan)\b/i.test(msgContent)
         && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task)\b/i.test(msgContent);
 
@@ -4794,7 +4884,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-        if (user) dbInsertChatMsg('assistant', displayContent, user.id);
+        if (user) {
+          dbInsertChatMsg('assistant', displayContent, user.id);
+        } else {
+          // Persist assistant reply to localStorage for demo carry-over on sign-up
+          try {
+            const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+            demoChat.push({ role: 'assistant', content: displayContent });
+            localStorage.setItem('cc_chat', JSON.stringify(demoChat));
+          } catch (_) {}
+        }
       }
 
       // Actions come back as structured tool_use results — no text parsing needed
@@ -4892,8 +4991,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const msg = err.message || '';
       if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
         setChatError("I'm getting a lot of requests right now — give me a few seconds and try again!");
+      } else if (msg.toLowerCase().includes('groq') || /error\s+[45]\d\d/i.test(msg) || msg.includes('timed out') || msg.includes('AI request failed')) {
+        console.error('[SOS] AI backend error:', msg);
+        setChatError("Hmm, I ran into a snag — want to try sending that again?");
       } else {
-        setChatError(msg || "couldn't reach the server — check your connection");
+        setChatError("Couldn't reach the server — check your connection and try again.");
       }
     } finally { setIsLoading(false); }
   }
@@ -4916,6 +5018,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }).filter(Boolean);
     const readableResponse = responseParts.join('\n') || 'No selection';
     setPendingClarification(null);
+    setPendingClarificationAnswers(null);
     sendMessage(readableResponse, { fromClarification: true });
   }
 
@@ -5002,7 +5105,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   async function startRecording() {
-    if (!user) { setShowAuthModal(true); return; }
+    if (!user) { setAuthModalInitialMode('signup'); setShowAuthModal(true); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
@@ -5123,7 +5226,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
 
   function clearChat() {
-    setMessages([]); setPendingActions([]); setPendingClarification(null); setChatError(null);
+    setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
     if (user) dbClearChat(user.id);
   }
 
@@ -5450,7 +5553,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         {pendingClarification && (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} />
+            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
           </div>
         )}
         {!pendingClarification && pendingActions.length > 1 ? (
@@ -5520,7 +5623,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               : <strong style={{color:'var(--warning)'}}>Demo limit reached — sign up to keep going</strong>
             }
           </span>
-          <button onClick={()=>setShowAuthModal(true)} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
+          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
         </div>
       )}
       {/* ── Input Area ── */}
@@ -5698,7 +5801,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onSyncNow={()=>syncCalendarRef.current()}
         />
       )}
-      {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);}} onClose={()=>setShowAuthModal(false)} />}
+      {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
 
 

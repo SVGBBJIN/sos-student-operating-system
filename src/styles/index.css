@@ -319,16 +319,16 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .cal-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
 .cal-day-header{text-align:center;font-size:0.72rem;font-weight:600;color:var(--text-dim);padding:6px 2px;text-transform:uppercase}
-.cal-cell{min-height:70px;padding:4px 6px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;font-size:0.78rem;overflow:hidden;transition:border-color .15s;cursor:default}
+.cal-cell{min-height:70px;padding:4px 6px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:10px;font-size:0.78rem;overflow:hidden;transition:border-color .15s;cursor:default}
 .cal-cell:hover{border-color:var(--accent-dim)}
 .cal-cell.other-month{opacity:0.35}
-.cal-cell.today{border-color:var(--accent);background:rgba(108,99,255,0.06)}
+.cal-cell.today{border-color:var(--accent);background:rgba(108,99,255,0.1)}
 .cal-cell-date{font-weight:600;margin-bottom:2px;font-size:0.75rem}
 .cal-cell-event{font-size:0.65rem;padding:1px 4px;border-radius:6px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cal-cell-event.task{background:rgba(108,99,255,0.15);color:var(--accent)}
-.cal-cell-event.event{background:rgba(46,213,115,0.15);color:var(--success)}
-.cal-cell-event.overdue{background:rgba(255,71,87,0.15);color:var(--danger)}
-.cal-cell-event.block{background:rgba(69,170,242,0.15);color:var(--blue)}
+.cal-cell-event.task{background:rgba(108,99,255,0.22);color:var(--accent)}
+.cal-cell-event.event{background:rgba(46,213,115,0.22);color:var(--success)}
+.cal-cell-event.overdue{background:rgba(255,71,87,0.22);color:var(--danger)}
+.cal-cell-event.block{background:rgba(69,170,242,0.22);color:var(--blue)}
 .cal-cell-more{font-size:0.6rem;color:var(--text-dim);margin-top:1px}
 
 /* Chat sidebar */

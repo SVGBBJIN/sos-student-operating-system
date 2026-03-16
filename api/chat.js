@@ -484,7 +484,7 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
           return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
         }
       }
-      throw new Error(`Groq ${model} error 400: ${errText}`);
+      throw new Error(`Groq ${model} error 400: ${errText.slice(0, 200)}`);
     }
 
     if (!res.ok) {
