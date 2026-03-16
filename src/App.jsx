@@ -4759,11 +4759,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Detect content generation requests (for rate limiting + model upgrade)
       const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
 
-      // Tier routing: pure conversational messages skip tools for lower latency
+      // Tier routing: pure conversational messages use a lighter system prompt + token budget.
+      // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
+      // conversational replies and tool calling in a single pass. When a message has no action
+      // intent the model simply returns text with no tool_calls (no card shown). This avoids
+      // the bug where phrases like "put in my calendar" were misclassified as conversational
+      // and had tools suppressed, producing a text-only response with no confirmation card.
       const hasCorrectionSignal = /\b(actually|i meant|wait no|change that|make it|not [a-z]+,|sorry,|oops)\b/i.test(msgContent);
       const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification && !hasCorrectionSignal
-        && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan)\b/i.test(msgContent)
-        && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task)\b/i.test(msgContent);
+        && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i.test(msgContent)
+        && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
+        && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
 
       const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
       const chatBody = {
@@ -4772,7 +4778,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         maxTokens: isContentGen ? 4096 : isConversational ? 512 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
-        ...(isConversational ? { noTools: true } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;

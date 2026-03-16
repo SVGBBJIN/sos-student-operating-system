@@ -742,11 +742,13 @@ serve(async (req: Request) => {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Model: llama-3.3-70b-versatile for text (reliable tool calling); vision model auto-selected in callGroq
-    const model = body.noTools ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile";
+    // Model: llama-3.3-70b-versatile handles both conversational replies and tool calling in one
+    // pass — when no action is intended the model returns plain text with no tool_calls.
+    // This eliminates the split where noTools suppressed tools and caused missing confirmation cards.
+    const model = "llama-3.3-70b-versatile"; // vision model auto-selected inside callGroq
 
     // For content generation, only pass clarification tool (not all action tools)
-    const includeTools = !isContentGen && !body.noTools;
+    const includeTools = !isContentGen;
     const clarificationOnlyTools = isContentGen
       ? ACTION_TOOLS.filter((t) => t.function.name === "ask_clarification")
       : null;
