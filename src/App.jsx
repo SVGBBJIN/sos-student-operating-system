@@ -4994,14 +4994,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     } catch(err) {
       console.error('Chat error:', err);
       const msg = err.message || '';
-      if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
-        setChatError("I'm getting a lot of requests right now — give me a few seconds and try again!");
-      } else if (msg.toLowerCase().includes('groq') || /error\s+[45]\d\d/i.test(msg) || msg.includes('timed out') || msg.includes('AI request failed') || msg.toLowerCase().includes('syntaxerror') || msg.toLowerCase().includes('unexpected token') || msg.toLowerCase().includes('json')) {
-        console.error('[SOS] AI backend error:', msg);
-        setChatError("Hmm, I ran into a snag — want to try sending that again?");
-      } else {
-        setChatError("Couldn't reach the server — check your connection and try again.");
-      }
+      setChatError(msg || "Unknown error");
     } finally { setIsLoading(false); }
   }
 
