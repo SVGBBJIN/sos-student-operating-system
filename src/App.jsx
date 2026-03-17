@@ -1780,6 +1780,14 @@ function PerfPill() {
   );
 }
 
+function TutorIndicator({ active }) {
+  return (
+    <div className={'tutor-indicator' + (active ? ' active' : '')} title={active ? 'Tutor mode is ON' : 'Tutor mode is OFF'}>
+      ✦ Tutor {active ? 'ON' : 'OFF'}
+    </div>
+  );
+}
+
 function FlashcardDisplay({ data, onSave, onDismiss }) {
   const cards = data.cards || [];
   const [idx, setIdx] = useState(0);
@@ -3497,6 +3505,11 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
+  const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
+  const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
+  const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
+  const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
+  const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const getWorkspaceContext = useCallback((overridePanel = null) => {
@@ -5339,8 +5352,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>openCompanionPanel('schedule')} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>openCompanionPanel('notes')} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -5348,6 +5361,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
           <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
         </div>
+        {(showTutorIndicatorSidebar || showPerfIndicatorSidebar) && (
+          <div className="sos-side-indicators sos-side-meta">
+            {showTutorIndicatorSidebar && <TutorIndicator active={tutorMode} />}
+            {showPerfIndicatorSidebar && <PerfPill />}
+          </div>
+        )}
         <div className="sos-side-list">
           {savedChats.length === 0 ? (
             <div className="chat-sidebar-empty" style={{paddingTop:24}}>
@@ -5393,8 +5412,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <PerfPill />
-          <button onClick={()=>setShowPeek(true)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
+          {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
+          {showPerfIndicatorTopbar && <PerfPill />}
+          <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
@@ -5463,6 +5483,41 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
                   <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
                 </div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Activates a guided, step-by-step learning style. Indicator appears in sidebar and topbar when on.</div>
+                </div>
+                <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>{ const n=!tutorMode; setTutorMode(n); localStorage.setItem('sos_tutor_mode',n?'true':'false'); }}>{tutorMode ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — sidebar</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the sidebar.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorSidebar; setShowTutorIndicatorSidebar(n); localStorage.setItem('sos_tutor_indicator_sidebar',n?'true':'false'); }}>{showTutorIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — topbar</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the topbar.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorTopbar; setShowTutorIndicatorTopbar(n); localStorage.setItem('sos_tutor_indicator_topbar',n?'true':'false'); }}>{showTutorIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — sidebar</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the sidebar.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorSidebar; setShowPerfIndicatorSidebar(n); localStorage.setItem('sos_perf_indicator_sidebar',n?'true':'false'); }}>{showPerfIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — topbar</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the topbar.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
               </div>
               <div className="settings-row">
                 <div>
