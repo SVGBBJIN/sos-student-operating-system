@@ -8,9 +8,9 @@ const corsHeaders = {
 };
 
 /* ── Model constants ── */
-// Primary: openai/gpt-oss-20b (cheaper, handles chat + tool calling in one pass)
+// Primary: openai/gpt-oss-120b (smarter + reliable, cheaper than llama 70b)
 // Backup:  llama-3.3-70b-versatile (reliable fallback if primary is unavailable)
-const PRIMARY_MODEL = "openai/gpt-oss-20b";
+const PRIMARY_MODEL = "openai/gpt-oss-120b";
 const BACKUP_MODEL  = "llama-3.3-70b-versatile";
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
@@ -576,9 +576,14 @@ async function callGroq(
     return parseLlmResponse(data);
   }
 
-  // Try primary model; on any failure fall back to backupModel if provided
+  // Try primary model; fall back to backupModel on hard errors OR empty responses
   try {
-    return await attempt(model);
+    const result = await attempt(model);
+    if (!result.content && result.actions.length === 0 && backupModel && backupModel !== model) {
+      console.warn(`[callGroq] Primary model (${model}) returned empty response — retrying with backup ${backupModel}`);
+      return await attempt(backupModel);
+    }
+    return result;
   } catch (primaryErr) {
     if (backupModel && backupModel !== model) {
       console.warn(`[callGroq] Primary model (${model}) failed: ${(primaryErr as Error).message} — retrying with backup ${backupModel}`);
