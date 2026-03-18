@@ -9,9 +9,9 @@ const corsHeaders = {
 
 /* ── Model constants ── */
 // Primary: openai/gpt-oss-120b (smarter + reliable, cheaper than llama 70b)
-// Backup:  llama-3.3-70b-versatile (reliable fallback if primary is unavailable)
+// Backup:  openai/gpt-oss-20b (reliable fallback if primary is unavailable)
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
-const BACKUP_MODEL  = "llama-3.3-70b-versatile";
+const BACKUP_MODEL  = "openai/gpt-oss-20b";
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -778,7 +778,7 @@ serve(async (req: Request) => {
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
     // not regex-gated detection. openai/gpt-oss-20b handles chat + tool calling in one pass;
-    // llama-3.3-70b-versatile is the automatic backup if the primary model is unavailable.
+    // openai/gpt-oss-20b is the automatic backup if the primary model is unavailable.
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,

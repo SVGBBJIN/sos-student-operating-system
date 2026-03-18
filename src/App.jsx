@@ -3531,6 +3531,8 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname || '/');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
@@ -3555,6 +3557,14 @@ function App() {
     : workspaceContext === 'notes'
       ? 'Notes mode'
       : null;
+  const resetHomeUi = useCallback(() => {
+    setShowPeek(false);
+    setShowNotes(false);
+    setSidebarCompanionPanel('none');
+    setCompanionCollapsed(true);
+    setActivePanel('chat');
+    setMobileSidebarOpen(false);
+  }, []);
   const openCompanionPanel = useCallback((panel) => {
     setActivePanel('chat');
     setSidebarCompanionPanel(panel);
@@ -3562,7 +3572,36 @@ function App() {
     if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
     setShowPeek(false);
     setShowNotes(false);
+    setMobileSidebarOpen(false);
   }, [autoCollapseSidebarCompanion]);
+  useEffect(() => {
+    const updatePath = () => setCurrentPath(window.location.pathname || '/');
+    const { pushState, replaceState } = window.history;
+    window.history.pushState = function(...args) {
+      const result = pushState.apply(this, args);
+      updatePath();
+      return result;
+    };
+    window.history.replaceState = function(...args) {
+      const result = replaceState.apply(this, args);
+      updatePath();
+      return result;
+    };
+    window.addEventListener('popstate', updatePath);
+    window.addEventListener('hashchange', updatePath);
+    updatePath();
+    return () => {
+      window.history.pushState = pushState;
+      window.history.replaceState = replaceState;
+      window.removeEventListener('popstate', updatePath);
+      window.removeEventListener('hashchange', updatePath);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentPath === '/') resetHomeUi();
+  }, [currentPath, resetHomeUi]);
+
   const detectCompanionIntent = useCallback((text) => {
     const msg = (text || '').toLowerCase();
     if (!msg) return null;
@@ -4814,7 +4853,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const token = session?.data?.session?.access_token;
 
       // Tier routing: pure conversational messages use a lighter system prompt + token budget.
-      // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
+      // NOTE: noTools is intentionally NOT set here — openai/gpt-oss-20b handles both
       // conversational replies and tool calling in a single pass. When a message has no action
       // intent the model simply returns text with no tool_calls (no card shown). This avoids
       // the bug where phrases like "put in my calendar" were misclassified as conversational
@@ -5295,11 +5334,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
     setShowPeek(false);
     setShowNotes(false);
+    setMobileSidebarOpen(false);
   }
 
   function closeSidebarCompanion() {
     setSidebarCompanionPanel('none');
     setCompanionCollapsed(true);
+    setMobileSidebarOpen(false);
   }
 
   // ── Keyboard shortcuts ──
@@ -5380,7 +5421,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   return (
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
-      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
+      {layoutMode === 'sidebar' && mobileSidebarOpen && <div className="sos-sidebar-backdrop" onClick={() => setMobileSidebarOpen(false)} />}
+      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'') + (mobileSidebarOpen ? ' mobile-open' : '')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
             <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
@@ -5445,6 +5487,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </aside>}
 
       <div className="sos-main">
+      {layoutMode === 'sidebar' && (
+        <button
+          className="sos-mobile-sidebar-toggle"
+          onClick={() => setMobileSidebarOpen(prev => !prev)}
+          aria-label={mobileSidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          title={mobileSidebarOpen ? 'Close menu' : 'Open menu'}
+        >
+          {Icon.panel(16)}
+        </button>
+      )}
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
