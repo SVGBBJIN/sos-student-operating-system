@@ -3824,7 +3824,9 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:action.due||today(), estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const rawDue = action.due || today();
+          const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:normalizedDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -3889,7 +3891,9 @@ function App() {
           break;
         }
         case 'add_event': {
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const rawEvDate = action.date || today();
+          const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -4126,7 +4130,7 @@ function App() {
           break;
         default: console.warn('Unknown action type:', action.type);
       }
-    } catch(e) { console.error('Failed to execute action:', action, e); }
+    } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
   }
 
   // ── Confirmation handlers ──
@@ -4136,6 +4140,14 @@ function App() {
     const name = action.title||action.activity||'Action';
     const verb = action.type?.startsWith('delete') ? 'removed' : action.type === 'update_event' ? 'updated' : action.type === 'complete_task' ? 'completed' : 'added';
     setToastMsg('✓ ' + name + ' ' + verb);
+    const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
+    if (calendarActionTypes.includes(action.type)) {
+      if (layoutMode === 'sidebar') {
+        openCompanionPanel('schedule');
+      } else if (!showSideBySide) {
+        setShowPeek(true);
+      }
+    }
   }
   function handleCancelAction(idx) { setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
 
@@ -5659,7 +5671,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   } else { executeAction(pa.action); }
                 });
                 setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
-                if(toExec.length>0)setToastMsg('Added '+toExec.length+' items');
+                if(toExec.length>0){
+                  setToastMsg('Added '+toExec.length+' items');
+                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
+                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
+                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
+                    else if(!showSideBySide){setShowPeek(true);}
+                  }
+                }
               }}
               onCancel={()=>setPendingActions([])}
             />
