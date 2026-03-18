@@ -1418,12 +1418,16 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
       : clarifications.map(() => ({ selected: [], otherText: '' }))
   );
 
+  // Stable string key based on question content — immune to object re-references.
+  // Only changes when the AI sends genuinely different questions.
+  const clarificationKey = clarifications.map(c => c.question).join('|||');
+
   useEffect(() => {
     if (!savedAnswers || savedAnswers.length !== clarifications.length) {
       setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
     }
     setCurrentQIdx(0);
-  }, [clarification]);
+  }, [clarificationKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function normalizeOption(option, idx) {
     if (typeof option === 'string') return { id: 'opt_' + idx, label: option };
@@ -4821,11 +4825,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
         && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
 
-      const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
+      // Always use the full tier-2 prompt so the AI always has tool definitions.
+      // Tier-1 (conversational) had no tool instructions — casual phrasing like
+      // "yeah next Friday works" would fall through with no action generated.
       const chatBody = {
-        systemPrompt: chatPromptFinal,
+        systemPrompt: chatPrompt,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : isConversational ? 512 : 1024,
+        maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
       };
