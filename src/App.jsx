@@ -505,7 +505,7 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
+function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
@@ -571,8 +571,9 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
 
   // ── Build notes section for AI context ──
   const noteNames = notes.map(n => n.name).join(', ') || 'none';
+  const includeNoteContent = options.includeNoteContent ?? true;
   let notesSection = '';
-  if (notes.length > 0) {
+  if (includeNoteContent && notes.length > 0) {
     // Sort: PDF-sourced first (reference docs), then Docs, then AI-generated
     const sortOrder = { pdf: 0, google_docs: 1 };
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
@@ -610,6 +611,32 @@ RULES:
 4. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help.
 5. Stay warm, brief, and casual.`;
   }
+
+  const photoSection = options.hasPhoto ? `
+PHOTO ANALYSIS:
+When the student sends a photo/image:
+1. DESCRIBE what you see first — "looks like a syllabus for..." or "I see a quadratic equation..."
+2. SCHEDULE DETECTION: If you see dates, due dates, assignments, syllabi, planners, or calendars:
+   - Extract EVERY date and assignment you can read
+   - Call add_event for tests/exams/events, add_task for homework/assignments — one tool call per item
+   - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
+   - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
+3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
+4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"` : '';
+
+  const contentGenSection = options.isContentGen ? `
+CONTENT GENERATION:
+When the student asks for study materials (flashcards, outlines, summaries, study plans, quizzes, project breakdowns), respond with ONLY a valid JSON object (no markdown, no code fences). Use these formats:
+
+For study plans: {"type":"make_plan","title":"Plan Title","summary":"One sentence overview of what this plan covers","steps":[{"title":"Step description","date":"YYYY-MM-DD","time":"HH:MM AM/PM","estimated_minutes":30}]}
+For flashcards: {"type":"create_flashcards","title":"Topic","cards":[{"q":"Question","a":"Answer"}]}
+For quizzes: {"type":"create_quiz","title":"Topic","questions":[{"q":"Question","choices":["A","B","C","D"],"answer":"A"}]}
+For outlines: {"type":"create_outline","title":"Topic","sections":[{"heading":"Section","points":["Point 1","Point 2"]}]}
+For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","Bullet 2"]}
+For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
+For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
+
+Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.` : '';
 
   return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
 
@@ -655,14 +682,15 @@ TOOLS — you have built-in tools to manage the student's calendar, tasks, block
 RULES:
 1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" for confirmation — just do it ONLY when ALL required details are explicitly stated by the student.
 2. Even casual phrasing counts: "got a calc test fri" = add_event (title: calc test, date: friday). "gotta finish essay by thursday" = add_task.
-3. *** HARD RULE — NEVER GUESS OR FABRICATE DETAILS ***: If the student's message does NOT explicitly contain the information needed for a tool field, you MUST call ask_clarification BEFORE calling any action tool. This is NON-NEGOTIABLE. Specifically:
-   - If the student did NOT say what the event/block/task IS (title/activity) → ASK. Never invent a generic name like "study session" or "event".
-   - If the student did NOT say WHEN (date) → ASK. Never guess today or tomorrow.
-   - If the student did NOT say what TIME (start/end for blocks) → ASK. Never invent times like "15:00-16:00".
-   - If the student did NOT say what SUBJECT → ASK for academic items. Never guess a subject.
-   - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
-   - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
-   - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
+3. *** HARD RULE — NEVER GUESS OR FABRICATE DETAILS ***: If the student's message does NOT explicitly contain the information needed for a tool field, you MUST call ask_clarification BEFORE calling any action tool. This is NON-NEGOTIABLE. When in doubt, ALWAYS ask — one extra question is far less costly than a wrong item the student has to delete.
+   - title/activity not stated → ASK. Never invent a generic name like "study session" or "event".
+   - date not stated → ASK. Never guess today or tomorrow.
+   - time/start/end not stated (add_block always requires this) → ASK. Never invent times like "15:00-16:00".
+   - subject not stated for academic items → ASK. Never guess a subject.
+   - priority can be inferred (exam = high); only ask if genuinely ambiguous.
+   - Example: "add a new block" → NO details given. Ask activity, date, and time. Do NOT create with made-up values.
+   - Example: "add a block for math" → activity known, date/time unknown. Ask for date and time.
+   - Example: "add a math block tomorrow 3-4pm" → all details present. Create immediately.
 4. When multiple fields are missing, make a SEPARATE ask_clarification tool call for EACH missing field — all in the same response. For example, if activity, date, and time are all unknown, make THREE ask_clarification calls: one asking "What activity?", one asking "What date?", one asking "What time?". Each call should have its own focused options. The system will display them all at once as individual question cards. NEVER split them across multiple conversation turns — call them all in the same response.
 5. PROACTIVE CLARIFICATION — also use ask_clarification when:
    - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
@@ -674,46 +702,16 @@ RULES:
    - The student just said "yes" or confirmed something you already asked about
    - The student is having a casual conversation (not requesting any action)
 7. Keep the same brief/casual voice for clarification questions and for tool follow-up.
-8. *** ZERO TOLERANCE FOR FABRICATION ***: If you call add_event, add_task, add_block, or any action tool with a value the student never said or clearly implied, that is a critical error. When in doubt, ALWAYS ask. The cost of one extra question is far less than creating a wrong item the student has to delete. Today is ${todayKey}.
-9. For day names, calculate the real YYYY-MM-DD date.
-10. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
-11. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
+8. For day names, calculate the real YYYY-MM-DD date. Today is ${todayKey}.
+9. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
+10. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
 CORRECTION HANDLING: When the student's message contains correction signals — "actually", "wait", "i meant", "change that to", "make it [X] instead", "not [X]", "sorry", "oops", "wait no" — treat it as a correction to the most recent add/update action in conversation history. Re-parse the corrected field(s) (date, time, subject, title) and call the appropriate update_task or update_event tool with the corrected values. Briefly confirm what changed: "got it, updated to Friday ✓". Never ignore a correction — always acknowledge and apply it.
-12. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
-13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
-14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
-15. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
-16. EVENT/BLOCK FIELD VALIDATION — before calling add_event or add_block, check each field against what the student ACTUALLY said:
-   - title/activity: Did the student say what this is? If not → ask_clarification. Never use generic placeholders.
-   - date: Did the student specify or clearly imply a date? If not → ask_clarification.
-   - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
-   - subject: For academic items, did the student mention the subject? If not → ask_clarification.
-   - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
-   If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
+11. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
+12. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
+13. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
+14. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
 
-PHOTO ANALYSIS:
-When the student sends a photo/image:
-1. DESCRIBE what you see first — "looks like a syllabus for..." or "I see a quadratic equation..."
-2. SCHEDULE DETECTION: If you see dates, due dates, assignments, syllabi, planners, or calendars:
-   - Extract EVERY date and assignment you can read
-   - Call add_event for tests/exams/events, add_task for homework/assignments — one tool call per item
-   - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
-   - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
-3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
-4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"
-
-CONTENT GENERATION:
-When the student asks for study materials (flashcards, outlines, summaries, study plans, quizzes, project breakdowns), respond with ONLY a valid JSON object (no markdown, no code fences). Use these formats:
-
-For study plans: {"type":"make_plan","title":"Plan Title","summary":"One sentence overview of what this plan covers","steps":[{"title":"Step description","date":"YYYY-MM-DD","time":"HH:MM AM/PM","estimated_minutes":30}]}
-For flashcards: {"type":"create_flashcards","title":"Topic","cards":[{"q":"Question","a":"Answer"}]}
-For quizzes: {"type":"create_quiz","title":"Topic","questions":[{"q":"Question","choices":["A","B","C","D"],"answer":"A"}]}
-For outlines: {"type":"create_outline","title":"Topic","sections":[{"heading":"Section","points":["Point 1","Point 2"]}]}
-For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","Bullet 2"]}
-For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
-For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
-
-Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.`;
+${photoSection}${contentGenSection}`;
 }
 
 /* ─── Action parser ─── */
@@ -4767,24 +4765,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
       // Tier routing: pure conversational messages use a lighter system prompt + token budget.
-      // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
-      // conversational replies and tool calling in a single pass. When a message has no action
-      // intent the model simply returns text with no tool_calls (no card shown). This avoids
-      // the bug where phrases like "put in my calendar" were misclassified as conversational
-      // and had tools suppressed, producing a text-only response with no confirmation card.
+      // The model handles both conversational replies and tool calling in a single pass —
+      // when there is no action intent it simply returns text with no tool_calls.
       const hasCorrectionSignal = /\b(actually|i meant|wait no|change that|make it|not [a-z]+,|sorry,|oops)\b/i.test(msgContent);
       const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification && !hasCorrectionSignal
         && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i.test(msgContent)
         && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
         && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
 
-      const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
+      // Only include full note content when the message actually references notes/docs, or is content gen.
+      // Action and conversational messages don't need the full note bodies (saves ~1500-2000 tokens).
+      const isNotesRef = /\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(msgContent);
+      const includeNoteContent = isContentGen || isNotesRef;
+
+      const chatPromptFinal = isConversational
+        ? buildSystemPrompt(tasks, blocks, events, notes, 1)
+        : buildSystemPrompt(tasks, blocks, events, notes, 2, { includeNoteContent, hasPhoto: !!photo, isContentGen });
       const chatBody = {
         systemPrompt: chatPromptFinal,
         messages: historyForApi,
