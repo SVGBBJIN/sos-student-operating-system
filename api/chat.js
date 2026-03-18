@@ -398,6 +398,19 @@ function stripRouteTag(text) {
   return { cleanText, needsAction: match[1] === "ACTION" };
 }
 
+/* ── Remove any leaked function call / JSON syntax from the 8b response ── */
+function sanitizeConversationText(text) {
+  return text
+    // Strip <function=...>...</function> and </function>...> variants
+    .replace(/<\/?function[^>]*>[\s\S]*?<\/function>/gi, "")
+    .replace(/<\/?function[^>]*>/gi, "")
+    // Strip bare JSON objects that start at line boundaries (leaked tool args)
+    .replace(/^\s*\{[\s\S]*?\}\s*$/gm, "")
+    // Strip tool name prefixes like "ask_clarification>" or "add_event{"
+    .replace(/\b(ask_clarification|add_event|add_task|delete_event|delete_task|complete_task|add_block|delete_block|add_note|edit_note|delete_note|add_recurring_event|update_event|break_task|convert_event_to_block|convert_block_to_event|make_plan|clear_all)[>\s{(][\s\S]*/gi, "")
+    .trim();
+}
+
 /* ── Parse Groq's malformed tool calls from failed_generation ── */
 function parseFailedGeneration(failedGen) {
   const results = [];
@@ -545,7 +558,7 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
 /* ── Conversation layer: llama-3.1-8b-instant (no tools, returns raw text) ── */
 async function callConversationModel(apiKey, systemPrompt, messages, maxTokens, imageBase64, imageMimeType) {
   const result = await callGroq(apiKey, CONVERSATION_MODEL, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, false, null, null);
-  return result.content;
+  return sanitizeConversationText(result.content);
 }
 
 /* ── Tool execution layer: openai/gpt-oss-120b (tools only, text discarded) ── */
@@ -744,7 +757,8 @@ export default async function handler(req, res) {
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
     // Step 1: Conversation model (llama-3.1-8b-instant) responds to user + classifies intent
-    const routingSystemPrompt = effectiveSystemPrompt + ROUTING_INSTRUCTION;
+    // Routing instruction is prepended so it takes effect before tool/context descriptions
+    const routingSystemPrompt = ROUTING_INSTRUCTION + "\n\n" + effectiveSystemPrompt;
     const rawConvText = await callConversationModel(
       GROQ_API_KEY,
       routingSystemPrompt,
