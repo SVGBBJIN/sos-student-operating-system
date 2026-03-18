@@ -494,3 +494,15 @@ select option{background:#0f0f23;color:var(--text)}
 [data-perf="mid"] *{transition-duration:.2s!important}
 [data-perf="mid"] .sos-sidebar::before{display:none}
 [data-perf="mid"] .fc-inner{transition:transform .2s linear}
+
+
+@media (max-width: 480px){
+  .sos-sidebar{position:fixed;top:0;bottom:0;left:0;z-index:120;width:min(280px,82vw);transform:translateX(-100%);transition:transform .28s cubic-bezier(0.16,1,0.3,1),width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1);box-shadow:0 18px 40px rgba(0,0,0,0.45)}
+  .sos-sidebar.collapsed{width:min(280px,82vw);padding:14px 12px}
+  .sos-sidebar.mobile-open{transform:translateX(0)}
+  .sos-sidebar-backdrop{position:fixed;inset:0;z-index:110;background:rgba(5,6,12,0.6);backdrop-filter:blur(6px);animation:overlayIn .2s ease}
+  .sos-mobile-sidebar-toggle{position:absolute;top:12px;left:12px;z-index:105;display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;border:1px solid rgba(255,255,255,0.18);background:rgba(10,10,18,0.88);color:rgba(240,240,255,0.92);box-shadow:0 10px 24px rgba(0,0,0,0.35);cursor:pointer}
+  .sos-mobile-sidebar-toggle:hover{background:rgba(22,22,34,0.96)}
+  .sos-main{width:100%;padding-left:0}
+  .sos-chat-area{padding-top:68px}
+}
