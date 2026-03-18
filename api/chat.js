@@ -7,10 +7,13 @@ const CORS_HEADERS = {
 };
 
 /* ── Model constants ── */
-// Primary: openai/gpt-oss-120b (smarter + reliable, cheaper than llama 70b)
-// Backup:  llama-3.3-70b-versatile (reliable fallback if primary is unavailable)
-const PRIMARY_MODEL = "openai/gpt-oss-120b";
-const BACKUP_MODEL  = "llama-3.3-70b-versatile";
+// Conversation model: llama-3.1-8b-instant — fast, user-facing responses + intent classification
+// Tool executor: openai/gpt-oss-120b — only runs when an action/tool call is needed
+const CONVERSATION_MODEL = "llama-3.1-8b-instant";
+const TOOL_EXECUTOR_MODEL = "openai/gpt-oss-120b";
+
+/* ── Routing instruction appended to system prompt for the conversation model ── */
+const ROUTING_INSTRUCTION = `\n\nROUTING INSTRUCTION: At the very end of your response, on a new line, append exactly one of:\n[ROUTE:ACTION] — if the user wants to add/update/delete tasks, events, blocks, or notes, or generate content (flashcards, summaries, study guides, etc.)\n[ROUTE:CHAT] — for everything else (questions, conversation, clarification)\nNo other text after the tag.`;
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -378,6 +381,14 @@ const ACTION_TOOLS = [
   },
 ];
 
+/* ── Strip routing tag from conversation model response ── */
+function stripRouteTag(text) {
+  const match = text.match(/\[ROUTE:(ACTION|CHAT)\]\s*$/);
+  if (!match) return { cleanText: text.trim(), needsAction: false };
+  const cleanText = text.slice(0, match.index).trim();
+  return { cleanText, needsAction: match[1] === "ACTION" };
+}
+
 /* ── Parse Groq's malformed tool calls from failed_generation ── */
 function parseFailedGeneration(failedGen) {
   const results = [];
@@ -520,6 +531,18 @@ async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageB
     }
     throw primaryErr;
   }
+}
+
+/* ── Conversation layer: llama-3.1-8b-instant (no tools, returns raw text) ── */
+async function callConversationModel(apiKey, systemPrompt, messages, maxTokens, imageBase64, imageMimeType) {
+  const result = await callGroq(apiKey, CONVERSATION_MODEL, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, false, null, null);
+  return result.content;
+}
+
+/* ── Tool execution layer: openai/gpt-oss-120b (tools only, text discarded) ── */
+async function callToolExecutor(apiKey, systemPrompt, messages) {
+  const result = await callGroq(apiKey, TOOL_EXECUTOR_MODEL, systemPrompt, messages, 1024, undefined, undefined, true, null, null);
+  return { actions: result.actions, clarification: result.clarification, clarifications: result.clarifications };
 }
 
 function parseLlmResponse(data) {
@@ -711,23 +734,30 @@ export default async function handler(req, res) {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
-    // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-20b handles chat + tool calling in one pass;
-    // llama-3.3-70b-versatile is the automatic backup if the primary model is unavailable.
-    const result = await callGroq(
+    // Step 1: Conversation model (llama-3.1-8b-instant) responds to user + classifies intent
+    const routingSystemPrompt = effectiveSystemPrompt + ROUTING_INSTRUCTION;
+    const rawConvText = await callConversationModel(
       GROQ_API_KEY,
-      PRIMARY_MODEL,
-      effectiveSystemPrompt,
+      routingSystemPrompt,
       messages,
       maxTokens,
       imageBase64,
-      imageMimeType,
-      true,   // includeTools — always on; model decides when to call tools
-      null,   // toolsOverride — use full ACTION_TOOLS
-      BACKUP_MODEL
+      imageMimeType
     );
 
-    return res.status(200).json(result);
+    // Step 2: Strip [ROUTE:ACTION/CHAT] tag — tag never reaches the user
+    const { cleanText, needsAction } = stripRouteTag(rawConvText);
+
+    // Step 3: If action needed, call tool executor (openai/gpt-oss-120b) to determine tool calls
+    let actions = [], clarification = null, clarifications = [];
+    if (needsAction && !imageBase64) {
+      const toolResult = await callToolExecutor(GROQ_API_KEY, effectiveSystemPrompt, messages);
+      actions = toolResult.actions;
+      clarification = toolResult.clarification;
+      clarifications = toolResult.clarifications;
+    }
+
+    return res.status(200).json({ content: cleanText, actions, clarification, clarifications });
   } catch (err) {
     console.error("api/chat error:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
