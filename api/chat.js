@@ -13,7 +13,16 @@ const CONVERSATION_MODEL = "llama-3.1-8b-instant";
 const TOOL_EXECUTOR_MODEL = "openai/gpt-oss-120b";
 
 /* ── Routing instruction appended to system prompt for the conversation model ── */
-const ROUTING_INSTRUCTION = `\n\nROUTING INSTRUCTION: At the very end of your response, on a new line, append exactly one of:\n[ROUTE:ACTION] — if the user wants to add/update/delete tasks, events, blocks, or notes, or generate content (flashcards, summaries, study guides, etc.)\n[ROUTE:CHAT] — for everything else (questions, conversation, clarification)\nNo other text after the tag.`;
+const ROUTING_INSTRUCTION = `\n\nROUTING INSTRUCTION (CRITICAL — FOLLOW EXACTLY):
+You are the conversational layer only. A separate system handles all actions and tool execution.
+NEVER output JSON, function calls, tool syntax, or structured data of any kind — not even as an example.
+NEVER describe what action you are taking in detail. Do not say things like "adding event X on date Y" or output make_plan / add_task / add_event data.
+Just reply naturally in 1-3 sentences (e.g. "on it!", "sure, setting that up now", "got it!") and let the action system handle the rest.
+
+At the very end of your response, on its own line, append exactly one of:
+[ROUTE:ACTION] — user wants to add/update/delete tasks, events, blocks, notes, or generate content
+[ROUTE:CHAT] — pure conversation, questions, advice, no data action needed
+No other text after the tag.`;
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
