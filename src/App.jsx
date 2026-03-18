@@ -1402,10 +1402,13 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
   );
 }
 
-function ClarificationCard({ clarification, onSubmit, savedAnswers, onAnswersChange }) {
+function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAnswersChange }) {
   // Support both single clarification and array of clarifications
   const clarifications = Array.isArray(clarification) ? clarification : [clarification];
   const questionCount = clarifications.length;
+
+  // Which question is currently displayed
+  const [currentQIdx, setCurrentQIdx] = useState(0);
 
   // Per-question state: selected options and free-form text
   // Initialize from savedAnswers if available (preserves state across panel navigation)
@@ -1415,11 +1418,16 @@ function ClarificationCard({ clarification, onSubmit, savedAnswers, onAnswersCha
       : clarifications.map(() => ({ selected: [], otherText: '' }))
   );
 
+  // Stable string key based on question content — immune to object re-references.
+  // Only changes when the AI sends genuinely different questions.
+  const clarificationKey = clarifications.map(c => c.question).join('|||');
+
   useEffect(() => {
     if (!savedAnswers || savedAnswers.length !== clarifications.length) {
       setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
     }
-  }, [clarification]);
+    setCurrentQIdx(0);
+  }, [clarificationKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function normalizeOption(option, idx) {
     if (typeof option === 'string') return { id: 'opt_' + idx, label: option };
@@ -1432,10 +1440,61 @@ function ClarificationCard({ clarification, onSubmit, savedAnswers, onAnswersCha
     };
   }
 
-  function toggleOption(qIdx, optId, multiSelect) {
+  function updateAnswer(qIdx, updater) {
     setAnswers(prev => {
       const next = [...prev];
-      const cur = { ...next[qIdx] };
+      next[qIdx] = updater(next[qIdx]);
+      if (onAnswersChange) onAnswersChange(next);
+      return next;
+    });
+  }
+
+  function toggleOption(qIdx, optId, multiSelect) {
+    updateAnswer(qIdx, cur => {
+      if (!multiSelect) return { ...cur, selected: [optId] };
+      return {
+        ...cur,
+        selected: cur.selected.includes(optId)
+          ? cur.selected.filter(v => v !== optId)
+          : [...cur.selected, optId],
+      };
+    });
+  }
+
+  function setOtherText(qIdx, text) {
+    updateAnswer(qIdx, cur => ({ ...cur, otherText: text }));
+  }
+
+  function buildPayloads(answersArr) {
+    return clarifications.map((c, i) => {
+      const opts = Array.isArray(c?.options) ? c.options.map(normalizeOption) : [];
+      return {
+        selected: answersArr[i].selected,
+        options: opts,
+        otherText: answersArr[i].otherText,
+        question: c?.question || '',
+      };
+    });
+  }
+
+  function handleSubmit() {
+    onSubmit(buildPayloads(answers));
+  }
+
+  function advance(updatedAnswers) {
+    const ans = updatedAnswers || answers;
+    if (currentQIdx < questionCount - 1) {
+      setCurrentQIdx(i => i + 1);
+    } else {
+      onSubmit(buildPayloads(ans));
+    }
+  }
+
+  function handleOptionClick(optId, multiSelect) {
+    let nextAnswers;
+    setAnswers(prev => {
+      const next = [...prev];
+      const cur = { ...next[currentQIdx] };
       if (!multiSelect) {
         cur.selected = [optId];
       } else {
@@ -1443,233 +1502,203 @@ function ClarificationCard({ clarification, onSubmit, savedAnswers, onAnswersCha
           ? cur.selected.filter(v => v !== optId)
           : [...cur.selected, optId];
       }
-      next[qIdx] = cur;
+      next[currentQIdx] = cur;
+      nextAnswers = next;
       if (onAnswersChange) onAnswersChange(next);
       return next;
     });
+    // Auto-advance for single-select after brief highlight
+    if (!multiSelect) {
+      setTimeout(() => advance(nextAnswers), 160);
+    }
   }
 
-  function setOtherText(qIdx, text) {
-    setAnswers(prev => {
-      const next = [...prev];
-      next[qIdx] = { ...next[qIdx], otherText: text };
-      if (onAnswersChange) onAnswersChange(next);
-      return next;
-    });
+  function handleSkipQuestion() {
+    if (currentQIdx < questionCount - 1) {
+      setCurrentQIdx(i => i + 1);
+    } else {
+      // Last question — submit with whatever we have (skipped = empty)
+      onSubmit(buildPayloads(answers));
+    }
   }
 
-  // Check if every question has at least one answer (selected option or text)
-  const allAnswered = answers.every((a, i) => {
-    const opts = Array.isArray(clarifications[i]?.options) ? clarifications[i].options : [];
-    // If question has no options (text-only), require text
-    if (opts.length === 0) return !!a.otherText.trim();
-    return a.selected.length > 0 || !!a.otherText.trim();
-  });
-
-  function handleSubmit() {
-    // Build per-question payloads
-    const payloads = clarifications.map((c, i) => {
-      const opts = Array.isArray(c?.options) ? c.options.map(normalizeOption) : [];
-      return {
-        selected: answers[i].selected,
-        options: opts,
-        otherText: answers[i].otherText,
-        question: c?.question || '',
-      };
-    });
-    onSubmit(payloads);
+  function handleClose() {
+    if (onSkip) onSkip();
+    else onSubmit(buildPayloads(answers));
   }
 
-  // Shared reason — show once if all share same reason, otherwise per-question
-  const sharedReason = questionCount > 1 && clarifications.every(c => c?.reason === clarifications[0]?.reason)
-    ? clarifications[0]?.reason || ''
-    : '';
+  const c = clarifications[currentQIdx] || {};
+  const options = Array.isArray(c?.options) ? c.options : [];
+  const multiSelect = !!c?.multiSelect || !!c?.multi_select;
+  const normalizedOptions = options.map(normalizeOption);
+  const answer = answers[currentQIdx] || { selected: [], otherText: '' };
+  const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim();
 
   return (
     <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(43,203,186,0.2)',
+      background:'rgba(22,22,36,0.98)',
+      border:'1px solid rgba(255,255,255,0.08)',
       borderRadius:18,
       padding:0,
       maxWidth:440,
       width:'100%',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(43,203,186,0.08)',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
+      overflow:'hidden',
     }}>
-      {/* Header */}
+      {/* Header: question title + nav + close */}
       <div style={{
-        background:'linear-gradient(135deg, rgba(43,203,186,0.15), rgba(108,99,255,0.1))',
-        padding:'14px 18px',
-        borderBottom:'1px solid rgba(43,203,186,0.1)',
+        padding:'20px 20px 16px',
         display:'flex',
-        alignItems:'center',
-        gap:10,
-        borderRadius:'18px 18px 0 0'
+        alignItems:'flex-start',
+        gap:12,
       }}>
+        {/* Question text */}
         <div style={{
-          width:32, height:32, borderRadius:8,
-          background:'linear-gradient(135deg, var(--teal), var(--accent))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(43,203,186,0.3)',
-          flexShrink:0
+          flex:1,
+          fontSize:'1.05rem',
+          fontWeight:700,
+          color:'var(--text)',
+          lineHeight:1.4,
+          letterSpacing:'-0.2px',
         }}>
-          {Icon.helpCircle(16)}
+          {c?.question || 'Can you clarify?'}
         </div>
-        <div>
-          <div style={{fontWeight:800, fontSize:'0.9rem', color:'var(--text)', letterSpacing:'-0.3px'}}>
-            {questionCount > 1 ? `A few quick questions` : 'Quick question'}
-          </div>
+        {/* Nav + close */}
+        <div style={{display:'flex', alignItems:'center', gap:4, flexShrink:0, marginTop:2}}>
+          {questionCount > 1 && (
+            <>
+              <button
+                onClick={() => setCurrentQIdx(i => Math.max(0, i - 1))}
+                disabled={currentQIdx === 0}
+                style={{
+                  background:'none', border:'none', cursor: currentQIdx === 0 ? 'default' : 'pointer',
+                  color: currentQIdx === 0 ? 'rgba(255,255,255,0.2)' : 'var(--text-dim)',
+                  padding:'2px 4px', fontSize:'1rem', lineHeight:1,
+                }}
+              >‹</button>
+              <span style={{fontSize:'0.78rem', color:'var(--text-dim)', whiteSpace:'nowrap', padding:'0 2px'}}>
+                {currentQIdx + 1} of {questionCount}
+              </span>
+              <button
+                onClick={() => advance()}
+                disabled={currentQIdx === questionCount - 1 && !currentAnswered}
+                style={{
+                  background:'none', border:'none',
+                  cursor:(currentQIdx === questionCount - 1 && !currentAnswered) ? 'default' : 'pointer',
+                  color:(currentQIdx === questionCount - 1 && !currentAnswered) ? 'rgba(255,255,255,0.2)' : 'var(--text-dim)',
+                  padding:'2px 4px', fontSize:'1rem', lineHeight:1,
+                }}
+              >›</button>
+            </>
+          )}
+          <button
+            onClick={handleClose}
+            style={{
+              background:'none', border:'none', cursor:'pointer',
+              color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1,
+              marginLeft:4,
+            }}
+          >×</button>
         </div>
       </div>
 
-      {/* Shared reason banner */}
-      {sharedReason && (
-        <div style={{
-          padding:'10px 18px',
-          background:'rgba(43,203,186,0.04)',
-          borderBottom:'1px solid rgba(255,255,255,0.04)',
-          fontSize:'0.8rem',
-          color:'var(--text-dim)',
-          lineHeight:1.5,
-          fontStyle:'italic'
-        }}>
-          {sharedReason}
+      {/* Options */}
+      {normalizedOptions.length > 0 && (
+        <div style={{borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+          {normalizedOptions.map((opt, i) => {
+            const isSelected = answer.selected.includes(opt.id);
+            return (
+              <div
+                key={opt.id}
+                onClick={() => handleOptionClick(opt.id, multiSelect)}
+                style={{
+                  display:'flex', alignItems:'center', gap:14,
+                  padding:'14px 20px',
+                  borderBottom:'1px solid rgba(255,255,255,0.05)',
+                  cursor:'pointer',
+                  background: isSelected ? 'rgba(255,255,255,0.06)' : 'transparent',
+                  transition:'background .12s',
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background='rgba(255,255,255,0.03)'; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background='transparent'; }}
+              >
+                {/* Number badge */}
+                <div style={{
+                  width:32, height:32, borderRadius:8, flexShrink:0,
+                  background: isSelected ? 'rgba(43,203,186,0.2)' : 'rgba(255,255,255,0.07)',
+                  border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  fontSize:'0.82rem', fontWeight:700,
+                  color: isSelected ? 'var(--teal)' : 'var(--text-dim)',
+                  transition:'all .12s',
+                }}>
+                  {i + 1}
+                </div>
+                {/* Label */}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:'0.88rem', color:'var(--text)', fontWeight:500, lineHeight:1.4}}>{opt.label}</div>
+                  {opt.description && (
+                    <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
+                  )}
+                </div>
+                {/* Chevron when selected */}
+                {isSelected && (
+                  <div style={{color:'var(--teal)', fontSize:'1rem', flexShrink:0}}>›</div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Individual question sections */}
-      {clarifications.map((c, qIdx) => {
-        const options = Array.isArray(c?.options) ? c.options : [];
-        const multiSelect = !!c?.multiSelect || !!c?.multi_select;
-        const reason = !sharedReason ? (c?.reason || '') : '';
-        const normalizedOptions = options.map(normalizeOption);
-        const answer = answers[qIdx] || { selected: [], otherText: '' };
-
-        return (
-          <div key={qIdx} style={{
-            borderBottom: qIdx < questionCount - 1 ? '1px solid rgba(43,203,186,0.12)' : 'none',
-          }}>
-            {/* Per-question reason */}
-            {reason && (
-              <div style={{
-                padding:'8px 18px',
-                background:'rgba(43,203,186,0.04)',
-                borderBottom:'1px solid rgba(255,255,255,0.04)',
-                fontSize:'0.78rem',
-                color:'var(--text-dim)',
-                lineHeight:1.5,
-                fontStyle:'italic'
-              }}>
-                {reason}
-              </div>
-            )}
-
-            {/* Question label */}
-            <div style={{
-              padding:'12px 18px 6px',
-              fontSize:'0.86rem',
-              color:'var(--text)',
-              lineHeight:1.5,
-              fontWeight:600
-            }}>
-              {questionCount > 1 && <span style={{color:'var(--teal)', marginRight:6, fontWeight:800}}>{qIdx + 1}.</span>}
-              {c?.question || 'Can you clarify?'}
-            </div>
-
-            {/* Options for this question */}
-            {normalizedOptions.length > 0 && (
-              <div style={{padding:'6px 18px 4px'}}>
-                {normalizedOptions.map((opt) => {
-                  const isSelected = answer.selected.includes(opt.id);
-                  return (
-                    <div key={opt.id}
-                      onClick={() => toggleOption(qIdx, opt.id, multiSelect)}
-                      style={{
-                        display:'flex', alignItems:'center', gap:10,
-                        padding:'9px 12px',
-                        marginBottom:5,
-                        borderRadius:10,
-                        cursor:'pointer',
-                        border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.06)',
-                        background: isSelected ? 'rgba(43,203,186,0.08)' : 'rgba(255,255,255,0.02)',
-                        transition:'all .15s'
-                      }}>
-                      <div style={{
-                        width:18, height:18, borderRadius: multiSelect ? 4 : 9,
-                        border: isSelected ? '2px solid var(--teal)' : '2px solid rgba(255,255,255,0.15)',
-                        background: isSelected ? 'var(--teal)' : 'transparent',
-                        display:'flex', alignItems:'center', justifyContent:'center',
-                        flexShrink:0,
-                        transition:'all .15s'
-                      }}>
-                        {isSelected && Icon.check(10)}
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:'0.82rem', color:'var(--text)', fontWeight:500}}>{opt.label}</div>
-                        {opt.description && (
-                          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Free-form text input */}
-            <div style={{padding:'2px 18px 10px'}}>
-              <input
-                type="text"
-                value={answer.otherText}
-                onChange={(e) => setOtherText(qIdx, e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && allAnswered) handleSubmit(); }}
-                placeholder={c?.otherPlaceholder || 'Or type your own answer...'}
-                style={{
-                  width:'100%',
-                  background:'rgba(255,255,255,0.04)',
-                  border:'1px solid rgba(255,255,255,0.08)',
-                  borderRadius:10,
-                  padding:'9px 12px',
-                  color:'var(--text)',
-                  fontSize:'0.8rem',
-                  outline:'none',
-                  transition:'border-color .15s',
-                  boxSizing:'border-box'
-                }}
-                onFocus={e => e.target.style.borderColor='rgba(43,203,186,0.3)'}
-                onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.08)'}
-              />
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Submit all */}
+      {/* Footer: text input + Skip */}
       <div style={{
-        padding:'10px 18px 14px',
-        borderTop:'1px solid rgba(255,255,255,0.06)'
+        display:'flex', alignItems:'center', gap:10,
+        padding:'10px 16px 12px',
+        borderTop: normalizedOptions.length > 0 ? 'none' : '1px solid rgba(255,255,255,0.06)',
       }}>
-        <button
-          onClick={handleSubmit}
-          disabled={!allAnswered}
+        {/* Pencil icon */}
+        <div style={{color:'var(--text-dim)', flexShrink:0, opacity:0.6, display:'flex', alignItems:'center'}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </div>
+        <input
+          type="text"
+          value={answer.otherText}
+          onChange={(e) => setOtherText(currentQIdx, e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && currentAnswered) advance(); }}
+          placeholder={c?.otherPlaceholder || 'Something else…'}
           style={{
-            width:'100%',
-            background: allAnswered ? 'linear-gradient(135deg, var(--teal), rgba(43,203,186,0.8))' : 'rgba(255,255,255,0.05)',
+            flex:1,
+            background:'transparent',
             border:'none',
-            borderRadius:10,
-            padding:'10px 16px',
-            color: allAnswered ? '#fff' : 'var(--text-dim)',
+            color:'var(--text-dim)',
             fontSize:'0.84rem',
-            fontWeight:700,
-            cursor: allAnswered ? 'pointer' : 'default',
-            display:'flex',
-            alignItems:'center',
-            justifyContent:'center',
-            gap:6,
-            transition:'all .15s',
-            opacity: allAnswered ? 1 : 0.5
+            outline:'none',
+            padding:'4px 0',
           }}
+        />
+        {/* Skip button */}
+        <button
+          onClick={handleSkipQuestion}
+          style={{
+            background:'rgba(255,255,255,0.07)',
+            border:'1px solid rgba(255,255,255,0.1)',
+            borderRadius:8,
+            padding:'6px 14px',
+            color:'var(--text-dim)',
+            fontSize:'0.82rem',
+            fontWeight:600,
+            cursor:'pointer',
+            flexShrink:0,
+            transition:'all .12s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.12)'; e.currentTarget.style.color='var(--text)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.07)'; e.currentTarget.style.color='var(--text-dim)'; }}
         >
-          {Icon.send(14)} {questionCount > 1 ? 'Submit All' : 'Submit'}
+          Skip
         </button>
       </div>
     </div>
@@ -3799,7 +3828,9 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:action.due||today(), estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const rawDue = action.due || today();
+          const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:normalizedDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -3864,7 +3895,9 @@ function App() {
           break;
         }
         case 'add_event': {
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:action.date||today(), time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const rawEvDate = action.date || today();
+          const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
+          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -4101,7 +4134,7 @@ function App() {
           break;
         default: console.warn('Unknown action type:', action.type);
       }
-    } catch(e) { console.error('Failed to execute action:', action, e); }
+    } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
   }
 
   // ── Confirmation handlers ──
@@ -4111,6 +4144,14 @@ function App() {
     const name = action.title||action.activity||'Action';
     const verb = action.type?.startsWith('delete') ? 'removed' : action.type === 'update_event' ? 'updated' : action.type === 'complete_task' ? 'completed' : 'added';
     setToastMsg('✓ ' + name + ' ' + verb);
+    const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
+    if (calendarActionTypes.includes(action.type)) {
+      if (layoutMode === 'sidebar') {
+        openCompanionPanel('schedule');
+      } else if (!showSideBySide) {
+        setShowPeek(true);
+      }
+    }
   }
   function handleCancelAction(idx) { setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
 
@@ -4784,11 +4825,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
         && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
 
-      const chatPromptFinal = isConversational ? buildSystemPrompt(tasks, blocks, events, notes, 1) : chatPrompt;
+      // Always use the full tier-2 prompt so the AI always has tool definitions.
+      // Tier-1 (conversational) had no tool instructions — casual phrasing like
+      // "yeah next Friday works" would fall through with no action generated.
       const chatBody = {
-        systemPrompt: chatPromptFinal,
+        systemPrompt: chatPrompt,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : isConversational ? 512 : 1024,
+        maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
       };
@@ -5606,7 +5649,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         {pendingClarification && (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
+            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
           </div>
         )}
         {!pendingClarification && pendingActions.length > 1 ? (
@@ -5634,7 +5677,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   } else { executeAction(pa.action); }
                 });
                 setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
-                if(toExec.length>0)setToastMsg('Added '+toExec.length+' items');
+                if(toExec.length>0){
+                  setToastMsg('Added '+toExec.length+' items');
+                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
+                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
+                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
+                    else if(!showSideBySide){setShowPeek(true);}
+                  }
+                }
               }}
               onCancel={()=>setPendingActions([])}
             />
