@@ -728,7 +728,9 @@ If tutor_mode is ON and the student is asking for explanation/help instead of co
 - line 1: a tiny objective ("goal: ...")
 - then 2-4 short teaching bullets or numbered steps
 - ask exactly one quick check question unless they explicitly asked for the full answer
-- close with one SOS-native next step (review notes, make flashcards, add a study block, etc.).`;
+- close with one SOS-native next step (review notes, make flashcards, add a study block, etc.)
+
+IMPORTANT: if the student asks for flashcards, a quiz, or practice questions — even if they are following up on the tutor explanation you just gave — respond with the proper content JSON ("create_flashcards" or "create_quiz") instead of the tutor text template. If they do not restate the topic, infer it from the most recent tutoring exchange or the referenced notes.`;
 }
 
 /* ─── Action parser ─── */
@@ -890,10 +892,12 @@ function parseDocId(input) {
 
 /* ─── Multi-model message classifier ─── */
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_GEN_REGEX = /flashcards?|outline|summar|study\s*plan|study\s*guide|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const TUTOR_STUDY_REGEX = /flashcards?|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?/i;
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
-  if (/flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text)) {
+  if (CONTENT_GEN_REGEX.test(text)) {
     return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
   }
   if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
@@ -3605,6 +3609,48 @@ function Toast({message,onDone}){
 }
 
 /* ─── Typing Dots (loading indicator) ─── */
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatAssistantMessage(content) {
+  const raw = String(content || '').trim();
+  if (!raw) return '';
+
+  const goalMatch = raw.match(/goal:\s*(.*?)(?=quick check:|next move:|$)/is);
+  const quickCheckMatch = raw.match(/quick check:\s*(.*?)(?=next move:|$)/is);
+  const nextMoveMatch = raw.match(/next move:\s*(.*)$/is);
+
+  if (goalMatch || quickCheckMatch || nextMoveMatch) {
+    const goalSection = (goalMatch?.[1] || '').trim();
+    const goalParts = goalSection ? goalSection.split(/\s+-\s+/).map(part => part.trim()).filter(Boolean) : [];
+    const goalTitle = goalParts[0] || '';
+    const goalBullets = goalParts.slice(1);
+    const quickCheck = (quickCheckMatch?.[1] || '').trim();
+    const nextMove = (nextMoveMatch?.[1] || '').trim();
+
+    const html = `
+      <div class="tutor-msg">
+        ${goalTitle ? `<div class="tutor-msg-section"><div class="tutor-msg-label">goal</div><div class="tutor-msg-title">${escapeHtml(goalTitle)}</div>${goalBullets.length ? `<ul class="tutor-msg-list">${goalBullets.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}</div>` : ''}
+        ${quickCheck ? `<div class="tutor-msg-section"><div class="tutor-msg-label">quick check</div><div class="tutor-msg-body">${escapeHtml(quickCheck)}</div></div>` : ''}
+        ${nextMove ? `<div class="tutor-msg-section tutor-msg-next"><div class="tutor-msg-label">next move</div><div class="tutor-msg-body">${escapeHtml(nextMove)}</div></div>` : ''}
+      </div>
+    `;
+    return DOMPurify.sanitize(html);
+  }
+
+  const withBreaks = escapeHtml(raw)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|<br>)(goal|quick check|next move):/gi, '$1<strong>$2:</strong>')
+    .replace(/\n/g, '<br/>');
+  return DOMPurify.sanitize(withBreaks);
+}
+
 const TypingDots=()=>(
   <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
     <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
@@ -4916,8 +4962,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     }
 
     // Detect content generation requests (for rate limiting + model upgrade)
-    const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
-    const isTutorStudyContentRequest = /flashcard|quiz\s+me|create\s+a\s+quiz|practice\s*question/i.test(text || '');
+    const isContentGen = CONTENT_GEN_REGEX.test(text || '');
+    const isTutorStudyContentRequest = TUTOR_STUDY_REGEX.test(text || '');
     if (isTutorStudyContentRequest) primeTutorSession();
 
     try {
@@ -5805,7 +5851,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     onError={(e)=>{e.target.style.display='none';}}
                     style={{maxWidth:240,maxHeight:200,borderRadius:10,marginBottom:msg.content?8:0,cursor:'pointer',display:'block'}}/>
                 )}
-                {msg.content&&<span>{msg.content}</span>}
+                {msg.content && (msg.role === 'assistant'
+                  ? <div dangerouslySetInnerHTML={{__html: formatAssistantMessage(msg.content)}} />
+                  : <span>{msg.content}</span>)}
                 <div className="sos-bubble-time">{msg.timestamp?new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</div>
               </div>
             </div>
