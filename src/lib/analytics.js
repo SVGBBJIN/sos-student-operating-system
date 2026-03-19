@@ -29,3 +29,8 @@ export async function trackEvent(userId, eventType, metadata = {}) {
     console.warn('Analytics tracking failed:', e);
   }
 }
+
+
+export async function trackTutorEvent(userId, eventType, metadata = {}) {
+  return trackEvent(userId, `tutor_${eventType}`, metadata);
+}
