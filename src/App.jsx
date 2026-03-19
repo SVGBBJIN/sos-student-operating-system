@@ -4917,6 +4917,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
     // Detect content generation requests (for rate limiting + model upgrade)
     const isContentGen = /flashcard|outline|summar|study\s*plan|study\s*guide|quiz\s+me|practice\s*question|project\s*breakdown|review\s*sheet|cheat\s*sheet/i.test(text || '');
+    const isTutorStudyContentRequest = /flashcard|quiz\s+me|create\s+a\s+quiz|practice\s*question/i.test(text || '');
+    if (isTutorStudyContentRequest) primeTutorSession();
 
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
@@ -5149,6 +5151,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        const tutorContentActions = contentActions.filter(a => a.type === 'create_flashcards' || a.type === 'create_quiz');
+        if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
         const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
@@ -5204,15 +5208,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     sendMessage(input);
   }
   function sendChip(text) {
+    const normalizedText = text === 'Make flashcards'
+      ? (notes.length > 0 ? 'Create flashcards from my notes for the topic I should study next.' : 'Create flashcards for the topic I should study next.')
+      : text === 'Quiz me'
+        ? (notes.length > 0 ? 'Create a quiz from my notes and ask me one question at a time.' : 'Create a quiz for the topic I should study next and ask me one question at a time.')
+        : text;
+    if (/flashcard|quiz me|create a quiz/i.test(normalizedText)) primeTutorSession();
     if(viewingSavedChatId)return;
     if(!user){
-      if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(text); setShowAuthModal(true); return; }
+      if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(normalizedText); setShowAuthModal(true); return; }
       setGuestMsgCount(c => c + 1);
       setInput('');
-      sendMessage(text);
+      sendMessage(normalizedText);
       return;
     }
-    setInput(''); sendMessage(text);
+    setInput(''); sendMessage(normalizedText);
   }
 
   async function handlePhotoSelect(e) {
@@ -5461,6 +5471,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function enterTutorMode() {
     toggleTutorMode(true);
     setActivePanel('tutor');
+  }
+
+  function primeTutorSession() {
+    toggleTutorMode(true);
+    setActivePanel('chat');
+    if (layoutMode === 'sidebar' && notes.length > 0) openCompanionPanel('notes');
   }
 
   function launchTutorPrompt(message) {
