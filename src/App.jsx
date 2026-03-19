@@ -505,7 +505,9 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
+function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
+  const tutorMode = !!options.tutorMode;
+  const workspaceContext = options.workspaceContext || 'chat';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
@@ -629,6 +631,7 @@ CORE BEHAVIORS:
 5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
 6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
 7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.
+8. TUTOR MODE: When tutor mode is on, act like a dedicated tutor page — lead with a tiny goal, teach in short steps, ask one check-for-understanding question before dumping answers, and end with a next move the student can take in SOS.
 
 TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
 
@@ -649,6 +652,12 @@ COMPLETED THIS WEEK: ${doneThisWeek} tasks
 
 ${notesSection ? `STUDENT'S NOTES & REFERENCE DOCUMENTS:
 ${notesSection}` : 'NOTES: (none)'}
+
+MODE FLAGS:
+- tutor_mode: ${tutorMode ? 'ON' : 'OFF'}
+- workspace_context: ${workspaceContext}
+- If workspace_context is notes, prioritize the student's notes as the primary reference.
+- If workspace_context is schedule, connect your answer to today's workload and upcoming due dates when useful.
 
 TOOLS — you have built-in tools to manage the student's calendar, tasks, blocks, and notes. Use them whenever the student mentions anything actionable. Keep your text response natural and brief — just mention what you did casually, don't explain the action in detail.
 
@@ -713,7 +722,13 @@ For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","B
 For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
 For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
 
-Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.`;
+Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.
+
+If tutor_mode is ON and the student is asking for explanation/help instead of content JSON, format the reply like this:
+- line 1: a tiny objective ("goal: ...")
+- then 2-4 short teaching bullets or numbered steps
+- ask exactly one quick check question unless they explicitly asked for the full answer
+- close with one SOS-native next step (review notes, make flashcards, add a study block, etc.).`;
 }
 
 /* ─── Action parser ─── */
@@ -1813,6 +1828,109 @@ function TutorIndicator({ active }) {
   return (
     <div className={'tutor-indicator' + (active ? ' active' : '')} title={active ? 'Tutor mode is ON' : 'Tutor mode is OFF'}>
       ✦ Tutor {active ? 'ON' : 'OFF'}
+    </div>
+  );
+}
+
+function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTutorMode, onPrompt, onOpenNotes, onOpenSchedule, onOpenSettings }) {
+  const activeTasks = tasks.filter(t => t.status !== 'done');
+  const overdueTasks = activeTasks.filter(t => daysUntil(t.dueDate) < 0);
+  const dueSoon = activeTasks.filter(t => { const d = daysUntil(t.dueDate); return d >= 0 && d <= 3; });
+  const upcomingEvents = events.filter(e => { const d = daysUntil(e.date); return d >= 0 && d <= 7; });
+  const hasNotes = notes.length > 0;
+  const primaryFocus = overdueTasks[0] || dueSoon[0] || activeTasks[0] || null;
+  const prompts = [
+    { label: 'Teach me from my notes', msg: hasNotes ? `Teach me the most important ideas from my notes and quiz me one question at a time.` : 'Help me study a topic step by step and quiz me one question at a time.' },
+    { label: 'Build a study sprint', msg: 'Plan a focused 45-minute study sprint for my highest-priority work.' },
+    { label: 'Explain this simply', msg: 'Explain this like I am learning it for the first time, then check my understanding with one question.' },
+    { label: 'Make flashcards', msg: hasNotes ? 'Make flashcards from my notes for the topic I need most right now.' : 'Make me flashcards for the topic I need to study.' },
+  ];
+  const integrations = [
+    { title: 'Notes-aware tutoring', description: hasNotes ? `Pulls from ${notes.length} saved note${notes.length === 1 ? '' : 's'} so explanations can cite your actual material.` : 'Import notes or PDFs and tutor mode will teach from them instead of starting from scratch.', action: onOpenNotes, cta: hasNotes ? 'Open notes' : 'Add notes', icon: Icon.fileText(16) },
+    { title: 'Schedule-aware coaching', description: primaryFocus ? `Your next likely focus is ${primaryFocus.title}${primaryFocus.subject ? ` in ${primaryFocus.subject}` : ''}. Tutor mode can turn that into a plan without losing track of due dates.` : 'Tutor mode can turn explanations into realistic study blocks that fit around your calendar.', action: onOpenSchedule, cta: 'Open schedule', icon: Icon.calendarClock(16) },
+    { title: 'One-click study actions', description: 'Jump from tutoring into flashcards, quizzes, plans, and task support without leaving the workspace.', action: onPrompt, cta: 'Start guided help', icon: Icon.sparkles(16), prompt: 'Help me study step by step using tutor mode.' },
+  ];
+
+  return (
+    <div className="tutor-page">
+      <section className="tutor-hero">
+        <div className="tutor-hero-copy">
+          <div className="tutor-eyebrow">Dedicated tutor workspace</div>
+          <h1>Make tutor mode feel like its own page.</h1>
+          <p>Tutor mode now has a home base for guided explanations, note-aware studying, and schedule-aware next steps. Turn it on when you want SOS to teach, coach, and keep you moving.</p>
+          <div className="tutor-hero-actions">
+            <button className="tutor-primary-btn" onClick={() => onToggleTutorMode(!tutorMode)}>{tutorMode ? 'Tutor mode on' : 'Turn tutor mode on'}</button>
+            <button className="tutor-secondary-btn" onClick={() => onPrompt(prompts[0].msg)}>Try a guided session</button>
+            <button className="tutor-secondary-btn" onClick={onBack}>Back to chat</button>
+          </div>
+        </div>
+        <div className="tutor-hero-card">
+          <div className="tutor-hero-card-top">
+            <TutorIndicator active={tutorMode} />
+            <span>{hasNotes ? 'Notes connected' : 'Bring in notes for better tutoring'}</span>
+          </div>
+          <div className="tutor-focus-label">Current mission</div>
+          <div className="tutor-focus-title">{primaryFocus ? primaryFocus.title : 'Get clear on what to study next'}</div>
+          <div className="tutor-focus-meta">
+            {primaryFocus
+              ? `${primaryFocus.subject || 'General study'} • due ${fmt(primaryFocus.dueDate)}`
+              : `${upcomingEvents.length} event${upcomingEvents.length === 1 ? '' : 's'} this week • ${notes.length} note${notes.length === 1 ? '' : 's'} ready`}
+          </div>
+          <div className="tutor-hero-checklist">
+            <div>{tutorMode ? '✓ Guided teaching voice is active' : '• Guided teaching voice is waiting for you to turn it on'}</div>
+            <div>{hasNotes ? '✓ Can cite your notes while explaining' : '• Add notes to unlock note-grounded explanations'}</div>
+            <div>✓ Can turn help into plans, blocks, flashcards, and quizzes</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="tutor-stats">
+        <div className="tutor-stat-card"><span>Active tasks</span><strong>{activeTasks.length}</strong><small>{overdueTasks.length > 0 ? `${overdueTasks.length} overdue` : 'Nothing overdue right now'}</small></div>
+        <div className="tutor-stat-card"><span>Due soon</span><strong>{dueSoon.length}</strong><small>Tasks due in the next 3 days</small></div>
+        <div className="tutor-stat-card"><span>Study sources</span><strong>{notes.length}</strong><small>{hasNotes ? 'Notes + docs available for reference' : 'Import PDFs or docs to ground answers'}</small></div>
+        <div className="tutor-stat-card"><span>This week</span><strong>{upcomingEvents.length}</strong><small>Upcoming events tutor mode can plan around</small></div>
+      </section>
+
+      <section className="tutor-section">
+        <div className="tutor-section-head">
+          <div>
+            <div className="tutor-section-eyebrow">Start here</div>
+            <h2>Quick tutor workflows</h2>
+          </div>
+          <button className="tutor-text-btn" onClick={() => onPrompt('Help me study step by step using tutor mode and my current workload.')}>Open in chat</button>
+        </div>
+        <div className="tutor-prompt-grid">
+          {prompts.map(prompt => (
+            <button key={prompt.label} className="tutor-prompt-card" onClick={() => onPrompt(prompt.msg)}>
+              <div className="tutor-prompt-icon">{Icon.sparkles(15)}</div>
+              <div>
+                <div className="tutor-prompt-title">{prompt.label}</div>
+                <div className="tutor-prompt-copy">{prompt.msg}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="tutor-section">
+        <div className="tutor-section-head">
+          <div>
+            <div className="tutor-section-eyebrow">Integration upgrades</div>
+            <h2>Tutor mode is connected to the rest of SOS</h2>
+          </div>
+          <button className="tutor-text-btn" onClick={onOpenSettings}>Tune settings</button>
+        </div>
+        <div className="tutor-integration-grid">
+          {integrations.map(item => (
+            <div key={item.title} className="tutor-integration-card">
+              <div className="tutor-integration-icon">{item.icon}</div>
+              <div className="tutor-integration-title">{item.title}</div>
+              <p>{item.description}</p>
+              <button className="tutor-secondary-btn" onClick={() => item.prompt ? item.action(item.prompt) : item.action()}>{item.cta}</button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -4808,7 +4926,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2);
+      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -5335,8 +5453,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showPeek,showNotes,showChatSidebar,activePanel,layoutMode,openCompanionPanel]);
 
+  function toggleTutorMode(nextValue) {
+    setTutorMode(nextValue);
+    localStorage.setItem('sos_tutor_mode', nextValue ? 'true' : 'false');
+  }
+
+  function launchTutorPrompt(message) {
+    setActivePanel('chat');
+    if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+    if (sidebarCompanionPanel !== 'notes') openCompanionPanel('notes');
+    setInput(message);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
+    { label:'Tutor mode', action:()=>setActivePanel('tutor') },
     { label:'Add a task', msg:'I need to add a task' },
     { label:'My schedule', action:()=>setShowPeek(true) },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
@@ -5397,6 +5529,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>setActivePanel('tutor')} title="Tutor workspace">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Tutor</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -5457,6 +5590,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
+          <button onClick={()=>setActivePanel('tutor')} className="g-hdr-btn">{Icon.bookOpen(14)} Tutor</button>
           <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
@@ -5464,7 +5598,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </div>}
 
-      {activePanel === 'settings' ? (
+      {activePanel === 'tutor' ? (
+        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
+          <TutorMissionPage
+            tutorMode={tutorMode}
+            tasks={tasks}
+            events={events}
+            notes={notes}
+            onBack={() => setActivePanel('chat')}
+            onToggleTutorMode={toggleTutorMode}
+            onPrompt={launchTutorPrompt}
+            onOpenNotes={() => openCompanionPanel('notes')}
+            onOpenSchedule={() => openCompanionPanel('schedule')}
+            onOpenSettings={() => setActivePanel('settings')}
+          />
+        </div>
+      ) : activePanel === 'settings' ? (
         <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
           <div className="settings-view" style={{animation:'slideUp .28s ease'}}>
             <div className="settings-card">
@@ -5532,7 +5681,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Activates a guided, step-by-step learning style. Indicator appears in sidebar and topbar when on.</div>
                 </div>
-                <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>{ const n=!tutorMode; setTutorMode(n); localStorage.setItem('sos_tutor_mode',n?'true':'false'); }}>{tutorMode ? 'On' : 'Off'}</button>
+                <div style={{display:'flex',gap:8}}>
+                  <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>toggleTutorMode(!tutorMode)}>{tutorMode ? 'On' : 'Off'}</button>
+                  <button className="settings-toggle" onClick={()=>setActivePanel('tutor')}>Open page</button>
+                </div>
               </div>
               <div className="settings-row">
                 <div>
