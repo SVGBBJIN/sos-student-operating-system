@@ -355,7 +355,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 }
 @media(max-width:768px){
   .sos-app{flex-direction:column}
-  .sos-sidebar{width:100%;height:auto;max-height:42vh;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
+  .sos-sidebar,.sos-sidebar.collapsed{width:100%;height:auto;max-height:42vh;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
   .sos-bubble{max-width:88%}
   .sos-header h1{font-size:1rem!important}
   .peek-panel{max-height:75vh}
@@ -368,6 +368,10 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
   .sos-chat-companion.collapsed{width:100%;min-width:0;min-height:56px;max-height:56px;padding-top:0;align-items:center;transition:min-height .38s cubic-bezier(0.16,1,0.3,1),max-height .38s cubic-bezier(0.16,1,0.3,1)}
   .cal-cell{min-height:55px}
   .cal-cell-event{font-size:0.6rem}
+}
+@media(max-width:480px){
+  /* Prevent collapsed icon-only sidebar from overlapping main content on narrow phones */
+  .sos-sidebar,.sos-sidebar.collapsed{width:100%;max-height:52px;border-right:none;border-bottom:1px solid rgba(108,99,255,0.14)}
 }
 @media(max-width:500px){
   .sos-input-area{padding:6px 10px 10px}

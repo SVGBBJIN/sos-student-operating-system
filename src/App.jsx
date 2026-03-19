@@ -5394,7 +5394,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
