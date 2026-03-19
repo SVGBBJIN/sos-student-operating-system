@@ -6,6 +6,11 @@ import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
+import { buildSystemPrompt } from './lib/prompts';
+import { StudyContentRouter } from './features/study/StudyContent';
+import TutorHeader from './features/tutor/TutorHeader';
+import TutorWorkspace, { TypingDots } from './features/tutor/TutorWorkspace';
+import { detectCompanionIntent, getWorkspaceContext, getWorkspaceModeLabel } from './features/tutor/TutorSessionState';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -505,217 +510,6 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
-  const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-  const todayKey = today();
-  const currentHour = new Date().getHours();
-
-  const todayBlocks = {};
-  const todayDow = new Date().getDay();
-  (blocks.recurring || []).forEach(rb => {
-    if (rb.days.includes(todayDow)) {
-      const [sh, sm] = rb.start.split(':').map(Number);
-      const [eh, em] = rb.end.split(':').map(Number);
-      let ch = sh, cm = sm;
-      while (ch < eh || (ch === eh && cm < em)) {
-        const key = String(ch).padStart(2,'0') + ':' + String(cm).padStart(2,'0');
-        todayBlocks[key] = { name: rb.name, category: rb.category };
-        cm += 30; if (cm >= 60) { ch++; cm = 0; }
-      }
-    }
-  });
-  const dateOverrides = blocks.dates?.[todayKey] || {};
-  Object.entries(dateOverrides).forEach(([k, v]) => {
-    if (v === null) delete todayBlocks[k]; else todayBlocks[k] = v;
-  });
-
-  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const weekSummary = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - d.getDay() + i);
-    const ds = toDateStr(d); const dow = d.getDay();
-    // Build merged block map (recurring base + date-specific overrides) for this day
-    const daySlots = {};
-    (blocks.recurring || []).forEach(rb => {
-      if (rb.days.includes(dow)) {
-        const [sh,sm] = rb.start.split(':').map(Number);
-        const [eh,em] = rb.end.split(':').map(Number);
-        let ch=sh, cm=sm;
-        while (ch<eh||(ch===eh&&cm<em)) {
-          daySlots[String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0')] = { name: rb.name };
-          cm+=30; if(cm>=60){ch++;cm=0;}
-        }
-      }
-    });
-    Object.entries(blocks.dates?.[ds] || {}).forEach(([k,v]) => {
-      if (v===null) delete daySlots[k]; else daySlots[k] = v;
-    });
-    const activities = summarizeBlockSlots(daySlots);
-    tasks.filter(t => t.dueDate === ds && t.status !== 'done').forEach(t => activities.push('DUE: ' + t.title));
-    events.filter(e => e.date === ds).forEach(e => activities.push('EVENT: ' + e.title));
-    if (activities.length > 0) weekSummary.push(dayNames[dow] + ' ' + fmt(ds) + ': ' + activities.join(', '));
-  }
-
-  const activeTasks = tasks.filter(t => t.status !== 'done').sort((a,b) => getPriority(a) - getPriority(b));
-  const overdueTasks = activeTasks.filter(t => daysUntil(t.dueDate) < 0);
-  const upcomingEvents = events.filter(ev => { const d = daysUntil(ev.date); return d >= 0 && d <= 14; }).map(ev => ev.title + ' (' + ev.type + ') on ' + fmt(ev.date));
-  const now = new Date(); const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
-  const doneThisWeek = tasks.filter(t => t.status === 'done' && t.completedAt && new Date(t.completedAt) >= weekStart).length;
-  const dailyLoad = {}; activeTasks.forEach(t => { dailyLoad[t.dueDate] = (dailyLoad[t.dueDate] || 0) + (t.estTime || 30); });
-  const overloadedDays = Object.entries(dailyLoad).filter(([d, mins]) => mins > 120).map(([d, mins]) => fmt(d) + ' (' + mins + ' min)');
-  const taskList = activeTasks.map(t =>
-    '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') +
-    ' | due ' + fmt(t.dueDate) + ' (' + daysUntil(t.dueDate) + 'd)' +
-    ' | ' + t.estTime + 'min | ' + t.status.replace('_',' ') + ' | id:' + t.id
-  ).join('\n');
-
-  // ── Build notes section for AI context ──
-  const noteNames = notes.map(n => n.name).join(', ') || 'none';
-  let notesSection = '';
-  if (notes.length > 0) {
-    // Sort: PDF-sourced first (reference docs), then Docs, then AI-generated
-    const sortOrder = { pdf: 0, google_docs: 1 };
-    const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
-    const maxTotal = 8000;
-    let totalLen = 0;
-    sorted.forEach(n => {
-      if (totalLen >= maxTotal) return;
-      const src = n.source === 'pdf' ? 'PDF' : n.source === 'google_docs' ? 'Google Doc' : 'study material';
-      const maxPer = 2000;
-      const content = (n.content || '').slice(0, maxPer) + ((n.content || '').length > maxPer ? '\n[truncated]' : '');
-      const entry = '--- ' + n.name + ' (source: ' + src + ') ---\n' + content + '\n\n';
-      if (totalLen + entry.length <= maxTotal) {
-        notesSection += entry;
-        totalLen += entry.length;
-      }
-    });
-  }
-
-  // ── Tier 1 (Llama) gets a lean prompt — no task list to hallucinate from ──
-  if (tier === 1) {
-    const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
-    const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
-    return `You are SOS, a chill study sidekick. Talk like a supportive friend — casual, brief (2-3 sentences max), never condescending.
-
-TODAY: ${todayStr}
-TODAY'S SCHEDULE: ${scheduleStr}
-COMPLETED THIS WEEK: ${doneThisWeek} task${doneThisWeek !== 1 ? 's' : ''}
-${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} task${activeTasks.length !== 1 ? 's' : ''} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
-NOTES: ${noteNames}
-
-RULES:
-1. NEVER invent specific tasks, deadlines, or events. If it's not explicitly listed above, it doesn't exist — do not make it up.
-2. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
-3. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
-4. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help.
-5. Stay warm, brief, and casual.`;
-  }
-
-  return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
-
-VOICE & PERSONALITY:
-- Talk like a supportive friend, not a teacher or assistant. Casual language, lowercase-ish energy.
-- Keep responses to 2-4 sentences unless they ask for detail. No walls of text.
-- Celebrate wins without being corny. Light humor when it fits.
-- Never condescending. This student is smart — they just need help managing time.
-- When they're stressed, be calming. When they're procrastinating, be gently honest.
-- You're not a planner — you're their study sidekick who happens to run their schedule.
-
-CORE BEHAVIORS:
-1. SLEEP PROTECTION: Never schedule or suggest work past 10pm. If they try to, gently push back: "that's sleep territory — let's find time earlier."
-2. TASK DECOMPOSITION: For big projects (>60 min or multi-day), suggest breaking into 2-4 smaller chunks with their own dates.
-3. WORKLOAD BALANCING: If a day has 2+ hours of tasks, suggest spreading to lighter days.
-4. MISSED TASK RECOVERY: For overdue tasks, don't guilt — suggest a realistic new date. "no stress, let's just move it."
-5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
-6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
-7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.
-
-TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
-
-ACTIVE TASKS (sorted by urgency):
-${taskList || '(none)'}
-
-${overdueTasks.length > 0 ? 'OVERDUE: ' + overdueTasks.map(t => t.title + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ') : ''}
-
-TODAY'S SCHEDULE:
-${summarizeBlockSlots(todayBlocks).join('\n') || '(nothing scheduled)'}
-
-THIS WEEK:
-${weekSummary.join('\n') || '(no scheduled activities)'}
-
-UPCOMING EVENTS: ${upcomingEvents.join(', ') || 'none'}
-${overloadedDays.length > 0 ? 'OVERLOADED DAYS: ' + overloadedDays.join(', ') : ''}
-COMPLETED THIS WEEK: ${doneThisWeek} tasks
-
-${notesSection ? `STUDENT'S NOTES & REFERENCE DOCUMENTS:
-${notesSection}` : 'NOTES: (none)'}
-
-TOOLS — you have built-in tools to manage the student's calendar, tasks, blocks, and notes. Use them whenever the student mentions anything actionable. Keep your text response natural and brief — just mention what you did casually, don't explain the action in detail.
-
-RULES:
-1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" for confirmation — just do it ONLY when ALL required details are explicitly stated by the student.
-2. Even casual phrasing counts: "got a calc test fri" = add_event (title: calc test, date: friday). "gotta finish essay by thursday" = add_task.
-3. *** HARD RULE — NEVER GUESS OR FABRICATE DETAILS ***: If the student's message does NOT explicitly contain the information needed for a tool field, you MUST call ask_clarification BEFORE calling any action tool. This is NON-NEGOTIABLE. Specifically:
-   - If the student did NOT say what the event/block/task IS (title/activity) → ASK. Never invent a generic name like "study session" or "event".
-   - If the student did NOT say WHEN (date) → ASK. Never guess today or tomorrow.
-   - If the student did NOT say what TIME (start/end for blocks) → ASK. Never invent times like "15:00-16:00".
-   - If the student did NOT say what SUBJECT → ASK for academic items. Never guess a subject.
-   - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
-   - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
-   - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
-4. When multiple fields are missing, make a SEPARATE ask_clarification tool call for EACH missing field — all in the same response. For example, if activity, date, and time are all unknown, make THREE ask_clarification calls: one asking "What activity?", one asking "What date?", one asking "What time?". Each call should have its own focused options. The system will display them all at once as individual question cards. NEVER split them across multiple conversation turns — call them all in the same response.
-5. PROACTIVE CLARIFICATION — also use ask_clarification when:
-   - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
-   - The student asks for content generation (flashcards, study plan, quiz, etc.) but hasn't specified the topic or scope
-   - Multiple reasonable interpretations exist and guessing wrong would waste their time
-   - The student seems unsure or mentions multiple subjects/topics without specifying which one
-6. DON'T ask for clarification ONLY when:
-   - ALL required details are explicitly stated in the student's message
-   - The student just said "yes" or confirmed something you already asked about
-   - The student is having a casual conversation (not requesting any action)
-7. Keep the same brief/casual voice for clarification questions and for tool follow-up.
-8. *** ZERO TOLERANCE FOR FABRICATION ***: If you call add_event, add_task, add_block, or any action tool with a value the student never said or clearly implied, that is a critical error. When in doubt, ALWAYS ask. The cost of one extra question is far less than creating a wrong item the student has to delete. Today is ${todayKey}.
-9. For day names, calculate the real YYYY-MM-DD date.
-10. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
-11. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
-CORRECTION HANDLING: When the student's message contains correction signals — "actually", "wait", "i meant", "change that to", "make it [X] instead", "not [X]", "sorry", "oops", "wait no" — treat it as a correction to the most recent add/update action in conversation history. Re-parse the corrected field(s) (date, time, subject, title) and call the appropriate update_task or update_event tool with the corrected values. Briefly confirm what changed: "got it, updated to Friday ✓". Never ignore a correction — always acknowledge and apply it.
-12. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
-13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
-14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
-15. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
-16. EVENT/BLOCK FIELD VALIDATION — before calling add_event or add_block, check each field against what the student ACTUALLY said:
-   - title/activity: Did the student say what this is? If not → ask_clarification. Never use generic placeholders.
-   - date: Did the student specify or clearly imply a date? If not → ask_clarification.
-   - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
-   - subject: For academic items, did the student mention the subject? If not → ask_clarification.
-   - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
-   If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
-
-PHOTO ANALYSIS:
-When the student sends a photo/image:
-1. DESCRIBE what you see first — "looks like a syllabus for..." or "I see a quadratic equation..."
-2. SCHEDULE DETECTION: If you see dates, due dates, assignments, syllabi, planners, or calendars:
-   - Extract EVERY date and assignment you can read
-   - Call add_event for tests/exams/events, add_task for homework/assignments — one tool call per item
-   - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
-   - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
-3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
-4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"
-
-CONTENT GENERATION:
-When the student asks for study materials (flashcards, outlines, summaries, study plans, quizzes, project breakdowns), respond with ONLY a valid JSON object (no markdown, no code fences). Use these formats:
-
-For study plans: {"type":"make_plan","title":"Plan Title","summary":"One sentence overview of what this plan covers","steps":[{"title":"Step description","date":"YYYY-MM-DD","time":"HH:MM AM/PM","estimated_minutes":30}]}
-For flashcards: {"type":"create_flashcards","title":"Topic","cards":[{"q":"Question","a":"Answer"}]}
-For quizzes: {"type":"create_quiz","title":"Topic","questions":[{"q":"Question","choices":["A","B","C","D"],"answer":"A"}]}
-For outlines: {"type":"create_outline","title":"Topic","sections":[{"heading":"Section","points":["Point 1","Point 2"]}]}
-For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","Bullet 2"]}
-For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
-For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
-
-Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.`;
-}
-
 /* ─── Action parser ─── */
 function parseActions(text) {
   const actions = []; const regex = /<action>([\s\S]*?)<\/action>/g; let match;
@@ -1767,629 +1561,6 @@ function RecurringEventPopup({ action, onConfirm, onCancel }) {
 /* ═══════════════════════════════════════════════
    CONTENT DISPLAY COMPONENTS
    ═══════════════════════════════════════════════ */
-function ContentCard({ icon, title, subject, onSave, onDismiss, children, accentColor }) {
-  const ac = accentColor || 'var(--teal)';
-  return (
-    <div className="content-card" style={{borderLeftColor:ac}}>
-      <div className="content-card-header">
-        <div className="content-card-hdr-icon" style={{background:`color-mix(in srgb, ${ac} 10%, transparent)`,borderColor:`color-mix(in srgb, ${ac} 20%, transparent)`,color:ac}}>{icon}</div>
-        <div>
-          <div className="content-card-title">{title}</div>
-          {subject && <div className="content-card-subject">{subject}</div>}
-        </div>
-      </div>
-      <div className="content-card-body">{children}</div>
-      <div className="content-card-actions">
-        <button className="content-card-save" style={{background:`linear-gradient(135deg, ${ac}, color-mix(in srgb, ${ac} 70%, #000))`,boxShadow:`0 2px 12px color-mix(in srgb, ${ac} 25%, transparent)`}} onClick={onSave}>{Icon.fileText(14)} Save to Notes</button>
-        <button className="content-card-dismiss" onClick={onDismiss}>Dismiss</button>
-      </div>
-    </div>
-  );
-}
-
-function PerfPill() {
-  const [tier, setTier] = useState(() => getPerfTier());
-  useEffect(() => {
-    function onTier(e) { setTier(e.detail.tier); }
-    window.addEventListener('sos:perf-tier', onTier);
-    return () => window.removeEventListener('sos:perf-tier', onTier);
-  }, []);
-  const labels = { full: 'Full', mid: 'Mid', low: 'Lite' };
-  const cycle = () => {
-    const tiers = ['full', 'mid', 'low'];
-    const next = tiers[(tiers.indexOf(tier) + 1) % 3];
-    setPerfOverride(next);
-    setTier(next);
-  };
-  const pillClass = 'perf-pill' + (tier === 'full' ? ' tier-full' : tier === 'mid' ? ' tier-mid' : '');
-  return (
-    <button className={pillClass} onClick={cycle} title={`Performance: ${labels[tier]}. Click to cycle.`}>
-      {tier === 'full' ? '✦' : tier === 'mid' ? '⚡' : '⚡'} {labels[tier]}
-    </button>
-  );
-}
-
-function TutorIndicator({ active }) {
-  return (
-    <div className={'tutor-indicator' + (active ? ' active' : '')} title={active ? 'Tutor mode is ON' : 'Tutor mode is OFF'}>
-      ✦ Tutor {active ? 'ON' : 'OFF'}
-    </div>
-  );
-}
-
-function FlashcardDisplay({ data, onSave, onDismiss }) {
-  const cards = data.cards || [];
-  const [idx, setIdx] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-
-  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards generated.</div></ContentCard>;
-
-  function goNext() { if (idx < cards.length - 1) { setFlipped(false); setTimeout(() => setIdx(i => i + 1), 100); } }
-  function goPrev() { if (idx > 0) { setFlipped(false); setTimeout(() => setIdx(i => i - 1), 100); } }
-
-  return (
-    <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)">
-      <div className="fc-container" onClick={() => setFlipped(f => !f)}>
-        <div className={'fc-inner' + (flipped ? ' flipped' : '')}>
-          <div className="fc-front">
-            <div>{cards[idx]?.q || 'No question'}</div>
-          </div>
-          <div className="fc-back">
-            <div>{cards[idx]?.a || 'No answer'}</div>
-          </div>
-        </div>
-      </div>
-      <div className="fc-nav">
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goPrev(); }} disabled={idx === 0}>{Icon.chevronLeft(16)}</button>
-        <span className="fc-counter">{idx + 1} / {cards.length}</span>
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>{Icon.chevronRight(16)}</button>
-      </div>
-      {flipped && (
-        <div className="fc-chips">
-          <button className="fc-chip chip-know" onClick={(e) => { e.stopPropagation(); goNext(); }}>✓ Got it</button>
-          <button className="fc-chip chip-unsure" onClick={(e) => { e.stopPropagation(); goNext(); }}>~ Almost</button>
-          <button className="fc-chip chip-nope" onClick={(e) => { e.stopPropagation(); goNext(); }}>✗ Nope</button>
-        </div>
-      )}
-      <div className="fc-hint">tap card to flip</div>
-    </ContentCard>
-  );
-}
-
-function QuizDisplay({ data, onSave, onDismiss }) {
-  const questions = data.questions || [];
-  const [qIdx, setQIdx] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [revealed, setRevealed] = useState(false);
-  const [score, setScore] = useState(0);
-  const [finished, setFinished] = useState(false);
-
-  if (questions.length === 0) return <ContentCard icon={Icon.fileText(16)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No questions generated.</div></ContentCard>;
-
-  const q = questions[qIdx];
-  const isCorrect = selected === q?.answer;
-
-  function checkAnswer() {
-    if (!selected || revealed) return;
-    setRevealed(true);
-    if (selected === q.answer) setScore(s => s + 1);
-  }
-  function nextQuestion() {
-    if (qIdx < questions.length - 1) { setQIdx(i => i + 1); setSelected(null); setRevealed(false); }
-    else setFinished(true);
-  }
-
-  return (
-    <ContentCard icon={Icon.fileText(16)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)">
-      {finished ? (
-        <div className="quiz-score">
-          <div style={{ marginBottom:8, color: score === questions.length ? 'var(--success)' : score >= questions.length * 0.7 ? 'var(--accent)' : 'var(--text-dim)', display:'flex', justifyContent:'center' }}>{score === questions.length ? Icon.trophy(32) : score >= questions.length * 0.7 ? Icon.thumbsUp(32) : Icon.bookOpen(32)}</div>
-          <div>{score} / {questions.length} correct</div>
-          <div style={{ fontSize:'0.82rem', color:'var(--text-dim)', fontWeight:400, marginTop:4 }}>
-            {score === questions.length ? 'Perfect score!' : score >= questions.length * 0.7 ? 'Nice job!' : 'Keep studying, you got this!'}
-          </div>
-          <button className="quiz-btn" style={{ marginTop:12 }} onClick={() => { setQIdx(0); setSelected(null); setRevealed(false); setScore(0); setFinished(false); }}>Try Again</button>
-        </div>
-      ) : (
-        <>
-          <div className="quiz-progress">
-            <span>{qIdx + 1}/{questions.length}</span>
-            <div className="quiz-progress-bar"><div className="quiz-progress-fill" style={{ width: ((qIdx + 1) / questions.length * 100) + '%' }}/></div>
-            <span style={{ color:'var(--success)', display:'flex', alignItems:'center', gap:2 }}>{score} {Icon.check(12)}</span>
-          </div>
-          <div className="quiz-question">{q?.q || 'No question'}</div>
-          <div className="quiz-choices">
-            {(q?.choices || []).map((choice, i) => {
-              let cls = 'quiz-choice';
-              if (revealed && choice === q.answer) cls += ' correct';
-              else if (revealed && choice === selected && choice !== q.answer) cls += ' wrong';
-              else if (!revealed && choice === selected) cls += ' selected';
-              if (revealed && choice === q.answer && choice !== selected) cls += ' reveal-correct';
-              return (
-                <button key={i} className={cls} onClick={() => { if (!revealed) setSelected(choice); }}>
-                  {choice}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            {!revealed && <button className="quiz-btn" onClick={checkAnswer} disabled={!selected}>Check Answer</button>}
-            {revealed && <button className="quiz-btn" style={{display:'flex',alignItems:'center',gap:4}} onClick={nextQuestion}>{qIdx < questions.length - 1 ? <>Next {Icon.arrowRight(14)}</> : 'See Score'}</button>}
-          </div>
-        </>
-      )}
-    </ContentCard>
-  );
-}
-
-function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentColor }) {
-  const ac = accentColor || 'var(--teal)';
-  const formatted = (() => {
-    try {
-      switch (data.type) {
-        case 'create_summary':
-          return (data.bullets||[]).map(b => ({ type:'bullet', text:b }));
-        case 'create_outline':
-          return (data.sections||[]).flatMap(s => [{ type:'heading', text: s.heading }, ...(s.points||[]).map(p => ({ type:'point', text: p }))]);
-        case 'create_study_plan':
-          return (data.steps||[]).map((s,i) => ({ type:'step', num:i+1, text:s.step, meta:(s.time_minutes||20)+'min'+(s.day?' · '+s.day:'') }));
-        case 'create_project_breakdown':
-          return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
-        default: return [{ type:'bullet', text:'(content generated)' }];
-      }
-    } catch(e) { return [{ type:'bullet', text:'(error displaying content)' }]; }
-  })();
-
-  return (
-    <ContentCard icon={icon} title={data.title||label} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor={ac}>
-      <div style={{ maxHeight:220, overflowY:'auto', fontSize:'0.85rem', lineHeight:1.6 }}>
-        {formatted.map((item, i) => {
-          if (item.type==='heading') return <div key={i} style={{ fontWeight:700, color:ac, marginTop: i > 0 ? 10 : 0, marginBottom:4, fontSize:'0.86rem', display:'flex', alignItems:'center', gap:6 }}><span style={{width:3,height:14,borderRadius:2,background:ac,flexShrink:0}}/>{item.text}</div>;
-          if (item.type==='step') return <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.03)' }}><span style={{width:22,height:22,borderRadius:6,background:`color-mix(in srgb, ${ac} 10%, transparent)`,border:`1px solid color-mix(in srgb, ${ac} 20%, transparent)`,color:ac,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.72rem',fontWeight:700,flexShrink:0}}>{item.num}</span><div><div style={{color:'var(--text)',fontWeight:500}}>{item.text}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginTop:1}}>{item.meta}</div></div></div>;
-          if (item.type==='point') return <div key={i} style={{ padding:'3px 0 3px 14px', color:'var(--text)', borderLeft:`2px solid color-mix(in srgb, ${ac} 25%, transparent)`, marginLeft:2 }}>• {item.text}</div>;
-          return <div key={i} style={{ padding:'4px 0', color:'var(--text)', display:'flex', alignItems:'flex-start', gap:8 }}><span style={{width:5,height:5,borderRadius:'50%',background:ac,marginTop:7,flexShrink:0}}/>{item.text}</div>;
-        })}
-      </div>
-    </ContentCard>
-  );
-}
-
-/* ─── Plan Templates ─── */
-const PLAN_TEMPLATES = [
-  {
-    id: 'weekly_study', name: 'Weekly Study Plan', iconFn: Icon.calendar,
-    description: 'Plan your study sessions for the week',
-    skeleton: {
-      summary: 'A structured weekly study plan to stay on top of your coursework.',
-      steps: [
-        { title: 'Review notes from last week', estimated_minutes: 30 },
-        { title: 'Read new chapter material', estimated_minutes: 45 },
-        { title: 'Practice problems / exercises', estimated_minutes: 40 },
-        { title: 'Study group / peer review', estimated_minutes: 30 },
-        { title: 'Self-quiz / flashcard review', estimated_minutes: 20 },
-      ]
-    }
-  },
-  {
-    id: 'exam_prep', name: 'Exam Prep Plan', iconFn: Icon.target,
-    description: '3-5 day countdown to exam day',
-    skeleton: {
-      summary: 'A focused exam preparation plan to maximize your study time.',
-      steps: [
-        { title: 'Gather all study materials and past notes', estimated_minutes: 20 },
-        { title: 'Review key concepts and make a cheat sheet', estimated_minutes: 45 },
-        { title: 'Practice with past exams / sample questions', estimated_minutes: 60 },
-        { title: 'Focus on weak areas identified from practice', estimated_minutes: 45 },
-        { title: 'Final review and light practice', estimated_minutes: 30 },
-      ]
-    }
-  },
-  {
-    id: 'essay_plan', name: 'Essay Writing Plan', iconFn: Icon.fileText,
-    description: 'Research, outline, draft, revise',
-    skeleton: {
-      summary: 'Step-by-step plan to write a polished essay.',
-      steps: [
-        { title: 'Research and gather sources', estimated_minutes: 45 },
-        { title: 'Create outline with thesis and key points', estimated_minutes: 25 },
-        { title: 'Write first draft', estimated_minutes: 60 },
-        { title: 'Revise and strengthen arguments', estimated_minutes: 40 },
-        { title: 'Proofread and final edits', estimated_minutes: 20 },
-      ]
-    }
-  },
-  {
-    id: 'project_timeline', name: 'Project Timeline', iconFn: Icon.hammer,
-    description: 'Break a big project into phases',
-    skeleton: {
-      summary: 'A phased timeline to complete your project on schedule.',
-      steps: [
-        { title: 'Define project scope and requirements', estimated_minutes: 30 },
-        { title: 'Research and plan approach', estimated_minutes: 45 },
-        { title: 'Build / create core deliverables', estimated_minutes: 90 },
-        { title: 'Test, review, and iterate', estimated_minutes: 45 },
-        { title: 'Polish and submit final version', estimated_minutes: 30 },
-      ]
-    }
-  },
-  {
-    id: 'research_paper', name: 'Research Paper Plan', iconFn: Icon.search,
-    description: 'Literature review through final draft',
-    skeleton: {
-      summary: 'A structured approach to writing a thorough research paper.',
-      steps: [
-        { title: 'Choose topic and narrow focus', estimated_minutes: 20 },
-        { title: 'Literature review — find and read sources', estimated_minutes: 60 },
-        { title: 'Create annotated bibliography', estimated_minutes: 40 },
-        { title: 'Write introduction and methodology', estimated_minutes: 45 },
-        { title: 'Write body sections and analysis', estimated_minutes: 90 },
-        { title: 'Write conclusion and format citations', estimated_minutes: 30 },
-      ]
-    }
-  },
-];
-
-function PlanTemplateSelector({ onSelectTemplate, onCustomPlan, onDismiss }) {
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.listTree(18)}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Choose a Plan Template</div>
-          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>Pick a starting point or create your own</div>
-        </div>
-        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
-      </div>
-
-      {/* Templates */}
-      <div style={{padding:'12px 16px'}}>
-        {PLAN_TEMPLATES.map(tmpl => (
-          <div key={tmpl.id}
-            onClick={() => onSelectTemplate(tmpl)}
-            style={{
-              display:'flex', alignItems:'center', gap:12,
-              padding:'12px 14px',
-              marginBottom:6,
-              borderRadius:12,
-              cursor:'pointer',
-              border:'1px solid rgba(255,255,255,0.06)',
-              background:'rgba(255,255,255,0.02)',
-              transition:'all .15s'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background='rgba(108,99,255,0.08)'; e.currentTarget.style.borderColor='rgba(108,99,255,0.2)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.06)'; }}>
-            <div style={{
-              width:32, height:32, borderRadius:8,
-              background:'rgba(108,99,255,0.1)',
-              border:'1px solid rgba(108,99,255,0.2)',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              color:'var(--accent)', flexShrink:0
-            }}>
-              {tmpl.iconFn(16)}
-            </div>
-            <div>
-              <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--text)'}}>{tmpl.name}</div>
-              <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>{tmpl.description}</div>
-            </div>
-          </div>
-        ))}
-
-        {/* Custom Plan option */}
-        <div
-          onClick={onCustomPlan}
-          style={{
-            display:'flex', alignItems:'center', gap:12,
-            padding:'12px 14px',
-            borderRadius:12,
-            cursor:'pointer',
-            border:'1px solid rgba(43,203,186,0.15)',
-            background:'rgba(43,203,186,0.04)',
-            transition:'all .15s'
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background='rgba(43,203,186,0.1)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.3)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background='rgba(43,203,186,0.04)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.15)'; }}>
-          <div style={{
-            width:32, height:32, borderRadius:8,
-            background:'rgba(43,203,186,0.1)',
-            border:'1px solid rgba(43,203,186,0.2)',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            color:'var(--teal)', flexShrink:0
-          }}>
-            {Icon.sparkles(16)}
-          </div>
-          <div>
-            <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--teal)'}}>Custom Plan</div>
-            <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>AI generates a unique plan from your description</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogleDocs, googleConnected }) {
-  const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
-  const [mode, setMode] = useState('breakdown');
-  const [activeIdx, setActiveIdx] = useState(null);
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const [docSyncing, setDocSyncing] = useState(false);
-  const steps = data.steps || [];
-  const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
-  const checkedCount = checked.filter(Boolean).length;
-
-  function startTask(i) {
-    if (!steps[i]) return;
-    setActiveIdx(i);
-    if (!checked[i]) toggle(i);
-    onStartTask?.(steps[i], i);
-  }
-
-  function startNextTask() {
-    const nextIdx = steps.findIndex((_, i) => checked[i] && i !== activeIdx);
-    if (nextIdx >= 0) startTask(nextIdx);
-  }
-
-  async function handleExportDocs() {
-    if (!onExportGoogleDocs) return;
-    setDocSyncing(true);
-    try { await onExportGoogleDocs(data); } finally { setDocSyncing(false); }
-  }
-
-  const hasDocId = !!data.googleDocId;
-
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      maxHeight:'70vh',
-      overflowY:'auto',
-      overflowX:'hidden',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.listTree(18)}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>{data.title||'Plan'}</div>
-          {data.templateName && (
-            <div style={{fontSize:'0.68rem', color:'var(--accent)', marginTop:1, fontWeight:600}}>
-              {data.templateName}
-            </div>
-          )}
-        </div>
-        <span style={{fontSize:'0.7rem',fontWeight:700,padding:'3px 10px',borderRadius:8,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
-        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
-      </div>
-
-      {/* Summary */}
-      {data.summary && (
-        <div style={{
-          padding:'12px 20px',
-          background:'rgba(108,99,255,0.04)',
-          borderBottom:'1px solid rgba(255,255,255,0.04)',
-          fontSize:'0.86rem',
-          color:'var(--text)',
-          lineHeight:1.5,
-          fontWeight:500
-        }}>
-          {data.summary}
-        </div>
-      )}
-
-      {/* Mode Toggle */}
-      <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
-        <button onClick={() => setMode('breakdown')} style={{
-          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
-          background: mode === 'breakdown' ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)',
-          color: mode === 'breakdown' ? 'var(--accent)' : 'var(--text-dim)',
-          transition:'all .15s'
-        }}>Breakdown</button>
-        <button onClick={() => setMode('start')} style={{
-          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
-          background: mode === 'start' ? 'rgba(43,203,186,0.15)' : 'rgba(255,255,255,0.04)',
-          color: mode === 'start' ? 'var(--teal)' : 'var(--text-dim)',
-          transition:'all .15s'
-        }}>Start task</button>
-      </div>
-
-      {/* Steps */}
-      <div style={{padding:'8px 20px'}}>
-        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Steps</div>
-        {steps.map((step,i) => {
-          const isActive = activeIdx === i;
-          const isChecked = checked[i];
-          return (
-            <div key={i}
-              onClick={() => mode === 'start' ? startTask(i) : toggle(i)}
-              style={{
-                display:'flex', alignItems:'center', gap:10,
-                padding:'8px 0',
-                borderBottom: i < steps.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
-                cursor:'pointer',
-                opacity: isChecked ? 1 : 0.5,
-              }}>
-              <span style={{
-                width:24, height:24, borderRadius:7, flexShrink:0,
-                background: isActive ? 'rgba(43,203,186,0.15)' : isChecked ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.04)',
-                border: isActive ? '1.5px solid var(--teal)' : isChecked ? '1.5px solid rgba(108,99,255,0.3)' : '1.5px solid rgba(255,255,255,0.1)',
-                color: isActive ? 'var(--teal)' : 'var(--accent)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:'0.72rem', fontWeight:700,
-                transition:'all .15s'
-              }}>{isActive ? Icon.arrowRight(11) : isChecked ? (i + 1) : Icon.x(10)}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>{step.title}</div>
-                <div style={{display:'flex', gap:8, marginTop:2}}>
-                  {step.date && <span style={{fontSize:'0.72rem', color:'var(--teal)', fontWeight:600}}>{Icon.calendar(10)} {fmt(step.date)}</span>}
-                  {step.time && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{Icon.clock(10)} {step.time}</span>}
-                  {step.estimated_minutes && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{step.estimated_minutes}min</span>}
-                </div>
-              </div>
-              {mode === 'start' && (
-                <span style={{
-                  fontSize:'0.72rem', fontWeight:700, padding:'3px 10px', borderRadius:6,
-                  background: isActive ? 'rgba(43,203,186,0.15)' : 'rgba(108,99,255,0.08)',
-                  color: isActive ? 'var(--teal)' : 'var(--accent)',
-                }}>{isActive ? 'In progress' : 'Start'}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Quick Actions Dropdown */}
-      <div style={{padding:'10px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
-        <button onClick={() => setActionsOpen(!actionsOpen)} style={{
-          width:'100%',
-          background:'rgba(108,99,255,0.08)',
-          border:'1px solid rgba(108,99,255,0.2)',
-          borderRadius:10,
-          padding:'10px 14px',
-          color:'var(--accent)',
-          fontSize:'0.84rem',
-          fontWeight:600,
-          cursor:'pointer',
-          display:'flex',
-          alignItems:'center',
-          justifyContent:'space-between',
-          transition:'all .15s'
-        }}>
-          <span style={{display:'flex',alignItems:'center',gap:6}}>
-            {Icon.zap(14)} Actions
-          </span>
-          <span style={{
-            display:'inline-flex',
-            transform: actionsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition:'transform .2s'
-          }}>
-            {Icon.arrowRight(12)}
-          </span>
-        </button>
-        {actionsOpen && (
-          <div style={{
-            marginTop:6,
-            borderRadius:10,
-            overflow:'hidden',
-            border:'1px solid rgba(108,99,255,0.15)',
-            background:'rgba(15,15,26,0.95)'
-          }}>
-            {mode === 'breakdown' ? (
-              <button onClick={() => { setActionsOpen(false); onApply(steps.filter((_,i) => checked[i])); }} style={{
-                width:'100%', background:'transparent', border:'none',
-                borderBottom:'1px solid rgba(255,255,255,0.04)',
-                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-              }}
-                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.check(13)}</span>
-                Add {checkedCount} as tasks
-              </button>
-            ) : (
-              <button onClick={() => { setActionsOpen(false); startNextTask(); }} style={{
-                width:'100%', background:'transparent', border:'none',
-                borderBottom:'1px solid rgba(255,255,255,0.04)',
-                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-              }}
-                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.arrowRight(13)}</span>
-                Start next task
-              </button>
-            )}
-            <button onClick={() => { setActionsOpen(false); onSave(); }} style={{
-              width:'100%', background:'transparent', border:'none',
-              borderBottom:'1px solid rgba(255,255,255,0.04)',
-              padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-              display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-            }}
-              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.fileText(13)}</span>
-              Save to notes
-            </button>
-            <button onClick={() => { setActionsOpen(false); handleExportDocs(); }} disabled={docSyncing} style={{
-              width:'100%', background:'transparent', border:'none',
-              padding:'10px 14px', color: googleConnected ? 'var(--text)' : 'var(--text-dim)', fontSize:'0.82rem',
-              cursor: docSyncing ? 'wait' : 'pointer', textAlign:'left',
-              display:'flex', alignItems:'center', gap:8, transition:'background .15s',
-              opacity: docSyncing ? 0.5 : 1
-            }}
-              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.externalLink(13)}</span>
-              {docSyncing ? 'Syncing...' : hasDocId ? 'Sync to Google Docs' : 'Export to Google Docs'}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
-  switch (content.type) {
-    case 'make_plan':
-      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
-    case 'create_flashcards':
-      return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
-    case 'create_quiz':
-      return <QuizDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
-    case 'create_outline':
-      return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" />;
-    case 'create_summary':
-      return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
-    case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
-    case 'create_project_breakdown':
-      return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
-    default:
-      return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
-  }
-}
-
 /* ═══════════════════════════════════════════════
    DAILY BRIEF CARD
    ═══════════════════════════════════════════════ */
@@ -3486,15 +2657,6 @@ function Toast({message,onDone}){
   return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:14,background:'linear-gradient(135deg,var(--success),#1db954)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4),0 0 40px rgba(46,213,115,0.1)',animation:'toastIn .3s cubic-bezier(0.16,1,0.3,1), toastOut .3s ease 2.1s forwards',backdropFilter:'blur(8px)'}}>{message}</div>);
 }
 
-/* ─── Typing Dots (loading indicator) ─── */
-const TypingDots=()=>(
-  <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
-    </div>
-  </div>
-);
-
 /* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
@@ -3541,20 +2703,8 @@ function App() {
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
-  const getWorkspaceContext = useCallback((overridePanel = null) => {
-    const effectivePanel = overridePanel || sidebarCompanionPanel;
-    if (layoutMode === 'sidebar' && activePanel === 'chat' && !companionCollapsed) {
-      if (effectivePanel === 'schedule') return 'schedule';
-      if (effectivePanel === 'notes') return 'notes';
-    }
-    return activePanel === 'chat' ? 'chat' : 'none';
-  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed]);
-  const workspaceContext = getWorkspaceContext();
-  const workspaceModeLabel = workspaceContext === 'schedule'
-    ? 'Schedule mode'
-    : workspaceContext === 'notes'
-      ? 'Notes mode'
-      : null;
+  const workspaceContext = getWorkspaceContext({ layoutMode, activePanel, sidebarCompanionPanel, companionCollapsed });
+  const workspaceModeLabel = getWorkspaceModeLabel(workspaceContext);
   const openCompanionPanel = useCallback((panel) => {
     setActivePanel('chat');
     setSidebarCompanionPanel(panel);
@@ -3563,13 +2713,6 @@ function App() {
     setShowPeek(false);
     setShowNotes(false);
   }, [autoCollapseSidebarCompanion]);
-  const detectCompanionIntent = useCallback((text) => {
-    const msg = (text || '').toLowerCase();
-    if (!msg) return null;
-    if (/\b(notes?|document|docs?|pdf|reference|summarize my notes|in my notes)\b/.test(msg)) return 'notes';
-    if (/\b(calendar|schedule|planner|plan my day|today\'s plan|timetable|due date)\b/.test(msg)) return 'schedule';
-    return null;
-  }, []);
   const [toastMsg, setToastMsg] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
@@ -4766,7 +3909,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
       openCompanionPanel(requestedCompanion);
     }
-    const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
+    const effectiveWorkspaceContext = getWorkspaceContext({ layoutMode, activePanel, sidebarCompanionPanel, companionCollapsed, overridePanel: requestedCompanion });
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
@@ -4808,7 +3951,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2);
+      const chatPrompt = buildSystemPrompt({ tasks, blocks, events, notes, tier: 2, helpers: { fmt, today, toDateStr, daysUntil, summarizeBlockSlots, getPriority } });
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -5445,24 +4588,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </aside>}
 
       <div className="sos-main">
-      {layoutMode === 'topbar' && <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
-          {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
-        </div>
-      </div>}
+      {layoutMode === 'topbar' && <TutorHeader
+        user={user}
+        syncStatus={syncStatus}
+        showTutorIndicatorTopbar={showTutorIndicatorTopbar}
+        showPerfIndicatorTopbar={showPerfIndicatorTopbar}
+        TutorIndicator={TutorIndicator}
+        PerfPill={PerfPill}
+        tutorMode={tutorMode}
+        setLayoutMode={setLayoutMode}
+        setShowPeek={setShowPeek}
+        setShowNotes={setShowNotes}
+        setShowChatSidebar={setShowChatSidebar}
+        setActivePanel={setActivePanel}
+      />}
 
       {activePanel === 'settings' ? (
         <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
@@ -5581,217 +4720,86 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       ) : (
       <>
       <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
-      <div className="sos-chat-column">
-      {/* ── Chat Area ── */}
       <ErrorBoundary>
-      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-        {viewingSavedChatId && (
-          <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
-            <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
-            <div style={{display:'flex',gap:6}}>
-              <button onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'var(--teal,#2bd5ba)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Resume</button>
-              <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
-            </div>
-          </div>
-        )}
-        {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
-          // Default welcome screen
-          const wv = welcomeVariants[welcomeIdx];
-          return (
-          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
-            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
-              {wv.chips.map((s,i)=>(
-                <button key={s} className="sos-chip" style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>
-              ))}
-            </div>
-          </div>
-          );
-        })()}
-        {messages.map((msg,i)=>(
-          <React.Fragment key={i}>
-            {/* P1.4: "Earlier in conversation" separator */}
-            {i === 0 && dbMessageCount > 0 && messages.length > dbMessageCount && (
-              <div className="chat-history-separator">
-                <span>Earlier in conversation</span>
-              </div>
-            )}
-            {i === dbMessageCount && dbMessageCount > 0 && messages.length > dbMessageCount && (
-              <div className="chat-history-separator">
-                <span>New messages</span>
-              </div>
-            )}
-            <div className={`sos-msg ${msg.role==='user'?'sos-msg-user':'sos-msg-ai'}`}>
-              <div className={`sos-bubble ${msg.role==='user'?'sos-bubble-user':'sos-bubble-ai'}`}>
-                {(msg.photoUrl||msg.photoPreview)&&(
-                  <img src={msg.photoUrl||msg.photoPreview} alt="photo"
-                    onClick={()=>setLightboxUrl(msg.photoUrl||msg.photoPreview)}
-                    onError={(e)=>{e.target.style.display='none';}}
-                    style={{maxWidth:240,maxHeight:200,borderRadius:10,marginBottom:msg.content?8:0,cursor:'pointer',display:'block'}}/>
-                )}
-                {msg.content&&<span>{msg.content}</span>}
-                <div className="sos-bubble-time">{msg.timestamp?new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</div>
-              </div>
-            </div>
-          </React.Fragment>
-        ))}
-        {pendingTemplateSelector && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <PlanTemplateSelector
-              onSelectTemplate={(tmpl) => handleSelectTemplate(tmpl, pendingTemplateSelector.context)}
-              onCustomPlan={handleCustomPlan}
-              onDismiss={handleDismissTemplateSelector}
-            />
-          </div>
-        )}
-        {pendingClarification && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
-          </div>
-        )}
-        {!pendingClarification && pendingActions.length > 1 ? (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <BulkConfirmationCard
-              actions={pendingActions}
-              onConfirmSelected={(checkedArr)=>{
-                const toExec=pendingActions.filter((_,i)=>checkedArr[i]);
-                toExec.forEach(pa=>{
-                  if(pa.action.type==='add_recurring_event'){
-                    const dayNameToIndex={Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6};
-                    const dayIndices=(pa.action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-                    const start=new Date(pa.action.start_date||today());
-                    const endDef=new Date();endDef.setMonth(endDef.getMonth()+3);
-                    const end=new Date(pa.action.end_date||toDateStr(endDef));
-                    const cursor=new Date(start);let count=0;
-                    while(cursor<=end&&count<100){
-                      if(dayIndices.includes(cursor.getDay())){
-                        const ds=toDateStr(cursor);
-                        executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
-                        count++;
-                      }
-                      cursor.setDate(cursor.getDate()+1);
-                    }
-                  } else { executeAction(pa.action); }
-                });
-                setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
-                if(toExec.length>0){
-                  setToastMsg('Added '+toExec.length+' items');
-                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
-                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
-                    else if(!showSideBySide){setShowPeek(true);}
-                  }
-                }
-              }}
-              onCancel={()=>setPendingActions([])}
-            />
-          </div>
-        ) : !pendingClarification && pendingActions.map((pa,idx)=>(
-          <div key={'pa-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            {pa.action.type==='add_recurring_event' ? (
-              <RecurringEventPopup
-                action={pa.action}
-                onConfirm={(checkedEvents)=>{
-                  checkedEvents.forEach(ev=>executeAction({type:'add_event',title:ev.title,date:ev.date,event_type:ev.event_type,subject:ev.subject}));
-                  setPendingActions(prev=>prev.filter((_,i)=>i!==idx));
-                  setToastMsg('Added '+checkedEvents.length+' recurring events');
-                }}
-                onCancel={()=>handleCancelAction(idx)}
-              />
-            ) : (
-              <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
-            )}
-          </div>
-        ))}
-        {pendingContent.map((pc,idx)=>(
-          <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
-          </div>
-        ))}
-        {isLoading&&<TypingDots/>}
-        {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
-        <div ref={messagesEndRef} style={{height:1}}/>
-      </div>
-
+      <TutorWorkspace
+        viewingSavedChatId={viewingSavedChatId}
+        resumeSavedChat={resumeSavedChat}
+        exitSavedChatView={exitSavedChatView}
+        messages={messages}
+        dbMessageCount={dbMessageCount}
+        setLightboxUrl={setLightboxUrl}
+        pendingTemplateSelector={pendingTemplateSelector}
+        PlanTemplateSelector={PlanTemplateSelector}
+        handleSelectTemplate={handleSelectTemplate}
+        handleCustomPlan={handleCustomPlan}
+        handleDismissTemplateSelector={handleDismissTemplateSelector}
+        pendingClarification={pendingClarification}
+        ClarificationCard={ClarificationCard}
+        handleClarificationSubmit={handleClarificationSubmit}
+        setPendingClarification={setPendingClarification}
+        pendingClarificationAnswers={pendingClarificationAnswers}
+        setPendingClarificationAnswers={setPendingClarificationAnswers}
+        pendingActions={pendingActions}
+        BulkConfirmationCard={BulkConfirmationCard}
+        today={today}
+        toDateStr={toDateStr}
+        executeAction={executeAction}
+        setPendingActions={setPendingActions}
+        setToastMsg={setToastMsg}
+        layoutMode={layoutMode}
+        openCompanionPanel={openCompanionPanel}
+        showSideBySide={showSideBySide}
+        setShowPeek={setShowPeek}
+        RecurringEventPopup={RecurringEventPopup}
+        handleCancelAction={handleCancelAction}
+        ConfirmationCard={ConfirmationCard}
+        handleConfirmAction={handleConfirmAction}
+        pendingContent={pendingContent}
+        StudyContentRouter={(props) => <StudyContentRouter {...props} PlanCard={PlanCard} fmt={fmt} />}
+        handleSaveContent={handleSaveContent}
+        handleDismissContent={handleDismissContent}
+        handleApplyPlan={handleApplyPlan}
+        handleStartPlanTask={handleStartPlanTask}
+        handleExportPlanToGoogleDocs={handleExportPlanToGoogleDocs}
+        isGoogleConnected={isGoogleConnected}
+        isLoading={isLoading}
+        chatError={chatError}
+        messagesEndRef={messagesEndRef}
+        quickChips={quickChips.map(chip => ({ ...chip, onSend: sendChip }))}
+        saveChat={saveChat}
+        setShowChatSidebar={setShowChatSidebar}
+        pendingPhoto={pendingPhoto}
+        setPendingPhoto={setPendingPhoto}
+        isRecording={isRecording}
+        recordingTime={recordingTime}
+        waveformRef={waveformRef}
+        cancelRecording={cancelRecording}
+        stopRecording={stopRecording}
+        isTranscribing={isTranscribing}
+        handleSubmit={handleSubmit}
+        photoInputRef={photoInputRef}
+        handlePhotoSelect={handlePhotoSelect}
+        workspaceModeLabel={workspaceModeLabel}
+        inputRef={inputRef}
+        input={input}
+        setInput={setInput}
+        welcomeIdx={welcomeIdx}
+        startRecording={startRecording}
+        TypingDotsComponent={TypingDots}
+        sendChip={sendChip}
+        footerHints={[
+          { label:'/ focus input' },
+          { label:'S opens Schedule tab' },
+          { label:'N opens Notes tab' },
+          { label:'Shift+S closes side panel' },
+          { label:'H history' },
+          { label:'Cam photo' },
+          { label:'Mic voice' },
+          { label:'Privacy Policy', href:'privacy.html' },
+        ]}
+        welcomeVariants={welcomeVariants}
+      />
       </ErrorBoundary>
-      {/* ── Guest Demo Banner ── */}
-      {!user && (
-        <div style={{padding:'6px 16px 0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,fontSize:'0.8rem',color:'var(--text-dim)',animation:'fadeIn .3s ease'}}>
-          <span>
-            {guestMsgCount < GUEST_DEMO_LIMIT
-              ? <>Demo mode — <strong style={{color:'var(--accent)'}}>{GUEST_DEMO_LIMIT - guestMsgCount} free message{GUEST_DEMO_LIMIT - guestMsgCount !== 1 ? 's' : ''} left</strong></>
-              : <strong style={{color:'var(--warning)'}}>Demo limit reached — sign up to keep going</strong>
-            }
-          </span>
-          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
-        </div>
-      )}
-      {/* ── Input Area ── */}
-      <div className="sos-input-area">
-        {messages.length>0&&(
-          <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
-            {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
-            {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
-            <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
-          </div>
-        )}
-        {pendingPhoto&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:12,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
-            <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:8,objectFit:'cover'}}/>
-            <span style={{fontSize:'0.82rem',color:'var(--text-dim)',flex:1}}>Photo attached</span>
-            <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
-          </div>
-        )}
-        {isRecording ? (
-          /* ── Inline Voice Recording Bar ── */
-          <div className="voice-bar">
-            <div className="voice-bar-indicator">
-              <div className="voice-bar-dot"/>
-              <div className="voice-bar-timer">{Math.floor(recordingTime/60)}:{String(recordingTime%60).padStart(2,'0')}</div>
-            </div>
-            <div className="voice-bar-waveform" ref={waveformRef}>
-              {Array.from({length:40},(_,i)=><div key={i} className="voice-bar-bar" style={{height:'3px'}}/>)}
-            </div>
-            <button className="voice-bar-cancel" onClick={cancelRecording} title="Cancel">{Icon.trash(16)}</button>
-            <button className="voice-bar-send" onClick={stopRecording} title="Send voice">{Icon.send(18)}</button>
-          </div>
-        ) : isTranscribing ? (
-          /* ── Transcribing indicator ── */
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:28}}>
-            <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
-            <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
-          </div>
-        ) : (
-          /* ── Normal chat input form ── */
-          <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-            <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-            {workspaceModeLabel && (
-              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
-            )}
-            <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-              {Icon.camera(18)}
-            </button>
-            <button type="button" onClick={startRecording} disabled={isLoading||!!viewingSavedChatId}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
-              {Icon.mic(18)}
-            </button>
-            <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={viewingSavedChatId?"viewing saved chat — click 'Resume' to continue":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
-              disabled={isLoading||!!viewingSavedChatId}
-              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
-              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
-          </form>
-        )}
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
-      </div>
-      </div>
       {showSidebarCompanion && (
         <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
           <button
