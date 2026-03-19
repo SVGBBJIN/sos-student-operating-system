@@ -3711,8 +3711,13 @@ function App() {
       if (effectivePanel === 'schedule') return 'schedule';
       if (effectivePanel === 'notes') return 'notes';
     }
+    if (layoutMode === 'topbar' && activePanel === 'chat') {
+      if (showNotes) return 'notes';
+      if (showPeek) return 'schedule';
+    }
+    if (tutorMode && notes.length > 0 && activePanel === 'chat') return 'notes';
     return activePanel === 'chat' ? 'chat' : 'none';
-  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed]);
+  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed, showNotes, showPeek, tutorMode, notes.length]);
   const workspaceContext = getWorkspaceContext();
   const workspaceModeLabel = workspaceContext === 'schedule'
     ? 'Schedule mode'
@@ -5522,13 +5527,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function primeTutorSession() {
     toggleTutorMode(true);
     setActivePanel('chat');
-    if (layoutMode === 'sidebar' && notes.length > 0) openCompanionPanel('notes');
+    if (notes.length > 0) {
+      if (layoutMode === 'sidebar') {
+        openCompanionPanel('notes');
+      } else {
+        setShowNotes(true);
+        setShowPeek(false);
+      }
+    }
   }
 
   function launchTutorPrompt(message) {
     setActivePanel('chat');
-    if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
-    if (sidebarCompanionPanel !== 'notes') openCompanionPanel('notes');
+    if (notes.length > 0) {
+      if (layoutMode === 'sidebar') {
+        if (sidebarCompanionPanel !== 'notes') openCompanionPanel('notes');
+      } else {
+        setShowNotes(true);
+        setShowPeek(false);
+      }
+    }
     setInput(message);
     requestAnimationFrame(() => inputRef.current?.focus());
   }
