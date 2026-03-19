@@ -5458,6 +5458,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     localStorage.setItem('sos_tutor_mode', nextValue ? 'true' : 'false');
   }
 
+  function enterTutorMode() {
+    toggleTutorMode(true);
+    setActivePanel('tutor');
+  }
+
   function launchTutorPrompt(message) {
     setActivePanel('chat');
     if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
@@ -5468,7 +5473,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
-    { label:'Tutor mode', action:()=>setActivePanel('tutor') },
+    { label:'Enter tutor mode', action:enterTutorMode },
     { label:'Add a task', msg:'I need to add a task' },
     { label:'My schedule', action:()=>setShowPeek(true) },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
@@ -5529,7 +5534,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>setActivePanel('tutor')} title="Tutor workspace">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Tutor</span></button>
+          <button className="sos-side-btn" onClick={enterTutorMode} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
           <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -5590,7 +5595,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>setActivePanel('tutor')} className="g-hdr-btn">{Icon.bookOpen(14)} Tutor</button>
+          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
           <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
@@ -5683,7 +5688,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 </div>
                 <div style={{display:'flex',gap:8}}>
                   <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>toggleTutorMode(!tutorMode)}>{tutorMode ? 'On' : 'Off'}</button>
-                  <button className="settings-toggle" onClick={()=>setActivePanel('tutor')}>Open page</button>
+                  <button className="settings-toggle" onClick={enterTutorMode}>Enter mode</button>
                 </div>
               </div>
               <div className="settings-row">
