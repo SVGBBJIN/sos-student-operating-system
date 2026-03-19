@@ -5,6 +5,9 @@ import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } f
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
+import ChatConversationPanel from './components/chat/ChatConversationPanel';
+import ChatWorkspace from './components/chat/ChatWorkspace';
+import TutorWorkspace from './components/tutor/TutorWorkspace';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
@@ -1809,1692 +1812,6 @@ function PerfPill() {
   );
 }
 
-function TutorIndicator({ active }) {
-  return (
-    <div className={'tutor-indicator' + (active ? ' active' : '')} title={active ? 'Tutor mode is ON' : 'Tutor mode is OFF'}>
-      ✦ Tutor {active ? 'ON' : 'OFF'}
-    </div>
-  );
-}
-
-function FlashcardDisplay({ data, onSave, onDismiss }) {
-  const cards = data.cards || [];
-  const [idx, setIdx] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-
-  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards generated.</div></ContentCard>;
-
-  function goNext() { if (idx < cards.length - 1) { setFlipped(false); setTimeout(() => setIdx(i => i + 1), 100); } }
-  function goPrev() { if (idx > 0) { setFlipped(false); setTimeout(() => setIdx(i => i - 1), 100); } }
-
-  return (
-    <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)">
-      <div className="fc-container" onClick={() => setFlipped(f => !f)}>
-        <div className={'fc-inner' + (flipped ? ' flipped' : '')}>
-          <div className="fc-front">
-            <div>{cards[idx]?.q || 'No question'}</div>
-          </div>
-          <div className="fc-back">
-            <div>{cards[idx]?.a || 'No answer'}</div>
-          </div>
-        </div>
-      </div>
-      <div className="fc-nav">
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goPrev(); }} disabled={idx === 0}>{Icon.chevronLeft(16)}</button>
-        <span className="fc-counter">{idx + 1} / {cards.length}</span>
-        <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>{Icon.chevronRight(16)}</button>
-      </div>
-      {flipped && (
-        <div className="fc-chips">
-          <button className="fc-chip chip-know" onClick={(e) => { e.stopPropagation(); goNext(); }}>✓ Got it</button>
-          <button className="fc-chip chip-unsure" onClick={(e) => { e.stopPropagation(); goNext(); }}>~ Almost</button>
-          <button className="fc-chip chip-nope" onClick={(e) => { e.stopPropagation(); goNext(); }}>✗ Nope</button>
-        </div>
-      )}
-      <div className="fc-hint">tap card to flip</div>
-    </ContentCard>
-  );
-}
-
-function QuizDisplay({ data, onSave, onDismiss }) {
-  const questions = data.questions || [];
-  const [qIdx, setQIdx] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [revealed, setRevealed] = useState(false);
-  const [score, setScore] = useState(0);
-  const [finished, setFinished] = useState(false);
-
-  if (questions.length === 0) return <ContentCard icon={Icon.fileText(16)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No questions generated.</div></ContentCard>;
-
-  const q = questions[qIdx];
-  const isCorrect = selected === q?.answer;
-
-  function checkAnswer() {
-    if (!selected || revealed) return;
-    setRevealed(true);
-    if (selected === q.answer) setScore(s => s + 1);
-  }
-  function nextQuestion() {
-    if (qIdx < questions.length - 1) { setQIdx(i => i + 1); setSelected(null); setRevealed(false); }
-    else setFinished(true);
-  }
-
-  return (
-    <ContentCard icon={Icon.fileText(16)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)">
-      {finished ? (
-        <div className="quiz-score">
-          <div style={{ marginBottom:8, color: score === questions.length ? 'var(--success)' : score >= questions.length * 0.7 ? 'var(--accent)' : 'var(--text-dim)', display:'flex', justifyContent:'center' }}>{score === questions.length ? Icon.trophy(32) : score >= questions.length * 0.7 ? Icon.thumbsUp(32) : Icon.bookOpen(32)}</div>
-          <div>{score} / {questions.length} correct</div>
-          <div style={{ fontSize:'0.82rem', color:'var(--text-dim)', fontWeight:400, marginTop:4 }}>
-            {score === questions.length ? 'Perfect score!' : score >= questions.length * 0.7 ? 'Nice job!' : 'Keep studying, you got this!'}
-          </div>
-          <button className="quiz-btn" style={{ marginTop:12 }} onClick={() => { setQIdx(0); setSelected(null); setRevealed(false); setScore(0); setFinished(false); }}>Try Again</button>
-        </div>
-      ) : (
-        <>
-          <div className="quiz-progress">
-            <span>{qIdx + 1}/{questions.length}</span>
-            <div className="quiz-progress-bar"><div className="quiz-progress-fill" style={{ width: ((qIdx + 1) / questions.length * 100) + '%' }}/></div>
-            <span style={{ color:'var(--success)', display:'flex', alignItems:'center', gap:2 }}>{score} {Icon.check(12)}</span>
-          </div>
-          <div className="quiz-question">{q?.q || 'No question'}</div>
-          <div className="quiz-choices">
-            {(q?.choices || []).map((choice, i) => {
-              let cls = 'quiz-choice';
-              if (revealed && choice === q.answer) cls += ' correct';
-              else if (revealed && choice === selected && choice !== q.answer) cls += ' wrong';
-              else if (!revealed && choice === selected) cls += ' selected';
-              if (revealed && choice === q.answer && choice !== selected) cls += ' reveal-correct';
-              return (
-                <button key={i} className={cls} onClick={() => { if (!revealed) setSelected(choice); }}>
-                  {choice}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            {!revealed && <button className="quiz-btn" onClick={checkAnswer} disabled={!selected}>Check Answer</button>}
-            {revealed && <button className="quiz-btn" style={{display:'flex',alignItems:'center',gap:4}} onClick={nextQuestion}>{qIdx < questions.length - 1 ? <>Next {Icon.arrowRight(14)}</> : 'See Score'}</button>}
-          </div>
-        </>
-      )}
-    </ContentCard>
-  );
-}
-
-function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentColor }) {
-  const ac = accentColor || 'var(--teal)';
-  const formatted = (() => {
-    try {
-      switch (data.type) {
-        case 'create_summary':
-          return (data.bullets||[]).map(b => ({ type:'bullet', text:b }));
-        case 'create_outline':
-          return (data.sections||[]).flatMap(s => [{ type:'heading', text: s.heading }, ...(s.points||[]).map(p => ({ type:'point', text: p }))]);
-        case 'create_study_plan':
-          return (data.steps||[]).map((s,i) => ({ type:'step', num:i+1, text:s.step, meta:(s.time_minutes||20)+'min'+(s.day?' · '+s.day:'') }));
-        case 'create_project_breakdown':
-          return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
-        default: return [{ type:'bullet', text:'(content generated)' }];
-      }
-    } catch(e) { return [{ type:'bullet', text:'(error displaying content)' }]; }
-  })();
-
-  return (
-    <ContentCard icon={icon} title={data.title||label} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor={ac}>
-      <div style={{ maxHeight:220, overflowY:'auto', fontSize:'0.85rem', lineHeight:1.6 }}>
-        {formatted.map((item, i) => {
-          if (item.type==='heading') return <div key={i} style={{ fontWeight:700, color:ac, marginTop: i > 0 ? 10 : 0, marginBottom:4, fontSize:'0.86rem', display:'flex', alignItems:'center', gap:6 }}><span style={{width:3,height:14,borderRadius:2,background:ac,flexShrink:0}}/>{item.text}</div>;
-          if (item.type==='step') return <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.03)' }}><span style={{width:22,height:22,borderRadius:6,background:`color-mix(in srgb, ${ac} 10%, transparent)`,border:`1px solid color-mix(in srgb, ${ac} 20%, transparent)`,color:ac,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.72rem',fontWeight:700,flexShrink:0}}>{item.num}</span><div><div style={{color:'var(--text)',fontWeight:500}}>{item.text}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginTop:1}}>{item.meta}</div></div></div>;
-          if (item.type==='point') return <div key={i} style={{ padding:'3px 0 3px 14px', color:'var(--text)', borderLeft:`2px solid color-mix(in srgb, ${ac} 25%, transparent)`, marginLeft:2 }}>• {item.text}</div>;
-          return <div key={i} style={{ padding:'4px 0', color:'var(--text)', display:'flex', alignItems:'flex-start', gap:8 }}><span style={{width:5,height:5,borderRadius:'50%',background:ac,marginTop:7,flexShrink:0}}/>{item.text}</div>;
-        })}
-      </div>
-    </ContentCard>
-  );
-}
-
-/* ─── Plan Templates ─── */
-const PLAN_TEMPLATES = [
-  {
-    id: 'weekly_study', name: 'Weekly Study Plan', iconFn: Icon.calendar,
-    description: 'Plan your study sessions for the week',
-    skeleton: {
-      summary: 'A structured weekly study plan to stay on top of your coursework.',
-      steps: [
-        { title: 'Review notes from last week', estimated_minutes: 30 },
-        { title: 'Read new chapter material', estimated_minutes: 45 },
-        { title: 'Practice problems / exercises', estimated_minutes: 40 },
-        { title: 'Study group / peer review', estimated_minutes: 30 },
-        { title: 'Self-quiz / flashcard review', estimated_minutes: 20 },
-      ]
-    }
-  },
-  {
-    id: 'exam_prep', name: 'Exam Prep Plan', iconFn: Icon.target,
-    description: '3-5 day countdown to exam day',
-    skeleton: {
-      summary: 'A focused exam preparation plan to maximize your study time.',
-      steps: [
-        { title: 'Gather all study materials and past notes', estimated_minutes: 20 },
-        { title: 'Review key concepts and make a cheat sheet', estimated_minutes: 45 },
-        { title: 'Practice with past exams / sample questions', estimated_minutes: 60 },
-        { title: 'Focus on weak areas identified from practice', estimated_minutes: 45 },
-        { title: 'Final review and light practice', estimated_minutes: 30 },
-      ]
-    }
-  },
-  {
-    id: 'essay_plan', name: 'Essay Writing Plan', iconFn: Icon.fileText,
-    description: 'Research, outline, draft, revise',
-    skeleton: {
-      summary: 'Step-by-step plan to write a polished essay.',
-      steps: [
-        { title: 'Research and gather sources', estimated_minutes: 45 },
-        { title: 'Create outline with thesis and key points', estimated_minutes: 25 },
-        { title: 'Write first draft', estimated_minutes: 60 },
-        { title: 'Revise and strengthen arguments', estimated_minutes: 40 },
-        { title: 'Proofread and final edits', estimated_minutes: 20 },
-      ]
-    }
-  },
-  {
-    id: 'project_timeline', name: 'Project Timeline', iconFn: Icon.hammer,
-    description: 'Break a big project into phases',
-    skeleton: {
-      summary: 'A phased timeline to complete your project on schedule.',
-      steps: [
-        { title: 'Define project scope and requirements', estimated_minutes: 30 },
-        { title: 'Research and plan approach', estimated_minutes: 45 },
-        { title: 'Build / create core deliverables', estimated_minutes: 90 },
-        { title: 'Test, review, and iterate', estimated_minutes: 45 },
-        { title: 'Polish and submit final version', estimated_minutes: 30 },
-      ]
-    }
-  },
-  {
-    id: 'research_paper', name: 'Research Paper Plan', iconFn: Icon.search,
-    description: 'Literature review through final draft',
-    skeleton: {
-      summary: 'A structured approach to writing a thorough research paper.',
-      steps: [
-        { title: 'Choose topic and narrow focus', estimated_minutes: 20 },
-        { title: 'Literature review — find and read sources', estimated_minutes: 60 },
-        { title: 'Create annotated bibliography', estimated_minutes: 40 },
-        { title: 'Write introduction and methodology', estimated_minutes: 45 },
-        { title: 'Write body sections and analysis', estimated_minutes: 90 },
-        { title: 'Write conclusion and format citations', estimated_minutes: 30 },
-      ]
-    }
-  },
-];
-
-function PlanTemplateSelector({ onSelectTemplate, onCustomPlan, onDismiss }) {
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.listTree(18)}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Choose a Plan Template</div>
-          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>Pick a starting point or create your own</div>
-        </div>
-        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
-      </div>
-
-      {/* Templates */}
-      <div style={{padding:'12px 16px'}}>
-        {PLAN_TEMPLATES.map(tmpl => (
-          <div key={tmpl.id}
-            onClick={() => onSelectTemplate(tmpl)}
-            style={{
-              display:'flex', alignItems:'center', gap:12,
-              padding:'12px 14px',
-              marginBottom:6,
-              borderRadius:12,
-              cursor:'pointer',
-              border:'1px solid rgba(255,255,255,0.06)',
-              background:'rgba(255,255,255,0.02)',
-              transition:'all .15s'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background='rgba(108,99,255,0.08)'; e.currentTarget.style.borderColor='rgba(108,99,255,0.2)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.06)'; }}>
-            <div style={{
-              width:32, height:32, borderRadius:8,
-              background:'rgba(108,99,255,0.1)',
-              border:'1px solid rgba(108,99,255,0.2)',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              color:'var(--accent)', flexShrink:0
-            }}>
-              {tmpl.iconFn(16)}
-            </div>
-            <div>
-              <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--text)'}}>{tmpl.name}</div>
-              <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>{tmpl.description}</div>
-            </div>
-          </div>
-        ))}
-
-        {/* Custom Plan option */}
-        <div
-          onClick={onCustomPlan}
-          style={{
-            display:'flex', alignItems:'center', gap:12,
-            padding:'12px 14px',
-            borderRadius:12,
-            cursor:'pointer',
-            border:'1px solid rgba(43,203,186,0.15)',
-            background:'rgba(43,203,186,0.04)',
-            transition:'all .15s'
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background='rgba(43,203,186,0.1)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.3)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background='rgba(43,203,186,0.04)'; e.currentTarget.style.borderColor='rgba(43,203,186,0.15)'; }}>
-          <div style={{
-            width:32, height:32, borderRadius:8,
-            background:'rgba(43,203,186,0.1)',
-            border:'1px solid rgba(43,203,186,0.2)',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            color:'var(--teal)', flexShrink:0
-          }}>
-            {Icon.sparkles(16)}
-          </div>
-          <div>
-            <div style={{fontSize:'0.86rem', fontWeight:600, color:'var(--teal)'}}>Custom Plan</div>
-            <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:1}}>AI generates a unique plan from your description</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogleDocs, googleConnected }) {
-  const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
-  const [mode, setMode] = useState('breakdown');
-  const [activeIdx, setActiveIdx] = useState(null);
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const [docSyncing, setDocSyncing] = useState(false);
-  const steps = data.steps || [];
-  const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
-  const checkedCount = checked.filter(Boolean).length;
-
-  function startTask(i) {
-    if (!steps[i]) return;
-    setActiveIdx(i);
-    if (!checked[i]) toggle(i);
-    onStartTask?.(steps[i], i);
-  }
-
-  function startNextTask() {
-    const nextIdx = steps.findIndex((_, i) => checked[i] && i !== activeIdx);
-    if (nextIdx >= 0) startTask(nextIdx);
-  }
-
-  async function handleExportDocs() {
-    if (!onExportGoogleDocs) return;
-    setDocSyncing(true);
-    try { await onExportGoogleDocs(data); } finally { setDocSyncing(false); }
-  }
-
-  const hasDocId = !!data.googleDocId;
-
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      maxHeight:'70vh',
-      overflowY:'auto',
-      overflowX:'hidden',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.listTree(18)}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>{data.title||'Plan'}</div>
-          {data.templateName && (
-            <div style={{fontSize:'0.68rem', color:'var(--accent)', marginTop:1, fontWeight:600}}>
-              {data.templateName}
-            </div>
-          )}
-        </div>
-        <span style={{fontSize:'0.7rem',fontWeight:700,padding:'3px 10px',borderRadius:8,background:'rgba(43,203,186,0.1)',color:'var(--teal)',letterSpacing:'0.5px'}}>{checkedCount}/{steps.length}</span>
-        <button onClick={onDismiss} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,display:'flex'}}>{Icon.x(14)}</button>
-      </div>
-
-      {/* Summary */}
-      {data.summary && (
-        <div style={{
-          padding:'12px 20px',
-          background:'rgba(108,99,255,0.04)',
-          borderBottom:'1px solid rgba(255,255,255,0.04)',
-          fontSize:'0.86rem',
-          color:'var(--text)',
-          lineHeight:1.5,
-          fontWeight:500
-        }}>
-          {data.summary}
-        </div>
-      )}
-
-      {/* Mode Toggle */}
-      <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
-        <button onClick={() => setMode('breakdown')} style={{
-          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
-          background: mode === 'breakdown' ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)',
-          color: mode === 'breakdown' ? 'var(--accent)' : 'var(--text-dim)',
-          transition:'all .15s'
-        }}>Breakdown</button>
-        <button onClick={() => setMode('start')} style={{
-          flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
-          background: mode === 'start' ? 'rgba(43,203,186,0.15)' : 'rgba(255,255,255,0.04)',
-          color: mode === 'start' ? 'var(--teal)' : 'var(--text-dim)',
-          transition:'all .15s'
-        }}>Start task</button>
-      </div>
-
-      {/* Steps */}
-      <div style={{padding:'8px 20px'}}>
-        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Steps</div>
-        {steps.map((step,i) => {
-          const isActive = activeIdx === i;
-          const isChecked = checked[i];
-          return (
-            <div key={i}
-              onClick={() => mode === 'start' ? startTask(i) : toggle(i)}
-              style={{
-                display:'flex', alignItems:'center', gap:10,
-                padding:'8px 0',
-                borderBottom: i < steps.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
-                cursor:'pointer',
-                opacity: isChecked ? 1 : 0.5,
-              }}>
-              <span style={{
-                width:24, height:24, borderRadius:7, flexShrink:0,
-                background: isActive ? 'rgba(43,203,186,0.15)' : isChecked ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.04)',
-                border: isActive ? '1.5px solid var(--teal)' : isChecked ? '1.5px solid rgba(108,99,255,0.3)' : '1.5px solid rgba(255,255,255,0.1)',
-                color: isActive ? 'var(--teal)' : 'var(--accent)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:'0.72rem', fontWeight:700,
-                transition:'all .15s'
-              }}>{isActive ? Icon.arrowRight(11) : isChecked ? (i + 1) : Icon.x(10)}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>{step.title}</div>
-                <div style={{display:'flex', gap:8, marginTop:2}}>
-                  {step.date && <span style={{fontSize:'0.72rem', color:'var(--teal)', fontWeight:600}}>{Icon.calendar(10)} {fmt(step.date)}</span>}
-                  {step.time && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{Icon.clock(10)} {step.time}</span>}
-                  {step.estimated_minutes && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{step.estimated_minutes}min</span>}
-                </div>
-              </div>
-              {mode === 'start' && (
-                <span style={{
-                  fontSize:'0.72rem', fontWeight:700, padding:'3px 10px', borderRadius:6,
-                  background: isActive ? 'rgba(43,203,186,0.15)' : 'rgba(108,99,255,0.08)',
-                  color: isActive ? 'var(--teal)' : 'var(--accent)',
-                }}>{isActive ? 'In progress' : 'Start'}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Quick Actions Dropdown */}
-      <div style={{padding:'10px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
-        <button onClick={() => setActionsOpen(!actionsOpen)} style={{
-          width:'100%',
-          background:'rgba(108,99,255,0.08)',
-          border:'1px solid rgba(108,99,255,0.2)',
-          borderRadius:10,
-          padding:'10px 14px',
-          color:'var(--accent)',
-          fontSize:'0.84rem',
-          fontWeight:600,
-          cursor:'pointer',
-          display:'flex',
-          alignItems:'center',
-          justifyContent:'space-between',
-          transition:'all .15s'
-        }}>
-          <span style={{display:'flex',alignItems:'center',gap:6}}>
-            {Icon.zap(14)} Actions
-          </span>
-          <span style={{
-            display:'inline-flex',
-            transform: actionsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition:'transform .2s'
-          }}>
-            {Icon.arrowRight(12)}
-          </span>
-        </button>
-        {actionsOpen && (
-          <div style={{
-            marginTop:6,
-            borderRadius:10,
-            overflow:'hidden',
-            border:'1px solid rgba(108,99,255,0.15)',
-            background:'rgba(15,15,26,0.95)'
-          }}>
-            {mode === 'breakdown' ? (
-              <button onClick={() => { setActionsOpen(false); onApply(steps.filter((_,i) => checked[i])); }} style={{
-                width:'100%', background:'transparent', border:'none',
-                borderBottom:'1px solid rgba(255,255,255,0.04)',
-                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-              }}
-                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.check(13)}</span>
-                Add {checkedCount} as tasks
-              </button>
-            ) : (
-              <button onClick={() => { setActionsOpen(false); startNextTask(); }} style={{
-                width:'100%', background:'transparent', border:'none',
-                borderBottom:'1px solid rgba(255,255,255,0.04)',
-                padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-                display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-              }}
-                onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                <span style={{color:'var(--teal)',display:'flex'}}>{Icon.arrowRight(13)}</span>
-                Start next task
-              </button>
-            )}
-            <button onClick={() => { setActionsOpen(false); onSave(); }} style={{
-              width:'100%', background:'transparent', border:'none',
-              borderBottom:'1px solid rgba(255,255,255,0.04)',
-              padding:'10px 14px', color:'var(--text)', fontSize:'0.82rem', cursor:'pointer', textAlign:'left',
-              display:'flex', alignItems:'center', gap:8, transition:'background .15s'
-            }}
-              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.fileText(13)}</span>
-              Save to notes
-            </button>
-            <button onClick={() => { setActionsOpen(false); handleExportDocs(); }} disabled={docSyncing} style={{
-              width:'100%', background:'transparent', border:'none',
-              padding:'10px 14px', color: googleConnected ? 'var(--text)' : 'var(--text-dim)', fontSize:'0.82rem',
-              cursor: docSyncing ? 'wait' : 'pointer', textAlign:'left',
-              display:'flex', alignItems:'center', gap:8, transition:'background .15s',
-              opacity: docSyncing ? 0.5 : 1
-            }}
-              onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <span style={{color:'var(--accent)',display:'flex'}}>{Icon.externalLink(13)}</span>
-              {docSyncing ? 'Syncing...' : hasDocId ? 'Sync to Google Docs' : 'Export to Google Docs'}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
-  switch (content.type) {
-    case 'make_plan':
-      return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
-    case 'create_flashcards':
-      return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
-    case 'create_quiz':
-      return <QuizDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
-    case 'create_outline':
-      return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" />;
-    case 'create_summary':
-      return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
-    case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
-    case 'create_project_breakdown':
-      return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
-    default:
-      return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
-  }
-}
-
-/* ═══════════════════════════════════════════════
-   DAILY BRIEF CARD
-   ═══════════════════════════════════════════════ */
-function DailyBriefCard({ brief, onAction }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  if (!brief) return null;
-  const scheduleItems = (brief.schedule_items || []).filter(item => (item?.event_name || '').trim() || (item?.time || '').trim());
-  const isScheduleBlank = scheduleItems.length === 0;
-  const allClearMsg = 'all clear for now go have some fun';
-
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      maxHeight:'70vh',
-      overflowY:'auto',
-      overflowX:'hidden',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.calendar(18)}
-        </div>
-        <div>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Daily Brief</div>
-          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>
-            {new Date().toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })}
-          </div>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div style={{
-        padding:'14px 20px',
-        background:'rgba(108,99,255,0.04)',
-        borderBottom:'1px solid rgba(255,255,255,0.04)',
-        fontSize:'0.88rem',
-        color:'var(--text)',
-        lineHeight:1.5,
-        fontWeight:500
-      }}>
-        {isScheduleBlank ? allClearMsg : (brief.summary || allClearMsg)}
-      </div>
-
-      {/* Schedule Items */}
-      <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
-        {isScheduleBlank ? (
-          <div style={{fontSize:'0.84rem', color:'var(--text-dim)', lineHeight:1.5}}>{allClearMsg}</div>
-        ) : scheduleItems.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'center', gap:10,
-              padding:'6px 0',
-              borderBottom: i < scheduleItems.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
-            }}>
-              <span style={{
-                fontSize:'0.78rem', fontWeight:700, color:'var(--teal)',
-                minWidth:72, fontVariantNumeric:'tabular-nums'
-              }}>{item.time || '—'}</span>
-              <span style={{fontSize:'0.84rem', color:'var(--text)', flex:1}}>{item.event_name}</span>
-              {item.related_doc_id && (
-                <span style={{display:'flex', color:'var(--accent)', opacity:0.6}} title="Linked document">
-                  {Icon.fileText(13)}
-                </span>
-              )}
-            </div>
-          ))}
-      </div>
-
-      {/* Plan of Action */}
-      {brief.plan_of_action && brief.plan_of_action.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--teal)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Plan of Action</div>
-          {brief.plan_of_action.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'flex-start', gap:8,
-              padding:'5px 0', fontSize:'0.84rem', color:'var(--text)', lineHeight:1.5
-            }}>
-              <span style={{
-                width:20, height:20, borderRadius:6, flexShrink:0, marginTop:1,
-                background:'rgba(43,203,186,0.1)',
-                border:'1px solid rgba(43,203,186,0.2)',
-                color:'var(--teal)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:'0.7rem', fontWeight:700
-              }}>{i + 1}</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Quick Actions Dropdown */}
-      {brief.dropdown_options && brief.dropdown_options.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
-          <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{
-            width:'100%',
-            background:'rgba(108,99,255,0.08)',
-            border:'1px solid rgba(108,99,255,0.2)',
-            borderRadius:10,
-            padding:'10px 14px',
-            color:'var(--accent)',
-            fontSize:'0.84rem',
-            fontWeight:600,
-            cursor:'pointer',
-            display:'flex',
-            alignItems:'center',
-            justifyContent:'space-between',
-            transition:'all .15s'
-          }}>
-            <span style={{display:'flex',alignItems:'center',gap:6}}>
-              {Icon.zap(14)} Quick Actions
-            </span>
-            <span style={{
-              display:'inline-flex',
-              transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition:'transform .2s'
-            }}>
-              {Icon.arrowRight(12)}
-            </span>
-          </button>
-          {dropdownOpen && (
-            <div style={{
-              marginTop:6,
-              borderRadius:10,
-              overflow:'hidden',
-              border:'1px solid rgba(108,99,255,0.15)',
-              background:'rgba(15,15,26,0.95)'
-            }}>
-              {brief.dropdown_options.map((opt, i) => (
-                <button key={i} onClick={() => { setDropdownOpen(false); onAction(opt); }}
-                  style={{
-                    width:'100%',
-                    background:'transparent',
-                    border:'none',
-                    borderBottom: i < brief.dropdown_options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                    padding:'10px 14px',
-                    color:'var(--text)',
-                    fontSize:'0.82rem',
-                    cursor:'pointer',
-                    textAlign:'left',
-                    transition:'background .15s',
-                    display:'flex',
-                    alignItems:'center',
-                    gap:8
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                  <span style={{color:'var(--accent)',display:'flex'}}>{Icon.sparkles(13)}</span>
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Encouragement Footer */}
-      {brief.encouragement && (
-        <div style={{
-          padding:'14px 20px',
-          background:'linear-gradient(135deg, rgba(43,203,186,0.06), rgba(108,99,255,0.04))',
-          fontSize:'0.84rem',
-          color:'var(--teal)',
-          fontWeight:600,
-          fontStyle:'italic',
-          textAlign:'center',
-          lineHeight:1.5
-        }}>
-          {brief.encouragement}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   GOOGLE IMPORT MODAL
-   ═══════════════════════════════════════════════ */
-function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect, onConnect,
-  calSyncEnabled, calSyncStatus, calSyncLastAt, calSyncCount, calSyncError, onToggleCalSync, onSyncNow }) {
-  const [tab, setTab] = useState('calendar');
-  // Calendar tab state
-  const [calEvents, setCalEvents] = useState([]);
-  const [selected, setSelected] = useState(new Set());
-  const [calLoading, setCalLoading] = useState(false);
-  const [calFetched, setCalFetched] = useState(false);
-  // Docs tab state — direct URL/ID input
-  const [docInput, setDocInput] = useState('');
-  const [docLoading, setDocLoading] = useState(false);
-  // PDF tab state — local file upload only
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const fileInputRef = useRef(null);
-  // Audio/Video tab state
-  const [audioLoading, setAudioLoading] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const audioInputRef = useRef(null);
-  const videoInputRef = useRef(null);
-  // Shared error
-  const [err, setErr] = useState(null);
-
-  // ── Helpers ──
-  const isConnected = !!googleToken;
-  function authHeader() { return { 'Authorization': 'Bearer ' + googleToken }; }
-
-  // Converts an ISO timestamp to a friendly "X min ago" string
-  function timeAgo(iso) {
-    if (!iso) return null;
-    const diffMs = Date.now() - new Date(iso).getTime();
-    const s = Math.floor(diffMs / 1000);
-    if (s < 10) return 'just now';
-    if (s < 60) return s + 's ago';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + ' min ago';
-    const h = Math.floor(m / 60);
-    if (h < 24) return h + ' hr ago';
-    return Math.floor(h / 24) + 'd ago';
-  }
-
-  // ── Calendar ──
-  async function fetchCalEvents() {
-    setCalLoading(true); setErr(null);
-    try {
-      const now = new Date();
-      const max = new Date(now.getTime() + 14 * 86400000);
-      const params = new URLSearchParams({
-        timeMin: now.toISOString(), timeMax: max.toISOString(),
-        singleEvents: 'true', orderBy: 'startTime', maxResults: '50'
-      });
-      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params, { headers: authHeader() });
-      if (!res.ok) { if (res.status === 401) throw new Error('Google session expired — click Reconnect.'); throw new Error('Calendar fetch failed: ' + res.status); }
-      const data = await res.json();
-      const evs = mapGoogleCalItems(data.items || []);
-      setCalEvents(evs);
-      setSelected(new Set(evs.map((_,i) => i)));
-      setCalFetched(true);
-    } catch(e) { setErr(e.message); }
-    finally { setCalLoading(false); }
-  }
-
-  function toggleEv(i) {
-    setSelected(prev => { const n=new Set(prev); n.has(i)?n.delete(i):n.add(i); return n; });
-  }
-
-  // ── Docs ── (uses Google Docs API with direct document access)
-  async function importDoc() {
-    const docId = parseDocId(docInput);
-    if (!docId) { setErr('Please enter a valid Google Doc URL or ID.'); return; }
-    setDocLoading(true); setErr(null);
-    try {
-      const res = await fetch('https://docs.googleapis.com/v1/documents/' + docId, { headers: authHeader() });
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('Google session expired — click Reconnect.');
-        if (res.status === 403) throw new Error('Access denied. Try disconnecting and reconnecting Google to refresh permissions.');
-        if (res.status === 404) throw new Error('Doc not found. Make sure you have access and the URL/ID is correct.');
-        throw new Error('Failed to fetch doc: ' + res.status);
-      }
-      const doc = await res.json();
-      const text = extractDocsText(doc);
-      if (!text) throw new Error('Document appears to be empty.');
-      const title = doc.title || 'Imported Doc';
-      onImportDoc(title, text);
-      setDocInput('');
-    } catch(e) { setErr(e.message); }
-    finally { setDocLoading(false); }
-  }
-
-  // ── PDF ──
-  async function importPdf(source) {
-    setPdfLoading(true); setErr(null);
-    try {
-      const lib = pdfjsLib;
-      if (!lib) throw new Error('PDF library is still loading — wait a moment and try again.');
-      let loadingTask;
-      let filename = source.name ? source.name.replace(/\.pdf$/i, '') : 'Imported PDF';
-      const buf = await source.arrayBuffer();
-      loadingTask = lib.getDocument({ data: buf });
-      const pdf = await loadingTask.promise;
-      let full = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const tc = await page.getTextContent();
-        full += tc.items.map(item => item.str).join(' ') + '\n\n';
-      }
-      const trimmed = full.trim();
-      if (!trimmed) throw new Error('No readable text found in this PDF. Scanned/image-only PDFs cannot be parsed.');
-      // Truncate very large docs with a note
-      const maxChars = 50000;
-      const content = trimmed.length > maxChars ? trimmed.slice(0, maxChars) + '\n\n[Truncated — PDF had more content than the notes limit]' : trimmed;
-      onImportPdf(filename, content);
-    } catch(e) { setErr(e.message); }
-    finally { setPdfLoading(false); }
-  }
-
-  // Audio/Video transcription via Whisper
-  async function transcribeFile(file, setLoading) {
-    if (file.size > 25 * 1024 * 1024) { setErr('File too large — max 25MB for transcription.'); return; }
-    setLoading(true); setErr(null);
-    try {
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const arrayBuf = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuf);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const audioBase64 = btoa(binary);
-      const res = await fetch(EDGE_FN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
-        body: JSON.stringify({ mode: 'voice', audioBase64, audioMimeType: file.type || 'audio/webm' })
-      });
-      if (!res.ok) throw new Error('Transcription failed: ' + res.status);
-      const data = await res.json();
-      const transcript = (data.text || '').trim();
-      if (!transcript) throw new Error('No speech detected in this file.');
-      const filename = file.name.replace(/\.[^.]+$/, '') || 'Transcription';
-      onImportPdf(filename, transcript);
-    } catch(e) { setErr(e.message); }
-    finally { setLoading(false); }
-  }
-
-  async function importAudio(file) { await transcribeFile(file, setAudioLoading); }
-
-  async function importVideo(file) {
-    if (file.size > 25 * 1024 * 1024) { setErr('File too large — max 25MB for transcription.'); return; }
-    setVideoLoading(true); setErr(null);
-    try {
-      // Try direct transcription first — Whisper handles video formats
-      await transcribeFile(file, setVideoLoading);
-    } catch(e) { setErr(e.message); setVideoLoading(false); }
-  }
-
-  const isLoading = calLoading || docLoading || pdfLoading || audioLoading || videoLoading;
-
-  return (
-    <>
-      <div className="g-overlay" onClick={onClose}/>
-      <div className="g-modal" onClick={e=>e.stopPropagation()}>
-        {/* Header */}
-        <div className="g-modal-hdr">
-          <div className="g-modal-title"><span style={{display:'flex',color:'var(--accent)'}}>{Icon.link(18)}</span> Import</div>
-          <button className="g-modal-close" onClick={onClose} disabled={isLoading}>{Icon.x(16)}</button>
-        </div>
-
-        {/* Connected account info */}
-        {googleUser ? (
-          <div className="g-connected">
-            <span style={{color:'var(--success)',display:'flex',alignItems:'center',gap:4}}>{Icon.check(12)} {googleUser.email}</span>
-            <button onClick={onDisconnect} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',fontSize:'0.78rem',fontWeight:600,padding:'0 4px'}}>Disconnect</button>
-          </div>
-        ) : (
-          <div className="g-connected" style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)'}}>
-            <span style={{color:'var(--text-dim)',display:'flex',alignItems:'center',gap:6}}>{Icon.link(12)} Connect Google to import Calendar events or Docs.</span>
-            <button onClick={onConnect} style={{background:'transparent',border:'1px solid rgba(108,99,255,0.3)',color:'var(--accent)',cursor:'pointer',fontSize:'0.76rem',fontWeight:600,padding:'4px 8px',borderRadius:8}}>Connect</button>
-          </div>
-        )}
-
-        {/* Error */}
-        {err && <div className="g-err" style={{display:'flex',alignItems:'center',gap:6}}>{Icon.alertTriangle(14)} {err}</div>}
-
-        {/* Tabs */}
-        <div className="g-tabs">
-          {['calendar','docs','pdf','audio','video'].map(t=>(
-            <button key={t} className={'g-tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setErr(null);}}>
-              {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>
-              :t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>
-              :t==='pdf'?<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>
-              :t==='audio'?<><span style={{display:'inline-flex'}}>{Icon.headphones(14)}</span> Audio</>
-              :<><span style={{display:'inline-flex'}}>{Icon.video(14)}</span> Video</>}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Calendar Tab ── */}
-        {tab==='calendar' && (
-          <div className="g-section">
-            {!isConnected ? (
-              <div className="g-note" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                <span>Connect Google to import and sync calendar events.</span>
-                <button className="g-hdr-btn" onClick={onConnect}>Connect</button>
-              </div>
-            ) : (
-            <>
-
-            {/* ── Auto-sync toggle card ── */}
-            <div className={'cal-sync-card' + (calSyncEnabled ? ' on' : '') + (calSyncStatus==='error' ? ' error' : '')}>
-              <div className="cal-sync-toggle">
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{display:'flex',color:'var(--accent)'}}>{calSyncStatus==='syncing'?Icon.circle(18):calSyncEnabled?Icon.checkCircle(18):Icon.calendar(18)}</span>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:'0.88rem'}}>Auto-sync Calendar</div>
-                    <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:1}}>
-                      {calSyncEnabled ? 'Syncing next 2 weeks every 30 min' : 'Enable to sync automatically in the background'}
-                    </div>
-                  </div>
-                </div>
-                <button className={'cal-sync-pill ' + (calSyncEnabled ? 'on' : 'off')} onClick={onToggleCalSync}>
-                  {calSyncEnabled ? '● ON' : '○ OFF'}
-                </button>
-              </div>
-
-              {/* Status row — only shown when enabled */}
-              {calSyncEnabled && (
-                <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                  <div style={{fontSize:'0.78rem'}}>
-                    {calSyncStatus==='syncing' && <span style={{color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>{Icon.circle(12)} Syncing now…</span>}
-                    {calSyncStatus==='done' && (
-                      <span style={{color:'var(--success)'}}>
-                        {Icon.check(12)} Last synced {timeAgo(calSyncLastAt)}
-                        {calSyncCount > 0 && <span style={{color:'var(--text-dim)',marginLeft:6}}>({calSyncCount} new event{calSyncCount!==1?'s':''})</span>}
-                        {calSyncCount === 0 && <span style={{color:'var(--text-dim)',marginLeft:6}}>(no new events)</span>}
-                      </span>
-                    )}
-                    {calSyncStatus==='error' && <span style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:4}}>{Icon.alertTriangle(12)} {calSyncError}</span>}
-                    {calSyncStatus==='idle' && calSyncLastAt && <span style={{color:'var(--text-dim)'}}>Last synced {timeAgo(calSyncLastAt)}</span>}
-                    {calSyncStatus==='idle' && !calSyncLastAt && <span style={{color:'var(--text-dim)'}}>Starting first sync…</span>}
-                  </div>
-                  <button onClick={onSyncNow} disabled={calSyncStatus==='syncing'}
-                    style={{background:'transparent',border:'1px solid '+(calSyncStatus==='syncing'?'var(--border)':'rgba(46,213,115,0.4)'),color:calSyncStatus==='syncing'?'var(--text-dim)':'var(--success)',borderRadius:8,padding:'4px 10px',cursor:calSyncStatus==='syncing'?'not-allowed':'pointer',fontSize:'0.75rem',fontWeight:600,transition:'all .15s',flexShrink:0}}>
-                    {calSyncStatus==='syncing'?'Syncing…':'Sync now'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* ── Manual mode (shown only when auto-sync is OFF) ── */}
-            {!calSyncEnabled && (
-              <>
-                {!calFetched ? (
-                  <>
-                    <p className="g-note">Or manually fetch events and choose which ones to import.</p>
-                    <button className="g-btn" onClick={fetchCalEvents} disabled={calLoading}>
-                      <span style={{display:'flex'}}>{calLoading?Icon.circle(16):Icon.calendar(16)}</span>
-                      {calLoading ? 'Fetching events…' : 'Fetch next 2 weeks of events'}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {calEvents.length === 0 ? (
-                      <div className="g-status">No events found in the next 2 weeks.</div>
-                    ) : (
-                      <>
-                        <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:10}}>
-                          {calEvents.length} events — tap to select/deselect.
-                          <button onClick={()=>setSelected(s=>s.size===calEvents.length?new Set():new Set(calEvents.map((_,i)=>i)))}
-                            style={{marginLeft:8,background:'transparent',border:'none',color:'var(--accent)',cursor:'pointer',fontSize:'0.78rem',fontWeight:600}}>
-                            {selected.size===calEvents.length?'Deselect all':'Select all'}
-                          </button>
-                        </div>
-                        {calEvents.map((ev,i)=>(
-                          <div key={i} className="g-event-row" onClick={()=>toggleEv(i)}>
-                            <div className={'g-check'+(selected.has(i)?' on':'')}>
-                              {selected.has(i)&&<span style={{color:'#fff',display:'flex'}}>{Icon.check(12)}</span>}
-                            </div>
-                            <div style={{flex:1}}>
-                              <div className="g-event-title">{ev.title}</div>
-                              <div className="g-event-sub">{fmt(ev.date)}{ev.startTime?' · '+ev.startTime:' · All day'}</div>
-                            </div>
-                          </div>
-                        ))}
-                        <div className="g-action-row">
-                          <button className="confirm-btn confirm-btn-yes" style={{flex:1}}
-                            onClick={()=>onImportEvents(calEvents.filter((_,i)=>selected.has(i)))}
-                            disabled={selected.size===0}>
-                            Import {selected.size} event{selected.size!==1?'s':''}
-                          </button>
-                          <button className="confirm-btn confirm-btn-cancel" onClick={()=>{setCalFetched(false);setCalEvents([]);}}>
-                            Re-fetch
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-            </>
-            )}
-          </div>
-        )}
-
-        {/* ── Docs Tab ── */}
-        {tab==='docs' && (
-          <div className="g-section">
-            {!isConnected ? (
-              <div className="g-note" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                <span>Connect Google to import Docs.</span>
-                <button className="g-hdr-btn" onClick={onConnect}>Connect</button>
-              </div>
-            ) : (
-            <>
-            <p className="g-note">Paste a Google Doc URL or ID below. Text only; formatting won't carry over.</p>
-            <div style={{display:'flex',gap:8,alignItems:'center'}}>
-              <input type="text" value={docInput} onChange={e=>{setDocInput(e.target.value);setErr(null);}}
-                placeholder="https://docs.google.com/document/d/... or Doc ID"
-                style={{flex:1,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',color:'var(--text)',fontSize:'0.85rem',outline:'none',transition:'border-color .2s'}}
-                onFocus={e=>e.target.style.borderColor='var(--accent)'}
-                onBlur={e=>e.target.style.borderColor='var(--border)'}/>
-              {docInput && <button onClick={()=>{setDocInput('');setErr(null);}}
-                style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>}
-            </div>
-            <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:8}}
-              onClick={importDoc} disabled={docLoading||!docInput.trim()}>
-              {docLoading?'Importing…':'Import to Notes'}
-            </button>
-            </>
-            )}
-          </div>
-        )}
-
-        {/* ── PDF Tab ── */}
-        {tab==='pdf' && (
-          <div className="g-section">
-            <button className="g-btn" onClick={()=>fileInputRef.current?.click()} disabled={pdfLoading}>
-              <span style={{display:'flex'}}>{Icon.fileText(16)}</span> {pdfLoading?'Reading PDF…':'Upload PDF from your computer'}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}}
-              onChange={e=>{if(e.target.files?.[0]){importPdf(e.target.files[0]);e.target.value='';}}}/>
-
-            <p className="g-note" style={{marginTop:8,display:'flex',alignItems:'flex-start',gap:6}}><span style={{display:'flex',flexShrink:0,color:'var(--warning)',marginTop:1}}>{Icon.alertTriangle(14)}</span> Scanned/photo PDFs won't work — only PDFs with real digital text can be read.</p>
-          </div>
-        )}
-
-        {/* ── Audio Tab ── */}
-        {tab==='audio' && (
-          <div className="g-section">
-            <button className="g-btn" onClick={()=>audioInputRef.current?.click()} disabled={audioLoading}>
-              <span style={{display:'flex'}}>{Icon.headphones(16)}</span> {audioLoading?'Transcribing audio…':'Upload audio file to transcribe'}
-            </button>
-            <input ref={audioInputRef} type="file" accept=".mp3,.wav,.m4a,.ogg,.webm,.aac,.flac" style={{display:'none'}}
-              onChange={e=>{if(e.target.files?.[0]){importAudio(e.target.files[0]);e.target.value='';}}}/>
-            <p className="g-note" style={{marginTop:8}}>Supported: MP3, WAV, M4A, OGG, WebM, AAC, FLAC. Max 25MB. Audio will be transcribed to text and saved as a note.</p>
-          </div>
-        )}
-
-        {/* ── Video Tab ── */}
-        {tab==='video' && (
-          <div className="g-section">
-            <button className="g-btn" onClick={()=>videoInputRef.current?.click()} disabled={videoLoading}>
-              <span style={{display:'flex'}}>{Icon.video(16)}</span> {videoLoading?'Transcribing video…':'Upload video file to transcribe'}
-            </button>
-            <input ref={videoInputRef} type="file" accept=".mp4,.webm,.mov,.avi,.mkv" style={{display:'none'}}
-              onChange={e=>{if(e.target.files?.[0]){importVideo(e.target.files[0]);e.target.value='';}}}/>
-            <p className="g-note" style={{marginTop:8}}>Supported: MP4, WebM, MOV, AVI, MKV. Max 25MB. Audio from the video will be transcribed to text and saved as a note.</p>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   SCHEDULE PEEK PANEL (with fullscreen calendar)
-   ═══════════════════════════════════════════════ */
-function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false }) {
-  const todayKey = today(); const todayDow = new Date().getDay();
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [calView, setCalView] = useState('month');
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-
-  const timeline = useMemo(() => {
-    const result = {};
-    (blocks.recurring || []).forEach(rb => {
-      if (rb.days.includes(todayDow)) {
-        const [sh,sm]=rb.start.split(':').map(Number); const [eh,em]=rb.end.split(':').map(Number);
-        let ch=sh,cm=sm;
-        while(ch<eh||(ch===eh&&cm<em)){const key=String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');result[key]={name:rb.name,category:rb.category};cm+=30;if(cm>=60){ch++;cm=0;}}
-      }
-    });
-    const ov = blocks.dates?.[todayKey]||{};
-    Object.entries(ov).forEach(([k,v])=>{if(v===null)delete result[k];else result[k]=v;});
-    return result;
-  },[blocks,todayKey,todayDow]);
-
-  const condensed = useMemo(()=>{
-    const sorted=Object.entries(timeline).sort(([a],[b])=>a.localeCompare(b));const bl=[];let cur=null;
-    sorted.forEach(([time,data])=>{if(cur&&cur.name===data.name&&cur.category===data.category){cur.end=time;cur.slots++}else{if(cur)bl.push(cur);cur={start:time,end:time,name:data.name,category:data.category,slots:1}}});
-    if(cur)bl.push(cur);
-    return bl.map(b=>{const[eh,em]=b.end.split(':').map(Number);let nm=em+30,nh=eh;if(nm>=60){nh++;nm=0}return{...b,endDisplay:String(nh).padStart(2,'0')+':'+String(nm).padStart(2,'0')}});
-  },[timeline]);
-
-  const overduePeekTasks=useMemo(()=>tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).sort((a,b)=>daysUntil(a.dueDate)-daysUntil(b.dueDate)),[tasks]);
-  const activeTasks=useMemo(()=>tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)>=0).sort((a,b)=>getPriority(a)-getPriority(b)).slice(0,5),[tasks]);
-  const upcomingEvents=useMemo(()=>events.filter(ev=>{const d=daysUntil(ev.date);return d>=0&&d<=7}).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4),[events]);
-  const currentHour=new Date().getHours();
-  const greeting=currentHour<12?'Good morning':currentHour<17?'Good afternoon':'Good evening';
-
-  // ── Month calendar grid ──
-  const calendarDays = useMemo(() => {
-    const firstDay = new Date(calYear, calMonth, 1);
-    const lastDay = new Date(calYear, calMonth + 1, 0);
-    const startDow = firstDay.getDay();
-    const daysInMonth = lastDay.getDate();
-    const prevMonthLast = new Date(calYear, calMonth, 0).getDate();
-
-    const cells = [];
-    // Previous month trailing days
-    for (let i = startDow - 1; i >= 0; i--) {
-      const d = prevMonthLast - i;
-      const dt = new Date(calYear, calMonth - 1, d);
-      cells.push({ date: dt, day: d, isCurrentMonth: false });
-    }
-    // Current month days
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dt = new Date(calYear, calMonth, d);
-      cells.push({ date: dt, day: d, isCurrentMonth: true });
-    }
-    // Next month leading days
-    const remaining = 7 - (cells.length % 7);
-    if (remaining < 7) {
-      for (let d = 1; d <= remaining; d++) {
-        const dt = new Date(calYear, calMonth + 1, d);
-        cells.push({ date: dt, day: d, isCurrentMonth: false });
-      }
-    }
-    return cells;
-  }, [calYear, calMonth]);
-
-  // Build a map of date → items for the calendar
-  const dateItemsMap = useMemo(() => {
-    const map = {};
-    function addItem(dateStr, item) {
-      if (!map[dateStr]) map[dateStr] = [];
-      if (item.cls === 'block' && map[dateStr].some(i => i.cls === 'block' && i.title === item.title)) return;
-      map[dateStr].push(item);
-    }
-    tasks.forEach(t => {
-      if (!t.dueDate) return;
-      const cls = t.status === 'done' ? 'task' : (daysUntil(t.dueDate) < 0 ? 'overdue' : 'task');
-      addItem(t.dueDate, { title: t.title, cls });
-    });
-    events.forEach(ev => {
-      if (!ev.date) return;
-      addItem(ev.date, { title: ev.title, cls: 'event' });
-    });
-    (blocks.recurring || []).forEach(rb => {
-      calendarDays.forEach(cell => {
-        if (rb.days.includes(cell.date.getDay())) {
-          const ds = toDateStr(cell.date);
-          addItem(ds, { title: rb.name, cls: 'block' });
-        }
-      });
-    });
-    Object.entries(blocks.dates || {}).forEach(([dateStr, slots]) => {
-      const seen = new Set();
-      Object.values(slots).forEach(slot => {
-        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); addItem(dateStr, { title: slot.name, cls: 'block' }); }
-      });
-    });
-    return map;
-  }, [tasks, events, blocks, calendarDays]);
-
-  function prevMonth() { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }
-  function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
-  function goToday() { setCalYear(new Date().getFullYear()); setCalMonth(new Date().getMonth()); }
-
-  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-  // ── Weekly view data ──
-  const weekDays = useMemo(() => {
-    const now = new Date();
-    const sunday = new Date(now); sunday.setDate(now.getDate() - now.getDay()); sunday.setHours(0,0,0,0);
-    return Array.from({length:7}, (_, i) => { const d = new Date(sunday); d.setDate(sunday.getDate() + i); return d; });
-  }, []);
-
-  const weekDayItems = useMemo(() => {
-    return weekDays.map(day => {
-      const ds = toDateStr(day);
-      const dow = day.getDay();
-      const dayBlocks = [];
-      const seen = new Set();
-      (blocks.recurring || []).forEach(rb => {
-        if (rb.days.includes(dow) && !seen.has(rb.name)) { seen.add(rb.name); dayBlocks.push({ title: rb.name, cls: 'block' }); }
-      });
-      Object.entries(blocks.dates?.[ds] || {}).forEach(([, slot]) => {
-        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); dayBlocks.push({ title: slot.name, cls: 'block' }); }
-      });
-      const dayTasks = tasks.filter(t => t.dueDate === ds && t.status !== 'done').map(t => ({ title: t.title, cls: daysUntil(t.dueDate) < 0 ? 'overdue' : 'task' }));
-      const dayEvents = events.filter(ev => ev.date === ds).map(ev => ({ title: ev.title, cls: 'event' }));
-      return { date: day, ds, items: [...dayBlocks, ...dayTasks, ...dayEvents] };
-    });
-  }, [weekDays, blocks, tasks, events]);
-
-  return (<>
-    {!embedded && <div className="peek-overlay" onClick={onClose}/>}
-    <div className={'peek-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
-      {!isFullscreen && <div className="peek-handle"/>}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-        <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
-          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6,marginRight:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
-          <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen calendar'}>
-            {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
-          </button>
-          {!embedded && <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>}
-        </div>
-      </div>
-
-      {/* ── Fullscreen: View Tabs + Calendar ── */}
-      {isFullscreen && (
-        <div style={{marginBottom:16}}>
-          {/* View toggle tabs */}
-          <div style={{display:'flex',gap:6,marginBottom:12}}>
-            {['month','week'].map(v => (
-              <button key={v} onClick={()=>setCalView(v)}
-                style={{padding:'5px 14px',borderRadius:8,border:'1px solid',fontSize:'0.8rem',fontWeight:600,cursor:'pointer',transition:'all .15s',
-                  borderColor: calView===v ? 'var(--accent)' : 'var(--border)',
-                  background: calView===v ? 'rgba(108,99,255,0.18)' : 'transparent',
-                  color: calView===v ? 'var(--accent)' : 'var(--text-dim)'}}>
-                {v.charAt(0).toUpperCase()+v.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {calView === 'month' && (<>
-            <div className="cal-month-nav">
-              <button className="cal-nav-btn" onClick={prevMonth}>{Icon.chevronLeft(16)}</button>
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
-                <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
-              </div>
-              <button className="cal-nav-btn" onClick={nextMonth}>{Icon.chevronRight(16)}</button>
-            </div>
-            <div className="cal-grid">
-              {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
-              {calendarDays.map((cell, i) => {
-                const dateStr = toDateStr(cell.date);
-                const isToday = dateStr === todayKey;
-                const items = dateItemsMap[dateStr] || [];
-                const maxShow = 2;
-                return (
-                  <div key={i} className={'cal-cell' + (cell.isCurrentMonth ? '' : ' other-month') + (isToday ? ' today' : '')}>
-                    <div className="cal-cell-date" style={isToday ? {color:'var(--accent)'} : {}}>{cell.day}</div>
-                    {items.slice(0, maxShow).map((item, j) => (
-                      <div key={j} className={'cal-cell-event ' + item.cls} title={item.title}>{item.title}</div>
-                    ))}
-                    {items.length > maxShow && <div className="cal-cell-more">+{items.length - maxShow} more</div>}
-                  </div>
-                );
-              })}
-            </div>
-          </>)}
-
-          {calView === 'week' && (
-            <div>
-              <div style={{textAlign:'center',fontWeight:600,marginBottom:10,color:'var(--text-dim)',fontSize:'0.85rem'}}>
-                Week of {weekDays[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {weekDays[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
-                {weekDayItems.map(({date, ds, items}) => {
-                  const isToday = ds === todayKey;
-                  return (
-                    <div key={ds} style={{background: isToday ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.05)', border: isToday ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius:10, padding:'6px 4px', minHeight:90}}>
-                      <div style={{textAlign:'center',marginBottom:4}}>
-                        <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',fontWeight:600}}>{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]}</div>
-                        <div style={{fontSize:'0.85rem',fontWeight:700,color: isToday ? 'var(--accent)' : 'var(--text)'}}>{date.getDate()}</div>
-                      </div>
-                      {items.length === 0 && <div style={{fontSize:'0.62rem',color:'var(--text-dim)',textAlign:'center',marginTop:4}}>free</div>}
-                      {items.map((item, j) => (
-                        <div key={j} className={'cal-cell-event ' + item.cls} title={item.title} style={{marginBottom:2}}>{item.title}</div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Regular peek content ── */}
-      <div className="peek-section">
-        <div className="peek-section-title">Today's Schedule</div>
-        {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Nothing scheduled today</div>:
-        condensed.map((block,i)=>(
-          <div key={i} className="peek-timeline-slot"><div className="peek-timeline-time">{fmtTime(...block.start.split(':').map(Number))}</div>
-          <div className="peek-timeline-block" style={{background:catColor(block.category)+'20',borderLeft:'3px solid '+catColor(block.category)}}>{block.name}<span style={{fontSize:'0.72rem',color:'var(--text-dim)',marginLeft:8}}>{block.slots*30}min</span></div></div>
-        ))}
-      </div>
-      {overduePeekTasks.length>0&&<div className="peek-section">
-        <div className="peek-section-title" style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:4}}>{Icon.alertTriangle(14)} Overdue ({overduePeekTasks.length})</div>
-        {overduePeekTasks.map(task=>(<div key={task.id} className="peek-task-item">
-          <div className="peek-task-dot" style={{background:'var(--danger)'}}/>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:600,color:'var(--danger)'}}>{task.title}</div>
-            <div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{Math.abs(daysUntil(task.dueDate))}d overdue{' · '+(task.estTime||30)+'min'}</div>
-          </div>
-          <div style={{color:'var(--danger)',display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div>
-        </div>))}
-      </div>}
-      {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.length})</div>
-        {activeTasks.map(task=>{const d=daysUntil(task.dueDate);const dotColor=d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{color:dotColor,display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
-        })}
-      </div>}
-      {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
-        {upcomingEvents.map(ev=>(<div key={ev.id} className="peek-task-item"><div className="peek-task-dot" style={{background:catColor(ev.type)}}/><div><div style={{fontWeight:500}}>{ev.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{fmt(ev.date)}{ev.subject&&' · '+ev.subject}</div></div></div>))}
-      </div>}
-    </div>
-  </>);
-}
-
-/* ═══════════════════════════════════════════════
-   NOTES PANEL (reference system + editing + fullscreen)
-   ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [expandedId, setExpandedId] = useState(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editingName, setEditingName] = useState('');
-  const [isCreatingNew, setIsCreatingNew] = useState(false);
-  const [newNoteName, setNewNoteName] = useState('');
-  const editorRef = useRef(null);
-
-  // ── Search / reference system ──
-  const filteredNotes = useMemo(() => {
-    if (!searchQuery.trim()) return notes.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-    const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 0);
-    if (queryWords.length === 0) return notes;
-
-    const scored = notes.map(note => {
-      const normName = normalize(note.name);
-      const normContent = normalize(note.content || '');
-      let score = 0;
-      let firstMatchIndex = -1;
-      queryWords.forEach(qw => {
-        if (normName.includes(qw)) score += 40;
-        const idx = normContent.indexOf(qw);
-        if (idx >= 0) {
-          score += 30;
-          if (firstMatchIndex < 0) firstMatchIndex = idx;
-        }
-      });
-      return { note, score, firstMatchIndex };
-    }).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
-
-    return scored.map(s => ({ ...s.note, _firstMatch: s.firstMatchIndex }));
-  }, [notes, searchQuery]);
-
-  function getSnippet(content, firstMatch) {
-    if (firstMatch < 0 || !content) return content?.slice(0, 150) || '';
-    const start = Math.max(0, firstMatch - 80);
-    const end = Math.min(content.length, firstMatch + 120);
-    let snippet = content.slice(start, end);
-    if (start > 0) snippet = '…' + snippet;
-    if (end < content.length) snippet += '…';
-    return snippet;
-  }
-
-  function highlightText(text) {
-    if (!searchQuery.trim() || !text) return text;
-    const queryWords = normalize(searchQuery).split(/\s+/).filter(w => w.length > 1);
-    if (queryWords.length === 0) return text;
-    const pattern = queryWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const splitRegex = new RegExp('(' + pattern + ')', 'gi');
-    const testRegex = new RegExp(pattern, 'i');
-    const parts = text.split(splitRegex);
-    return parts.map((part, i) => testRegex.test(part)
-      ? React.createElement('span', { key: i, className: 'notes-match' }, part)
-      : part
-    );
-  }
-
-  function getSourceBadge(note) {
-    const src = note.source || '';
-    if (src === 'pdf') return React.createElement('span', { className: 'notes-badge notes-badge-pdf' }, 'PDF');
-    if (src === 'google_docs') return React.createElement('span', { className: 'notes-badge notes-badge-docs' }, 'Docs');
-    if (src === 'manual') return React.createElement('span', { className: 'notes-badge', style:{background:'rgba(43,203,186,0.12)',color:'var(--teal)'} }, 'Manual');
-    return React.createElement('span', { className: 'notes-badge notes-badge-ai' }, 'AI');
-  }
-
-  // ── Formatting toolbar actions ──
-  function execFormat(cmd, value) {
-    document.execCommand(cmd, false, value || null);
-    editorRef.current?.focus();
-  }
-
-  // ── Start editing a note ──
-  function startEdit(note, e) {
-    e.stopPropagation();
-    setEditingId(note.id);
-    setEditingName(note.name);
-    setExpandedId(note.id);
-    setTimeout(() => {
-      if (editorRef.current) {
-        editorRef.current.innerHTML = note.content || '';
-        editorRef.current.focus();
-      }
-    }, 50);
-  }
-
-  // ── Save edited note ──
-  function saveEdit() {
-    if (!editingName.trim()) return;
-    const content = editorRef.current?.innerHTML || '';
-    onUpdateNote({ id: editingId, name: editingName.trim(), content, updatedAt: new Date().toISOString() });
-    setEditingId(null);
-    setEditingName('');
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditingName('');
-  }
-
-  // ── Create new note ──
-  function startNewNote() {
-    setIsCreatingNew(true);
-    setNewNoteName('');
-    setExpandedId(null);
-    setEditingId(null);
-    setTimeout(() => {
-      if (editorRef.current) {
-        editorRef.current.innerHTML = '';
-        editorRef.current.focus();
-      }
-    }, 50);
-  }
-
-  function saveNewNote() {
-    const title = newNoteName.trim() || 'Untitled Note';
-    const content = editorRef.current?.innerHTML || '';
-    onCreateNote({ name: title, content, source: 'manual' });
-    setIsCreatingNew(false);
-    setNewNoteName('');
-  }
-
-  function cancelNewNote() {
-    setIsCreatingNew(false);
-    setNewNoteName('');
-  }
-
-  const FormatToolbar = useCallback(() => (
-    <div className="notes-toolbar">
-      <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('italic')} title="Italic"><i>I</i></button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('underline')} title="Underline"><u>U</u></button>
-      <div className="notes-toolbar-sep"/>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '2')} title="Small text" style={{fontSize:'0.68rem'}}>A</button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '4')} title="Medium text" style={{fontSize:'0.82rem'}}>A</button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('fontSize', '6')} title="Large text" style={{fontSize:'1rem'}}>A</button>
-      <div className="notes-toolbar-sep"/>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('indent')} title="Indent">{Icon.arrowRight(14)}</button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('outdent')} title="Outdent">{Icon.arrowLeft(14)}</button>
-      <div className="notes-toolbar-sep"/>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('insertUnorderedList')} title="Bullet list">•</button>
-      <button className="notes-toolbar-btn" onClick={() => execFormat('insertOrderedList')} title="Numbered list">1.</button>
-    </div>
-  ), []);
-
-  return (
-    <>
-      {!embedded && <div className="peek-overlay" onClick={onClose}/>}
-      <div className={'notes-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
-        {!isFullscreen && <div className="peek-handle"/>}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{display:'flex',color:'var(--accent)'}}>{Icon.fileText(18)}</span>
-            <span style={{fontWeight:700,fontSize:'1.05rem'}}>Notes</span>
-            {notes.length > 0 && <span style={{fontSize:'0.75rem',color:'var(--text-dim)',background:'var(--bg2)',padding:'2px 8px',borderRadius:10,fontWeight:600}}>{notes.length}</span>}
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <button className="notes-new-btn" onClick={startNewNote} style={{display:'flex',alignItems:'center',gap:4}}>{Icon.plus(14)} New Note</button>
-            <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-              {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
-            </button>
-            {!embedded && <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>}
-          </div>
-        </div>
-
-        {/* ── New note creation form ── */}
-        {isCreatingNew && (
-          <div style={{marginBottom:16,animation:'fadeIn .2s ease'}}>
-            <input className="notes-title-input" value={newNoteName} onChange={e => setNewNoteName(e.target.value)}
-              placeholder="Note title..." autoFocus/>
-            <FormatToolbar/>
-            <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="Start writing your note..."
-              onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); execFormat('indent'); }}}/>
-            <div className="notes-edit-actions">
-              <button className="notes-cancel-btn" onClick={cancelNewNote}>Cancel</button>
-              <button className="notes-save-btn" onClick={saveNewNote}>Save Note</button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Search bar ── */}
-        {notes.length > 0 && !isCreatingNew && !editingId && (
-          <div className="notes-search-wrap">
-            <span className="notes-search-icon" style={{display:'flex'}}>{Icon.search(14)}</span>
-            <input className="notes-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search notes for keywords..." autoFocus/>
-          </div>
-        )}
-
-        {/* ── Empty states ── */}
-        {filteredNotes.length === 0 && !searchQuery.trim() && !isCreatingNew && (
-          <div className="notes-empty">
-            <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.fileText(28)}</div>
-            <div>No notes yet</div>
-            <div style={{fontSize:'0.82rem',marginTop:4}}>Click "+ New Note" to create one, or import a PDF, Google Doc, or save study materials from chat</div>
-          </div>
-        )}
-
-        {filteredNotes.length === 0 && searchQuery.trim() && !isCreatingNew && (
-          <div className="notes-empty">
-            <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.search(24)}</div>
-            <div>No matches for "{searchQuery}"</div>
-            <div style={{fontSize:'0.82rem',marginTop:4}}>Try different keywords or check spelling</div>
-          </div>
-        )}
-
-        {/* ── Notes list ── */}
-        <div className="notes-list">
-          {filteredNotes.map(note => {
-            const isExpanded = expandedId === note.id;
-            const isEditing = editingId === note.id;
-            const isSearching = searchQuery.trim().length > 0;
-            const plainContent = (note.content || '').replace(/<[^>]*>/g, '');
-            const snippet = isSearching && note._firstMatch !== undefined
-              ? getSnippet(plainContent, note._firstMatch)
-              : plainContent.slice(0, 150);
-
-            return (
-              <div key={note.id} className={'notes-item' + (isExpanded ? ' expanded' : '')}
-                onClick={() => { if (!isEditing) { setExpandedId(isExpanded ? null : note.id); setEditingId(null); } }}>
-                {/* ── Editing mode ── */}
-                {isEditing ? (
-                  <div onClick={e => e.stopPropagation()}>
-                    <input className="notes-title-input" value={editingName} onChange={e => setEditingName(e.target.value)}
-                      placeholder="Note title..." autoFocus/>
-                    <FormatToolbar/>
-                    <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="Write something..."
-                      onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); execFormat('indent'); }}}/>
-                    <div className="notes-edit-actions">
-                      <button className="notes-cancel-btn" onClick={cancelEdit}>Cancel</button>
-                      <button className="notes-save-btn" onClick={saveEdit}>Save</button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="notes-item-header">
-                      <div className="notes-item-name">{isSearching ? highlightText(note.name) : note.name}</div>
-                      <div className="notes-item-meta">
-                        {getSourceBadge(note)}
-                        {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
-                        <button className="notes-toolbar-btn" onClick={e => startEdit(note, e)} title="Edit" style={{fontSize:'0.72rem',padding:'3px 7px'}}>✎</button>
-                        <button className="notes-delete" style={{display:'flex',alignItems:'center',gap:2}} onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>{Icon.trash(12)} Delete</button>
-                      </div>
-                    </div>
-                    {!isExpanded && snippet && (
-                      <div className="notes-item-preview">
-                        {isSearching ? highlightText(snippet) : snippet}{!isSearching && plainContent.length > 150 ? '…' : ''}
-                      </div>
-                    )}
-                    {isExpanded && (
-                      <div className="notes-item-content" dangerouslySetInnerHTML={{__html: note.content || ''}}/>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   TOAST
-   ═══════════════════════════════════════════════ */
-function Toast({message,onDone}){
-  useEffect(()=>{const t=setTimeout(onDone,2400);return()=>clearTimeout(t)},[]);
-  return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:14,background:'linear-gradient(135deg,var(--success),#1db954)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4),0 0 40px rgba(46,213,115,0.1)',animation:'toastIn .3s cubic-bezier(0.16,1,0.3,1), toastOut .3s ease 2.1s forwards',backdropFilter:'blur(8px)'}}>{message}</div>);
-}
-
-/* ─── Typing Dots (loading indicator) ─── */
-const TypingDots=()=>(
-  <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
-    </div>
-  </div>
-);
-
 /* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
@@ -3534,9 +1851,8 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
-  const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
-  const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
-  const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
+  const [defaultWorkspace, setDefaultWorkspace] = useState(() => localStorage.getItem('sos_default_workspace') || 'chat');
+  const [activeWorkspace, setActiveWorkspace] = useState(() => localStorage.getItem('sos_active_workspace') || localStorage.getItem('sos_default_workspace') || 'chat');
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSideBySide = showPeek && showNotes;
@@ -3554,7 +1870,9 @@ function App() {
     ? 'Schedule mode'
     : workspaceContext === 'notes'
       ? 'Notes mode'
-      : null;
+      : activeWorkspace === 'tutor'
+        ? 'Tutor workspace'
+        : null;
   const openCompanionPanel = useCallback((panel) => {
     setActivePanel('chat');
     setSidebarCompanionPanel(panel);
@@ -3563,6 +1881,13 @@ function App() {
     setShowPeek(false);
     setShowNotes(false);
   }, [autoCollapseSidebarCompanion]);
+  const navigateToWorkspace = useCallback((workspace) => {
+    setActiveWorkspace(workspace);
+    setActivePanel('chat');
+    setShowPeek(false);
+    setShowNotes(false);
+    setShowChatSidebar(false);
+  }, []);
   const detectCompanionIntent = useCallback((text) => {
     const msg = (text || '').toLowerCase();
     if (!msg) return null;
@@ -5346,6 +3671,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     { label:'Settings', action:()=>setActivePanel('settings') },
   ];
 
+  const tutorQuickChips = [
+    { label:'Teach me this', msg:'Teach me this like a tutor and focus on understanding before giving the answer.' },
+    { label:'Quiz me', msg:'Quiz me on this topic and wait for my answers one question at a time.' },
+    { label:'Make flashcards', msg:'Make flashcards from what we are studying.' },
+    { label:'Explain step by step', msg:'Explain this step by step like a tutor.' },
+    { label:'Review my notes', msg:'Review my notes and tell me what I should study first.' },
+    { label:'Settings', action:()=>setActivePanel('settings') },
+  ];
+
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
@@ -5354,6 +3688,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
   useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  useEffect(() => { localStorage.setItem('sos_default_workspace', defaultWorkspace); }, [defaultWorkspace]);
+  useEffect(() => { localStorage.setItem('sos_active_workspace', activeWorkspace); }, [activeWorkspace]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -5366,6 +3702,140 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </div>
     );
   }
+
+  const welcomePlaceholders = ["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"];
+
+  const plannerWelcome = (() => {
+    const wv = welcomeVariants[welcomeIdx];
+    return (
+      <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
+        <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
+        <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
+        <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
+        <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
+          {wv.chips.map((s,i)=>(<button key={s} className='sos-chip' style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>))}
+        </div>
+      </div>
+    );
+  })();
+
+  const tutorWelcome = (
+    <div className='tutor-chat-empty'>
+      <div className='tutor-chat-empty-badge'>Focused tutoring session</div>
+      <h3>Choose a study action above or ask a question to start learning.</h3>
+      <p>Try asking for a lesson, a quiz, flashcards, or help reviewing notes for your next test.</p>
+    </div>
+  );
+
+  const chatFooter = <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href='privacy.html' style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>;
+
+  const settingsView = (
+    <div className='settings-view' style={{animation:'slideUp .28s ease'}}>
+      <div className='settings-card'>
+        <div className='settings-title'>Settings</div>
+        <div className='settings-sub'>Customize navigation, planner layout, and which workspace SOS should open by default.</div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Current workspace</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Jump directly into planner/chat or the dedicated tutor workspace.</div></div><div style={{display:'flex',gap:8}}><button className='settings-toggle' onClick={()=>navigateToWorkspace('chat')}>Planner</button><button className='settings-toggle' onClick={()=>navigateToWorkspace('tutor')}>Tutor</button></div></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Default workspace</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose which workspace opens first when SOS loads.</div></div><div style={{display:'flex',gap:8}}><button className='settings-toggle' onClick={()=>setDefaultWorkspace('chat')}>{defaultWorkspace==='chat'?'Planner default':'Set planner'}</button><button className='settings-toggle' onClick={()=>setDefaultWorkspace('tutor')}>{defaultWorkspace==='tutor'?'Tutor default':'Set tutor'}</button></div></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between topbar and sidebar navigation.</div></div><button className='settings-toggle' onClick={()=>setLayoutMode(layoutMode==='topbar'?'sidebar':'topbar')}>{layoutMode==='topbar'?'Use sidebar':'Use topbar'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar collapsed</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Applies when sidebar mode is active.</div></div><button className='settings-toggle' onClick={()=>setSidebarCollapsed(prev=>!prev)}>{sidebarCollapsed?'Expand':'Collapse'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar in notes/schedule mode</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat or Schedule + chat, collapse the left sidebar automatically.</div></div><button className='settings-toggle' onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div></div><button className='settings-toggle' onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar split panel</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether planner chat is paired with notes or schedule in sidebar mode.</div></div><div style={{display:'flex',gap:8}}><button className='settings-toggle' onClick={()=>openCompanionPanel('schedule')}>Schedule</button><button className='settings-toggle' onClick={()=>openCompanionPanel('notes')}>Notes</button><button className='settings-toggle' onClick={closeSidebarCompanion}>Off</button></div></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Companion toggle style</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the old horizontal bar and the compact icon-only toggle.</div></div><button className='settings-toggle' onClick={()=>setCompactCompanionToggle(prev=>!prev)}>{compactCompanionToggle ? 'Compact' : 'Classic'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance mode</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Auto adjusts based on device speed, or pick a fixed tier.</div></div><div style={{display:'flex',gap:8}}><button className='settings-toggle' onClick={()=>setPerfOverride(null)}>Auto</button><button className='settings-toggle' onClick={()=>setPerfOverride('mid')}>Mid</button><button className='settings-toggle' onClick={()=>setPerfOverride('low')}>Low</button></div></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — sidebar</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the sidebar.</div></div><button className='settings-toggle' onClick={()=>{ const n=!showPerfIndicatorSidebar; setShowPerfIndicatorSidebar(n); localStorage.setItem('sos_perf_indicator_sidebar',n?'true':'false'); }}>{showPerfIndicatorSidebar ? 'Visible' : 'Hidden'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — topbar</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the topbar.</div></div><button className='settings-toggle' onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button></div>
+        <div className='settings-row'><div><div style={{fontWeight:600,fontSize:'0.88rem'}}>Back</div><div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the active workspace.</div></div><button className='settings-toggle' onClick={()=>setActivePanel('chat')}>Open</button></div>
+      </div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
+        <a href='/privacy.html' target='_blank' rel='noopener noreferrer' style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>
+        <span style={{color:'var(--border)'}}>|</span>
+        <a href='/terms' target='_blank' rel='noopener noreferrer' style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
+      </div>
+    </div>
+  );
+
+  const sharedChatPanel = (
+    <ChatConversationPanel
+      chatAreaRef={chatAreaRef}
+      messagesEndRef={messagesEndRef}
+      messages={messages}
+      isLoading={isLoading}
+      viewingSavedChatId={viewingSavedChatId}
+      resumeSavedChat={resumeSavedChat}
+      exitSavedChatView={exitSavedChatView}
+      welcomeContent={activeWorkspace === 'tutor' ? tutorWelcome : plannerWelcome}
+      dbMessageCount={dbMessageCount}
+      setLightboxUrl={setLightboxUrl}
+      pendingTemplateSelector={pendingTemplateSelector}
+      handleSelectTemplate={handleSelectTemplate}
+      handleCustomPlan={handleCustomPlan}
+      handleDismissTemplateSelector={handleDismissTemplateSelector}
+      PlanTemplateSelector={PlanTemplateSelector}
+      pendingClarification={pendingClarification}
+      handleClarificationSubmit={handleClarificationSubmit}
+      pendingClarificationAnswers={pendingClarificationAnswers}
+      setPendingClarification={setPendingClarification}
+      setPendingClarificationAnswers={setPendingClarificationAnswers}
+      ClarificationCard={ClarificationCard}
+      pendingActions={pendingActions}
+      BulkConfirmationCard={BulkConfirmationCard}
+      today={today}
+      toDateStr={toDateStr}
+      executeAction={executeAction}
+      setPendingActions={setPendingActions}
+      setToastMsg={setToastMsg}
+      layoutMode={layoutMode}
+      openCompanionPanel={openCompanionPanel}
+      showSideBySide={showSideBySide}
+      setShowPeek={setShowPeek}
+      RecurringEventPopup={RecurringEventPopup}
+      handleCancelAction={handleCancelAction}
+      ConfirmationCard={ConfirmationCard}
+      handleConfirmAction={handleConfirmAction}
+      pendingContent={pendingContent}
+      ContentTypeRouter={ContentTypeRouter}
+      handleSaveContent={handleSaveContent}
+      handleDismissContent={handleDismissContent}
+      handleApplyPlan={handleApplyPlan}
+      handleStartPlanTask={handleStartPlanTask}
+      handleExportPlanToGoogleDocs={handleExportPlanToGoogleDocs}
+      isGoogleConnected={isGoogleConnected}
+      TypingDots={TypingDots}
+      chatError={chatError}
+      user={user}
+      guestMsgCount={guestMsgCount}
+      GUEST_DEMO_LIMIT={GUEST_DEMO_LIMIT}
+      setAuthModalInitialMode={setAuthModalInitialMode}
+      setShowAuthModal={setShowAuthModal}
+      quickChips={activeWorkspace === 'tutor' ? tutorQuickChips : quickChips}
+      sendChip={sendChip}
+      saveChat={saveChat}
+      setShowChatSidebar={setShowChatSidebar}
+      pendingPhoto={pendingPhoto}
+      setPendingPhoto={setPendingPhoto}
+      Icon={Icon}
+      isRecording={isRecording}
+      recordingTime={recordingTime}
+      waveformRef={waveformRef}
+      cancelRecording={cancelRecording}
+      stopRecording={stopRecording}
+      isTranscribing={isTranscribing}
+      handleSubmit={handleSubmit}
+      photoInputRef={photoInputRef}
+      handlePhotoSelect={handlePhotoSelect}
+      inputRef={inputRef}
+      input={input}
+      setInput={setInput}
+      welcomePlaceholders={welcomePlaceholders}
+      welcomeIdx={welcomeIdx}
+      startRecording={startRecording}
+      workspaceModeLabel={workspaceModeLabel}
+      chatFooter={chatFooter}
+      inputPlaceholder={activeWorkspace === 'tutor' ? 'Ask for a lesson, quiz, flashcards, or notes review...' : undefined}
+    />
+  );
 
   // ── Checking session on first load ──
   if (!authChecked) {
@@ -5380,7 +3850,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   return (
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
-      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
+      {layoutMode === 'sidebar' && activeWorkspace === 'chat' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
             <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
@@ -5394,6 +3864,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
+          <button className={'sos-side-btn'+(activeWorkspace==='chat'?' active':'')} onClick={()=>navigateToWorkspace('chat')} title="Planner workspace">{Icon.messageCircle(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Planner workspace</span></button>
+          <button className={'sos-side-btn'+(activeWorkspace==='tutor'?' active':'')} onClick={()=>navigateToWorkspace('tutor')} title="Tutor workspace">{Icon.sparkles ? Icon.sparkles(14) : Icon.sparkles(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Tutor workspace</span></button>
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
@@ -5404,436 +3876,76 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
           <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
         </div>
-        {(showTutorIndicatorSidebar || showPerfIndicatorSidebar) && (
-          <div className="sos-side-indicators sos-side-meta">
-            {showTutorIndicatorSidebar && <TutorIndicator active={tutorMode} />}
-            {showPerfIndicatorSidebar && <PerfPill />}
-          </div>
-        )}
+        {showPerfIndicatorSidebar && (<div className="sos-side-indicators sos-side-meta"><PerfPill /></div>)}
         <div className="sos-side-list">
           {savedChats.length === 0 ? (
-            <div className="chat-sidebar-empty" style={{paddingTop:24}}>
-              <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-              <div>No saved conversations yet</div>
-            </div>
+            <div className="chat-sidebar-empty" style={{paddingTop:24}}><div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div><div>No saved conversations yet</div></div>
           ) : (
-            <div className="chat-sidebar-list">
-              {savedChats.map(chat => (
-                <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
-                  onClick={() => loadSavedChat(chat.id)}>
-                  <div className="chat-sidebar-item-title">{chat.title}</div>
-                  <div className="chat-sidebar-item-meta">
-                    <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
-                    <span style={{display:'flex',gap:4}}>
-                      <button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button>
-                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="chat-sidebar-list">{savedChats.map(chat => (<div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')} onClick={() => loadSavedChat(chat.id)}><div className="chat-sidebar-item-title">{chat.title}</div><div className="chat-sidebar-item-meta"><span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span><span style={{display:'flex',gap:4}}><button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button><button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button></span></div></div>))}</div>
           )}
         </div>
         <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
           <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Topbar mode">{Icon.chevronLeft(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
-          {user ? (
-            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
-          ) : (
-            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
-          )}
+          {user ? (<button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>) : (<button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>)}
         </div>
       </aside>}
 
       <div className="sos-main">
-      {layoutMode === 'topbar' && <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
-          {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
-        </div>
-      </div>}
+        {layoutMode === 'topbar' && (
+          <div className="sos-header">
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              {activeWorkspace === 'chat' && <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>}
+              <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
+              {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}><span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>{syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}</div>}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+              <button onClick={()=>navigateToWorkspace('chat')} className="g-hdr-btn">{Icon.messageCircle(14)} Planner</button>
+              <button onClick={()=>navigateToWorkspace('tutor')} className="g-hdr-btn">{Icon.sparkles(14)} Tutor</button>
+              {showPerfIndicatorTopbar && <PerfPill />}
+              {activeWorkspace === 'chat' && <><button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button><button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button><button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button></>}
+              <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
+            </div>
+          </div>
+        )}
 
-      {activePanel === 'settings' ? (
-        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
-          <div className="settings-view" style={{animation:'slideUp .28s ease'}}>
-            <div className="settings-card">
-              <div className="settings-title">Settings</div>
-              <div className="settings-sub">Customize your workspace layout and keep the controls for topbar/sidebar behavior in one place.</div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between topbar and sidebar navigation.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setLayoutMode(layoutMode==='topbar'?'sidebar':'topbar')}>{layoutMode==='topbar'?'Use sidebar':'Use topbar'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar collapsed</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Applies when sidebar mode is active.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setSidebarCollapsed(prev=>!prev)}>{sidebarCollapsed?'Expand':'Collapse'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar in notes/schedule mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat or Schedule + chat, collapse the left sidebar automatically.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar split panel</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('schedule')}>Schedule</button>
-                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('notes')}>Notes</button>
-                  <button className="settings-toggle" onClick={closeSidebarCompanion}>Off</button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Companion toggle style</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the old horizontal bar and the compact icon-only toggle.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setCompactCompanionToggle(prev=>!prev)}>{compactCompanionToggle ? 'Compact' : 'Classic'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Auto adjusts based on device speed, or pick a fixed tier.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride(null)}>Auto</button>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Activates a guided, step-by-step learning style. Indicator appears in sidebar and topbar when on.</div>
-                </div>
-                <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>{ const n=!tutorMode; setTutorMode(n); localStorage.setItem('sos_tutor_mode',n?'true':'false'); }}>{tutorMode ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — sidebar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the sidebar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorSidebar; setShowTutorIndicatorSidebar(n); localStorage.setItem('sos_tutor_indicator_sidebar',n?'true':'false'); }}>{showTutorIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — topbar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the topbar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorTopbar; setShowTutorIndicatorTopbar(n); localStorage.setItem('sos_tutor_indicator_topbar',n?'true':'false'); }}>{showTutorIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — sidebar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the sidebar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorSidebar; setShowPerfIndicatorSidebar(n); localStorage.setItem('sos_perf_indicator_sidebar',n?'true':'false'); }}>{showPerfIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — topbar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the topbar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the conversation view.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open</button>
-              </div>
-            </div>
-            {/* P4.3: Privacy/Terms links */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
-              <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>
-              <span style={{color:'var(--border)'}}>|</span>
-              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
-            </div>
-          </div>
-        </div>
-      ) : (
-      <>
-      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
-      <div className="sos-chat-column">
-      {/* ── Chat Area ── */}
-      <ErrorBoundary>
-      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-        {viewingSavedChatId && (
-          <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
-            <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
-            <div style={{display:'flex',gap:6}}>
-              <button onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'var(--teal,#2bd5ba)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Resume</button>
-              <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
-            </div>
-          </div>
-        )}
-        {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
-          // Default welcome screen
-          const wv = welcomeVariants[welcomeIdx];
-          return (
-          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
-            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
-              {wv.chips.map((s,i)=>(
-                <button key={s} className="sos-chip" style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>
-              ))}
-            </div>
-          </div>
-          );
-        })()}
-        {messages.map((msg,i)=>(
-          <React.Fragment key={i}>
-            {/* P1.4: "Earlier in conversation" separator */}
-            {i === 0 && dbMessageCount > 0 && messages.length > dbMessageCount && (
-              <div className="chat-history-separator">
-                <span>Earlier in conversation</span>
-              </div>
-            )}
-            {i === dbMessageCount && dbMessageCount > 0 && messages.length > dbMessageCount && (
-              <div className="chat-history-separator">
-                <span>New messages</span>
-              </div>
-            )}
-            <div className={`sos-msg ${msg.role==='user'?'sos-msg-user':'sos-msg-ai'}`}>
-              <div className={`sos-bubble ${msg.role==='user'?'sos-bubble-user':'sos-bubble-ai'}`}>
-                {(msg.photoUrl||msg.photoPreview)&&(
-                  <img src={msg.photoUrl||msg.photoPreview} alt="photo"
-                    onClick={()=>setLightboxUrl(msg.photoUrl||msg.photoPreview)}
-                    onError={(e)=>{e.target.style.display='none';}}
-                    style={{maxWidth:240,maxHeight:200,borderRadius:10,marginBottom:msg.content?8:0,cursor:'pointer',display:'block'}}/>
-                )}
-                {msg.content&&<span>{msg.content}</span>}
-                <div className="sos-bubble-time">{msg.timestamp?new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</div>
-              </div>
-            </div>
-          </React.Fragment>
-        ))}
-        {pendingTemplateSelector && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <PlanTemplateSelector
-              onSelectTemplate={(tmpl) => handleSelectTemplate(tmpl, pendingTemplateSelector.context)}
-              onCustomPlan={handleCustomPlan}
-              onDismiss={handleDismissTemplateSelector}
-            />
-          </div>
-        )}
-        {pendingClarification && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
-          </div>
-        )}
-        {!pendingClarification && pendingActions.length > 1 ? (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <BulkConfirmationCard
-              actions={pendingActions}
-              onConfirmSelected={(checkedArr)=>{
-                const toExec=pendingActions.filter((_,i)=>checkedArr[i]);
-                toExec.forEach(pa=>{
-                  if(pa.action.type==='add_recurring_event'){
-                    const dayNameToIndex={Sunday:0,Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5,Saturday:6};
-                    const dayIndices=(pa.action.days||[]).map(d=>dayNameToIndex[d]).filter(d=>d!==undefined);
-                    const start=new Date(pa.action.start_date||today());
-                    const endDef=new Date();endDef.setMonth(endDef.getMonth()+3);
-                    const end=new Date(pa.action.end_date||toDateStr(endDef));
-                    const cursor=new Date(start);let count=0;
-                    while(cursor<=end&&count<100){
-                      if(dayIndices.includes(cursor.getDay())){
-                        const ds=toDateStr(cursor);
-                        executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
-                        count++;
-                      }
-                      cursor.setDate(cursor.getDate()+1);
-                    }
-                  } else { executeAction(pa.action); }
-                });
-                setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
-                if(toExec.length>0){
-                  setToastMsg('Added '+toExec.length+' items');
-                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
-                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
-                    else if(!showSideBySide){setShowPeek(true);}
-                  }
-                }
-              }}
-              onCancel={()=>setPendingActions([])}
-            />
-          </div>
-        ) : !pendingClarification && pendingActions.map((pa,idx)=>(
-          <div key={'pa-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            {pa.action.type==='add_recurring_event' ? (
-              <RecurringEventPopup
-                action={pa.action}
-                onConfirm={(checkedEvents)=>{
-                  checkedEvents.forEach(ev=>executeAction({type:'add_event',title:ev.title,date:ev.date,event_type:ev.event_type,subject:ev.subject}));
-                  setPendingActions(prev=>prev.filter((_,i)=>i!==idx));
-                  setToastMsg('Added '+checkedEvents.length+' recurring events');
-                }}
-                onCancel={()=>handleCancelAction(idx)}
-              />
-            ) : (
-              <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
-            )}
-          </div>
-        ))}
-        {pendingContent.map((pc,idx)=>(
-          <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
-          </div>
-        ))}
-        {isLoading&&<TypingDots/>}
-        {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
-        <div ref={messagesEndRef} style={{height:1}}/>
-      </div>
-
-      </ErrorBoundary>
-      {/* ── Guest Demo Banner ── */}
-      {!user && (
-        <div style={{padding:'6px 16px 0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,fontSize:'0.8rem',color:'var(--text-dim)',animation:'fadeIn .3s ease'}}>
-          <span>
-            {guestMsgCount < GUEST_DEMO_LIMIT
-              ? <>Demo mode — <strong style={{color:'var(--accent)'}}>{GUEST_DEMO_LIMIT - guestMsgCount} free message{GUEST_DEMO_LIMIT - guestMsgCount !== 1 ? 's' : ''} left</strong></>
-              : <strong style={{color:'var(--warning)'}}>Demo limit reached — sign up to keep going</strong>
-            }
-          </span>
-          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
-        </div>
-      )}
-      {/* ── Input Area ── */}
-      <div className="sos-input-area">
-        {messages.length>0&&(
-          <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
-            {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
-            {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
-            <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
-          </div>
-        )}
-        {pendingPhoto&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:12,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
-            <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:8,objectFit:'cover'}}/>
-            <span style={{fontSize:'0.82rem',color:'var(--text-dim)',flex:1}}>Photo attached</span>
-            <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
-          </div>
-        )}
-        {isRecording ? (
-          /* ── Inline Voice Recording Bar ── */
-          <div className="voice-bar">
-            <div className="voice-bar-indicator">
-              <div className="voice-bar-dot"/>
-              <div className="voice-bar-timer">{Math.floor(recordingTime/60)}:{String(recordingTime%60).padStart(2,'0')}</div>
-            </div>
-            <div className="voice-bar-waveform" ref={waveformRef}>
-              {Array.from({length:40},(_,i)=><div key={i} className="voice-bar-bar" style={{height:'3px'}}/>)}
-            </div>
-            <button className="voice-bar-cancel" onClick={cancelRecording} title="Cancel">{Icon.trash(16)}</button>
-            <button className="voice-bar-send" onClick={stopRecording} title="Send voice">{Icon.send(18)}</button>
-          </div>
-        ) : isTranscribing ? (
-          /* ── Transcribing indicator ── */
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:28}}>
-            <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
-            <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
-          </div>
+        {activePanel === 'settings' ? settingsView : activeWorkspace === 'tutor' ? (
+          <TutorWorkspace
+            chatPanel={sharedChatPanel}
+            onBackToPlanner={()=>navigateToWorkspace('chat')}
+            onOpenSettings={()=>setActivePanel('settings')}
+            onQuickAction={(label)=>sendChip(tutorQuickChips.find(chip=>chip.label===label)?.msg || label)}
+            onOpenNotes={()=>setShowNotes(true)}
+            onOpenSchedule={()=>setShowPeek(true)}
+            onImport={()=>setShowGoogleModal(true)}
+            messageCount={messages.length}
+            Icon={Icon}
+          />
         ) : (
-          /* ── Normal chat input form ── */
-          <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-            <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-            {workspaceModeLabel && (
-              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
-            )}
-            <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-              {Icon.camera(18)}
-            </button>
-            <button type="button" onClick={startRecording} disabled={isLoading||!!viewingSavedChatId}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
-              {Icon.mic(18)}
-            </button>
-            <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={viewingSavedChatId?"viewing saved chat — click 'Resume' to continue":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
-              disabled={isLoading||!!viewingSavedChatId}
-              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
-              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
-          </form>
+          <ChatWorkspace
+            showSettings={activePanel === 'settings'}
+            settingsView={settingsView}
+            chatPanel={sharedChatPanel}
+            showSidebarCompanion={showSidebarCompanion}
+            companionCollapsed={companionCollapsed}
+            compactCompanionToggle={compactCompanionToggle}
+            setCompanionCollapsed={setCompanionCollapsed}
+            closeSidebarCompanion={closeSidebarCompanion}
+            sidebarCompanionPanel={sidebarCompanionPanel}
+            sendChip={sendChip}
+            SchedulePeek={SchedulePeek}
+            NotesPanel={NotesPanel}
+            tasks={tasks}
+            blocks={blocks}
+            events={events}
+            weatherData={weatherData}
+            notes={notes}
+            handleDeleteNote={handleDeleteNote}
+            handleUpdateNote={handleUpdateNote}
+            handleCreateNote={handleCreateNote}
+            Icon={Icon}
+          />
         )}
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
-      </div>
-      {showSidebarCompanion && (
-        <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
-          <button
-            className={'sos-companion-toggle' + (compactCompanionToggle ? ' icon-only' : ' classic-bar')}
-            onClick={() => setCompanionCollapsed(prev => !prev)}
-            title={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-            aria-label={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-          >
-            <span>{Icon.panel(14)}</span>
-            {!compactCompanionToggle && <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>}
-          </button>
-          {!companionCollapsed && (sidebarCompanionPanel === 'schedule' || sidebarCompanionPanel === 'notes') && (
-            <div style={{padding:'6px 10px 0'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <div style={{fontSize:'0.76rem',fontWeight:700,color:'var(--text-dim)',letterSpacing:'0.02em',textTransform:'uppercase'}}>
-                  {sidebarCompanionPanel === 'schedule' ? 'Schedule workflows' : 'Notes workflows'}
-                </div>
-                <button className="settings-toggle" onClick={closeSidebarCompanion} style={{padding:'4px 8px',fontSize:'0.68rem'}}>Close panel</button>
-              </div>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
-                {sidebarCompanionPanel === 'schedule' && ['Plan today','Find free block','Due soon'].map((chip) => (
-                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
-                ))}
-                {sidebarCompanionPanel === 'notes' && ['Summarize note','Make flashcards','Quiz me'].map((chip) => (
-                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
-            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
-          )}
-          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
-          )}
-        </div>
-      )}
-      </div>
-      </>
-      )}
-      </div>
-
       {showSideBySide && (
         <>
           <div className="peek-overlay" onClick={() => { setShowPeek(false); setShowNotes(false); }}/>
