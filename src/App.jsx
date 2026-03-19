@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
 import Icon from './lib/icons';
-import { trackEvent } from './lib/analytics';
+import { trackEvent, trackTutorEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
@@ -505,7 +505,7 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-function buildSystemPrompt(tasks, blocks, events, notes, tier = 2) {
+function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, tutorMode = false) {
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
@@ -608,7 +608,10 @@ RULES:
 2. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
 3. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
 4. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help.
-5. Stay warm, brief, and casual.`;
+5. Stay warm, brief, and casual.${tutorMode ? `
+6. TUTOR MODE: guide instead of just telling. Ask one short Socratic question or give one next step at a time.
+7. TUTOR MODE: explain in clear steps, check for understanding before moving on, and prefer mastery-building follow-ups over final-answer dumps.
+8. TUTOR MODE: when notes or reference docs are relevant, ground the answer in them and mention which note/doc you're using.` : ''}`;
   }
 
   return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
@@ -628,7 +631,11 @@ CORE BEHAVIORS:
 4. MISSED TASK RECOVERY: For overdue tasks, don't guilt — suggest a realistic new date. "no stress, let's just move it."
 5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
 6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
-7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.
+7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.${tutorMode ? `
+8. TUTOR MODE: default to guided teaching flows over generic assistant replies. Start by diagnosing what they know, then coach step by step.
+9. TUTOR MODE: use Socratic prompts, mini mastery checks, and short practice questions when helpful.
+10. TUTOR MODE: if they ask for the answer, still give the key explanation, but pair it with reasoning and a quick check for understanding.
+11. TUTOR MODE: for note-based questions, prioritize the student's notes/reference docs over generic background knowledge and say when the notes are incomplete.` : ''}
 
 TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
 
@@ -690,6 +697,7 @@ CORRECTION HANDLING: When the student's message contains correction signals — 
    - subject: For academic items, did the student mention the subject? If not → ask_clarification.
    - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
    If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
+17. RESPONSE STYLE PRIORITY: ${tutorMode ? 'Tutor mode is ON, so prefer coaching, scaffolding, and mastery checks before generic assistant-style summaries.' : 'Tutor mode is OFF, so use the normal concise sidekick style unless they explicitly ask to be taught step by step.'}
 
 PHOTO ANALYSIS:
 When the student sends a photo/image:
@@ -754,6 +762,10 @@ async function parseActionsWithRecovery(rawContent, token) {
   } catch (e) { console.error('JSON recovery re-prompt failed:', e); }
   return actions;
 }
+function isNotesReferenceRequest(text) {
+  return /\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text || '');
+}
+
 function stripActionTags(text) {
   return (text || '')
     .replace(/<action>[\s\S]*?<\/action>/gi, '')
@@ -3535,6 +3547,7 @@ function App() {
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
+  const tutorSessionTrackedRef = useRef(false);
   const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
@@ -3703,6 +3716,7 @@ function App() {
       if (event === 'SIGNED_OUT') {
         setUser(null);
         setDataLoaded(false);
+        tutorSessionTrackedRef.current = false;
         setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
         setPendingClarification(null); setPendingClarificationAnswers(null);
       }
@@ -4306,6 +4320,7 @@ function App() {
     };
     setPendingTemplateSelector(null);
     setPendingContent(prev => [...prev, planContent]);
+    if (user && tutorMode) trackTutorEvent(user.id, 'study_plan_opened', { source: 'template', template: template.name });
     setToastMsg('Created plan from "' + template.name + '" template');
   }
 
@@ -4743,8 +4758,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (!fromClarification) autoConfirmPending();
     setChatError(null);
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
+    if (user && tutorMode && !tutorSessionTrackedRef.current) {
+      tutorSessionTrackedRef.current = true;
+      trackTutorEvent(user.id, 'session_started', { source: fromClarification ? 'clarification' : 'chat' });
+    }
 
     const msgContent = text?.trim() || '';
+    const noteGroundedRequest = isNotesReferenceRequest(msgContent);
+    if (user && tutorMode && noteGroundedRequest) trackTutorEvent(user.id, 'note_based_tutoring_invoked', { source: 'chat' });
 
     // Intercept vague plan requests and show template selector
     const isPlanRequest = /^(make|create|build|give)\s*(me\s*)?(a\s*)?(study\s*)?plan$/i.test(msgContent)
@@ -4808,7 +4829,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2);
+      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2, tutorMode);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -4834,6 +4855,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
+        tutorMode,
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5031,6 +5053,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
         const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        if (user && tutorMode && contentActions.length > 0) {
+          contentActions.forEach(a => {
+            if (a.type === 'create_quiz') trackTutorEvent(user.id, 'quiz_launched', { source: 'chat', title: a.title || '' });
+            if (a.type === 'create_flashcards') trackTutorEvent(user.id, 'flashcards_opened', { source: 'chat', title: a.title || '' });
+          });
+        }
         const blockExecution = pendingClarification && !fromClarification;
         const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
         autoExec.forEach(executeAction);
@@ -5530,9 +5558,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Activates a guided, step-by-step learning style. Indicator appears in sidebar and topbar when on.</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Routes AI replies through tutor instructions for Socratic coaching, step-by-step teaching, mastery checks, and note-grounded help. The backend also receives this flag, and the tutor badge appears when enabled.</div>
                 </div>
-                <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>{ const n=!tutorMode; setTutorMode(n); localStorage.setItem('sos_tutor_mode',n?'true':'false'); }}>{tutorMode ? 'On' : 'Off'}</button>
+                <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>{ const n=!tutorMode; setTutorMode(n); localStorage.setItem('sos_tutor_mode',n?'true':'false'); if (!n) tutorSessionTrackedRef.current = false; if (n && user) { tutorSessionTrackedRef.current = true; trackTutorEvent(user.id, 'session_started', { source: 'settings_toggle' }); } }}>{tutorMode ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
