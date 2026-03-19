@@ -34,6 +34,63 @@ function fmtTime(h, m) {
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
 }
 
+
+function stripHtml(html) {
+  return (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function truncateText(text, max = 220) {
+  const clean = (text || '').trim();
+  if (clean.length <= max) return clean;
+  return clean.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
+}
+
+function buildTutorContextFromNote(note, mode = 'explain') {
+  const plainContent = stripHtml(note?.content || '');
+  return {
+    type: 'note',
+    mode,
+    title: note?.name || 'Untitled note',
+    subject: note?.subject || '',
+    sourceId: note?.id || null,
+    dueDate: null,
+    excerpt: truncateText(plainContent, 280),
+    content: plainContent,
+  };
+}
+
+function buildTutorContextFromScheduleItem(item, itemType = 'task', mode = 'study') {
+  return {
+    type: itemType,
+    mode,
+    title: item?.title || (itemType === 'event' ? 'Upcoming event' : 'Task'),
+    subject: item?.subject || item?.type || '',
+    sourceId: item?.id || null,
+    dueDate: item?.dueDate || item?.date || null,
+    excerpt: truncateText([
+      item?.subject ? 'Subject: ' + item.subject : '',
+      item?.dueDate ? 'Due: ' + fmtFull(item.dueDate) : '',
+      item?.date ? 'Date: ' + fmtFull(item.date) : '',
+      item?.type ? 'Type: ' + item.type : '',
+      item?.estTime ? 'Estimated time: ' + item.estTime + ' min' : '',
+    ].filter(Boolean).join(' · '), 240),
+    content: [item?.title, item?.subject, item?.dueDate || item?.date].filter(Boolean).join(' | '),
+  };
+}
+
+function tutorPromptForContext(context, action = 'explain') {
+  if (!context) return '';
+  const title = context.title || 'this';
+  if (context.type === 'note') {
+    if (action === 'quiz') return 'Quiz me on the note "' + title + '" using the exact material in context.';
+    if (action === 'flashcards') return 'Make flashcards from the note "' + title + '" using the exact material in context.';
+    return 'Explain the note "' + title + '" and focus on the selected section in context.';
+  }
+  if (action === 'plan') return 'Help me study for "' + title + '" and make a practical study plan.';
+  if (action === 'quiz') return 'Quiz me on "' + title + '" based on the schedule context.';
+  return 'Help me study for "' + title + '" using the schedule context.';
+}
+
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
   const entries = Object.entries(slotMap).filter(([,v]) => v).sort(([a],[b]) => a.localeCompare(b));
@@ -2961,7 +3018,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 /* ═══════════════════════════════════════════════
    SCHEDULE PEEK PANEL (with fullscreen calendar)
    ═══════════════════════════════════════════════ */
-function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false }) {
+function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false, onTutorContextAction }) {
   const todayKey = today(); const todayDow = new Date().getDay();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [calView, setCalView] = useState('month');
@@ -3201,11 +3258,11 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
       </div>}
       {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.length})</div>
         {activeTasks.map(task=>{const d=daysUntil(task.dueDate);const dotColor=d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{color:dotColor,display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
+          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div>{onTutorContextAction && <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}><button className="sos-chip" onClick={(e)=>{e.stopPropagation();onTutorContextAction(buildTutorContextFromScheduleItem(task, 'task', 'study'),'study');}}>Help me study for this test</button><button className="sos-chip" onClick={(e)=>{e.stopPropagation();onTutorContextAction(buildTutorContextFromScheduleItem(task, 'task', 'quiz'),'quiz');}}>Quiz me on this</button></div>}</div><div style={{color:dotColor,display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
         })}
       </div>}
       {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
-        {upcomingEvents.map(ev=>(<div key={ev.id} className="peek-task-item"><div className="peek-task-dot" style={{background:catColor(ev.type)}}/><div><div style={{fontWeight:500}}>{ev.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{fmt(ev.date)}{ev.subject&&' · '+ev.subject}</div></div></div>))}
+        {upcomingEvents.map(ev=>(<div key={ev.id} className="peek-task-item"><div className="peek-task-dot" style={{background:catColor(ev.type)}}/><div><div style={{fontWeight:500}}>{ev.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{fmt(ev.date)}{ev.subject&&' · '+ev.subject}</div>{onTutorContextAction && <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}><button className="sos-chip" onClick={(e)=>{e.stopPropagation();onTutorContextAction(buildTutorContextFromScheduleItem(ev, 'event', 'study'),'study');}}>Help me study for this test</button></div>}</div></div>))}
       </div>}
     </div>
   </>);
@@ -3214,7 +3271,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
 /* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
+function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false, activeTutorContext, onSelectTutorContext, onTutorAction }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -3431,10 +3488,11 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
             const snippet = isSearching && note._firstMatch !== undefined
               ? getSnippet(plainContent, note._firstMatch)
               : plainContent.slice(0, 150);
+            const isTutorActive = activeTutorContext?.type === 'note' && activeTutorContext?.sourceId === note.id;
 
             return (
-              <div key={note.id} className={'notes-item' + (isExpanded ? ' expanded' : '')}
-                onClick={() => { if (!isEditing) { setExpandedId(isExpanded ? null : note.id); setEditingId(null); } }}>
+              <div key={note.id} className={'notes-item' + (isExpanded ? ' expanded' : '')} style={isTutorActive ? {borderColor:'rgba(108,99,255,0.45)', boxShadow:'0 0 0 1px rgba(108,99,255,0.18)'} : undefined}
+                onClick={() => { if (!isEditing) { setExpandedId(isExpanded ? null : note.id); setEditingId(null); onSelectTutorContext?.(buildTutorContextFromNote(note, 'explain')); } }}>
                 {/* ── Editing mode ── */}
                 {isEditing ? (
                   <div onClick={e => e.stopPropagation()}>
@@ -3465,7 +3523,14 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
                       </div>
                     )}
                     {isExpanded && (
-                      <div className="notes-item-content" dangerouslySetInnerHTML={{__html: note.content || ''}}/>
+                      <>
+                        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:10}}>
+                          <button className="sos-chip" onClick={(e)=>{e.stopPropagation(); const context=buildTutorContextFromNote(note, 'study'); onTutorAction?.(context, 'study');}}>Tutor me on this note</button>
+                          <button className="sos-chip" onClick={(e)=>{e.stopPropagation(); const context=buildTutorContextFromNote(note, 'quiz'); onTutorAction?.(context, 'quiz');}}>Quiz me on this</button>
+                          <button className="sos-chip" onClick={(e)=>{e.stopPropagation(); const context=buildTutorContextFromNote(note, 'explain'); onTutorAction?.(context, 'explain');}}>Explain this section</button>
+                        </div>
+                        <div className="notes-item-content" dangerouslySetInnerHTML={{__html: note.content || ''}}/>
+                      </>
                     )}
                   </>
                 )}
@@ -3524,6 +3589,8 @@ function App() {
   const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
   const [pendingClarification, setPendingClarification] = useState(null);
   const [pendingClarificationAnswers, setPendingClarificationAnswers] = useState(null);
+  const [activeTutorContext, setActiveTutorContext] = useState(null);
+  const [tutorWorkspaceContent, setTutorWorkspaceContent] = useState([]);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -3549,12 +3616,6 @@ function App() {
     }
     return activePanel === 'chat' ? 'chat' : 'none';
   }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed]);
-  const workspaceContext = getWorkspaceContext();
-  const workspaceModeLabel = workspaceContext === 'schedule'
-    ? 'Schedule mode'
-    : workspaceContext === 'notes'
-      ? 'Notes mode'
-      : null;
   const openCompanionPanel = useCallback((panel) => {
     setActivePanel('chat');
     setSidebarCompanionPanel(panel);
@@ -3563,6 +3624,28 @@ function App() {
     setShowPeek(false);
     setShowNotes(false);
   }, [autoCollapseSidebarCompanion]);
+  const pushTutorWorkspaceContent = useCallback((content) => {
+    if (!content || !content.type) return;
+    setTutorWorkspaceContent(prev => [content, ...prev].slice(0, 4));
+  }, []);
+  const launchTutorFromContext = useCallback((context, action = 'study') => {
+    if (!context) return;
+    setTutorMode(true);
+    setActiveTutorContext(context);
+    if (context.type === 'note') openCompanionPanel('notes');
+    else openCompanionPanel('schedule');
+    const prompt = tutorPromptForContext(context, action);
+    setInput(prompt);
+    if (action !== 'study') setTimeout(() => sendMessage(prompt, { tutorContextOverride: context }), 0);
+  }, [openCompanionPanel]);
+  const workspaceContext = getWorkspaceContext();
+  const workspaceModeLabel = activeTutorContext
+    ? 'Tutor: ' + truncateText(activeTutorContext.title || 'Selected material', 32)
+    : workspaceContext === 'schedule'
+      ? 'Schedule mode'
+      : workspaceContext === 'notes'
+        ? 'Notes mode'
+        : null;
   const detectCompanionIntent = useCallback((text) => {
     const msg = (text || '').toLowerCase();
     if (!msg) return null;
@@ -4735,6 +4818,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Send message via Edge Function (multi-model routing) ──
   async function sendMessage(text, opts = {}) {
     const fromClarification = !!opts.fromClarification;
+    const tutorContext = opts.tutorContextOverride || activeTutorContext;
     // Capture pending photo and clear it immediately
     const photo = pendingPhoto;
     setPendingPhoto(null);
@@ -4834,6 +4918,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
+        tutorContext: tutorContext ? {
+          type: tutorContext.type,
+          mode: tutorContext.mode,
+          title: tutorContext.title,
+          subject: tutorContext.subject,
+          dueDate: tutorContext.dueDate,
+          excerpt: tutorContext.excerpt,
+          contentSnippet: truncateText(tutorContext.content || tutorContext.excerpt || '', 500),
+        } : null,
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -4865,6 +4958,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       const chatData = await chatResponse.json();
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
+      const maybeContent = (item) => item && item.type && CONTENT_TYPES.includes(item.type);
 
       // For content gen, parse content types from raw text response (AI outputs JSON when tools are disabled)
       if (isContentGen && actions.length === 0 && chatData?.content) {
@@ -4886,6 +4980,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           }
         }
       }
+
+      if (maybeContent(chatData?.content_payload)) pushTutorWorkspaceContent(chatData.content_payload);
+      actions.filter(maybeContent).forEach(pushTutorWorkspaceContent);
 
       // Support multiple clarifications (array) or single (object)
       const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
@@ -5706,6 +5803,31 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             )}
           </div>
         ))}
+        {activeTutorContext && (
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.98),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.2)',borderRadius:16,padding:'14px 16px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:'0.72rem',fontWeight:800,color:'var(--accent)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Tutor context</div>
+                  <div style={{fontWeight:700,color:'var(--text)',marginTop:4}}>{activeTutorContext.title}</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginTop:4}}>{[activeTutorContext.subject, activeTutorContext.dueDate ? fmtFull(activeTutorContext.dueDate) : null].filter(Boolean).join(' · ')}</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setActiveTutorContext(null)}>Clear</button>
+              </div>
+              {activeTutorContext.excerpt && <div style={{fontSize:'0.84rem',lineHeight:1.55,color:'var(--text)',background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.05)',borderRadius:12,padding:'10px 12px',marginBottom:10}}>{activeTutorContext.excerpt}</div>}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <button className="sos-chip" onClick={()=>sendMessage(tutorPromptForContext(activeTutorContext, 'explain'))}>Explain</button>
+                <button className="sos-chip" onClick={()=>sendMessage(tutorPromptForContext(activeTutorContext, 'quiz'))}>Quiz me</button>
+                <button className="sos-chip" onClick={()=>sendMessage(tutorPromptForContext(activeTutorContext, activeTutorContext.type === 'note' ? 'flashcards' : 'plan'))}>{activeTutorContext.type === 'note' ? 'Make flashcards' : 'Build study plan'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {tutorWorkspaceContent.length > 0 && activeTutorContext && tutorWorkspaceContent.map((content, idx) => (
+          <div key={'twc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <ContentTypeRouter content={content} onSave={()=>{ const formatted = formatContentForNote(content); executeAction({ type:'add_note', tab_name: content.title || 'Study Material', content: formatted }); setToastMsg('Saved "' + (content.title || 'content') + '" to notes'); }} onDismiss={()=>setTutorWorkspaceContent(prev=>prev.filter((_,i)=>i!==idx))} onApplyPlan={(steps)=>{ steps.forEach(step => executeAction({ type:'add_task', title:step.title, subject:'', due:step.date||today(), estimated_minutes:step.estimated_minutes||30 })); setToastMsg('Added ' + steps.length + ' tasks from plan'); }} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={()=>setToastMsg('Export this tutor result by saving it to notes first.')} googleConnected={isGoogleConnected()}/>
+          </div>
+        ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
@@ -5822,10 +5944,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
-            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded onTutorContextAction={launchTutorFromContext}/></ErrorBoundary>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+            <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded activeTutorContext={activeTutorContext} onSelectTutorContext={setActiveTutorContext} onTutorAction={launchTutorFromContext}/>
           )}
         </div>
       )}
@@ -5843,14 +5965,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <button className="g-modal-close" onClick={() => { setShowPeek(false); setShowNotes(false); }}>{Icon.x(16)}</button>
             </div>
             <div className="split-workspace-grid">
-              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
-              <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded onTutorContextAction={launchTutorFromContext}/></ErrorBoundary>
+              <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded activeTutorContext={activeTutorContext} onSelectTutorContext={setActiveTutorContext} onTutorAction={launchTutorFromContext}/>
             </div>
           </div>
         </>
       )}
-      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
-      {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)} onTutorContextAction={launchTutorFromContext}/></ErrorBoundary>}
+      {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} activeTutorContext={activeTutorContext} onSelectTutorContext={setActiveTutorContext} onTutorAction={launchTutorFromContext}/>} 
       {showChatSidebar&&(
         <>
           <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
