@@ -34,6 +34,13 @@ function fmtTime(h, m) {
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
 }
 
+function getSkyTheme(date = new Date()) {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 15) return 'day';
+  if (hour >= 15 && hour < 20) return 'sunset';
+  return 'night';
+}
+
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
   const entries = Object.entries(slotMap).filter(([,v]) => v).sort(([a],[b]) => a.localeCompare(b));
@@ -5551,6 +5558,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  const [skyTheme, setSkyTheme] = useState(() => getSkyTheme());
+  useEffect(() => {
+    const syncTheme = () => setSkyTheme(getSkyTheme());
+    syncTheme();
+    const interval = window.setInterval(syncTheme, 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const skyThemeCopy = useMemo(() => ({
+    day: { label: 'Morning drift', motto: "Sky's the Limit", note: 'A soft start for planning, projects, and calm focus.' },
+    sunset: { label: 'Golden hour', motto: "Sky's the Limit", note: 'Warm gradients and lighter structure for your afternoon reset.' },
+    night: { label: 'Starry focus', motto: "Sky's the Limit", note: 'Deep indigo calm for quiet work and reflective study.' },
+  })[skyTheme], [skyTheme]);
+
   const quickChips = [
     { label:'What should I do?', msg:'What should I work on right now?' },
     { label:'Enter tutor mode', action:enterTutorMode },
@@ -5575,11 +5596,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
-      <div className="auth-screen" style={{position:'relative'}}>
-        <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none',animation:'breathe 3s ease-in-out infinite'}}/>
-        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
-        <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
-        <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)',position:'relative',animation:'textReveal 0.4s ease 0.2s both'}}>Loading your data...</div>
+      <div className="auth-screen" data-sky-theme={skyTheme} style={{position:'relative'}}>
+        <div className="sky-motif" aria-hidden="true">
+          <span className="sky-orb sky-orb-a"/>
+          <span className="sky-orb sky-orb-b"/>
+        </div>
+        <div className="auth-card">
+          <div className="auth-badge">{skyThemeCopy.motto}</div>
+          <div className="auth-logo">SOS</div>
+          <div style={{width:28,height:28,border:'3px solid rgba(46,46,46,0.12)',borderTopColor:'var(--accent)',borderRightColor:'var(--coral)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative'}}/>
+          <div className="auth-copy" style={{marginTop:12}}>Loading your data...</div>
+        </div>
       </div>
     );
   }
@@ -5587,16 +5614,31 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Checking session on first load ──
   if (!authChecked) {
     return (
-      <div className="auth-screen" style={{position:'relative'}}>
-        <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
-        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
-        <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
+      <div className="auth-screen" data-sky-theme={skyTheme} style={{position:'relative'}}>
+        <div className="sky-motif" aria-hidden="true">
+          <span className="sky-orb sky-orb-a"/>
+          <span className="sky-orb sky-orb-b"/>
+        </div>
+        <div className="auth-card">
+          <div className="auth-badge">{skyThemeCopy.label}</div>
+          <div className="auth-logo">SOS</div>
+          <div style={{width:28,height:28,border:'3px solid rgba(46,46,46,0.12)',borderTopColor:'var(--accent)',borderRightColor:'var(--coral)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative'}}/>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+    <div className="sos-app" data-sky-theme={skyTheme} style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      <div className="sky-motif" aria-hidden="true">
+        <span className="sky-orb sky-orb-a"/>
+        <span className="sky-orb sky-orb-b"/>
+        <span className="sky-cloud sky-cloud-a"/>
+        <span className="sky-cloud sky-cloud-b"/>
+        <span className="sky-star sky-star-a"/>
+        <span className="sky-star sky-star-b"/>
+        <span className="sky-star sky-star-c"/>
+      </div>
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -5609,6 +5651,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button className="sos-collapse-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>
             {Icon.panel(16)}
           </button>
+        </div>
+        <div className="sos-sidebar-intro">
+          <div className="sky-badge">{skyThemeCopy.motto}</div>
+          <div className="sos-sidebar-title">Default workspace</div>
+          <div className="sos-sidebar-note">{skyThemeCopy.note}</div>
         </div>
         <div className="sos-side-actions">
           <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
@@ -5665,6 +5712,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div className="topbar-nav">
+            <span>Dashboard</span>
+            <span>Projects</span>
+            <span>Focus Mode</span>
+          </div>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
           <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
@@ -5673,6 +5725,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button className="sky-profile-btn" onClick={()=>user?setActivePanel('settings'):setShowAuthModal(true)}>{user?'Profile →':'Sign in →'}</button>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
@@ -5835,10 +5888,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           // Default welcome screen
           const wv = welcomeVariants[welcomeIdx];
           return (
-          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
+          <div className="welcome-hero" style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
+            <div className="sky-badge" style={{marginBottom:14}}>{skyThemeCopy.label}</div>
             <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
             <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
             <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
+            <div style={{fontSize:'0.78rem',fontFamily:'var(--font-sketch)',color:'var(--text-dim)',marginBottom:10,letterSpacing:'0.08em',textTransform:'uppercase'}}>{skyThemeCopy.motto}</div>
             <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
               {wv.chips.map((s,i)=>(
