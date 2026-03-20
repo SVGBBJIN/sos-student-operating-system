@@ -1,7 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Indie+Flower&family=Inter:wght@400;500;600;700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0c0e17;--bg2:#0a0c15;--card:rgba(255,255,255,.05);--accent:#5B8DFF;--accent-dim:rgba(91,141,255,.4);--accent-glow:rgba(91,141,255,.15);--text:#e0e4f0;--text-dim:rgba(224,228,240,.4);--border:rgba(255,255,255,.07);--border-mid:rgba(255,255,255,.09);--danger:#f87171;--success:#34d399;--warning:#f59e0b;--green:#34d399;--blue:#5B8DFF;--orange:#f59e0b;--pink:#f87171;--teal:#34d399;--violet:#a78bfa;--radius:10px;--shadow:0 2px 12px rgba(0,0,0,0.4);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
+:root{--bg:#f3ecdf;--bg2:#fff7ec;--card:rgba(255,243,228,.72);--accent:#7DD3FC;--accent-dim:rgba(125,211,252,.45);--accent-glow:rgba(125,211,252,.24);--text:#2E2E2E;--text-dim:rgba(46,46,46,.62);--border:rgba(46,46,46,.12);--border-mid:rgba(46,46,46,.18);--danger:#d26d77;--success:#63b48f;--warning:#f0a15d;--green:#9ccf9b;--blue:#7DD3FC;--orange:#f0a15d;--pink:#F7B7A3;--teal:#9ad6d0;--violet:#C3A1E0;--coral:#F7B7A3;--cream:#FFF3E4;--sky-day:#BFD8F2;--sunset-start:#F9AFAE;--sunset-end:#C3A1E0;--star-night:#1B1B40;--font-body:'Inter',system-ui,-apple-system,sans-serif;--font-sketch:'Indie Flower',cursive;--radius:18px;--shadow:0 10px 30px rgba(46,46,46,0.12);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
-body{background:#0c0e17;color:var(--text);font-family:'DM Sans',system-ui,-apple-system,sans-serif;overflow:hidden;min-height:100vh}
+body{background:linear-gradient(180deg,#cde0f4 0%,#fff5e8 100%);color:var(--text);font-family:var(--font-body);overflow:hidden;min-height:100vh;background-image:radial-gradient(rgba(255,255,255,.45) 1px,transparent 1px),linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,0));background-size:6px 6px,100% 100%}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -540,3 +541,56 @@ select option{background:#0f0f23;color:var(--text)}
 .tutor-integration-card{display:flex;flex-direction:column;gap:12px}
 .tutor-integration-card .tutor-secondary-btn{margin-top:auto;align-self:flex-start}
 @media (max-width: 980px){.tutor-hero,.tutor-stats,.tutor-integration-grid,.tutor-prompt-grid{grid-template-columns:1fr}.tutor-section-head{align-items:flex-start;flex-direction:column}.tutor-hero-copy h1{max-width:none}}
+
+
+.sos-app[data-sky-theme="day"],.auth-screen[data-sky-theme="day"]{--bg:#eef6ff;--bg2:#fff9ef;--card:rgba(255,243,228,.74);--accent:#7DD3FC;--accent-dim:rgba(125,211,252,.45);--accent-glow:rgba(125,211,252,.24);--text:#2E2E2E;--text-dim:rgba(46,46,46,.65);--border:rgba(46,46,46,.12);--border-mid:rgba(46,46,46,.18)}
+.sos-app[data-sky-theme="sunset"],.auth-screen[data-sky-theme="sunset"]{--bg:#fff3ea;--bg2:#fff8f4;--card:rgba(255,243,228,.7);--accent:#7DD3FC;--accent-dim:rgba(195,161,224,.42);--accent-glow:rgba(249,175,174,.28);--text:#312a35;--text-dim:rgba(49,42,53,.66);--border:rgba(49,42,53,.14);--border-mid:rgba(49,42,53,.2)}
+.sos-app[data-sky-theme="night"],.auth-screen[data-sky-theme="night"]{--bg:#23234b;--bg2:#1b1b40;--card:rgba(255,243,228,.08);--accent:#7DD3FC;--accent-dim:rgba(125,211,252,.35);--accent-glow:rgba(125,211,252,.22);--text:#f8ecdf;--text-dim:rgba(248,236,223,.7);--border:rgba(255,243,228,.14);--border-mid:rgba(255,243,228,.22)}
+
+.sky-motif{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+.sky-orb,.sky-cloud,.sky-star{position:absolute;display:block}
+.sky-orb{width:18rem;height:18rem;border-radius:50%;filter:blur(28px);opacity:.5;animation:orbFloat 18s ease-in-out infinite}
+.sky-orb-a{top:-4rem;right:8%;background:radial-gradient(circle,var(--cream),transparent 70%)}
+.sky-orb-b{bottom:-5rem;left:10%;background:radial-gradient(circle,rgba(247,183,163,.65),transparent 70%);animation-delay:-8s}
+.sky-cloud{width:180px;height:56px;border-radius:999px;background:rgba(255,243,228,.6);box-shadow:45px 10px 0 0 rgba(255,243,228,.7),90px -8px 0 8px rgba(255,243,228,.55);opacity:.75;animation:cloudDrift 36s linear infinite}
+.sky-cloud-a{top:12%;left:-8%}
+.sky-cloud-b{top:26%;right:-12%;animation-duration:46s;animation-direction:reverse}
+.sky-star{width:6px;height:6px;border-radius:50%;background:rgba(255,243,228,.9);box-shadow:0 0 12px rgba(255,243,228,.7);opacity:0;animation:starTwinkle 4.8s ease-in-out infinite}
+.sky-star-a{top:16%;right:20%;animation-delay:.5s}.sky-star-b{top:24%;right:34%;animation-delay:1.8s}.sky-star-c{top:11%;right:11%;animation-delay:3.1s}
+.sos-app[data-sky-theme="day"] .sky-star,.auth-screen[data-sky-theme="day"] .sky-star,.sos-app[data-sky-theme="sunset"] .sky-star,.auth-screen[data-sky-theme="sunset"] .sky-star{display:none}
+.sos-app[data-sky-theme="night"] .sky-cloud,.auth-screen[data-sky-theme="night"] .sky-cloud{display:none}
+.sos-app[data-sky-theme="night"],.auth-screen[data-sky-theme="night"]{background:linear-gradient(180deg,#20204a 0%,#111129 100%)}
+.sos-app[data-sky-theme="day"],.auth-screen[data-sky-theme="day"]{background:linear-gradient(180deg,#bfd8f2 0%,#fff5e8 100%)}
+.sos-app[data-sky-theme="sunset"],.auth-screen[data-sky-theme="sunset"]{background:linear-gradient(180deg,#f9afae 0%,#c3a1e0 100%)}
+@keyframes cloudDrift{0%{transform:translateX(0)}100%{transform:translateX(115vw)}}
+@keyframes starTwinkle{0%,100%{opacity:.2;transform:scale(.9)}50%{opacity:1;transform:scale(1.25)}}
+
+.sos-app{position:relative;isolation:isolate;color:var(--text);background:transparent!important}
+.sos-sidebar,.sos-header,.sos-input-area,.sos-chat-companion,.settings-card,.auth-form,.g-modal,.peek-panel,.notes-panel,.split-workspace,.split-workspace-head{background:rgba(255,243,228,.42)!important;backdrop-filter:blur(20px);border-color:var(--border)!important;box-shadow:var(--shadow)}
+.sos-sidebar{background:rgba(255,243,228,.4)!important;border-right:1px solid var(--border)!important}
+.sos-sidebar::before{background:radial-gradient(circle, rgba(125,211,252,.2) 0%, rgba(247,183,163,.12) 45%, transparent 72%)}
+.sos-sidebar-intro{position:relative;z-index:1;padding:14px;border:1px solid var(--border);border-radius:22px;background:rgba(255,243,228,.45);box-shadow:0 2px 5px rgba(0,0,0,.15);display:flex;flex-direction:column;gap:6px}
+.sos-sidebar-title{font-size:1.08rem;font-weight:700}
+.sos-sidebar-note{font-size:.8rem;line-height:1.6;color:var(--text-dim)}
+.sky-badge,.auth-badge{align-self:flex-start;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:rgba(255,243,228,.66);font-size:.75rem;font-family:var(--font-sketch);letter-spacing:.05em;color:var(--text)}
+.auth-screen{overflow:hidden;position:relative}
+.auth-card{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 28px;min-width:min(90vw,360px);border-radius:28px;border:1px solid var(--border);background:rgba(255,243,228,.48);box-shadow:var(--shadow);backdrop-filter:blur(18px)}
+.auth-logo{font-size:2.6rem;font-weight:800;letter-spacing:-.04em}
+.auth-copy{font-size:.9rem;color:var(--text-dim)}
+.topbar-nav{display:flex;align-items:center;gap:18px;padding:8px 14px;border-radius:999px;background:rgba(255,243,228,.42);border:1px solid var(--border);font-size:.82rem;color:var(--text-dim)}
+.topbar-nav span:hover{color:var(--text)}
+.sky-profile-btn{padding:10px 16px;border:none;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--coral));color:#2E2E2E;font-weight:700;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,.15)}
+.sos-main::before{background:radial-gradient(ellipse at 70% 25%, rgba(255,243,228,.28), transparent 45%),radial-gradient(ellipse at 30% 78%, rgba(125,211,252,.18), transparent 42%),linear-gradient(120deg,rgba(255,255,255,.14),rgba(247,183,163,.08),rgba(125,211,252,.1));filter:blur(18px)}
+.sos-header{background:rgba(255,243,228,.36)!important}
+.sos-side-btn,.settings-toggle,.g-hdr-btn{border-color:var(--border)!important;background:rgba(255,243,228,.4)!important;color:var(--text)!important;border-radius:16px}
+.sos-side-btn:hover,.settings-toggle:hover,.g-hdr-btn:hover,.sos-chip:hover{box-shadow:0 2px 5px rgba(0,0,0,.15);transform:translateY(-2px) scale(1.01)}
+.sos-side-btn.active{background:linear-gradient(135deg,rgba(125,211,252,.34),rgba(247,183,163,.25))!important;box-shadow:0 2px 5px rgba(0,0,0,.15)}
+.sos-chip,.notes-item,.notes-search,.auth-input,.g-input,.g-btn,.quiz-choice,.peek-timeline-block,.notes-item-content{background:rgba(255,243,228,.42)!important;border-color:var(--border)!important;color:var(--text)!important}
+.sos-bubble-ai,.content-card,.confirm-card,.fc-front,.fc-back,.quiz-btn,.auth-btn-primary{background:rgba(255,243,228,.32)!important;border-color:var(--border)!important;color:var(--text)!important;box-shadow:0 2px 5px rgba(0,0,0,.15)}
+.sos-bubble-user,.confirm-btn-yes,.content-card-save{background:linear-gradient(135deg,var(--accent),var(--coral))!important;color:#2E2E2E!important}
+.sos-input-area{background:rgba(255,243,228,.34)!important}
+.welcome-hero::before{content:'';position:absolute;inset:8% 12%;border-radius:36px;background:rgba(255,243,228,.24);border:1px solid var(--border);box-shadow:var(--shadow);z-index:-1}
+.chat-sidebar-item,.chat-sidebar,.chat-sidebar-header{background:rgba(255,243,228,.42)!important;color:var(--text)!important;border-color:var(--border)!important}
+.sos-app[data-sky-theme="night"] .sky-profile-btn,.sos-app[data-sky-theme="night"] .sos-bubble-user,.sos-app[data-sky-theme="night"] .confirm-btn-yes,.sos-app[data-sky-theme="night"] .content-card-save{color:#1b1b40!important}
+.sos-app[data-sky-theme="night"] .topbar-nav,.sos-app[data-sky-theme="night"] .auth-card,.sos-app[data-sky-theme="night"] .sos-sidebar-intro,.sos-app[data-sky-theme="night"] .sos-side-btn,.sos-app[data-sky-theme="night"] .settings-toggle,.sos-app[data-sky-theme="night"] .g-hdr-btn,.sos-app[data-sky-theme="night"] .sos-chip{background:rgba(255,243,228,.08)!important}
+@media (max-width: 900px){.topbar-nav{display:none}.welcome-hero::before{inset:6% 4%}.sos-sidebar-intro{padding:12px}}
