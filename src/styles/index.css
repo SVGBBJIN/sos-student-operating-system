@@ -1,7 +1,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0c0e17;--bg2:#0a0c15;--card:rgba(255,255,255,.05);--accent:#5B8DFF;--accent-dim:rgba(91,141,255,.4);--accent-glow:rgba(91,141,255,.15);--text:#e0e4f0;--text-dim:rgba(224,228,240,.4);--border:rgba(255,255,255,.07);--border-mid:rgba(255,255,255,.09);--danger:#f87171;--success:#34d399;--warning:#f59e0b;--green:#34d399;--blue:#5B8DFF;--orange:#f59e0b;--pink:#f87171;--teal:#34d399;--violet:#a78bfa;--radius:10px;--shadow:0 2px 12px rgba(0,0,0,0.4);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
-html,body{height:100%;font-size:16px}
-body{background:#0c0e17;color:var(--text);font-family:'DM Sans',system-ui,-apple-system,sans-serif;overflow:hidden;min-height:100vh}
+html,body{height:100%;min-height:100%;font-size:16px}
+body{background:#0c0e17;color:var(--text);font-family:'DM Sans',system-ui,-apple-system,sans-serif;overflow:hidden;min-height:100vh;min-height:100dvh}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -36,8 +36,8 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .card-pop{animation:cardPop .25s ease}
 
 /* SOS Layout */
-#root{height:100vh;display:flex;flex-direction:column}
-.sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,#05050a 0%,#070711 35%,#05050c 70%,#040408 100%);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
+#root{height:100vh;height:100dvh;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+.sos-app{display:flex;flex-direction:row;height:100vh;height:100dvh;min-height:100vh;min-height:100dvh;overflow:hidden;background:linear-gradient(160deg,#05050a 0%,#070711 35%,#05050c 70%,#040408 100%);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
 .sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(108,99,255,0.12);background:linear-gradient(180deg,rgba(10,10,18,0.98) 0%,rgba(6,6,12,0.98) 100%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
 .sos-sidebar.collapsed{width:86px;padding:14px 10px}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(108,99,255,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
@@ -213,7 +213,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .notes-empty{text-align:center;padding:40px 20px;color:var(--text-dim);font-size:0.88rem;line-height:1.6}
 
 /* Auth Screen */
-.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center;background:transparent}
+.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;height:100dvh;min-height:100vh;min-height:100dvh;padding:24px;text-align:center;background:transparent}
 .auth-form{background:linear-gradient(145deg,#1a1a2e 0%,#0f0f1a 100%);border:1px solid rgba(108,99,255,0.12);border-radius:24px;padding:32px 28px;width:100%;max-width:360px;animation:scaleIn .4s cubic-bezier(0.16,1,0.3,1)}
 .auth-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px 16px;color:var(--text);font-size:0.92rem;outline:none;margin-bottom:12px;transition:border-color .25s ease,box-shadow .25s ease}
 .auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,0.12),0 0 20px rgba(108,99,255,0.06)}
@@ -278,7 +278,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 .g-picked-file{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.3);border-radius:14px;margin-bottom:8px;animation:fadeIn .2s ease}
 
 /* Fullscreen panels */
-.notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
+.notes-panel.fullscreen,.peek-panel.fullscreen{position:fixed;inset:0;max-height:100vh;max-height:100dvh;border-radius:0;z-index:100;padding:20px 24px 24px;animation:overlayIn .2s ease}
 
 
 

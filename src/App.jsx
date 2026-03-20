@@ -13,6 +13,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+const MOBILE_LAYOUT_BREAKPOINT = 768;
+function isMobileViewport() {
+  return typeof window !== 'undefined' && window.innerWidth <= MOBILE_LAYOUT_BREAKPOINT;
+}
 
 /* ─── Date helpers ─── */
 function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
@@ -3691,7 +3695,11 @@ function App() {
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'sidebar');
+  const [isMobileLayout, setIsMobileLayout] = useState(() => isMobileViewport());
+  const [layoutMode, setLayoutMode] = useState(() => {
+    if (isMobileViewport()) return 'topbar';
+    return localStorage.getItem('sos_layout_mode') || 'sidebar';
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -5565,7 +5573,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  useEffect(() => {
+    const updateMobileLayout = () => {
+      const mobile = isMobileViewport();
+      setIsMobileLayout(mobile);
+      setLayoutMode(prev => {
+        if (mobile) return 'topbar';
+        if (prev === 'topbar' && localStorage.getItem('sos_layout_mode') === 'sidebar') return 'sidebar';
+        return prev;
+      });
+    };
+
+    updateMobileLayout();
+    window.addEventListener('resize', updateMobileLayout);
+    return () => window.removeEventListener('resize', updateMobileLayout);
+  }, []);
+  useEffect(() => {
+    if (isMobileLayout) return;
+    localStorage.setItem('sos_layout_mode', layoutMode);
+  }, [layoutMode, isMobileLayout]);
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
@@ -5665,7 +5691,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-main">
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
+          {!isMobileLayout && <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>}
           <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
