@@ -13,31 +13,29 @@ function seed(i, salt = 0) {
   return x - Math.floor(x);
 }
 
-/* ── Day Clouds ── */
+/* ── Day Clouds — 3 depth layers (v2) ── */
 function DayClouds() {
+  // layer classes: bg-layer (faint/blurry), mid-layer, fg-layer (crisp)
+  // dur is set per layer in CSS; only animationDelay is set inline
   const clouds = useMemo(() => [
-    { id: 0, size: 'large', top: '8%',  left: '12%', delay: '0s',   dur: '28s' },
-    { id: 1, size: '',      top: '22%', left: '58%', delay: '4s',   dur: '22s' },
-    { id: 2, size: 'small', top: '14%', left: '80%', delay: '8s',   dur: '18s' },
-    { id: 3, size: '',      top: '40%', left: '30%', delay: '2s',   dur: '25s' },
-    { id: 4, size: 'small', top: '55%', left: '68%', delay: '11s',  dur: '20s' },
-    { id: 5, size: 'large', top: '5%',  left: '42%', delay: '15s',  dur: '32s' },
+    // Background layer — large, barely visible, very slow
+    { id: 0, layer: 'bg-layer', size: 'large', top: '6%',  left: '8%',  delay: '0s'  },
+    { id: 1, layer: 'bg-layer', size: 'large', top: '20%', left: '55%', delay: '12s' },
+    // Mid layer — default opacity/blur
+    { id: 2, layer: 'mid-layer', size: '',     top: '12%', left: '30%', delay: '4s'  },
+    { id: 3, layer: 'mid-layer', size: '',     top: '38%', left: '70%', delay: '8s'  },
+    // Foreground layer — small, crispest, fastest
+    { id: 4, layer: 'fg-layer',  size: 'small', top: '18%', left: '82%', delay: '6s'  },
+    { id: 5, layer: 'fg-layer',  size: 'small', top: '48%', left: '22%', delay: '15s' },
   ], []);
 
   return (
     <>
-      {clouds.map(({ id, size, top, left, delay, dur }) => (
+      {clouds.map(({ id, layer, size, top, left, delay }) => (
         <div
           key={id}
-          className={`sky-cloud${size ? ' ' + size : ''}`}
-          style={{
-            top,
-            left,
-            width: size === 'large' ? 90 : size === 'small' ? 44 : 64,
-            height: size === 'large' ? 28 : size === 'small' ? 14 : 20,
-            animationDelay: delay,
-            animationDuration: dur,
-          }}
+          className={`sky-cloud ${layer}${size ? ' ' + size : ''}`}
+          style={{ top, left, animationDelay: delay }}
         />
       ))}
     </>
