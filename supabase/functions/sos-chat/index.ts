@@ -8,7 +8,8 @@ const corsHeaders = {
 };
 
 /* ── Model constants ── */
-const PRIMARY_MODEL = "openai/gpt-oss-120b";
+const PRIMARY_MODEL = "llama-3.3-70b-versatile";
+const BACKUP_MODEL  = "llama-3.1-70b-versatile";
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -774,7 +775,7 @@ serve(async (req: Request) => {
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
+    // not regex-gated detection. llama-3.3-70b-versatile handles chat + tool calling in one pass.
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
@@ -783,9 +784,9 @@ serve(async (req: Request) => {
       maxTokens,
       imageBase64,
       imageMimeType,
-      true,        // includeTools — always on; model decides when to call tools
-      null,        // toolsOverride — use full ACTION_TOOLS
-      null
+      true,         // includeTools — always on; model decides when to call tools
+      null,         // toolsOverride — use full ACTION_TOOLS
+      BACKUP_MODEL  // fallback if primary fails or returns empty
     );
 
     return new Response(JSON.stringify(result), {
