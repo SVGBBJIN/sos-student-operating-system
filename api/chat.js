@@ -7,8 +7,8 @@ const CORS_HEADERS = {
 };
 
 /* ── Model constants ── */
-const PRIMARY_MODEL = "llama-3.3-70b-versatile";
-const BACKUP_MODEL  = "llama-3.1-70b-versatile";
+const PRIMARY_MODEL = "openai/gpt-oss-120b";
+const BACKUP_MODEL  = "llama-3.3-70b-versatile";
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -710,7 +710,7 @@ export default async function handler(req, res) {
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. llama-3.3-70b-versatile handles chat + tool calling in one pass.
+    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
