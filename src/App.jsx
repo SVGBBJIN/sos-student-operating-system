@@ -5,6 +5,8 @@ import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } f
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
+import BackgroundCanvas from './components/BackgroundCanvas';
+import AmbientUI from './components/AmbientUI';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
@@ -5632,15 +5634,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Checking session on first load ──
   if (!authChecked) {
     return (
+      <BackgroundCanvas>
       <div className="auth-screen" style={{position:'relative'}}>
-        <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
-        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
-        <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
+        <div style={{position:'absolute',width:220,height:220,background:'radial-gradient(circle, rgba(167,139,207,0.12) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none'}}/>
+        <div style={{fontSize:'2.2rem',fontWeight:600,background:'linear-gradient(135deg, #A78BCF 0%, #BFD8F2 50%, #7A6FA3 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 4s ease infinite'}}>SOS</div>
+        <div style={{width:28,height:28,border:'3px solid rgba(167,139,207,0.2)',borderTopColor:'var(--accent)',borderRightColor:'rgba(191,216,242,0.6)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative'}}/>
       </div>
+      </BackgroundCanvas>
     );
   }
 
   return (
+    <BackgroundCanvas>
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
@@ -5881,11 +5886,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           const wv = welcomeVariants[welcomeIdx];
           return (
           <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
-            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(234,88,12,0.08) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #d97706 0%, #ea580c 50%, #f59e0b 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.35rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both',fontFamily:"'Crimson Text', Georgia, serif",letterSpacing:'-0.01em'}}>{wv.greeting}</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
+            <div style={{position:'absolute',top:'28%',width:280,height:280,background:'radial-gradient(circle, rgba(167,139,207,0.15) 0%, rgba(191,216,242,0.08) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(60px)',pointerEvents:'none',animation:'breathe 6s ease-in-out infinite, orbFloat 10s ease-in-out infinite'}}/>
+            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #A78BCF 0%, #7A6FA3 50%, #BFD8F2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:600,letterSpacing:'-1px',position:'relative',animation:'gradientShift 5s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
+            <div style={{fontSize:'1.25rem',color:'var(--text)',fontWeight:500,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both',letterSpacing:'-0.01em'}}>{wv.greeting}</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.7,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:10,justifyContent:'center',maxWidth:460,position:'relative'}}>
               {wv.chips.map((s,i)=>(
                 <button key={s} className="sos-chip" style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>
               ))}
@@ -6025,7 +6030,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         )}
         {pendingPhoto&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:12,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'rgba(255,255,255,0.18)',backdropFilter:'blur(8px)',WebkitBackdropFilter:'blur(8px)',borderRadius:999,border:'1px solid rgba(255,255,255,0.22)',animation:'fadeIn .2s ease'}}>
             <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:8,objectFit:'cover'}}/>
             <span style={{fontSize:'0.82rem',color:'var(--text-dim)',flex:1}}>Photo attached</span>
             <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
@@ -6046,7 +6051,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         ) : isTranscribing ? (
           /* ── Transcribing indicator ── */
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:28}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'rgba(255,255,255,0.18)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',border:'1px solid rgba(255,255,255,0.22)',borderRadius:999}}>
             <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
             <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
           </div>
@@ -6055,25 +6060,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
             <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
             {workspaceModeLabel && (
-              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
+              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:500,color:'var(--text)',background:'rgba(255,255,255,0.2)',border:'1px solid rgba(255,255,255,0.28)',whiteSpace:'nowrap',backdropFilter:'blur(6px)',WebkitBackdropFilter:'blur(6px)'}}>{workspaceModeLabel}</span>
             )}
             <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+              style={{width:40,height:40,borderRadius:'50%',background:pendingPhoto?'rgba(167,139,207,0.2)':'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.22)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
               {Icon.camera(18)}
             </button>
             <button type="button" onClick={startRecording} disabled={isLoading||!!viewingSavedChatId}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
+              style={{width:40,height:40,borderRadius:'50%',background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.22)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
               {Icon.mic(18)}
             </button>
             <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
               placeholder={viewingSavedChatId?"viewing saved chat — click 'Resume' to continue":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
               disabled={isLoading||!!viewingSavedChatId}
-              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
+              style={{flex:1,background:'rgba(255,255,255,0.18)',backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',color:'var(--text)',border:'1px solid rgba(255,255,255,0.22)',borderRadius:999,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)',animation:'float 4s ease-in-out infinite'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
+            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'rgba(255,255,255,0.12)':'linear-gradient(135deg,#A78BCF,#7A6FA3)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 4px 20px rgba(122,111,163,0.3)'}}>{Icon.send(18)}</button>
           </form>
         )}
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <AmbientUI />
       </div>
       </div>
       {showSidebarCompanion && (
@@ -6193,11 +6198,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
 
       {lightboxUrl&&(
-        <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
-          <img src={lightboxUrl} alt="full size" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:12,objectFit:'contain'}}/>
+        <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
+          <img src={lightboxUrl} alt="full size" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:24,objectFit:'contain'}}/>
         </div>
       )}
     </div>
+    </BackgroundCanvas>
   );
 }
 
