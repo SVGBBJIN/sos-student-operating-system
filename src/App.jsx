@@ -3651,10 +3651,31 @@ function formatAssistantMessage(content) {
   return DOMPurify.sanitize(withBreaks);
 }
 
-const TypingDots=()=>(
+function getLoadingMessage(msgContent, photo, isPlanRequest) {
+  const m = (msgContent || '').toLowerCase();
+  if (photo)           return "scanning your work…";
+  if (isPlanRequest)   return "building your study plan…";
+  if (CONTENT_GEN_REGEX.test(msgContent || '')) {
+    if (/flashcard/.test(m))              return "crafting flashcards…";
+    if (/quiz/.test(m))                   return "writing your quiz…";
+    if (/outline/.test(m))                return "building an outline…";
+    if (/summary|summarize/.test(m))      return "summarizing that…";
+    return "creating your study material…";
+  }
+  if (/\b(delete|remove|cancel|clear)\b/.test(m))           return "clearing that out…";
+  if (/\b(update|move|reschedule|change)\b/.test(m))         return "updating your schedule…";
+  if (/\b(exam|test|deadline)\b/.test(m))                    return "logging your exam…";
+  if (/\b(homework|assignment|project)\b/.test(m))           return "adding your homework…";
+  if (/\b(event|appointment|meeting|practice|game|tournament|dentist|doctor|club|lab)\b/.test(m)) return "building your calendar…";
+  if (/\b(schedule|block|time\s*slot)\b/.test(m))            return "blocking your time…";
+  if (/\btask\b/.test(m))                                    return "adding that task…";
+  return "thinkisizing…";
+}
+
+const ThinkingIndicator=({message="thinkisizing…"})=>(
   <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
+    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'10px 18px',display:'inline-flex',alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
+      <span style={{fontSize:13,fontStyle:'italic',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',animation:'textPulse 1.6s ease-in-out infinite'}}>{message}</span>
     </div>
   </div>
 );
@@ -3682,6 +3703,7 @@ function App() {
   // ── UI state ──
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
@@ -4944,6 +4966,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setMessages(updated);
     setInput('');
     setIsLoading(true);
+    setLoadingMessage(getLoadingMessage(msgContent, photo, isPlanRequest));
 
     // Persist demo messages to localStorage so they're migrated to Supabase on sign-up
     if (!user && msgContent) {
@@ -5972,7 +5995,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
           </div>
         ))}
-        {isLoading&&<TypingDots/>}
+        {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>
       </div>

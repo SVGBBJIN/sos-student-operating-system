@@ -10,6 +10,7 @@ input,textarea,select,button{font-family:inherit;font-size:inherit}
 @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes dotPulse{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
+@keyframes textPulse{0%,100%{opacity:0.65}50%{opacity:1}}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
 @keyframes toastIn{from{opacity:0;transform:translateY(-20px) translateX(-50%)}to{opacity:1;transform:translateY(0) translateX(-50%)}}
 @keyframes toastOut{from{opacity:1;transform:translateY(0) translateX(-50%)}to{opacity:0;transform:translateY(-20px) translateX(-50%)}}
