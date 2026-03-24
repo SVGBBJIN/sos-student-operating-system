@@ -3304,7 +3304,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
       {/* ── Regular peek content ── */}
       <div className="peek-section">
         <div className="peek-section-title">Today's Schedule</div>
-        {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Nothing scheduled today</div>:
+        {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Wide open! Your future self will thank you 🗓️</div>:
         condensed.map((block,i)=>(
           <div key={i} className="peek-timeline-slot"><div className="peek-timeline-time">{fmtTime(...block.start.split(':').map(Number))}</div>
           <div className="peek-timeline-block" style={{background:catColor(block.category)+'20',borderLeft:'3px solid '+catColor(block.category)}}>{block.name}<span style={{fontSize:'0.72rem',color:'var(--text-dim)',marginLeft:8}}>{block.slots*30}min</span></div></div>
@@ -3530,7 +3530,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
         {filteredNotes.length === 0 && !searchQuery.trim() && !isCreatingNew && (
           <div className="notes-empty">
             <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.fileText(28)}</div>
-            <div>No notes yet</div>
+            <div>Nothing here yet — drop your first note 📝</div>
             <div style={{fontSize:'0.82rem',marginTop:4}}>Click "+ New Note" to create one, or import a PDF, Google Doc, or save study materials from chat</div>
           </div>
         )}
@@ -3651,10 +3651,31 @@ function formatAssistantMessage(content) {
   return DOMPurify.sanitize(withBreaks);
 }
 
-const TypingDots=()=>(
+function getLoadingMessage(msgContent, photo, isPlanRequest) {
+  const m = (msgContent || '').toLowerCase();
+  if (photo)           return "scanning your work…";
+  if (isPlanRequest)   return "building your study plan…";
+  if (CONTENT_GEN_REGEX.test(msgContent || '')) {
+    if (/flashcard/.test(m))              return "crafting flashcards…";
+    if (/quiz/.test(m))                   return "writing your quiz…";
+    if (/outline/.test(m))                return "building an outline…";
+    if (/summary|summarize/.test(m))      return "summarizing that…";
+    return "creating your study material…";
+  }
+  if (/\b(delete|remove|cancel|clear)\b/.test(m))           return "clearing that out…";
+  if (/\b(update|move|reschedule|change)\b/.test(m))         return "updating your schedule…";
+  if (/\b(exam|test|deadline)\b/.test(m))                    return "logging your exam…";
+  if (/\b(homework|assignment|project)\b/.test(m))           return "adding your homework…";
+  if (/\b(event|appointment|meeting|practice|game|tournament|dentist|doctor|club|lab)\b/.test(m)) return "building your calendar…";
+  if (/\b(schedule|block|time\s*slot)\b/.test(m))            return "blocking your time…";
+  if (/\btask\b/.test(m))                                    return "adding that task…";
+  return "thinkisizing…";
+}
+
+const ThinkingIndicator=({message="thinkisizing…"})=>(
   <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',display:'flex',gap:6,alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
-      {[0,1,2].map(i=>(<span key={i} style={{width:7,height:7,borderRadius:'50%',background:'linear-gradient(135deg, var(--accent), var(--teal))',display:'inline-block',animation:'dotPulse 1.2s ease-in-out infinite',animationDelay:(i*0.15)+'s',boxShadow:'0 0 8px rgba(108,99,255,0.3)'}}/>))}
+    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'10px 18px',display:'inline-flex',alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
+      <span style={{fontSize:13,fontStyle:'italic',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',animation:'textPulse 1.6s ease-in-out infinite'}}>{message}</span>
     </div>
   </div>
 );
@@ -3682,6 +3703,7 @@ function App() {
   // ── UI state ──
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
@@ -3743,7 +3765,9 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
-  const [guestMsgCount, setGuestMsgCount] = useState(0);
+  const [guestMsgCount, setGuestMsgCount] = useState(
+    () => parseInt(localStorage.getItem('sos_guest_msg_count') || '0', 10)
+  );
   // Google OAuth state
   const [googleToken, setGoogleToken] = useState(() => {
     const t = sessionStorage.getItem('sos_google_token');
@@ -3811,7 +3835,7 @@ function App() {
     { greeting: "Let's Get You Ahead", desc: "I can track your tasks, manage your schedule, create flashcards, and help you study smarter. Just tell me what you need.", chips: ['What\'s due this week?','Quiz me on vocabulary','I finished my essay','Help me plan my study time'] },
     { greeting: "Your Schedule, Simplified", desc: "Think of me as your personal planner that actually talks back. Tell me what's coming up and I'll handle the rest.", chips: ['I have a test tomorrow','Show me my tasks','Make flashcards for history','What should I prioritize?'] },
   ], []);
-  const welcomeIdx = useMemo(() => Math.floor(Math.random() * 5), []);
+  const welcomeIdx = 0; // Pinned to first variant for a stable, consistent first impression
 
   // ── Auth handler ──
   async function handleAuth(authUser) {
@@ -4942,6 +4966,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setMessages(updated);
     setInput('');
     setIsLoading(true);
+    setLoadingMessage(getLoadingMessage(msgContent, photo, isPlanRequest));
 
     // Persist demo messages to localStorage so they're migrated to Supabase on sign-up
     if (!user && msgContent) {
@@ -5111,7 +5136,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ? rawContent
         : actions.length > 0
           ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
-          : "hmm, didn't get a response. try again?";
+          : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
       if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
@@ -5222,8 +5247,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
       console.error('Chat error:', err);
-      const msg = err.message || '';
-      setChatError(msg || "Unknown error");
+      const raw = err.message || '';
+      let friendlyMsg;
+      if (raw.includes('500') || raw.includes('Internal') || raw.includes('timed out')) {
+        friendlyMsg = "the AI service is temporarily unavailable — please try again in a moment.";
+      } else if (raw.includes('503') || raw.includes('overloaded')) {
+        friendlyMsg = "the AI is a bit overloaded right now — wait a few seconds and try again.";
+      } else if (raw.includes('401') || raw.includes('403')) {
+        friendlyMsg = "authentication error — please refresh the page and try again.";
+      } else if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('network')) {
+        friendlyMsg = "couldn't reach the server — check your connection and try again.";
+      } else {
+        friendlyMsg = raw || "something went wrong — please try again.";
+      }
+      setChatError(friendlyMsg);
     } finally { setIsLoading(false); }
   }
 
@@ -5249,12 +5286,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     sendMessage(readableResponse, { fromClarification: true });
   }
 
+  function incrementGuestCount() {
+    setGuestMsgCount(c => {
+      const next = c + 1;
+      try { localStorage.setItem('sos_guest_msg_count', String(next)); } catch (_) {}
+      return next;
+    });
+  }
+
   function handleSubmit(e) {
     if(e)e.preventDefault();
     if(viewingSavedChatId)return;
     if(!user){
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setShowAuthModal(true); return; }
-      setGuestMsgCount(c => c + 1);
+      incrementGuestCount();
     }
     sendMessage(input);
   }
@@ -5268,7 +5313,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if(viewingSavedChatId)return;
     if(!user){
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(normalizedText); setShowAuthModal(true); return; }
-      setGuestMsgCount(c => c + 1);
+      incrementGuestCount();
       setInput('');
       sendMessage(normalizedText);
       return;
@@ -5632,7 +5677,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           {savedChats.length === 0 ? (
             <div className="chat-sidebar-empty" style={{paddingTop:24}}>
               <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-              <div>No saved conversations yet</div>
+              <div>No saved chats yet. Like bookmarks, but smarter.</div>
             </div>
           ) : (
             <div className="chat-sidebar-list">
@@ -5690,7 +5735,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             tasks={tasks}
             events={events}
             notes={notes}
-            onBack={() => setActivePanel('chat')}
+            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); }}
             onToggleTutorMode={toggleTutorMode}
             onPrompt={launchTutorPrompt}
             onOpenNotes={() => openCompanionPanel('notes')}
@@ -5836,9 +5881,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           const wv = welcomeVariants[welcomeIdx];
           return (
           <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
-            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(108,99,255,0.12) 0%, rgba(43,203,186,0.06) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.05rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both'}}>{wv.greeting}</div>
+            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(234,88,12,0.08) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
+            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #d97706 0%, #ea580c 50%, #f59e0b 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
+            <div style={{fontSize:'1.35rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both',fontFamily:"'Crimson Text', Georgia, serif",letterSpacing:'-0.01em'}}>{wv.greeting}</div>
             <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
               {wv.chips.map((s,i)=>(
@@ -5950,7 +5995,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
           </div>
         ))}
-        {isLoading&&<TypingDots/>}
+        {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>
       </div>
@@ -6101,7 +6146,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {savedChats.length === 0 ? (
               <div className="chat-sidebar-empty">
                 <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-                <div>No saved conversations yet</div>
+                <div>No saved chats yet. Like bookmarks, but smarter.</div>
                 <div style={{fontSize:'0.78rem',marginTop:4}}>Use "Save chat" to keep a conversation</div>
               </div>
             ) : (
