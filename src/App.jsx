@@ -6,6 +6,9 @@ import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
+import BackgroundMotif from './components/BackgroundMotif';
+import MotifBadge from './components/MotifBadge';
+import './styles/lofi-sky-theme.css';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -3725,6 +3728,13 @@ function App() {
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
+  const [appTheme, setAppTheme] = useState(() => localStorage.getItem('sos_app_theme') || 'default');
+  const skyTime = useMemo(() => {
+    const h = new Date().getHours();
+    if (h >= 6 && h < 16) return 'day';
+    if (h >= 16 && h < 20) return 'sunset';
+    return 'night';
+  }, []);
   const showSideBySide = showPeek && showNotes;
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
   const getWorkspaceContext = useCallback((overridePanel = null) => {
@@ -5616,6 +5626,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
   useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  useEffect(() => {
+    localStorage.setItem('sos_app_theme', appTheme);
+    if (appTheme === 'lofi-sky') {
+      document.documentElement.setAttribute('data-theme', 'lofi-sky');
+      document.documentElement.setAttribute('data-sky-time', skyTime);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.removeAttribute('data-sky-time');
+    }
+  }, [appTheme, skyTime]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -5642,6 +5662,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   return (
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      {appTheme === 'lofi-sky' && <BackgroundMotif skyTime={skyTime} />}
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -5720,6 +5741,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
+          <MotifBadge visible={appTheme === 'lofi-sky'} />
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
           <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
           <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
@@ -5749,6 +5771,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <div className="settings-card">
               <div className="settings-title">Settings</div>
               <div className="settings-sub">Customize your workspace layout and keep the controls for topbar/sidebar behavior in one place.</div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Appearance theme</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the default theme and the cozy Lo-Fi Sky theme.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setAppTheme(t=>t==='lofi-sky'?'default':'lofi-sky')}>{appTheme==='lofi-sky'?'Default theme':'Lo-Fi Sky ✦'}</button>
+              </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
