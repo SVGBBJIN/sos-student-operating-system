@@ -4871,8 +4871,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   // ── Save / Load / Delete chat conversations ──
-  function saveChat() {
+  function autoSaveCurrentChat() {
     if (messages.length === 0) return;
+    if (viewingSavedChatId) return;
     const firstUserMsg = messages.find(m => m.role === 'user');
     const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) + (firstUserMsg.content.length > 60 ? '...' : '') : 'Chat ' + new Date().toLocaleDateString();
     const chatId = uid();
@@ -4882,10 +4883,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     const note = { id: chatId, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setSavedChats(prev => [{ id: chatId, ...chatData }, ...prev]);
-    // Clear current chat
-    setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
-    if (user) dbClearChat(user.id);
-    setToastMsg('Chat saved');
   }
 
   function loadSavedChat(chatId) {
@@ -4901,49 +4898,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
     if (viewingSavedChatId === chatId) { setViewingSavedChatId(null); setMessages([]); setDailyBrief(null); briefRequestedRef.current = false; }
     setToastMsg('Conversation deleted');
-  }
-
-  function exitSavedChatView() {
-    setViewingSavedChatId(null);
-    setMessages([]);
-    // Reset daily brief so it can re-trigger for fresh session
-    setDailyBrief(null);
-    briefRequestedRef.current = false;
-    // Reload current chat from DB
-    if (user) {
-      sb.from('chat_messages').select('*').eq('user_id', user.id).order('created_at').then(({ data }) => {
-        if (data) {
-          const msgs = data.map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.created_at).getTime(), photoUrl: m.photo_url || null }));
-          setMessages(msgs);
-          setDbMessageCount(msgs.length); // P1.4
-        }
-      });
-    }
-  }
-
-  function resumeSavedChat(chatId) {
-    const chat = savedChats.find(c => c.id === chatId);
-    if (!chat) return;
-    // Clear viewing lock so user can type
-    setViewingSavedChatId(null);
-    setMessages(chat.messages || []);
-    setShowChatSidebar(false);
-    setPendingActions([]);
-    setPendingClarification(null);
-    setPendingClarificationAnswers(null);
-    setChatError(null);
-    // Persist resumed messages as the new active chat in DB
-    if (user) {
-      dbClearChat(user.id).then(() => {
-        (chat.messages || []).forEach(m => {
-          dbInsertChatMsg(m.role, m.content, user.id, m.photoUrl || null);
-        });
-      });
-    }
-    // Remove from saved chats since it's now the active chat
-    setSavedChats(prev => prev.filter(c => c.id !== chatId));
-    if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
-    setToastMsg('Chat resumed');
   }
 
   function autoConfirmPending() {
@@ -5324,7 +5278,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function handleSubmit(e) {
     if(e)e.preventDefault();
-    if(viewingSavedChatId)return;
     if(!user){
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setShowAuthModal(true); return; }
       incrementGuestCount();
@@ -5339,7 +5292,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ? (notes.length > 0 ? 'Create a quiz from my notes and ask me one question at a time.' : 'Create a quiz for the topic I should study next and ask me one question at a time.')
         : text;
     if (/flashcard|quiz me|create a quiz/i.test(normalizedText)) primeTutorSession();
-    if(viewingSavedChatId)return;
     if(!user){
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(normalizedText); setShowAuthModal(true); return; }
       incrementGuestCount();
@@ -5534,7 +5486,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function clearChat() {
     setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
+    setViewingSavedChatId(null);
     if (user) dbClearChat(user.id);
+  }
+
+  function startNewChat() {
+    autoSaveCurrentChat();
+    setActivePanel('chat');
+    clearChat();
+    closeSidebarCompanion();
   }
 
   async function handleLogout() {
@@ -5625,18 +5585,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  const quickChips = [
-    { label:'What should I do?', msg:'What should I work on right now?' },
-    { label:'Enter tutor mode', action:enterTutorMode },
-    { label:'Add a task', msg:'I need to add a task' },
-    { label:'Schedule + chat', action:()=>openCompanionPanel('schedule') },
-    { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
-    { label:'Quiz me', msg:'Quiz me on what I need to study' },
-    { label:'Notes + chat', action:()=>openCompanionPanel('notes') },
-    { label:'Import', action:()=>setShowGoogleModal(true) },
-    { label:'Settings', action:()=>setActivePanel('settings') },
-  ];
-
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
@@ -5706,7 +5654,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           <button className="sos-side-btn" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
@@ -5738,7 +5686,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div className="chat-sidebar-item-meta">
                     <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
                     <span style={{display:'flex',gap:4}}>
-                      <button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button>
                       <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
                     </span>
                   </div>
@@ -5924,16 +5871,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-        {viewingSavedChatId && (
-          <div style={{padding:'8px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(108,99,255,0.06)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:12,margin:'0 16px 8px',animation:'fadeIn .2s ease'}}>
-            <span style={{fontSize:'0.82rem',color:'var(--accent)',fontWeight:600}}>Viewing saved conversation</span>
-            <div style={{display:'flex',gap:6}}>
-              <button onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'var(--teal,#2bd5ba)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Resume</button>
-              <button onClick={exitSavedChatView} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'5px 12px',fontSize:'0.78rem',fontWeight:600,cursor:'pointer',transition:'all .15s'}}>Back</button>
-            </div>
-          </div>
-        )}
-        {messages.length===0&&!isLoading&&!viewingSavedChatId&&(()=>{
+        {messages.length===0&&!isLoading&&(()=>{
           // Default welcome screen
           const wv = welcomeVariants[welcomeIdx];
           return (
@@ -6074,10 +6012,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-input-area">
         {messages.length>0&&(
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
-            {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
-            {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
-            {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
             <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
           </div>
         )}
@@ -6118,16 +6052,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
               {Icon.camera(18)}
             </button>
-            <button type="button" onClick={startRecording} disabled={isLoading||!!viewingSavedChatId}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:(isLoading||viewingSavedChatId)?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:(isLoading||viewingSavedChatId)?0.5:1}}>
+            <button type="button" onClick={startRecording} disabled={isLoading}
+              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
               {Icon.mic(18)}
             </button>
             <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={viewingSavedChatId?"viewing saved chat — click 'Resume' to continue":pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
-              disabled={isLoading||!!viewingSavedChatId}
-              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
+              placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+              disabled={isLoading}
+              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
+            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
@@ -6204,7 +6138,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <div className="chat-sidebar-empty">
                 <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
                 <div>No saved chats yet. Like bookmarks, but smarter.</div>
-                <div style={{fontSize:'0.78rem',marginTop:4}}>Use "Save chat" to keep a conversation</div>
+                <div style={{fontSize:'0.78rem',marginTop:4}}>Click New chat to save your current conversation</div>
               </div>
             ) : (
               <div className="chat-sidebar-list">
@@ -6215,7 +6149,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     <div className="chat-sidebar-item-meta">
                       <span>{chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''} · {fmt(chat.savedAt)}</span>
                       <span style={{display:'flex',gap:4}}>
-                        <button className="chat-sidebar-item-delete" style={{color:'var(--teal,#2bd5ba)'}} onClick={e => { e.stopPropagation(); resumeSavedChat(chat.id); }}>Resume</button>
                         <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
                       </span>
                     </div>
