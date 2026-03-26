@@ -33,11 +33,6 @@ export default function IdleLockScreen() {
     };
   }, [visible]);
 
-  const handleCTA = () => {
-    window.dispatchEvent(new MouseEvent('mousemove'));
-    document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-  };
-
   if (!visible) return null;
 
   return (
@@ -49,9 +44,6 @@ export default function IdleLockScreen() {
     >
       <div className="idle-lock-wordmark" aria-hidden="true">SOS</div>
       <div className="idle-lock-sub">Ready when you are.</div>
-      <button className="idle-lock-cta neon-primary" onClick={handleCTA}>
-        Let&apos;s get to work
-      </button>
     </div>
   );
 }

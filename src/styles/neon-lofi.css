@@ -925,3 +925,36 @@ button,
   -webkit-backdrop-filter: blur(18px) saturate(1.35) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
 }
+
+/* Overlay panels instead of resizing chat width */
+.sos-app {
+  position: relative;
+}
+
+.sos-sidebar {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 36;
+  height: 100vh;
+  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.32);
+}
+
+.sos-main {
+  width: 100%;
+}
+
+.sos-chat-shell {
+  position: relative;
+}
+
+.sos-chat-companion {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  height: 100%;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.28);
+}
