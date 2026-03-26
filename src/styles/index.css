@@ -1,5 +1,5 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#fffbeb;--bg2:#fef3c7;--card:rgba(245,158,11,.07);--accent:#d97706;--accent-dim:rgba(217,119,6,.4);--accent-glow:rgba(245,158,11,.18);--text:#166534;--text-dim:rgba(22,101,52,.45);--border:rgba(22,101,52,.12);--border-mid:rgba(22,101,52,.18);--danger:#dc2626;--success:#16a34a;--warning:#d97706;--green:#16a34a;--blue:#0369a1;--orange:#ea580c;--pink:#dc2626;--teal:#0d9488;--violet:#7c3aed;--radius:16px;--shadow:0 2px 12px rgba(22,101,52,0.12);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
+:root{--bg:#060b1d;--bg2:#0b1430;--card:rgba(45,104,255,.12);--accent:#38d8e8;--accent-dim:rgba(56,216,232,.36);--accent-glow:rgba(56,216,232,.2);--text:#d9e4ff;--text-dim:rgba(201,216,255,.56);--border:rgba(112,142,214,.2);--border-mid:rgba(126,160,241,.34);--danger:#ff6b81;--success:#35d29a;--warning:#ffb347;--green:#35d29a;--blue:#4ea4ff;--orange:#ff9f43;--pink:#ff6bcb;--teal:#38d8e8;--violet:#7c8dff;--radius:16px;--shadow:0 2px 16px rgba(1,9,30,0.5);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
 html[data-theme-mode]{
   --text:#eaf2ff;
@@ -8,15 +8,15 @@ html[data-theme-mode]{
   --border-mid:rgba(180,207,255,0.46);
 }
 html[data-theme-mode="default"]{
-  --bg:#050506;
-  --bg2:#0a0a0c;
-  --card:rgba(255,255,255,0.05);
-  --accent:#5E6AD2;
-  --accent-dim:rgba(94,106,210,0.34);
-  --text:#EDEDEF;
-  --text-dim:#8A8F98;
-  --border:rgba(255,255,255,0.08);
-  --border-mid:rgba(255,255,255,0.12);
+  --bg:#060b1d;
+  --bg2:#0b1430;
+  --card:rgba(45,104,255,.12);
+  --accent:#38d8e8;
+  --accent-dim:rgba(56,216,232,.36);
+  --text:#dfe8ff;
+  --text-dim:#91a3c9;
+  --border:rgba(112,142,214,.2);
+  --border-mid:rgba(126,160,241,.34);
 }
 body{background:transparent;color:var(--text);font-family:'DM Sans',system-ui,-apple-system,sans-serif;overflow:hidden;min-height:100vh}
 html[data-theme-mode="default"] body{
@@ -68,7 +68,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 #root{height:100vh;display:flex;flex-direction:column}
 .sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,rgba(6,10,20,0.42) 0%,rgba(12,18,32,0.3) 50%,rgba(6,10,20,0.46) 100%);backdrop-filter:blur(2px);transition:background .45s cubic-bezier(0.16,1,0.3,1);position:relative;isolation:isolate}
 html[data-theme-mode="default"] .sos-app{
-  background:radial-gradient(ellipse at top,#0a0a0f 0%,#050506 52%,#020203 100%);
+  background:
+    radial-gradient(1200px 700px at 82% 16%, rgba(76,94,190,0.22), transparent 72%),
+    radial-gradient(820px 620px at 18% 88%, rgba(37,179,255,0.14), transparent 74%),
+    linear-gradient(160deg,#040918 0%,#060c22 44%,#050a1a 100%);
 }
 html[data-theme-mode="default"] .sos-app::before{
   content:'';
@@ -77,9 +80,9 @@ html[data-theme-mode="default"] .sos-app::before{
   z-index:0;
   pointer-events:none;
   background:
-    radial-gradient(1000px 620px at 52% 10%, rgba(94,106,210,0.24), transparent 72%),
-    radial-gradient(680px 520px at 12% 28%, rgba(139,92,246,0.16), transparent 72%),
-    radial-gradient(620px 460px at 88% 34%, rgba(59,130,246,0.12), transparent 74%);
+    radial-gradient(1000px 620px at 52% 10%, rgba(98,126,255,0.2), transparent 72%),
+    radial-gradient(680px 520px at 12% 28%, rgba(40,187,255,0.1), transparent 72%),
+    radial-gradient(620px 460px at 88% 34%, rgba(96,84,230,0.14), transparent 74%);
   filter:blur(72px);
   animation:ambientFloat 10s ease-in-out infinite;
 }
@@ -106,7 +109,7 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
   border-radius:18px !important;
 }
 .sos-app > *{position:relative;z-index:1}
-.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(255,255,255,.2);background:linear-gradient(180deg,rgba(255,255,255,0.16) 0%,rgba(255,255,255,0.09) 100%);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
+.sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(104,134,214,.24);background:linear-gradient(180deg,rgba(8,14,36,0.92) 0%,rgba(5,9,25,0.94) 100%);backdrop-filter:blur(18px) saturate(125%);-webkit-backdrop-filter:blur(18px) saturate(125%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
 .sos-sidebar.collapsed{width:86px;padding:14px 10px}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
 .sos-side-label,.sos-side-meta,.sos-side-list,.sos-side-indicators,.sync-label{opacity:1;transform:translateX(0);max-height:900px;overflow:hidden;visibility:visible;transition:opacity .22s ease,transform .22s ease,max-height .3s ease,margin .3s ease,padding .3s ease,visibility .22s}
@@ -122,9 +125,9 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 .topbar-sidebar-btn:active{transform:translateY(0) scale(0.97)}
 .sos-sidebar-brand{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0}
 .sos-brand-logo{display:block;filter:drop-shadow(0 4px 12px rgba(42,168,255,0.22))}
-.sos-side-btn{width:100%;border:1px solid rgba(245,158,11,0.2);background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(234,88,12,0.08));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
-.sos-side-btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 18px rgba(245,158,11,0.18)}
-.sos-side-btn.active{border-color:rgba(245,158,11,0.95);background:linear-gradient(135deg,rgba(245,158,11,0.34),rgba(234,88,12,0.2));box-shadow:0 0 0 1px rgba(245,158,11,0.28),0 10px 28px rgba(245,158,11,0.32),0 0 26px rgba(234,88,12,0.18)}
+.sos-side-btn{width:100%;border:1px solid rgba(70,114,220,0.35);background:linear-gradient(135deg,rgba(13,24,56,0.85),rgba(9,19,45,0.72));color:var(--text);border-radius:12px;padding:10px 12px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:all .2s}
+.sos-side-btn:hover{transform:translateY(-1px);border-color:rgba(96,187,255,0.76);box-shadow:0 8px 24px rgba(26,75,196,0.24)}
+.sos-side-btn.active{border-color:rgba(66,219,240,0.92);background:linear-gradient(135deg,rgba(24,56,122,0.52),rgba(21,49,112,0.34));box-shadow:0 0 0 1px rgba(66,219,240,0.2),0 10px 28px rgba(26,75,196,0.3)}
 .sos-side-actions{display:flex;flex-direction:column;gap:8px;position:relative;z-index:1}
 .sos-side-meta{font-size:0.73rem;color:var(--text-dim);display:flex;align-items:center;justify-content:space-between;padding:2px 4px}
 .sos-side-list{flex:1;overflow-y:auto;padding-right:2px;position:relative;z-index:1}
@@ -153,7 +156,7 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 .settings-toggle{border:1px solid rgba(245,158,11,0.22);background:rgba(245,158,11,0.1);color:var(--text);padding:8px 12px;border-radius:12px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all .2s ease}
 .settings-toggle:hover{border-color:var(--accent);background:rgba(245,158,11,0.16)}
 
-.sos-input-area{flex-shrink:0;border-top:1px solid rgba(255,255,255,.22);background:linear-gradient(180deg,rgba(255,255,255,0.16) 0%,rgba(255,255,255,0.1) 100%);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
+.sos-input-area{flex-shrink:0;border-top:1px solid rgba(90,124,214,.3);background:linear-gradient(180deg,rgba(11,21,52,0.86) 0%,rgba(9,18,45,0.9) 100%);backdrop-filter:blur(18px) saturate(130%);-webkit-backdrop-filter:blur(18px) saturate(130%);padding:8px 16px 12px;transition:all .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg{padding:8px 16px;display:flex}
 .sos-msg-user{justify-content:flex-end;animation:slideInRight .3s cubic-bezier(0.16,1,0.3,1)}
 .sos-msg-ai{justify-content:flex-start;animation:slideInLeft .3s cubic-bezier(0.16,1,0.3,1)}
@@ -161,9 +164,9 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 .sos-bubble-user{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;border-bottom-right-radius:16px;box-shadow:0 2px 12px rgba(245,158,11,0.2);background-size:200% 200%;animation:gradientShift 6s ease infinite}
 .sos-bubble-ai{background:linear-gradient(135deg,rgba(26,26,46,0.95) 0%,rgba(15,15,26,0.95) 100%);border:1px solid rgba(245,158,11,0.08);border-bottom-left-radius:16px;backdrop-filter:blur(8px);animation:borderGlow 3s ease-in-out infinite}
 .sos-bubble-time{font-size:0.6rem;opacity:0.45;margin-top:4px;text-align:right}
-.sos-chip{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:var(--accent);padding:6px 14px;border-radius:24px;font-size:0.82rem;cursor:pointer;transition:all .25s cubic-bezier(0.16,1,0.3,1);white-space:nowrap;position:relative;overflow:hidden;flex-shrink:0}
-.sos-chip::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(245,158,11,0.08),transparent);transform:translateX(-100%);transition:none}
-.sos-chip:hover{background:linear-gradient(135deg,rgba(245,158,11,0.18),rgba(234,88,12,0.1));border-color:var(--accent);box-shadow:0 2px 16px rgba(245,158,11,0.15);transform:translateY(-1px)}
+.sos-chip{background:rgba(64,89,196,0.18);border:1px solid rgba(86,120,242,0.36);color:#7e8fff;padding:6px 14px;border-radius:24px;font-size:0.82rem;cursor:pointer;transition:all .25s cubic-bezier(0.16,1,0.3,1);white-space:nowrap;position:relative;overflow:hidden;flex-shrink:0}
+.sos-chip::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(87,140,255,0.12),transparent);transform:translateX(-100%);transition:none}
+.sos-chip:hover{background:linear-gradient(135deg,rgba(92,118,245,0.24),rgba(67,90,220,0.18));border-color:rgba(128,170,255,0.8);box-shadow:0 2px 16px rgba(46,80,196,0.22);transform:translateY(-1px)}
 .sos-chip:hover::after{transform:translateX(100%);transition:transform .5s ease}
 .sos-chip:active{transform:translateY(0) scale(0.96)}
 
