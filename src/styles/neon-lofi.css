@@ -876,3 +876,94 @@ select option {
   color: var(--text-ghost);
   border-color: rgba(144, 151, 168, 0.1);
 }
+
+/* ─── Softer Corners + Unified Glassmorphism (Requested) ─────────── */
+:root { --radius: 14px; }
+
+button,
+.sos-side-btn,
+.sos-collapse-btn,
+.topbar-sidebar-btn,
+.sos-companion-toggle,
+.confirm-btn,
+.g-hdr-btn,
+.settings-toggle,
+.sos-chip,
+.notes-new-btn,
+.notes-save-btn,
+.notes-cancel-btn,
+.notes-fs-btn,
+.cal-nav-btn,
+.g-btn,
+.auth-btn,
+.sos-send-btn,
+.idle-lock-cta,
+.sfx-toggle {
+  border-radius: 12px !important;
+  clip-path: none !important;
+}
+
+.sos-side-btn.active,
+.chat-sidebar-item.active {
+  border-left-width: 1px !important;
+}
+
+.sos-app,
+.sos-main,
+.sos-chat-shell,
+.sos-chat-column,
+.sos-chat-area {
+  background: transparent !important;
+}
+
+.sos-sidebar,
+.sos-header,
+.sos-chat-companion {
+  background: rgba(10, 14, 24, 0.5) !important;
+  backdrop-filter: blur(18px) saturate(1.35) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.35) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.sos-input-area {
+  background: rgba(10, 14, 24, 0.42) !important;
+  backdrop-filter: blur(14px) saturate(1.25) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.25) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  position: relative;
+  z-index: 22;
+}
+
+/* Overlay panels instead of resizing chat width */
+.sos-app {
+  position: relative;
+}
+
+.sos-sidebar {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 36;
+  height: 100vh;
+  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.32);
+}
+
+.sos-main {
+  width: 100%;
+}
+
+.sos-chat-shell {
+  position: relative;
+  flex-direction: row;
+}
+
+.sos-chat-companion {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  height: 100%;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.28);
+}

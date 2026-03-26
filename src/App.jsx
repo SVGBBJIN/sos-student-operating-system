@@ -4355,11 +4355,7 @@ function App() {
     setToastMsg('✓ ' + name + ' ' + verb);
     const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
     if (calendarActionTypes.includes(action.type)) {
-      if (layoutMode === 'sidebar') {
-        openCompanionPanel('schedule');
-      } else if (!showSideBySide) {
-        setShowPeek(true);
-      }
+      openMergedWorkspace('schedule');
     }
   }
   function handleCancelAction(idx) { sfx.dismiss(); setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
@@ -5539,6 +5535,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setShowNotes(false);
   }
 
+  function openMergedWorkspace(panel) {
+    if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+    openSidebarCompanion(panel);
+  }
+
   function closeSidebarCompanion() {
     setSidebarCompanionPanel('none');
     setCompanionCollapsed(true);
@@ -5553,23 +5554,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){
         e.preventDefault();
-        if (layoutMode === 'topbar') {
-          setShowPeek(p=>!p);
-        } else if (activePanel === 'chat') {
-          openCompanionPanel('schedule');
-        } else {
-          setShowPeek(p=>!p);
-        }
+        openMergedWorkspace('schedule');
       }
       else if(key==='n'){
         e.preventDefault();
-        if (layoutMode === 'topbar') {
-          setShowNotes(p=>!p);
-        } else if (activePanel === 'chat') {
-          openCompanionPanel('notes');
-        } else {
-          setShowNotes(p=>!p);
-        }
+        openMergedWorkspace('notes');
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
@@ -5618,10 +5607,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     { label:'What should I do?', msg:'What should I work on right now?' },
     { label:'Enter tutor mode', action:enterTutorMode },
     { label:'Add a task', msg:'I need to add a task' },
-    { label:'My schedule', action:()=>setShowPeek(true) },
+    { label:'My schedule', action:()=>openMergedWorkspace('schedule') },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
-    { label:'Notes', action:()=>setShowNotes(true) },
+    { label:'Notes', action:()=>openMergedWorkspace('notes') },
     { label:'Import', action:()=>setShowGoogleModal(true) },
     { label:'Settings', action:()=>setActivePanel('settings') },
   ];
@@ -5746,8 +5735,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
-          <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
+          <button onClick={()=>openMergedWorkspace('schedule')} className="g-hdr-btn">{Icon.clipboard(14)} Schedule + chat</button>
+          <button onClick={()=>openMergedWorkspace('notes')} className="g-hdr-btn">{Icon.fileText(14)} Notes + chat</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
         </div>
@@ -5990,8 +5979,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   setToastMsg('Added '+toExec.length+' items');
                   const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
                   if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
-                    else if(!showSideBySide){setShowPeek(true);}
+                    openMergedWorkspace('schedule');
                   }
                 }
               }}

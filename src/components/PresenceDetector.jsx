@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { usePresence } from '../context/PresenceContext';
 
 // Fires the neon-strike flicker on all .neon-primary elements
@@ -15,19 +15,12 @@ function triggerNeonStrike() {
 
 export default function PresenceDetector() {
   const { presenceState, trackingEnabled, toggleTracking, STATES } = usePresence();
-  const [pillText, setPillText] = useState(null);   // null = hidden
-  const [pillVisible, setPillVisible] = useState(false);
-  const returnTimerRef = useRef(null);
   const prevStateRef   = useRef(presenceState);
 
   // ── Listen for RETURN custom event ──────────────────────────────
   useEffect(() => {
     const onReturn = () => {
       triggerNeonStrike();
-      setPillText('Welcome back');
-      setPillVisible(true);
-      clearTimeout(returnTimerRef.current);
-      returnTimerRef.current = setTimeout(() => setPillVisible(false), 2000);
     };
     window.addEventListener('sos:presence-return', onReturn);
     return () => window.removeEventListener('sos:presence-return', onReturn);
@@ -38,30 +31,8 @@ export default function PresenceDetector() {
     const prev = prevStateRef.current;
     prevStateRef.current = presenceState;
 
-    if (presenceState === STATES.AWAY) {
-      setPillText('Session paused');
-      setPillVisible(true);
-    } else if (presenceState === STATES.ABSENT) {
-      setPillText('Waiting for you\u2026');
-      setPillVisible(true);
-    } else if (presenceState === STATES.PRESENT && (prev === STATES.AWAY || prev === STATES.ABSENT)) {
-      // RETURN: already handled by the custom event, but fallback here
-      if (pillText !== 'Welcome back') {
-        setPillText('Welcome back');
-        setPillVisible(true);
-        clearTimeout(returnTimerRef.current);
-        returnTimerRef.current = setTimeout(() => setPillVisible(false), 2000);
-      }
-    } else if (presenceState === STATES.PRESENT || presenceState === STATES.GLANCED_AWAY) {
-      // Clear pill on short idle
-      if (pillText !== 'Welcome back') {
-        setPillVisible(false);
-      }
-    }
+    if (presenceState === STATES.PRESENT && (prev === STATES.AWAY || prev === STATES.ABSENT)) triggerNeonStrike();
   }, [presenceState, STATES]);
-
-  // ── Cleanup ───────────────────────────────────────────────────────
-  useEffect(() => () => clearTimeout(returnTimerRef.current), []);
 
   const isAway    = presenceState === STATES.AWAY;
   const isAbsent  = presenceState === STATES.ABSENT;
@@ -80,7 +51,7 @@ export default function PresenceDetector() {
       : '0 0 6px var(--neon-cyan)';
 
   const tooltip   = trackingEnabled
-    ? 'SOS pauses your session when you step away. Click to disable.'
+    ? 'Activity tracking is on. Click to disable.'
     : 'Activity tracking off. Click to enable.';
 
   return (
@@ -97,48 +68,6 @@ export default function PresenceDetector() {
         pointerEvents: 'none',
       }}
     >
-      {/* ── Status pill ──────────────────────────────────────────── */}
-      {pillText && (
-        <div
-          style={{
-            pointerEvents: 'none',
-            width: 150,
-            padding: '6px 12px',
-            background: 'rgba(6, 8, 18, 0.92)',
-            border: '1px solid rgba(255,255,255,0.07)',
-            borderTop: `1px solid ${isAbsent || isAway ? 'var(--neon-amber)' : 'var(--neon-cyan)'}`,
-            borderRadius: 999,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 7,
-            opacity: pillVisible ? 1 : 0,
-            transform: pillVisible ? 'translateY(0)' : 'translateY(6px)',
-            transition: 'opacity 350ms ease, transform 350ms ease',
-          }}
-        >
-          {/* Blinking cursor dot */}
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: '50%',
-              background: isAbsent || isAway ? 'var(--neon-amber)' : 'var(--neon-cyan)',
-              flexShrink: 0,
-              animation: isAway || isAbsent ? 'blink-cursor 1s ease-in-out infinite' : 'none',
-            }}
-          />
-          <span style={{
-            fontFamily: 'var(--font-body)',
-            fontSize: 11,
-            color: 'var(--text-secondary)',
-            letterSpacing: '0.03em',
-            whiteSpace: 'nowrap',
-          }}>
-            {pillText}
-          </span>
-        </div>
-      )}
-
       {/* ── Activity tracking dot ─────────────────────────────────── */}
       <button
         title={tooltip}
