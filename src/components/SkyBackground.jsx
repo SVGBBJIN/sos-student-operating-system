@@ -2,23 +2,28 @@ import { useState, useEffect, useMemo } from 'react';
 
 // ─── Sky state configuration ────────────────────────────────────────
 const SKY_STATES = {
-  sunrise: {
-    gradient: 'linear-gradient(180deg, #1a1c2e 0%, #2d2040 20%, #7a3a2a 55%, #d4713a 78%, #f0a855 92%, #ffd49e 100%)',
-    rainCount: 3,
+  morning: {
+    gradient: 'radial-gradient(circle at 50% 30%, #dcecff 0%, #bfd8f2 38%, #a7c8ec 68%, #a78bcf 100%)',
+    rainCount: 0,
   },
-  midday: {
-    gradient: 'linear-gradient(180deg, #2c4a6e 0%, #87CEEB 25%, #b8dff5 55%, #e8f4fb 85%, #f5f0e0 100%)',
+  afternoon: {
+    gradient: 'radial-gradient(circle at 52% 28%, #d6e6fb 0%, #bfd8f2 40%, #b8c4ef 68%, #a78bcf 100%)',
+    rainCount: 0,
+  },
+  sunset: {
+    gradient: 'radial-gradient(circle at 50% 30%, #f7c3ac 0%, #f7b7a3 32%, #c49ad8 62%, #7a6fa3 100%)',
     rainCount: 0,
   },
   night: {
-    gradient: 'linear-gradient(180deg, #050810 0%, #0a0c18 35%, #0d1020 65%, #141828 100%)',
-    rainCount: 6,
+    gradient: 'radial-gradient(circle at 50% 30%, #3d3f76 0%, #2b2d62 35%, #1b1b40 68%, #131331 100%)',
+    rainCount: 0,
   },
 };
 
 function getSkyState(hour) {
-  if (hour >= 5 && hour < 10) return 'sunrise';
-  if (hour >= 10 && hour < 16) return 'midday';
+  if (hour >= 6 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 20) return 'sunset';
   return 'night';
 }
 
@@ -78,8 +83,9 @@ export default function SkyBackground() {
 
   const config = SKY_STATES[skyState];
   const isNight   = skyState === 'night';
-  const isMidday  = skyState === 'midday';
-  const isSunrise = skyState === 'sunrise';
+  const isAfternoon  = skyState === 'afternoon';
+  const isSunset = skyState === 'sunset';
+  const showClouds = !isNight;
 
   // ── Rain streaks (CSS-only diagonal lines) ───────────────────────
   const rainStreaks = useMemo(() => {
@@ -128,8 +134,8 @@ export default function SkyBackground() {
         }}
       />
 
-      {/* ── Layer 0: Sun (midday only) ───────────────────────────── */}
-      {isMidday && (
+      {/* ── Layer 0: Sun (afternoon only) ────────────────────────── */}
+      {isAfternoon && (
         <div
           className="sky-layer sky-sun"
           aria-hidden="true"
@@ -169,9 +175,36 @@ export default function SkyBackground() {
                 background: '#fff',
                 opacity: 0.7 + (i % 3) * 0.1,
                 boxShadow: `0 0 ${s.size * 2}px rgba(255,255,255,0.6)`,
+                animation: `star-twinkle ${8 + i * 2}s ease-in-out ${i * 0.7}s infinite`,
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Layer 0.5: Cloud drift (day/sunrise) ─────────────────── */}
+      {showClouds && (
+        <div
+          className="sky-layer sky-clouds"
+          aria-hidden="true"
+          style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}
+        >
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(50% 28% at 20% 24%, rgba(255,255,255,0.2), transparent 70%), radial-gradient(42% 24% at 68% 28%, rgba(255,255,255,0.16), transparent 70%)',
+            filter: 'blur(28px)',
+            opacity: isSunset ? 0.22 : 0.18,
+            animation: 'cloud-drift-slow 38s ease-in-out infinite',
+          }}/>
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(40% 22% at 34% 32%, rgba(255,255,255,0.22), transparent 68%), radial-gradient(46% 26% at 78% 36%, rgba(255,255,255,0.18), transparent 70%)',
+            filter: 'blur(18px)',
+            opacity: isSunset ? 0.26 : 0.2,
+            animation: 'cloud-drift-mid 26s ease-in-out infinite',
+          }}/>
         </div>
       )}
 
@@ -312,7 +345,7 @@ export default function SkyBackground() {
                 background: 'linear-gradient(180deg, transparent 0%, rgba(180,210,255,0.3) 40%, rgba(200,225,255,0.22) 100%)',
                 transform: 'rotate(8deg)',
                 animation: `rain-fall ${s.dur} linear ${s.delay} infinite`,
-                opacity: isSunrise ? 0.25 : 0.42,
+                opacity: isSunset ? 0.25 : 0.42,
               }}
             />
           ))}
@@ -326,6 +359,18 @@ export default function SkyBackground() {
           10%  { opacity: 1; }
           90%  { opacity: 1; }
           100% { transform: rotate(8deg) translateY(110vh); opacity: 0; }
+        }
+        @keyframes cloud-drift-slow {
+          0%,100% { transform: translateX(0px) translateY(0px); }
+          50% { transform: translateX(18px) translateY(-6px); }
+        }
+        @keyframes cloud-drift-mid {
+          0%,100% { transform: translateX(0px) translateY(0px); }
+          50% { transform: translateX(-20px) translateY(-4px); }
+        }
+        @keyframes star-twinkle {
+          0%,100% { opacity: 0.2; }
+          50% { opacity: 0.58; }
         }
       `}</style>
     </>

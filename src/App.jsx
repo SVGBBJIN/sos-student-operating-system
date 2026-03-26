@@ -3777,6 +3777,18 @@ function App() {
       window.removeEventListener('sos:presence-return', onReturn);
     };
   }, []);
+  useEffect(() => {
+    sfx.startAmbient();
+    const onSfxChange = () => {
+      if (sfx.isEnabled()) sfx.startAmbient();
+      else sfx.stopAmbient();
+    };
+    window.addEventListener('sos:sfx-change', onSfxChange);
+    return () => {
+      window.removeEventListener('sos:sfx-change', onSfxChange);
+      sfx.stopAmbient();
+    };
+  }, []);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
