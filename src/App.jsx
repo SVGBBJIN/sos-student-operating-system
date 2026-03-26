@@ -35,6 +35,13 @@ function fmtTime(h, m) {
   return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
 }
 
+function getSkyTimeMode(hour = new Date().getHours()) {
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 20) return 'sunset';
+  return 'night';
+}
+
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
   const entries = Object.entries(slotMap).filter(([,v]) => v).sort(([a],[b]) => a.localeCompare(b));
@@ -5608,6 +5615,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     { label:'Import', action:()=>setShowGoogleModal(true) },
     { label:'Settings', action:()=>setActivePanel('settings') },
   ];
+  const [skyMode, setSkyMode] = useState(() => getSkyTimeMode());
+  const ambientClouds = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => ({
+      id: i,
+      top: `${8 + i * 11}%`,
+      width: `${140 + (i % 3) * 80}px`,
+      delay: `${i * -6}s`,
+      duration: `${26 + i * 4}s`,
+      opacity: skyMode === 'night' ? 0 : 0.12 + (i % 4) * 0.05,
+    })),
+    [skyMode]
+  );
+  const ambientStars = useMemo(
+    () => Array.from({ length: 34 }, (_, i) => ({
+      id: i,
+      top: `${8 + (i * 13) % 72}%`,
+      left: `${4 + (i * 29) % 92}%`,
+      delay: `${(i % 8) * 0.4}s`,
+      duration: `${2.8 + (i % 5) * 1.2}s`,
+      size: `${1 + (i % 3)}px`,
+    })),
+    []
+  );
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
@@ -5617,6 +5647,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
   useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  useEffect(() => {
+    const tick = () => setSkyMode(getSkyTimeMode());
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -5642,7 +5678,43 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+    <div className={`sos-app sos-app-${skyMode}`} style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      <div className="ambient-sky-layer" aria-hidden="true">
+        <div className="ambient-gradient" />
+        <div className="ambient-cloud-layer">
+          {ambientClouds.map(cloud => (
+            <span
+              key={cloud.id}
+              className="ambient-cloud"
+              style={{
+                top: cloud.top,
+                width: cloud.width,
+                animationDuration: cloud.duration,
+                animationDelay: cloud.delay,
+                opacity: cloud.opacity,
+              }}
+            />
+          ))}
+        </div>
+        {skyMode === 'night' && (
+          <div className="ambient-star-layer">
+            {ambientStars.map(star => (
+              <span
+                key={star.id}
+                className="ambient-star"
+                style={{
+                  top: star.top,
+                  left: star.left,
+                  width: star.size,
+                  height: star.size,
+                  animationDelay: star.delay,
+                  animationDuration: star.duration,
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
       <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
