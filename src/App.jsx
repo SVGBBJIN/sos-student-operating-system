@@ -5665,7 +5665,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     return (
       <div className="auth-screen" style={{position:'relative'}}>
         <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none',animation:'breathe 3s ease-in-out infinite'}}/>
-        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
+        <div style={{fontSize:'2.2rem',fontWeight:900,color:'transparent',background:'linear-gradient(135deg, #4de7f5 0%, #38d8e8 55%, #58b8ff 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
         <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
         <div style={{marginTop:12,fontSize:'0.85rem',color:'var(--text-dim)',position:'relative',animation:'textReveal 0.4s ease 0.2s both'}}>Loading your data...</div>
       </div>
@@ -5677,7 +5677,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     return (
       <div className="auth-screen" style={{position:'relative'}}>
         <div style={{position:'absolute',width:200,height:200,background:'radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)',borderRadius:'50%',filter:'blur(40px)',pointerEvents:'none'}}/>
-        <div style={{fontSize:'2.2rem',fontWeight:900,background:'linear-gradient(135deg, #7B6CFF 0%, var(--teal) 50%, #45aaf2 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
+        <div style={{fontSize:'2.2rem',fontWeight:900,color:'transparent',background:'linear-gradient(135deg, #4de7f5 0%, #38d8e8 55%, #58b8ff 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',marginBottom:16,position:'relative',animation:'gradientShift 3s ease infinite'}}>SOS</div>
         <div style={{width:28,height:28,border:'3px solid rgba(108,99,255,0.15)',borderTopColor:'var(--accent)',borderRightColor:'var(--teal)',borderRadius:'50%',animation:'spin 0.8s linear infinite',position:'relative',boxShadow:'0 0 16px rgba(108,99,255,0.15)'}}/>
       </div>
     );
@@ -5767,14 +5767,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
           </div>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
+        <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
-          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn">{Icon.clipboard(14)} Schedule + chat</button>
-          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn">{Icon.fileText(14)} Notes + chat</button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
+          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
+          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
+          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Enter tutor mode</span></button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>History</span></button>
+          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
         </div>
       </div>}
 
@@ -5939,7 +5939,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           return (
           <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
             <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(234,88,12,0.08) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,background:'linear-gradient(135deg, #d97706 0%, #ea580c 50%, #f59e0b 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
+            <div style={{fontSize:'3.2rem',marginBottom:16,color:'transparent',background:'linear-gradient(135deg, #4de7f5 0%, #38d8e8 55%, #58b8ff 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
             <div style={{fontSize:'1.35rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both',fontFamily:"'Crimson Text', Georgia, serif",letterSpacing:'-0.01em'}}>{wv.greeting}</div>
             <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
