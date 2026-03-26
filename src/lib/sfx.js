@@ -7,6 +7,9 @@
 let _ctx = null;
 let _master = null;
 let _lp = null;
+let _ambientNoiseSource = null;
+let _ambientNoiseGain = null;
+let _ambientPulseInterval = null;
 const STORAGE_KEY = 'sos:sfx-enabled';
 
 function getCtx() {
@@ -41,6 +44,8 @@ function setEnabled(v) {
 function toggle() {
   const next = !isEnabled();
   setEnabled(next);
+  if (next) startAmbient();
+  else stopAmbient();
   return next;
 }
 
@@ -185,6 +190,69 @@ export function unlock() {
   synth({ type: 'sine', freq: 440, attack: 0.005, decay: 0.12, peak: 0.65, delay: 0.07  });
   synth({ type: 'sine', freq: 550, attack: 0.005, decay: 0.18, peak: 0.55, delay: 0.14  });
   noise(0.05, 0.025, 0.14);
+}
+
+/**
+ * Ambient audio bed: low white-noise texture + occasional soft lo-fi pulses.
+ * Placeholder for future asset-backed ambience.
+ */
+export function startAmbient() {
+  if (!isEnabled()) return;
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+  if (_ambientNoiseSource) return;
+
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 1100;
+  lp.Q.value = 0.8;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 180;
+  hp.Q.value = 0.6;
+
+  const gain = ctx.createGain();
+  gain.gain.value = 0.012;
+
+  source.connect(lp);
+  lp.connect(hp);
+  hp.connect(gain);
+  gain.connect(_master);
+  source.start();
+
+  _ambientNoiseSource = source;
+  _ambientNoiseGain = gain;
+
+  _ambientPulseInterval = window.setInterval(() => {
+    if (!isEnabled()) return;
+    synth({ type: 'sine', freq: 196, attack: 0.08, decay: 1.6, peak: 0.06, detune: -2 });
+    synth({ type: 'triangle', freq: 247, attack: 0.08, decay: 1.3, peak: 0.04, detune: 4, delay: 0.12 });
+  }, 18000);
+}
+
+export function stopAmbient() {
+  if (_ambientPulseInterval) {
+    clearInterval(_ambientPulseInterval);
+    _ambientPulseInterval = null;
+  }
+  if (_ambientNoiseSource) {
+    try { _ambientNoiseSource.stop(); } catch {}
+    _ambientNoiseSource.disconnect();
+    _ambientNoiseSource = null;
+  }
+  if (_ambientNoiseGain) {
+    _ambientNoiseGain.disconnect();
+    _ambientNoiseGain = null;
+  }
 }
 
 export { isEnabled, setEnabled, toggle };

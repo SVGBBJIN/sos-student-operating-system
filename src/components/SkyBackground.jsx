@@ -80,6 +80,7 @@ export default function SkyBackground() {
   const isNight   = skyState === 'night';
   const isMidday  = skyState === 'midday';
   const isSunrise = skyState === 'sunrise';
+  const showClouds = !isNight;
 
   // ── Rain streaks (CSS-only diagonal lines) ───────────────────────
   const rainStreaks = useMemo(() => {
@@ -169,9 +170,36 @@ export default function SkyBackground() {
                 background: '#fff',
                 opacity: 0.7 + (i % 3) * 0.1,
                 boxShadow: `0 0 ${s.size * 2}px rgba(255,255,255,0.6)`,
+                animation: `star-twinkle ${8 + i * 2}s ease-in-out ${i * 0.7}s infinite`,
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Layer 0.5: Cloud drift (day/sunrise) ─────────────────── */}
+      {showClouds && (
+        <div
+          className="sky-layer sky-clouds"
+          aria-hidden="true"
+          style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}
+        >
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(50% 28% at 20% 24%, rgba(255,255,255,0.2), transparent 70%), radial-gradient(42% 24% at 68% 28%, rgba(255,255,255,0.16), transparent 70%)',
+            filter: 'blur(28px)',
+            opacity: isSunrise ? 0.22 : 0.18,
+            animation: 'cloud-drift-slow 38s ease-in-out infinite',
+          }}/>
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(40% 22% at 34% 32%, rgba(255,255,255,0.22), transparent 68%), radial-gradient(46% 26% at 78% 36%, rgba(255,255,255,0.18), transparent 70%)',
+            filter: 'blur(18px)',
+            opacity: isSunrise ? 0.26 : 0.2,
+            animation: 'cloud-drift-mid 26s ease-in-out infinite',
+          }}/>
         </div>
       )}
 
@@ -326,6 +354,18 @@ export default function SkyBackground() {
           10%  { opacity: 1; }
           90%  { opacity: 1; }
           100% { transform: rotate(8deg) translateY(110vh); opacity: 0; }
+        }
+        @keyframes cloud-drift-slow {
+          0%,100% { transform: translateX(0px) translateY(0px); }
+          50% { transform: translateX(18px) translateY(-6px); }
+        }
+        @keyframes cloud-drift-mid {
+          0%,100% { transform: translateX(0px) translateY(0px); }
+          50% { transform: translateX(-20px) translateY(-4px); }
+        }
+        @keyframes star-twinkle {
+          0%,100% { opacity: 0.2; }
+          50% { opacity: 0.58; }
         }
       `}</style>
     </>
