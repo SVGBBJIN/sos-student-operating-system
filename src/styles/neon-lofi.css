@@ -344,7 +344,7 @@ body {
 .sos-companion-toggle {
   background: rgba(0, 229, 204, 0.06) !important;
   border: 1px solid rgba(0, 229, 204, 0.18) !important;
-  border-radius: 0 !important;
+  border-radius: 14px !important;
   color: var(--text-secondary) !important;
 }
 .sos-companion-toggle:hover {
@@ -356,13 +356,13 @@ body {
 /* ─── Chat Messages ───────────────────────────────────────────────── */
 
 .sos-bubble {
-  border-radius: 2px !important;
+  border-radius: 18px !important;
 }
 .sos-bubble-user {
   background: linear-gradient(135deg, var(--neon-cyan), var(--neon-violet)) !important;
   color: #fff !important;
-  border-bottom-right-radius: 0 !important;
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  border-bottom-right-radius: 14px !important;
+  clip-path: none !important;
   box-shadow: none !important;
   animation: none !important;
 }
@@ -370,7 +370,7 @@ body {
   background: rgba(12, 15, 26, 0.88) !important;
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
   border-top: 1px solid rgba(0, 229, 204, 0.2) !important;
-  border-bottom-left-radius: 0 !important;
+  border-bottom-left-radius: 14px !important;
   animation: none !important;
 }
 
@@ -378,7 +378,7 @@ body {
   background: transparent !important;
   border: 1px solid rgba(0, 229, 204, 0.28) !important;
   color: var(--neon-cyan) !important;
-  border-radius: 2px !important;
+  border-radius: 16px !important;
 }
 .sos-chip:hover {
   background: rgba(0, 229, 204, 0.08) !important;
@@ -431,7 +431,7 @@ body {
 /* ─── Inputs & Forms ──────────────────────────────────────────────── */
 
 input, textarea, select {
-  border-radius: 0 !important;
+  border-radius: 12px !important;
   background: rgba(0, 0, 0, 0.35) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
   color: var(--text-primary) !important;
@@ -460,6 +460,13 @@ select option {
 .sos-input-wrap:focus-within {
   border-color: rgba(0, 229, 204, 0.4) !important;
   box-shadow: 0 0 0 1px rgba(0, 229, 204, 0.15) !important;
+}
+
+
+
+button {
+  border-radius: 14px !important;
+  clip-path: none !important;
 }
 
 /* ─── Buttons ─────────────────────────────────────────────────────── */
@@ -875,4 +882,16 @@ select option {
 .sfx-toggle[aria-pressed="false"] {
   color: var(--text-ghost);
   border-color: rgba(144, 151, 168, 0.1);
+}
+
+
+/* Glassmorphism pass for shell surfaces */
+.sos-sidebar,
+.sos-chat-companion,
+.sos-input-area,
+.sos-header {
+  background: linear-gradient(180deg, rgba(11, 16, 30, 0.58), rgba(11, 16, 30, 0.42)) !important;
+  backdrop-filter: blur(18px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(135%) !important;
+  border-color: rgba(0, 229, 204, 0.2) !important;
 }
