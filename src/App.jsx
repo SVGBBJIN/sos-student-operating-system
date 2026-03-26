@@ -106,6 +106,16 @@ function weatherEmoji(code) {
   return Icon.cloudLightning(18);
 }
 
+function weatherThemeKey(code) {
+  if (code === null || code === undefined) return 'clear';
+  if (code <= 1) return 'clear';
+  if (code <= 48) return 'cloudy';
+  if (code <= 67) return 'rainy';
+  if (code <= 77) return 'snowy';
+  if (code <= 82) return 'rainy';
+  return 'stormy';
+}
+
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 10;
 
@@ -3724,6 +3734,7 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
+  const [weatherThemeEnabled, setWeatherThemeEnabled] = useState(() => localStorage.getItem('sos_weather_theme') === 'true');
   const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
   const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
@@ -5618,10 +5629,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     { label:'What should I do?', msg:'What should I work on right now?' },
     { label:'Enter tutor mode', action:enterTutorMode },
     { label:'Add a task', msg:'I need to add a task' },
-    { label:'My schedule', action:()=>setShowPeek(true) },
+    { label:'Schedule + chat', action:()=>openCompanionPanel('schedule') },
     { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
     { label:'Quiz me', msg:'Quiz me on what I need to study' },
-    { label:'Notes', action:()=>setShowNotes(true) },
+    { label:'Notes + chat', action:()=>openCompanionPanel('notes') },
     { label:'Import', action:()=>setShowGoogleModal(true) },
     { label:'Settings', action:()=>setActivePanel('settings') },
   ];
@@ -5634,6 +5645,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
   useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  useEffect(() => { localStorage.setItem('sos_weather_theme', weatherThemeEnabled ? 'true' : 'false'); }, [weatherThemeEnabled]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme-mode', weatherThemeEnabled ? 'weather' : 'default');
+    if (weatherThemeEnabled) {
+      root.setAttribute('data-weather-theme', weatherThemeKey(weatherData?.current?.weathercode));
+    } else {
+      root.removeAttribute('data-weather-theme');
+    }
+    return () => {
+      root.removeAttribute('data-theme-mode');
+      root.removeAttribute('data-weather-theme');
+    };
+  }, [weatherThemeEnabled, weatherData]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -5746,8 +5771,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
-          <button onClick={()=>setShowPeek(p=>!p)} className="g-hdr-btn">{Icon.clipboard(14)} Peek</button>
-          <button onClick={()=>setShowNotes(true)} className="g-hdr-btn">{Icon.fileText(14)} Notes</button>
+          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn">{Icon.clipboard(14)} Schedule + chat</button>
+          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn">{Icon.fileText(14)} Notes + chat</button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
         </div>
@@ -5830,6 +5855,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
                   <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
                 </div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Weather-based theme</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Off = default blue gradient. On = theme colors react to local weather.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setWeatherThemeEnabled(prev=>!prev)}>{weatherThemeEnabled ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
@@ -6021,7 +6053,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         ))}
         {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
-        {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:12,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
+        {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:16,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>
       </div>
 
@@ -6035,7 +6067,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               : <strong style={{color:'var(--warning)'}}>Demo limit reached — sign up to keep going</strong>
             }
           </span>
-          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
+          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);}} style={{background:'var(--accent)',border:'none',borderRadius:14,color:'#fff',fontSize:'0.76rem',fontWeight:700,padding:'4px 10px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free →</button>
         </div>
       )}
       {/* ── Input Area ── */}
@@ -6050,8 +6082,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         )}
         {pendingPhoto&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:12,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
-            <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:8,objectFit:'cover'}}/>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:'var(--bg)',borderRadius:16,border:'1px solid var(--border)',animation:'fadeIn .2s ease'}}>
+            <img src={pendingPhoto.preview} alt="attached" style={{width:48,height:48,borderRadius:12,objectFit:'cover'}}/>
             <span style={{fontSize:'0.82rem',color:'var(--text-dim)',flex:1}}>Photo attached</span>
             <button onClick={()=>setPendingPhoto(null)} style={{background:'transparent',border:'none',color:'var(--danger)',cursor:'pointer',padding:'4px 8px',display:'flex'}}>{Icon.x(16)}</button>
           </div>
@@ -6071,7 +6103,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         ) : isTranscribing ? (
           /* ── Transcribing indicator ── */
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:28}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'14px 16px',background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.15)',borderRadius:20}}>
             <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
             <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
           </div>
@@ -6095,7 +6127,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               disabled={isLoading||!!viewingSavedChatId}
               style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:0,background:'transparent',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?0.3:1,clipPath:'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)'}}>{Icon.send(18)}</button>
+            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
