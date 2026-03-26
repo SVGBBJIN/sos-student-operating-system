@@ -5,6 +5,10 @@ import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } f
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
+import PresenceDetector from './components/PresenceDetector';
+import IdleLockScreen from './components/IdleLockScreen';
+import SfxToggle from './components/SfxToggle';
+import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
@@ -3762,6 +3766,17 @@ function App() {
     return null;
   }, []);
   const [toastMsg, setToastMsg] = useState(null);
+  useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
+  useEffect(() => {
+    const onLock   = () => sfx.lock();
+    const onReturn = () => sfx.unlock();
+    window.addEventListener('sos:idle-lock',        onLock);
+    window.addEventListener('sos:presence-return',  onReturn);
+    return () => {
+      window.removeEventListener('sos:idle-lock',       onLock);
+      window.removeEventListener('sos:presence-return', onReturn);
+    };
+  }, []);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
@@ -4332,6 +4347,7 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
+    sfx.confirm();
     executeAction(action);
     setPendingActions(prev => prev.filter((_,i)=>i!==idx));
     const name = action.title||action.activity||'Action';
@@ -4346,7 +4362,7 @@ function App() {
       }
     }
   }
-  function handleCancelAction(idx) { setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
+  function handleCancelAction(idx) { sfx.dismiss(); setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
 
   // ── Content save/dismiss helpers ──
   function formatContentForNote(c) {
@@ -5140,6 +5156,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+        sfx.arrive();
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) {
           dbInsertChatMsg('assistant', displayContent, user.id);
@@ -5301,6 +5318,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setShowAuthModal(true); return; }
       incrementGuestCount();
     }
+    if(input.trim()) sfx.send();
     sendMessage(input);
   }
   function sendChip(text) {
@@ -5642,6 +5660,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   return (
     <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+      {/* Neon Lofi — corner targeting reticles (decorative) */}
+      <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
+      <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
+      <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
+      <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
+      {/* Loading scan line */}
+      {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -5656,12 +5681,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" onClick={enterTutorMode} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
@@ -6070,7 +6095,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               disabled={isLoading||!!viewingSavedChatId}
               style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:(isLoading||viewingSavedChatId)?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:'50%',background:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'var(--border)':'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .2s',flexShrink:0,boxShadow:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'none':'0 2px 12px rgba(108,99,255,0.3)'}}>{Icon.send(18)}</button>
+            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:0,background:'transparent',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||!!viewingSavedChatId||(!input.trim()&&!pendingPhoto))?0.3:1,clipPath:'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)'}}>{Icon.send(18)}</button>
           </form>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
@@ -6190,7 +6215,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
-
+      <PresenceDetector />
+      <IdleLockScreen />
+      <SfxToggle />
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
