@@ -1,0 +1,715 @@
+/* ═══════════════════════════════════════════════════════════════════
+   NEON LOFI URBANIST — Design System Override Layer
+   Loaded after index.css via main.jsx — cascades on top.
+   Legacy CSS variables are repointed here so existing App.jsx
+   components automatically inherit the new palette.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── Google Fonts ─────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300;1,400&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@300;400&display=swap');
+
+/* ─── Design Tokens ────────────────────────────────────────────────── */
+:root {
+  /* Core backgrounds */
+  --bg-deep:    #080a12;
+  --bg-surface: rgba(22, 26, 36, 0.72);
+  --bg-panel:   rgba(18, 22, 32, 0.85);
+
+  /* Neon palette */
+  --neon-cyan:   #00E5CC;
+  --neon-violet: #9B5DE5;
+  --neon-amber:  #FFB830;
+  --neon-cta:    var(--neon-cyan);
+
+  /* Text */
+  --text-primary:   #E8EAF0;
+  --text-secondary: #9097A8;
+  --text-ghost:     rgba(232, 234, 240, 0.35);
+
+  /* Fonts */
+  --font-display: 'Syne', sans-serif;
+  --font-body:    'DM Sans', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-jp:      'Noto Sans JP', sans-serif;
+
+  /* Neon glows — box-shadow only, never background fills */
+  --glow-cyan:   0 0 8px rgba(0, 229, 204, 0.4),  0 0 24px rgba(0, 229, 204, 0.15);
+  --glow-violet: 0 0 8px rgba(155, 93, 229, 0.4), 0 0 24px rgba(155, 93, 229, 0.15);
+  --glow-amber:  0 0 8px rgba(255, 184, 48, 0.4), 0 0 24px rgba(255, 184, 48, 0.15);
+
+  /* Motion — no spring, no bounce */
+  --ease-neon: cubic-bezier(0.4, 0, 0.2, 1);
+  --t-fast:    150ms;
+  --t-mid:     200ms;
+
+  /* Sky window colors (overridden per data-sky state) */
+  --win-lit:  var(--neon-cyan);
+  --win-dark: rgba(0, 0, 0, 0.6);
+
+  /* Japanese text overlay opacity (overridden per data-sky state) */
+  --jp-opacity: 0.05;
+
+  /* ── Repoint legacy index.css variables → new palette ──────────────
+     Every existing component using var(--accent), var(--text), etc.
+     automatically inherits the new Neon Lofi values. No App.jsx changes
+     needed for color propagation.
+  ──────────────────────────────────────────────────────────────────── */
+  --bg:          var(--bg-deep);
+  --bg2:         var(--bg-panel);
+  --card:        var(--bg-surface);
+  --accent:      var(--neon-cyan);
+  --accent-dim:  rgba(0, 229, 204, 0.4);
+  --accent-glow: var(--glow-cyan);
+  --text:        var(--text-primary);
+  --text-dim:    var(--text-secondary);
+  --teal:        var(--neon-cyan);
+  --violet:      var(--neon-violet);
+  --radius:      2px;        /* was 10px — sharp rectangular components */
+  --shadow:      var(--glow-cyan);
+}
+
+/* ─── Sky State Overrides ──────────────────────────────────────────── */
+/* Applied via data-sky attribute on <html> by SkyBackground.jsx       */
+
+[data-sky="sunrise"] {
+  --neon-cyan:   rgba(0, 229, 204, 0.4);
+  --neon-violet: rgba(155, 93, 229, 0.4);
+  --neon-amber:  rgba(255, 184, 48, 0.7);
+  --neon-cta:    var(--neon-amber);
+  --win-lit:     rgba(255, 180, 80, 0.5);
+  --win-dark:    rgba(0, 0, 0, 0.6);
+  --jp-opacity:  0.03;
+  --accent:      rgba(0, 229, 204, 0.4);
+}
+[data-sky="midday"] {
+  --neon-cyan:   rgba(0, 229, 204, 0.25);
+  --neon-violet: rgba(155, 93, 229, 0.20);
+  --neon-amber:  rgba(255, 184, 48, 0.25);
+  --neon-cta:    #00B8D4;
+  --bg-surface:  rgba(20, 26, 40, 0.88);
+  --win-lit:     rgba(140, 180, 220, 0.2);
+  --win-dark:    rgba(0, 0, 0, 0.5);
+  --jp-opacity:  0.02;
+  --accent:      rgba(0, 229, 204, 0.25);
+}
+[data-sky="night"] {
+  --neon-cyan:   #00E5CC;
+  --neon-violet: #9B5DE5;
+  --neon-amber:  #FFB830;
+  --neon-cta:    var(--neon-cyan);
+  --win-lit:     var(--neon-cyan);
+  --jp-opacity:  0.05;
+  --accent:      #00E5CC;
+}
+
+/* ─── Presence / Activity State Overrides ─────────────────────────── */
+/* Applied via data-presence on <html> by PresenceDetector.jsx         */
+/* City dims progressively as student becomes idle                      */
+
+.sky-layer,
+.neon-primary {
+  transition: opacity 800ms var(--ease-neon), filter 1200ms var(--ease-neon);
+}
+[data-presence="glanced_away"] .sky-layer {
+  opacity: 0.6;
+  transition: opacity 300ms ease;
+}
+[data-presence="glanced_away"] .neon-primary {
+  opacity: 0.6;
+  transition: opacity 300ms ease;
+}
+[data-presence="away"] .sky-layer {
+  filter: saturate(0.6);
+  opacity: 0.3;
+  transition: filter 500ms ease, opacity 500ms ease;
+}
+[data-presence="away"] .neon-primary {
+  opacity: 0.3;
+  transition: opacity 500ms ease;
+}
+[data-presence="absent"] .sky-layer {
+  filter: saturate(0.2);
+  opacity: 0.15;
+  animation: city-sleep 4s ease-in-out infinite;
+}
+[data-presence="absent"] .neon-primary {
+  opacity: 0.15;
+}
+
+/* ─── Keyframe Animations ──────────────────────────────────────────── */
+
+/* Neon tube re-strike — used on app load and presence RETURN          */
+@keyframes neon-strike {
+  0%   { opacity: 1; }
+  15%  { opacity: 0.6; }
+  20%  { opacity: 1; }
+  35%  { opacity: 0.75; }
+  40%  { opacity: 1; }
+}
+/* Applied by PresenceDetector on RETURN event */
+.neon-striking {
+  animation: neon-strike 220ms ease forwards;
+}
+
+/* Sleeping city pulse — ambient glow breathe when fully absent        */
+@keyframes city-sleep {
+  0%,  100% { filter: saturate(0.2); opacity: 0.15; }
+  50%        { filter: saturate(0.2); opacity: 0.08; }
+}
+
+/* Loading scan line — sweeps top to bottom                            */
+@keyframes scan-sweep {
+  0%   { transform: translateY(-2px); }
+  100% { transform: translateY(100vh); }
+}
+
+/* Blink for status pill cursor                                         */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ─── Atmosphere (always-on) ──────────────────────────────────────── */
+
+/* Film grain — SVG feTurbulence noise, 2% opacity overlay             */
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.022;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23grain)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 200px 200px;
+}
+
+/* Scanlines — CRT feel, every 2px                                     */
+#root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.015) 1px,
+    rgba(0, 0, 0, 0.015) 2px
+  );
+}
+
+/* City grid overlay — overhead map feel                               */
+.sos-app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    repeating-linear-gradient(0deg,   rgba(255,255,255,0.018) 0, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg,  rgba(255,255,255,0.018) 0, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 40px);
+}
+
+/* Corner L-bracket targeting reticles                                 */
+.corner-bracket {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(0, 229, 204, 0.22);
+  border-style: solid;
+  pointer-events: none;
+  z-index: 9997;
+}
+.corner-bracket-tl { top: 12px;    left: 12px;    border-width: 1px 0 0 1px; }
+.corner-bracket-tr { top: 12px;    right: 12px;   border-width: 1px 1px 0 0; }
+.corner-bracket-bl { bottom: 12px; left: 12px;    border-width: 0 0 1px 1px; }
+.corner-bracket-br { bottom: 12px; right: 12px;   border-width: 0 1px 1px 0; }
+
+/* ─── Base Overrides ──────────────────────────────────────────────── */
+
+html, body {
+  background: var(--bg-deep);
+}
+body {
+  background: var(--bg-deep) !important;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 229, 204, 0.22); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 229, 204, 0.42); }
+
+/* ─── Layout Shells ───────────────────────────────────────────────── */
+
+#root {
+  position: relative;
+  z-index: 3;
+  background: transparent;
+}
+
+.sos-app {
+  background: transparent !important;
+  position: relative;
+  z-index: 3;
+}
+/* Override the ambient gradient blobs in .sos-main::before and .sos-sidebar::before */
+.sos-main::before,
+.sos-sidebar::before {
+  display: none !important;
+}
+
+.sos-sidebar {
+  background: rgba(6, 8, 16, 0.88) !important;
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.sos-sidebar.collapsed {
+  background: rgba(6, 8, 16, 0.88) !important;
+}
+
+.sos-header {
+  background: rgba(6, 8, 16, 0.88) !important;
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-bottom: 1px solid rgba(0, 229, 204, 0.07) !important;
+}
+
+.sos-input-area {
+  background: rgba(6, 8, 16, 0.92) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.sos-chat-companion {
+  background: rgba(6, 8, 16, 0.88) !important;
+  border-left: 1px solid rgba(0, 229, 204, 0.07) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* ─── Navigation ──────────────────────────────────────────────────── */
+
+.sos-sidebar-head {
+  border-bottom: 1px solid rgba(0, 229, 204, 0.07) !important;
+}
+
+.sos-side-btn {
+  background: transparent !important;
+  border: 1px solid rgba(0, 229, 204, 0.16) !important;
+  border-radius: 0 !important;
+  color: var(--text-secondary) !important;
+  font-family: var(--font-body);
+  font-weight: 500;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  transition: background var(--t-fast) var(--ease-neon),
+              border-color var(--t-fast) var(--ease-neon),
+              color var(--t-fast) var(--ease-neon),
+              box-shadow var(--t-fast) var(--ease-neon);
+}
+.sos-side-btn:hover {
+  background: rgba(0, 229, 204, 0.06) !important;
+  border-color: rgba(0, 229, 204, 0.36) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.sos-side-btn.active {
+  background: rgba(0, 229, 204, 0.08) !important;
+  border-color: var(--neon-cyan) !important;
+  border-left: 3px solid var(--neon-cyan) !important;
+  color: var(--neon-cyan) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+.sos-collapse-btn,
+.topbar-sidebar-btn {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 0 !important;
+  color: var(--text-secondary) !important;
+}
+.sos-collapse-btn:hover,
+.topbar-sidebar-btn:hover {
+  background: rgba(0, 229, 204, 0.06) !important;
+  border-color: rgba(0, 229, 204, 0.3) !important;
+  transform: none !important;
+}
+
+.sos-companion-toggle {
+  background: rgba(0, 229, 204, 0.06) !important;
+  border: 1px solid rgba(0, 229, 204, 0.18) !important;
+  border-radius: 0 !important;
+  color: var(--text-secondary) !important;
+}
+.sos-companion-toggle:hover {
+  background: rgba(0, 229, 204, 0.10) !important;
+  border-color: rgba(0, 229, 204, 0.36) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ─── Chat Messages ───────────────────────────────────────────────── */
+
+.sos-bubble {
+  border-radius: 2px !important;
+}
+.sos-bubble-user {
+  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-violet)) !important;
+  color: #fff !important;
+  border-bottom-right-radius: 0 !important;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  box-shadow: none !important;
+  animation: none !important;
+}
+.sos-bubble-ai {
+  background: rgba(12, 15, 26, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-top: 1px solid rgba(0, 229, 204, 0.2) !important;
+  border-bottom-left-radius: 0 !important;
+  animation: none !important;
+}
+
+.sos-chip {
+  background: transparent !important;
+  border: 1px solid rgba(0, 229, 204, 0.28) !important;
+  color: var(--neon-cyan) !important;
+  border-radius: 2px !important;
+}
+.sos-chip:hover {
+  background: rgba(0, 229, 204, 0.08) !important;
+  border-color: var(--neon-cyan) !important;
+  box-shadow: var(--glow-cyan) !important;
+  transform: none !important;
+}
+
+/* ─── Cards & Panels ──────────────────────────────────────────────── */
+
+.settings-card,
+.confirm-card,
+.content-card,
+.plan-card,
+.daily-brief-card,
+.notes-panel,
+.peek-panel {
+  background: rgba(12, 15, 26, 0.88) !important;
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: 2px !important;
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5) !important;
+}
+.settings-card:focus-within,
+.confirm-card,
+.content-card {
+  border-top: 1px solid rgba(0, 229, 204, 0.15) !important;
+}
+
+.settings-view {
+  background: transparent;
+}
+
+/* Chat history sidebar */
+.chat-sidebar-item {
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+.chat-sidebar-item:hover {
+  background: rgba(0, 229, 204, 0.04) !important;
+  border-color: rgba(0, 229, 204, 0.15) !important;
+}
+.chat-sidebar-item.active {
+  background: rgba(0, 229, 204, 0.07) !important;
+  border-left: 2px solid var(--neon-cyan) !important;
+}
+
+/* ─── Inputs & Forms ──────────────────────────────────────────────── */
+
+input, textarea, select {
+  border-radius: 0 !important;
+  background: rgba(0, 0, 0, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-body);
+  caret-color: var(--neon-cyan);
+}
+input:focus, textarea:focus, select:focus {
+  border-color: rgba(0, 229, 204, 0.55) !important;
+  box-shadow: 0 0 0 1px rgba(0, 229, 204, 0.25) !important;
+  outline: none;
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-ghost) !important;
+}
+select option {
+  background: #0d1020;
+  color: var(--text-primary);
+}
+
+/* Chat input wrapper */
+.sos-input-wrap {
+  border: 1px solid rgba(0, 229, 204, 0.14) !important;
+  border-radius: 0 !important;
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+.sos-input-wrap:focus-within {
+  border-color: rgba(0, 229, 204, 0.4) !important;
+  box-shadow: 0 0 0 1px rgba(0, 229, 204, 0.15) !important;
+}
+
+/* ─── Buttons ─────────────────────────────────────────────────────── */
+
+/* Generic action buttons */
+.confirm-btn,
+.g-hdr-btn,
+.settings-toggle {
+  background: transparent !important;
+  border: 1px solid rgba(0, 229, 204, 0.22) !important;
+  border-radius: 0 !important;
+  color: var(--neon-cyan) !important;
+  font-family: var(--font-display);
+  font-weight: 600;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  transition: background var(--t-fast) var(--ease-neon),
+              box-shadow var(--t-fast) var(--ease-neon);
+}
+.confirm-btn:hover,
+.g-hdr-btn:hover,
+.settings-toggle:hover {
+  background: rgba(0, 229, 204, 0.10) !important;
+  box-shadow: var(--glow-cyan) !important;
+  border-color: var(--neon-cyan) !important;
+  transform: none !important;
+}
+.confirm-btn:active,
+.g-hdr-btn:active,
+.settings-toggle:active {
+  background: rgba(0, 229, 204, 0.18) !important;
+  transform: translateY(1px) !important;
+}
+
+/* Danger / secondary buttons */
+.confirm-btn.danger,
+.confirm-btn[data-variant="danger"] {
+  border-color: rgba(155, 93, 229, 0.35) !important;
+  color: var(--neon-violet) !important;
+  clip-path: none;
+  border-radius: 2px !important;
+}
+.confirm-btn.danger:hover,
+.confirm-btn[data-variant="danger"]:hover {
+  background: rgba(155, 93, 229, 0.08) !important;
+  box-shadow: var(--glow-violet) !important;
+  border-color: var(--neon-violet) !important;
+}
+
+/* Send button */
+.sos-send-btn {
+  background: transparent !important;
+  border: 1px solid rgba(0, 229, 204, 0.3) !important;
+  border-radius: 0 !important;
+  color: var(--neon-cyan) !important;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  transition: background var(--t-fast) var(--ease-neon), box-shadow var(--t-fast) var(--ease-neon);
+}
+.sos-send-btn:hover {
+  background: rgba(0, 229, 204, 0.12) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+.sos-send-btn:disabled {
+  opacity: 0.3 !important;
+  box-shadow: none !important;
+}
+
+/* ─── Loading State ───────────────────────────────────────────────── */
+
+/* Horizontal scan line — sweeps top to bottom while loading           */
+.sos-loading-scan {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--neon-cyan);
+  opacity: 0.45;
+  z-index: 9999;
+  pointer-events: none;
+  animation: scan-sweep 2s var(--ease-neon) infinite;
+}
+
+/* Thinking/loading dots */
+.sos-thinking-dot,
+.dot-pulse {
+  background: var(--neon-cyan) !important;
+}
+
+/* ─── Sync Status ─────────────────────────────────────────────────── */
+
+.sync-dot {
+  background: var(--neon-amber) !important;
+}
+.sync-dot.sync-saved {
+  background: var(--neon-cyan) !important;
+}
+.sync-dot.sync-error {
+  background: var(--neon-amber) !important;
+}
+
+/* ─── Modals & Overlays ───────────────────────────────────────────── */
+
+.g-modal,
+.auth-form,
+.auth-modal-inner {
+  background: rgba(8, 10, 18, 0.96) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 229, 204, 0.12) !important;
+  border-radius: 2px !important;
+  border-top: 1px solid rgba(0, 229, 204, 0.25) !important;
+}
+.g-modal-overlay,
+.auth-modal-overlay {
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* ─── Notes & Schedule Panels ────────────────────────────────────── */
+
+.notes-item {
+  background: rgba(12, 15, 26, 0.7) !important;
+  border-radius: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+.notes-item:hover,
+.notes-item.active {
+  border-color: rgba(0, 229, 204, 0.18) !important;
+  background: rgba(0, 229, 204, 0.04) !important;
+}
+.notes-search {
+  border-radius: 0 !important;
+}
+
+/* Calendar / schedule cells */
+.cal-cell,
+.cal-day-cell,
+.sched-block {
+  border-radius: 0 !important;
+}
+.cal-cell.today,
+.cal-day-cell.today {
+  border: 1px solid var(--neon-cyan) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+
+/* ─── Flashcards & Quizzes ───────────────────────────────────────── */
+
+.fc-card,
+.quiz-choice {
+  border-radius: 0 !important;
+  background: rgba(12, 15, 26, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+.quiz-choice:hover,
+.quiz-choice.selected {
+  border-color: var(--neon-cyan) !important;
+  background: rgba(0, 229, 204, 0.06) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+.quiz-choice.correct {
+  border-color: var(--neon-cyan) !important;
+  box-shadow: var(--glow-cyan) !important;
+}
+.quiz-choice.incorrect {
+  border-color: var(--neon-violet) !important;
+  box-shadow: var(--glow-violet) !important;
+}
+
+/* ─── Google Import / Tabs ───────────────────────────────────────── */
+
+.g-tab {
+  border-radius: 0 !important;
+  border-bottom: 1px solid transparent;
+}
+.g-tab.active {
+  border-bottom: 2px solid var(--neon-cyan) !important;
+  color: var(--neon-cyan) !important;
+}
+
+/* ─── Toast Notifications ────────────────────────────────────────── */
+
+.sos-toast {
+  background: rgba(8, 10, 18, 0.95) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 229, 204, 0.16) !important;
+  border-radius: 2px !important;
+  border-top: 1px solid var(--neon-cyan) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ─── Brand Logo ──────────────────────────────────────────────────── */
+
+.sos-brand-logo {
+  filter: drop-shadow(0 0 6px rgba(0, 229, 204, 0.35)) !important;
+}
+
+/* ─── Welcome / Empty States ─────────────────────────────────────── */
+
+.chat-sidebar-empty {
+  color: var(--text-ghost) !important;
+  font-family: var(--font-body);
+}
+
+/* ─── Tutor Mode ──────────────────────────────────────────────────── */
+
+.tutor-indicator,
+.tutor-badge {
+  border: 1px solid rgba(155, 93, 229, 0.4) !important;
+  background: rgba(155, 93, 229, 0.08) !important;
+  color: var(--neon-violet) !important;
+  border-radius: 2px !important;
+}
+
+/* ─── Performance Tier Overrides ─────────────────────────────────── */
+/* Low-perf devices: strip expensive effects                           */
+
+[data-perf="low"] .sky-layer,
+[data-perf="low"] .sky-background,
+[data-perf="low"] .sky-rain,
+[data-perf="low"] .sky-jp-text,
+[data-perf="low"] .sky-stars {
+  display: none !important;
+}
+[data-perf="low"] #root::before,
+[data-perf="low"] #root::after,
+[data-perf="low"] .sos-app::before {
+  display: none !important;
+}
+[data-perf="low"] .sos-sidebar,
+[data-perf="low"] .sos-header,
+[data-perf="low"] .sos-input-area,
+[data-perf="low"] .sos-chat-companion,
+[data-perf="low"] .settings-card,
+[data-perf="low"] .confirm-card,
+[data-perf="low"] .content-card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0a0c18 !important;
+}
+[data-perf="low"] .sos-loading-scan {
+  animation-duration: 0ms !important;
+}
+[data-perf="low"] * {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}
+
+/* Mid-perf: keep layout, strip blur (already handled by index.css)   */
+[data-perf="mid"] .sky-rain,
+[data-perf="mid"] #root::before {
+  display: none !important;
+}
