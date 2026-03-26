@@ -5681,6 +5681,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     <div className={`sos-app sos-app-${skyMode}`} style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
       <div className="ambient-sky-layer" aria-hidden="true">
         <div className="ambient-gradient" />
+        <img className="ambient-city" src="/city-bg.svg" alt="" />
         <div className="ambient-cloud-layer">
           {ambientClouds.map(cloud => (
             <span
