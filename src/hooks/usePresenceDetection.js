@@ -1,20 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── Thresholds (ms) ────────────────────────────────────────────────
-const GLANCED_AWAY_MS = 5_000;   //  5s → subtle dim
-const AWAY_MS         = 30_000;  // 30s → deeper dim + "Session paused"
-const ABSENT_MS       = 90_000;  // 90s → city sleeps + "Waiting for you..."
+const GLANCED_AWAY_MS = 5_000;    //  5s → subtle dim
+const AWAY_MS         = 30_000;   // 30s → deeper dim + "Session paused"
+const ABSENT_MS       = 90_000;   // 90s → city sleeps + "Waiting for you..."
+const LOCKED_MS       = 300_000;  //  5m → idle lock screen
 
 // ─── Presence states ────────────────────────────────────────────────
 // PRESENT      → active, city alive
 // GLANCED_AWAY → idle < AWAY_MS, subtle 60% dim, timer still running
 // AWAY         → idle 30s–90s, heavy dim, timer paused, pill shown
-// ABSENT       → idle 90s+, city fully asleep
+// ABSENT       → idle 90s–5m, city fully asleep
+// LOCKED       → idle 5m+, lock screen overlay shown
 const STATES = {
   PRESENT:      'PRESENT',
   GLANCED_AWAY: 'GLANCED_AWAY',
   AWAY:         'AWAY',
   ABSENT:       'ABSENT',
+  LOCKED:       'LOCKED',
 };
 
 // Activity events that reset the idle timer
@@ -42,10 +45,12 @@ export function usePresenceDetection() {
   const computeState = useCallback(() => {
     if (!trackingRef.current) return STATES.PRESENT;
     const elapsed = Date.now() - lastActivityRef.current;
-    if (elapsed < GLANCED_AWAY_MS) return STATES.PRESENT;
-    if (elapsed < AWAY_MS)         return STATES.GLANCED_AWAY;
-    if (elapsed < ABSENT_MS)       return STATES.AWAY;
-    return STATES.ABSENT;
+    // Check in descending order — longest threshold first
+    if (elapsed >= LOCKED_MS)       return STATES.LOCKED;
+    if (elapsed >= ABSENT_MS)       return STATES.ABSENT;
+    if (elapsed >= AWAY_MS)         return STATES.AWAY;
+    if (elapsed >= GLANCED_AWAY_MS) return STATES.GLANCED_AWAY;
+    return STATES.PRESENT;
   }, []);
 
   // ── Update data-presence attribute on <html> ───────────────────
@@ -83,8 +88,8 @@ export function usePresenceDetection() {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Window blur (switching apps) = GLANCED_AWAY hint
-    const handleBlur  = () => { /* don't reset timer, let it drift */ };
+    // Window blur (switching apps) = let timer drift naturally
+    const handleBlur  = () => { /* don't reset timer */ };
     const handleFocus = () => { lastActivityRef.current = Date.now(); };
     window.addEventListener('blur',  handleBlur);
     window.addEventListener('focus', handleFocus);
@@ -95,8 +100,13 @@ export function usePresenceDetection() {
       setPresenceState(prev => {
         if (prev === next) return prev;
 
-        // RETURN detection: was away/absent, now present
-        const wasIdle    = prev === STATES.AWAY || prev === STATES.ABSENT;
+        // Entering LOCKED — fire idle lock event
+        if (next === STATES.LOCKED && prev !== STATES.LOCKED) {
+          window.dispatchEvent(new CustomEvent('sos:idle-lock'));
+        }
+
+        // RETURN detection: was away/absent/locked, now present
+        const wasIdle    = prev === STATES.AWAY || prev === STATES.ABSENT || prev === STATES.LOCKED;
         const nowPresent = next === STATES.PRESENT;
         if (wasIdle && nowPresent) {
           window.dispatchEvent(new CustomEvent('sos:presence-return'));

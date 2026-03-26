@@ -6,6 +6,7 @@ import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import PresenceDetector from './components/PresenceDetector';
+import IdleLockScreen from './components/IdleLockScreen';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
@@ -6199,6 +6200,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
+      <IdleLockScreen />
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
