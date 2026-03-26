@@ -918,12 +918,20 @@ button,
 
 .sos-sidebar,
 .sos-header,
-.sos-input-area,
 .sos-chat-companion {
-  background: rgba(10, 14, 24, 0.58) !important;
+  background: rgba(10, 14, 24, 0.5) !important;
   backdrop-filter: blur(18px) saturate(1.35) !important;
   -webkit-backdrop-filter: blur(18px) saturate(1.35) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.sos-input-area {
+  background: rgba(10, 14, 24, 0.42) !important;
+  backdrop-filter: blur(14px) saturate(1.25) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.25) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  position: relative;
+  z-index: 22;
 }
 
 /* Overlay panels instead of resizing chat width */
@@ -947,6 +955,7 @@ button,
 
 .sos-chat-shell {
   position: relative;
+  flex-direction: row;
 }
 
 .sos-chat-companion {
