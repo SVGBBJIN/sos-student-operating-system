@@ -881,7 +881,7 @@ select option {
 :root {
   --font-display: 'Inter', 'DM Sans', sans-serif;
   --font-body: 'Inter', 'DM Sans', sans-serif;
-  --bg-deep: #1B1B40;
+  --bg-deep: #BFD8F2;
   --bg-surface: rgba(255, 255, 255, 0.15);
   --bg-panel: rgba(255, 255, 255, 0.1);
   --accent: #A78BCF;
@@ -889,16 +889,71 @@ select option {
   --text: #2E2E2E;
   --text-dim: #6B7280;
   --radius: 24px;
+  --atm-1: #dcecff;
+  --atm-2: #bfd8f2;
+  --atm-3: #a78bcf;
+  --atm-glass: rgba(255, 255, 255, 0.16);
+  --atm-text: #2E2E2E;
+  --atm-text-dim: #6B7280;
+  --text: var(--atm-text);
+  --text-dim: var(--atm-text-dim);
+}
+
+[data-sky="morning"] {
+  --atm-1: #dcecff;
+  --atm-2: #bfd8f2;
+  --atm-3: #a78bcf;
+  --atm-glass: rgba(255, 255, 255, 0.18);
+  --atm-text: #2E2E2E;
+  --atm-text-dim: #6B7280;
+  --text: var(--atm-text);
+  --text-dim: var(--atm-text-dim);
+  --win-lit: rgba(255, 255, 255, 0.6);
+}
+[data-sky="afternoon"] {
+  --atm-1: #d6e6fb;
+  --atm-2: #bfd8f2;
+  --atm-3: #a78bcf;
+  --atm-glass: rgba(255, 255, 255, 0.16);
+  --atm-text: #2E2E2E;
+  --atm-text-dim: #6B7280;
+  --text: var(--atm-text);
+  --text-dim: var(--atm-text-dim);
+  --win-lit: rgba(255, 242, 178, 0.55);
+}
+[data-sky="sunset"] {
+  --atm-1: #f7c3ac;
+  --atm-2: #f7b7a3;
+  --atm-3: #a78bcf;
+  --atm-glass: rgba(255, 255, 255, 0.14);
+  --atm-text: #2E2E2E;
+  --atm-text-dim: #6B7280;
+  --text: var(--atm-text);
+  --text-dim: var(--atm-text-dim);
+  --win-lit: rgba(255, 196, 128, 0.58);
+}
+[data-sky="night"] {
+  --atm-1: #3d3f76;
+  --atm-2: #2b2d62;
+  --atm-3: #1b1b40;
+  --atm-glass: rgba(255, 255, 255, 0.12);
+  --atm-text: rgba(246, 247, 255, 0.92);
+  --atm-text-dim: rgba(226, 229, 246, 0.72);
+  --text: var(--atm-text);
+  --text-dim: var(--atm-text-dim);
+  --win-lit: rgba(198, 214, 255, 0.62);
 }
 
 body {
   font-family: var(--font-body);
   transition: background 1.5s ease-in-out;
+  color: var(--atm-text);
 }
 
 .sos-app {
   background:
-    radial-gradient(circle at 50% 30%, rgba(195, 177, 225, 0.6), rgba(167, 139, 207, 0.42), rgba(122, 111, 163, 0.5)) !important;
+    radial-gradient(circle at 50% 30%, var(--atm-1), var(--atm-2), var(--atm-3)) !important;
+  transition: background 1.6s ease-in-out !important;
 }
 .sos-app::before,
 #root::before,
@@ -910,7 +965,7 @@ body {
 .sos-header,
 .sos-chat-companion,
 .sos-input-area {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: var(--atm-glass) !important;
   border: none !important;
   box-shadow: none !important;
   backdrop-filter: blur(10px) saturate(1.08);
@@ -938,8 +993,8 @@ body {
   border-radius: 999px !important;
   border: none !important;
   clip-path: none !important;
-  background: rgba(255, 255, 255, 0.16) !important;
-  color: rgba(46, 46, 46, 0.9) !important;
+  background: var(--atm-glass) !important;
+  color: var(--atm-text) !important;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08) !important;
   transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease !important;
 }
@@ -963,19 +1018,19 @@ body {
 }
 .sos-bubble-user {
   background: linear-gradient(135deg, rgba(247, 183, 163, 0.76), rgba(167, 139, 207, 0.72)) !important;
-  color: #2E2E2E !important;
+  color: var(--atm-text) !important;
 }
 .sos-bubble-ai {
-  background: rgba(255, 255, 255, 0.2) !important;
+  background: var(--atm-glass) !important;
   border: none !important;
-  color: #2E2E2E !important;
+  color: var(--atm-text) !important;
 }
 
 .sos-chip {
   border-radius: 999px !important;
   border: none !important;
-  background: rgba(255, 255, 255, 0.2) !important;
-  color: rgba(46, 46, 46, 0.88) !important;
+  background: var(--atm-glass) !important;
+  color: var(--atm-text) !important;
 }
 
 .sos-input-area {
@@ -989,11 +1044,11 @@ body {
 input, textarea, select, .sos-input-wrap {
   border-radius: 999px !important;
   border: none !important;
-  background: rgba(255, 255, 255, 0.18) !important;
-  color: #2E2E2E !important;
+  background: var(--atm-glass) !important;
+  color: var(--atm-text) !important;
 }
 input::placeholder, textarea::placeholder {
-  color: rgba(46, 46, 46, 0.55) !important;
+  color: var(--atm-text-dim) !important;
 }
 
 .settings-card,
