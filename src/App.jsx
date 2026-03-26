@@ -106,6 +106,16 @@ function weatherEmoji(code) {
   return Icon.cloudLightning(18);
 }
 
+function weatherThemeKey(code) {
+  if (code === null || code === undefined) return 'clear';
+  if (code <= 1) return 'clear';
+  if (code <= 48) return 'cloudy';
+  if (code <= 67) return 'rainy';
+  if (code <= 77) return 'snowy';
+  if (code <= 82) return 'rainy';
+  return 'stormy';
+}
+
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 10;
 
@@ -3724,6 +3734,7 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
+  const [weatherThemeEnabled, setWeatherThemeEnabled] = useState(() => localStorage.getItem('sos_weather_theme') === 'true');
   const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
   const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
@@ -5634,6 +5645,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
   useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
   useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  useEffect(() => { localStorage.setItem('sos_weather_theme', weatherThemeEnabled ? 'true' : 'false'); }, [weatherThemeEnabled]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme-mode', weatherThemeEnabled ? 'weather' : 'default');
+    if (weatherThemeEnabled) {
+      root.setAttribute('data-weather-theme', weatherThemeKey(weatherData?.current?.weathercode));
+    } else {
+      root.removeAttribute('data-weather-theme');
+    }
+    return () => {
+      root.removeAttribute('data-theme-mode');
+      root.removeAttribute('data-weather-theme');
+    };
+  }, [weatherThemeEnabled, weatherData]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -5830,6 +5855,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
                   <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
                 </div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Weather-based theme</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Off = default blue gradient. On = theme colors react to local weather.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setWeatherThemeEnabled(prev=>!prev)}>{weatherThemeEnabled ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>

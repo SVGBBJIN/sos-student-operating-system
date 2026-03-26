@@ -2,6 +2,12 @@
 :root{--bg:#fffbeb;--bg2:#fef3c7;--card:rgba(245,158,11,.07);--accent:#d97706;--accent-dim:rgba(217,119,6,.4);--accent-glow:rgba(245,158,11,.18);--text:#166534;--text-dim:rgba(22,101,52,.45);--border:rgba(22,101,52,.12);--border-mid:rgba(22,101,52,.18);--danger:#dc2626;--success:#16a34a;--warning:#d97706;--green:#16a34a;--blue:#0369a1;--orange:#ea580c;--pink:#dc2626;--teal:#0d9488;--violet:#7c3aed;--radius:10px;--shadow:0 2px 12px rgba(22,101,52,0.12);--space-xs:4px;--space-sm:8px;--space-md:12px;--space-lg:16px;--space-xl:20px;--space-2xl:24px;--space-3xl:32px;--space-4xl:48px}
 html,body{height:100%;font-size:16px}
 body{background:transparent;color:var(--text);font-family:'DM Sans',system-ui,-apple-system,sans-serif;overflow:hidden;min-height:100vh}
+html[data-theme-mode="default"] body{
+  background:linear-gradient(180deg,#0b1b42 0%,#102a62 46%,#12387e 100%);
+}
+html[data-theme-mode="default"] .sky-layer{
+  opacity:0 !important;
+}
 input,textarea,select,button{font-family:inherit;font-size:inherit}
 button{border-radius:14px}
 ::-webkit-scrollbar{width:6px}
@@ -40,6 +46,14 @@ button{border-radius:14px}
 /* SOS Layout */
 #root{height:100vh;display:flex;flex-direction:column}
 .sos-app{display:flex;flex-direction:row;height:100vh;overflow:hidden;background:linear-gradient(160deg,rgba(6,10,20,0.42) 0%,rgba(12,18,32,0.3) 50%,rgba(6,10,20,0.46) 100%);backdrop-filter:blur(2px);transition:background .45s cubic-bezier(0.16,1,0.3,1)}
+html[data-theme-mode="default"] .sos-app{
+  background:linear-gradient(160deg,rgba(31,88,214,0.36) 0%,rgba(17,63,163,0.26) 46%,rgba(10,31,89,0.44) 100%);
+}
+html[data-theme-mode="weather"][data-weather-theme="clear"] .sos-app{background:linear-gradient(160deg,rgba(56,189,248,0.28),rgba(59,130,246,0.22),rgba(14,116,144,0.35));}
+html[data-theme-mode="weather"][data-weather-theme="cloudy"] .sos-app{background:linear-gradient(160deg,rgba(148,163,184,0.26),rgba(100,116,139,0.24),rgba(30,41,59,0.4));}
+html[data-theme-mode="weather"][data-weather-theme="rainy"] .sos-app{background:linear-gradient(160deg,rgba(29,78,216,0.3),rgba(30,64,175,0.25),rgba(15,23,42,0.46));}
+html[data-theme-mode="weather"][data-weather-theme="snowy"] .sos-app{background:linear-gradient(160deg,rgba(191,219,254,0.3),rgba(147,197,253,0.22),rgba(30,58,138,0.34));}
+html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background:linear-gradient(160deg,rgba(67,56,202,0.28),rgba(30,41,59,0.36),rgba(10,10,25,0.52));}
 .sos-sidebar{width:280px;flex-shrink:0;border-right:1px solid rgba(255,255,255,.2);background:linear-gradient(180deg,rgba(255,255,255,0.16) 0%,rgba(255,255,255,0.09) 100%);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);padding:14px 12px;display:flex;flex-direction:column;gap:10px;overflow:hidden;position:relative;transition:width .38s cubic-bezier(0.16,1,0.3,1),padding .38s cubic-bezier(0.16,1,0.3,1)}
 .sos-sidebar.collapsed{width:86px;padding:14px 10px}
 .sos-sidebar::before{content:'';position:absolute;inset:-40% -30% auto -30%;height:240px;background:radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(69,170,242,0.1) 45%, transparent 72%);filter:blur(35px);pointer-events:none}
