@@ -847,3 +847,32 @@ select option {
 [data-perf="mid"] #root::before {
   display: none !important;
 }
+
+/* ── SFX Toggle ──────────────────────────────────────────────────────── */
+.sfx-toggle {
+  position: fixed;
+  bottom: 18px;
+  right: 56px; /* sits left of the presence dot (which is at right: 16px) */
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(14, 18, 28, 0.72);
+  border: 1px solid rgba(144, 151, 168, 0.18);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+  backdrop-filter: blur(8px);
+}
+.sfx-toggle:hover {
+  color: var(--neon-cyan);
+  border-color: rgba(0, 229, 204, 0.35);
+  background: rgba(0, 229, 204, 0.07);
+}
+.sfx-toggle[aria-pressed="false"] {
+  color: var(--text-ghost);
+  border-color: rgba(144, 151, 168, 0.1);
+}

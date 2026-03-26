@@ -7,6 +7,8 @@ import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import PresenceDetector from './components/PresenceDetector';
 import IdleLockScreen from './components/IdleLockScreen';
+import SfxToggle from './components/SfxToggle';
+import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 
 // Configure pdfjs worker
@@ -3764,6 +3766,17 @@ function App() {
     return null;
   }, []);
   const [toastMsg, setToastMsg] = useState(null);
+  useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
+  useEffect(() => {
+    const onLock   = () => sfx.lock();
+    const onReturn = () => sfx.unlock();
+    window.addEventListener('sos:idle-lock',        onLock);
+    window.addEventListener('sos:presence-return',  onReturn);
+    return () => {
+      window.removeEventListener('sos:idle-lock',       onLock);
+      window.removeEventListener('sos:presence-return', onReturn);
+    };
+  }, []);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
@@ -4334,6 +4347,7 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
+    sfx.confirm();
     executeAction(action);
     setPendingActions(prev => prev.filter((_,i)=>i!==idx));
     const name = action.title||action.activity||'Action';
@@ -4348,7 +4362,7 @@ function App() {
       }
     }
   }
-  function handleCancelAction(idx) { setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
+  function handleCancelAction(idx) { sfx.dismiss(); setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
 
   // ── Content save/dismiss helpers ──
   function formatContentForNote(c) {
@@ -5142,6 +5156,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
+        sfx.arrive();
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) {
           dbInsertChatMsg('assistant', displayContent, user.id);
@@ -5303,6 +5318,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setShowAuthModal(true); return; }
       incrementGuestCount();
     }
+    if(input.trim()) sfx.send();
     sendMessage(input);
   }
   function sendChip(text) {
@@ -5665,12 +5681,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={()=>{ setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" onClick={enterTutorMode} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
-          <button className="sos-side-btn" onClick={()=>setShowGoogleModal(true)} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          <button className="sos-side-btn" onClick={()=>setActivePanel('settings')} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('chat'); clearChat(); closeSidebarCompanion(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
@@ -6201,6 +6217,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
       <IdleLockScreen />
+      <SfxToggle />
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
