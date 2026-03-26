@@ -5625,18 +5625,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  const quickChips = [
-    { label:'What should I do?', msg:'What should I work on right now?' },
-    { label:'Enter tutor mode', action:enterTutorMode },
-    { label:'Add a task', msg:'I need to add a task' },
-    { label:'Schedule + chat', action:()=>openCompanionPanel('schedule') },
-    { label:'Flashcards', msg:'Make me flashcards for what I studied last' },
-    { label:'Quiz me', msg:'Quiz me on what I need to study' },
-    { label:'Notes + chat', action:()=>openCompanionPanel('notes') },
-    { label:'Import', action:()=>setShowGoogleModal(true) },
-    { label:'Settings', action:()=>setActivePanel('settings') },
-  ];
-
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
@@ -6074,7 +6062,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-input-area">
         {messages.length>0&&(
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
-            {quickChips.map((chip,i)=>(<button key={i} className="sos-chip" onClick={()=>chip.action?chip.action():sendChip(chip.msg)}>{chip.label}</button>))}
             {!viewingSavedChatId && <button className="sos-chip" onClick={saveChat} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Save chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={() => resumeSavedChat(viewingSavedChatId)} style={{background:'rgba(46,213,115,0.08)',borderColor:'rgba(46,213,115,0.2)',color:'var(--success)'}}>Resume chat</button>}
             {viewingSavedChatId && <button className="sos-chip" onClick={exitSavedChatView} style={{background:'rgba(108,99,255,0.08)',borderColor:'rgba(108,99,255,0.2)',color:'var(--accent)'}}>Back</button>}
