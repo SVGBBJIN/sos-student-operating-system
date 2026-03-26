@@ -5767,14 +5767,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
           </div>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
+        <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} Enter tutor mode</button>
-          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn">{Icon.clipboard(14)} Schedule + chat</button>
-          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn">{Icon.fileText(14)} Notes + chat</button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} History</button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} Settings</button>
+          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
+          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
+          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Enter tutor mode</span></button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>History</span></button>
+          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
         </div>
       </div>}
 

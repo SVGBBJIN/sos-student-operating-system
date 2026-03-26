@@ -331,6 +331,10 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 .g-hdr-btn{background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);color:var(--accent);cursor:pointer;border-radius:8px;padding:5px 10px;font-size:0.78rem;font-weight:600;transition:all .2s;display:flex;align-items:center;gap:4px}
 .g-hdr-btn:hover{background:rgba(245,158,11,0.2)}
 .g-hdr-btn.connected{background:rgba(46,213,115,0.1);border-color:rgba(46,213,115,0.3);color:var(--success)}
+.topbar-actions{min-width:0;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}
+.topbar-actions .g-hdr-btn{flex-shrink:0;white-space:nowrap}
+.topbar-priority-btn{border-color:rgba(108,99,255,0.38);background:rgba(108,99,255,0.14);color:#cfd2ff}
+.topbar-priority-btn:hover{background:rgba(108,99,255,0.24)}
 /* Calendar auto-sync card */
 .cal-sync-card{padding:12px 14px;border-radius:16px;border:1px solid var(--border);background:var(--bg2);margin-bottom:14px;transition:border-color .2s,background .2s}
 .cal-sync-card.on{border-color:rgba(46,213,115,0.4);background:rgba(46,213,115,0.04)}
@@ -462,6 +466,8 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 @media(max-width:390px){
   /* Extra-small phones (375px iPhone SE etc.) */
   .sos-header{padding:8px 10px;gap:6px}
+  .topbar-actions{gap:6px !important}
+  .topbar-actions .g-hdr-btn:not(.topbar-priority-btn){display:none}
   /* Hide button text labels in topbar to save space, show icons only */
   .g-hdr-btn span{display:none}
   .g-hdr-btn svg{display:block}
