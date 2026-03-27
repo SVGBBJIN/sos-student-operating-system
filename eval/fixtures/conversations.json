@@ -1,0 +1,41 @@
+[
+  {
+    "id": "add-event-complete",
+    "prompt_version": "v1.0",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "Add a chemistry midterm on 2026-04-02" }
+    ],
+    "expected": {
+      "tools": ["add_event"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "title", "date", "subject", "event_type", "description", "location", "priority"]
+    }
+  },
+  {
+    "id": "missing-event-date",
+    "prompt_version": "v1.0",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "Add my biology quiz" }
+    ],
+    "expected": {
+      "tools": [],
+      "should_clarify": true,
+      "allowed_fields": ["reason", "question", "options", "multi_select", "context_action", "missing_fields"]
+    }
+  },
+  {
+    "id": "delete-task",
+    "prompt_version": "v1.1",
+    "model_revision": "llama-3.3-70b-versatile",
+    "messages": [
+      { "role": "user", "content": "Remove the history worksheet task" }
+    ],
+    "expected": {
+      "tools": ["delete_task"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "title"]
+    }
+  }
+]

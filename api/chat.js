@@ -17,6 +17,34 @@ const CORS_HEADERS = {
 
 console.log(`[chat-core] adapter=vercel version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
+function estimateTokensFromText(text) {
+  const normalized = typeof text === "string" ? text : "";
+  return Math.max(0, Math.ceil(normalized.length / 4));
+}
+
+function estimateInputTokens({ systemPrompt, messages, inputTokensEst }) {
+  if (Number.isFinite(inputTokensEst) && inputTokensEst > 0) {
+    return Math.round(inputTokensEst);
+  }
+  const msgText = Array.isArray(messages)
+    ? messages.map((m) => (typeof m?.content === "string" ? m.content : "")).join("\n")
+    : "";
+  return estimateTokensFromText(`${systemPrompt || ""}\n${msgText}`);
+}
+
+function toExecutionOutcome(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "success") return "success";
+  if (normalized === "not_found") return "not_found";
+  if (normalized === "validation_error" || normalized === "validation_failed") return "validation_error";
+  if (normalized === "duplicate_skipped" || normalized === "duplicate") return "duplicate_skipped";
+  return "validation_error";
+}
+
+function emitRequestEvent(event) {
+  console.log("chat_request_event", JSON.stringify(event));
+}
+
 function buildToolFallbackPrompt(failures = []) {
   const lines = failures.map((failure, idx) => {
     const actionType = failure?.action_type || "unknown_action";
@@ -159,6 +187,12 @@ export default async function handler(req, res) {
 
   const startedAt = Date.now();
   const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const stageTimings = {
+    prompt_build_ms: 0,
+    llm_call_ms: 0,
+    parse_ms: 0,
+    execution_ms: 0,
+  };
   let telemetry = null;
   try {
     const body = req.body;
@@ -238,6 +272,11 @@ export default async function handler(req, res) {
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
       isContentGen: Boolean(isContentGen),
     };
+    const inputTokensEstimated = estimateInputTokens({
+      systemPrompt,
+      messages,
+      inputTokensEst: telemetry?.inputTokensEst,
+    });
 
     if (mode === "tool_fallback") {
       const fallbackMessages = Array.isArray(messages) ? messages.filter((m) => m && typeof m.content === "string") : [];
@@ -246,6 +285,7 @@ export default async function handler(req, res) {
         ...fallbackMessages,
         { role: "user", content: failureReport },
       ];
+      const llmStartedAt = Date.now();
       const fallbackResult = await callGroq(
         GROQ_API_KEY,
         PRIMARY_MODEL,
@@ -263,6 +303,41 @@ export default async function handler(req, res) {
           routeType: "conversational",
         }
       );
+      stageTimings.llm_call_ms = Date.now() - llmStartedAt;
+      const fallbackParseStartedAt = Date.now();
+      const toolCallStats = fallbackResult?.tool_call_stats || { proposed: 0, validated: 0 };
+      stageTimings.parse_ms = Date.now() - fallbackParseStartedAt;
+      const executionStartedAt = Date.now();
+      const executionOutcomes = Array.isArray(tool_failures)
+        ? tool_failures.map((failure) => toExecutionOutcome(failure?.outcome || failure?.category || "validation_error"))
+        : [];
+      stageTimings.execution_ms = Date.now() - executionStartedAt;
+      const outputTokensEstimated = estimateTokensFromText(
+        `${fallbackResult?.content || ""}\n${JSON.stringify(fallbackResult?.actions || [])}`
+      );
+      emitRequestEvent({
+        event_type: "chat_request",
+        request_id: requestId,
+        prompt_version: telemetry?.promptVersion || null,
+        model: {
+          primary: PRIMARY_MODEL,
+          backup: BACKUP_MODEL,
+          selected: fallbackResult?.model_used || null,
+          fallback_used: Boolean(fallbackResult?.fallback_used),
+        },
+        tokens: {
+          input_est: inputTokensEstimated,
+          output_est: outputTokensEstimated,
+        },
+        stages: stageTimings,
+        tool_calls: {
+          proposed: toolCallStats.proposed || 0,
+          validated: toolCallStats.validated || 0,
+          executed: 0,
+        },
+        execution_outcomes: executionOutcomes,
+        status: "success",
+      });
       return res.status(200).json({
         ...fallbackResult,
         actions: [],
@@ -299,10 +374,13 @@ export default async function handler(req, res) {
     const toolsForRequest = isContentGen ? CONTENT_ACTION_TOOLS : null;
     const toolChoice = isContentGen ? "required" : "auto";
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
+    stageTimings.prompt_build_ms = Date.now() - promptBuildStartedAt;
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
     // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
+    const llmStartedAt = Date.now();
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
@@ -320,9 +398,50 @@ export default async function handler(req, res) {
         routeType,
       }
     );
+    stageTimings.llm_call_ms = Date.now() - llmStartedAt;
+    const parseStartedAt = Date.now();
+    const toolCallStats = result?.tool_call_stats || { proposed: 0, validated: 0 };
+    stageTimings.parse_ms = Date.now() - parseStartedAt;
     if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
       throw new Error("Content generation must return typed actions[] payloads.");
     }
+
+    const executionStartedAt = Date.now();
+    const executionOutcomes = [
+      ...(Array.isArray(result?.validation_warnings) && result.validation_warnings.length > 0
+        ? result.validation_warnings.map(() => "validation_error")
+        : []),
+      ...(Array.isArray(tool_failures)
+        ? tool_failures.map((failure) => toExecutionOutcome(failure?.outcome || failure?.category || "validation_error"))
+        : []),
+    ];
+    stageTimings.execution_ms = Date.now() - executionStartedAt;
+    const outputTokensEstimated = estimateTokensFromText(
+      `${result?.content || ""}\n${JSON.stringify(result?.actions || [])}`
+    );
+    emitRequestEvent({
+      event_type: "chat_request",
+      request_id: requestId,
+      prompt_version: telemetry?.promptVersion || null,
+      model: {
+        primary: PRIMARY_MODEL,
+        backup: BACKUP_MODEL,
+        selected: result?.model_used || null,
+        fallback_used: Boolean(result?.fallback_used),
+      },
+      tokens: {
+        input_est: inputTokensEstimated,
+        output_est: outputTokensEstimated,
+      },
+      stages: stageTimings,
+      tool_calls: {
+        proposed: toolCallStats.proposed || 0,
+        validated: toolCallStats.validated || 0,
+        executed: 0,
+      },
+      execution_outcomes: executionOutcomes,
+      status: "success",
+    });
 
     await persistPromptTelemetry({
       supabaseUrl: SUPABASE_URL,
@@ -343,6 +462,30 @@ export default async function handler(req, res) {
       orchestration: { mode: "client_execution", executed_on: "client" },
     });
   } catch (err) {
+    emitRequestEvent({
+      event_type: "chat_request",
+      request_id: requestId,
+      prompt_version: telemetry?.promptVersion || null,
+      model: {
+        primary: PRIMARY_MODEL,
+        backup: BACKUP_MODEL,
+        selected: null,
+        fallback_used: false,
+      },
+      tokens: {
+        input_est: Number.isFinite(telemetry?.inputTokensEst) ? telemetry.inputTokensEst : null,
+        output_est: 0,
+      },
+      stages: stageTimings,
+      tool_calls: {
+        proposed: 0,
+        validated: 0,
+        executed: 0,
+      },
+      execution_outcomes: ["validation_error"],
+      status: "error",
+      error: err?.message || "Internal server error",
+    });
     await persistPromptTelemetry({
       supabaseUrl: SUPABASE_URL,
       serviceKey: SUPABASE_SERVICE_ROLE_KEY,

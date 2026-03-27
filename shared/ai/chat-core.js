@@ -958,7 +958,12 @@ export function parseLlmResponse(data) {
   const textContent = message?.content || "";
   const clarifications = [];
   const validationWarnings = [];
-  const actions = (message?.tool_calls || []).flatMap((tc) => {
+  const toolCalls = message?.tool_calls || [];
+  const proposedToolCalls = [];
+  const validatedToolCalls = [];
+  const actions = toolCalls.flatMap((tc) => {
+    const toolName = tc?.function?.name || "unknown_tool";
+    proposedToolCalls.push(toolName);
     let parsedArgs;
     try {
       const raw = tc.function.arguments;
@@ -968,6 +973,7 @@ export function parseLlmResponse(data) {
     }
 
     if (tc.function.name === "ask_clarification") {
+      validatedToolCalls.push(toolName);
       clarifications.push({
         reason: parsedArgs.reason || "",
         question: parsedArgs.question || "",
@@ -992,6 +998,7 @@ export function parseLlmResponse(data) {
       return [];
     }
 
+    validatedToolCalls.push(toolName);
     const actionType = _CONTENT_ACTION_TYPES.has(tc.function.name) ? tc.function.name : (parsedArgs.type || tc.function.name);
     return [{
       type: actionType,
@@ -1007,5 +1014,11 @@ export function parseLlmResponse(data) {
     clarification,
     clarifications,
     validation_warnings: validationWarnings,
+    tool_call_stats: {
+      proposed: proposedToolCalls.length,
+      validated: validatedToolCalls.length,
+      proposed_tools: proposedToolCalls,
+      validated_tools: validatedToolCalls,
+    },
   };
 }
