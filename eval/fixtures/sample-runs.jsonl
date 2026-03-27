@@ -1,0 +1,3 @@
+{"fixture_id":"add-event-complete","prompt_version":"v1.0","model_revision":"openai/gpt-oss-120b","predicted_tools":["add_event"],"clarification":null,"action_fields":["type","title","date","subject"],"latency_ms":780}
+{"fixture_id":"missing-event-date","prompt_version":"v1.0","model_revision":"openai/gpt-oss-120b","predicted_tools":[],"clarification":{"question":"What date is the quiz?"},"action_fields":["question","context_action"],"latency_ms":860}
+{"fixture_id":"delete-task","prompt_version":"v1.1","model_revision":"llama-3.3-70b-versatile","predicted_tools":["delete_task","add_event"],"clarification":null,"action_fields":["type","title","date"],"latency_ms":1120}
