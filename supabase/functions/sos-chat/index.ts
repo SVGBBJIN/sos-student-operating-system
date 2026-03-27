@@ -10,6 +10,11 @@ const corsHeaders = {
 /* ── Model constants ── */
 const PRIMARY_MODEL = "openai/gpt-oss-120b";
 const BACKUP_MODEL  = "llama-3.3-70b-versatile";
+const FAST_MODEL = "llama-3.1-8b-instant";
+const GROQ_CIRCUIT: { openedUntilMs: number; spikes: number[] } = {
+  openedUntilMs: 0,
+  spikes: [],
+};
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -664,6 +669,10 @@ type CallGroqResult = {
   clarification: Record<string, unknown> | null;
   clarifications: Record<string, unknown>[];
   validation_warnings: ValidationWarning[];
+  model_used: string;
+  attempt_count: number;
+  retry_wait_ms_total: number;
+  fallback_used: boolean;
 };
 
 async function callGroq(
@@ -681,9 +690,46 @@ async function callGroq(
   imageMimeType?: string,
   includeTools = true,
   toolsOverride?: typeof ACTION_TOOLS | null,
-  backupModel?: string | null
+  backupModel?: string | null,
+  options?: {
+    isContentGen?: boolean;
+    budgetMs?: number;
+    routeType?: "conversational" | "tool_heavy" | "content_gen";
+  }
 ): Promise<CallGroqResult> {
-  // Inner attempt: builds and fires the request for a specific model with 429 retry logic.
+  const isContentGen = Boolean(options?.isContentGen);
+  const budgetMs = Math.max(1000, Number(options?.budgetMs) || (isContentGen ? 20000 : 10000));
+  const requestStartedAt = Date.now();
+  const metrics = {
+    attempt_count: 0,
+    retry_wait_ms_total: 0,
+    fallback_used: false,
+  };
+  const routeType = options?.routeType || (isContentGen ? "content_gen" : "conversational");
+  const selectedPrimary = routeType === "conversational" ? (backupModel || FAST_MODEL) : model;
+  const selectedBackup = routeType === "conversational" ? model : (backupModel || null);
+
+  function remainingBudgetMs() {
+    return budgetMs - (Date.now() - requestStartedAt);
+  }
+
+  function noteSpike(statusCode: number) {
+    const now = Date.now();
+    GROQ_CIRCUIT.spikes = GROQ_CIRCUIT.spikes.filter((ts) => now - ts <= 60_000);
+    if (statusCode === 429 || statusCode >= 500) {
+      GROQ_CIRCUIT.spikes.push(now);
+      if (GROQ_CIRCUIT.spikes.length >= 4) {
+        GROQ_CIRCUIT.openedUntilMs = now + 15_000;
+      }
+    }
+  }
+
+  function resetCircuit() {
+    GROQ_CIRCUIT.spikes = [];
+    GROQ_CIRCUIT.openedUntilMs = 0;
+  }
+
+  // Inner attempt: builds and fires the request for a specific model with budget-aware retries.
   async function attempt(mdl: string): Promise<CallGroqResult> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const groqMessages: any[] = [{ role: "system", content: systemPrompt }];
@@ -728,12 +774,24 @@ async function callGroq(
       body.tool_choice = "auto";
     }
 
-    // Retry loop: handles 429 rate limits with exponential backoff (up to 3 retries)
-    const MAX_RETRIES = 3;
+    // Retry loop: capped by both retry count and remaining budget.
+    const MAX_RETRIES = 5;
+    const MIN_REMAINING_FOR_RETRY_MS = 900;
     let res!: Response;
     for (let i = 0; i <= MAX_RETRIES; i++) {
+      if (Date.now() < GROQ_CIRCUIT.openedUntilMs) {
+        throw new Error(`Groq circuit open until ${new Date(GROQ_CIRCUIT.openedUntilMs).toISOString()}`);
+      }
+      const remaining = remainingBudgetMs();
+      if (remaining <= MIN_REMAINING_FOR_RETRY_MS) {
+        throw new Error(`Groq ${mdl} budget exhausted (${budgetMs}ms)`);
+      }
+      metrics.attempt_count += 1;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        Math.max(700, Math.min(remaining - 250, 8000))
+      );
       try {
         res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
@@ -747,18 +805,39 @@ async function callGroq(
       } catch (err) {
         clearTimeout(timeoutId);
         if ((err as Error).name === "AbortError") {
-          throw new Error(`Groq ${mdl} request timed out after 30s`);
+          noteSpike(503);
+          throw new Error(`Groq ${mdl} request timed out within budget (${budgetMs}ms)`);
         }
         throw err;
       }
       clearTimeout(timeoutId);
 
+      if ((res.status === 429 || res.status >= 500) && i < MAX_RETRIES) {
+        noteSpike(res.status);
+      }
+
       if (res.status === 429 && i < MAX_RETRIES) {
         const errBody = await res.text().catch(() => "");
         const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
-        const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : (2 ** i) * 2;
+        const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 8) : Math.min((2 ** i) * 0.8, 8);
+        const waitMs = Math.floor(waitSec * 1000);
+        if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
+          throw new Error(`Groq ${mdl} rate limited with insufficient budget to retry`);
+        }
+        metrics.retry_wait_ms_total += waitMs;
         console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
-        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+
+      if (res.status >= 500 && i < MAX_RETRIES) {
+        const waitMs = Math.min(300 * (2 ** i), 2500);
+        if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+        }
+        metrics.retry_wait_ms_total += waitMs;
+        await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
 
@@ -788,25 +867,33 @@ async function callGroq(
         const errText = await res.text().catch(() => "");
         throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
       }
+      resetCircuit();
       break;
     }
 
     const data = await res.json();
-    return parseLlmResponse(data);
+    return {
+      ...parseLlmResponse(data),
+      model_used: effectiveModel,
+      ...metrics,
+    };
   }
 
   // Try primary model; fall back to backupModel on hard errors OR empty responses
   try {
-    const result = await attempt(model);
-    if (!result.content && result.actions.length === 0 && backupModel && backupModel !== model) {
-      console.warn(`[callGroq] Primary model (${model}) returned empty response — retrying with backup ${backupModel}`);
-      return await attempt(backupModel);
+    let result = await attempt(selectedPrimary);
+    if (!result.content && result.actions.length === 0 && selectedBackup && selectedBackup !== selectedPrimary) {
+      metrics.fallback_used = true;
+      console.warn(`[callGroq] Primary model (${selectedPrimary}) returned empty response — retrying with backup ${selectedBackup}`);
+      result = await attempt(selectedBackup);
     }
-    return result;
+    return { ...result, ...metrics };
   } catch (primaryErr) {
-    if (backupModel && backupModel !== model) {
-      console.warn(`[callGroq] Primary model (${model}) failed: ${(primaryErr as Error).message} — retrying with backup ${backupModel}`);
-      return await attempt(backupModel);
+    if (selectedBackup && selectedBackup !== selectedPrimary && remainingBudgetMs() > 900) {
+      metrics.fallback_used = true;
+      console.warn(`[callGroq] Primary model (${selectedPrimary}) failed: ${(primaryErr as Error).message} — retrying with backup ${selectedBackup}`);
+      const fallbackResult = await attempt(selectedBackup);
+      return { ...fallbackResult, ...metrics };
     }
     throw primaryErr;
   }
@@ -1013,6 +1100,15 @@ serve(async (req: Request) => {
     const normalizedWorkspaceContext = typeof workspaceContext === "string"
       ? workspaceContext.trim().toLowerCase()
       : "chat";
+    const latestUserMessage = [...(Array.isArray(messages) ? messages : [])]
+      .reverse()
+      .find((m) => m?.role === "user" && typeof m?.content === "string");
+    const latestUserText = ((latestUserMessage?.content as string) || "").toLowerCase();
+    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note)/i.test(latestUserText)
+      || normalizedWorkspaceContext === "schedule"
+      || normalizedWorkspaceContext === "notes";
+    const routeType: "conversational" | "tool_heavy" | "content_gen" =
+      isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
@@ -1028,7 +1124,11 @@ serve(async (req: Request) => {
       imageMimeType,
       true,         // includeTools — always on; model decides when to call tools
       null,         // toolsOverride — use full ACTION_TOOLS
-      BACKUP_MODEL  // fallback if primary fails or returns empty
+      BACKUP_MODEL, // fallback if primary fails or returns empty
+      {
+        isContentGen: Boolean(isContentGen),
+        routeType,
+      }
     );
 
     await persistPromptTelemetry({
