@@ -699,6 +699,53 @@ function parseLlmResponse(data) {
   };
 }
 
+async function persistPromptTelemetry({
+  supabaseUrl,
+  serviceKey,
+  userId,
+  requestId,
+  promptVersion,
+  contextChars,
+  inputTokensEst,
+  workspaceContext,
+  isContentGen,
+  latencyMs,
+  ok,
+  errorMessage,
+}) {
+  const payload = {
+    request_id: requestId,
+    user_id: userId,
+    prompt_version: promptVersion || null,
+    context_chars: Number.isFinite(contextChars) ? contextChars : null,
+    input_tokens_est: Number.isFinite(inputTokensEst) ? inputTokensEst : null,
+    workspace_context: workspaceContext || "chat",
+    is_content_gen: Boolean(isContentGen),
+    latency_ms: Number.isFinite(latencyMs) ? latencyMs : null,
+    ok: Boolean(ok),
+    error: errorMessage || null,
+    created_at: new Date().toISOString(),
+  };
+
+  console.log("chat_prompt_telemetry", payload);
+
+  if (!supabaseUrl || !serviceKey) return;
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/prompt_telemetry_logs`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn("prompt telemetry persistence failed:", err?.message || err);
+  }
+}
+
 /* ── Extract user ID from JWT ── */
 function extractUserId(authHeader) {
   if (!authHeader) return null;
@@ -764,6 +811,9 @@ export default async function handler(req, res) {
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  const startedAt = Date.now();
+  const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  let telemetry = null;
   try {
     const body = req.body;
 
@@ -827,11 +877,22 @@ export default async function handler(req, res) {
       imageBase64,
       imageMimeType,
       workspaceContext,
+      prompt_version,
+      context_chars,
+      input_tokens_est,
     } = body;
+    const userId = extractUserId(req.headers.authorization);
+    telemetry = {
+      userId,
+      promptVersion: typeof prompt_version === "string" ? prompt_version : null,
+      contextChars: Number(context_chars),
+      inputTokensEst: Number(input_tokens_est),
+      workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
+      isContentGen: Boolean(isContentGen),
+    };
 
     // Rate limiting for content generation
     if (isContentGen && SUPABASE_SERVICE_ROLE_KEY) {
-      const userId = extractUserId(req.headers.authorization);
       if (userId) {
         const { allowed, used } = await checkContentRateLimit(
           userId,
@@ -865,8 +926,35 @@ export default async function handler(req, res) {
       BACKUP_MODEL  // fallback if primary fails or returns empty
     );
 
+    await persistPromptTelemetry({
+      supabaseUrl: SUPABASE_URL,
+      serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+      userId: telemetry?.userId || null,
+      requestId,
+      promptVersion: telemetry?.promptVersion,
+      contextChars: telemetry?.contextChars,
+      inputTokensEst: telemetry?.inputTokensEst,
+      workspaceContext: telemetry?.workspaceContext,
+      isContentGen: telemetry?.isContentGen,
+      latencyMs: Date.now() - startedAt,
+      ok: true,
+    });
     return res.status(200).json(result);
   } catch (err) {
+    await persistPromptTelemetry({
+      supabaseUrl: SUPABASE_URL,
+      serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+      userId: telemetry?.userId || null,
+      requestId,
+      promptVersion: telemetry?.promptVersion,
+      contextChars: telemetry?.contextChars,
+      inputTokensEst: telemetry?.inputTokensEst,
+      workspaceContext: telemetry?.workspaceContext,
+      isContentGen: telemetry?.isContentGen,
+      latencyMs: Date.now() - startedAt,
+      ok: false,
+      errorMessage: err?.message || "Internal server error",
+    });
     console.error("api/chat error:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
   }

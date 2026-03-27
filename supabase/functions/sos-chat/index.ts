@@ -618,6 +618,45 @@ function parseLlmResponse(data: any): { content: string; actions: Record<string,
   return { content: textContent.trim(), actions, clarification, clarifications, validation_warnings: validationWarnings };
 }
 
+async function persistPromptTelemetry(params: {
+  userId: string | null;
+  requestId: string;
+  promptVersion: string | null;
+  contextChars: number | null;
+  inputTokensEst: number | null;
+  workspaceContext: string;
+  isContentGen: boolean;
+  latencyMs: number;
+  ok: boolean;
+  errorMessage?: string;
+}) {
+  const payload = {
+    request_id: params.requestId,
+    user_id: params.userId,
+    prompt_version: params.promptVersion,
+    context_chars: Number.isFinite(params.contextChars as number) ? params.contextChars : null,
+    input_tokens_est: Number.isFinite(params.inputTokensEst as number) ? params.inputTokensEst : null,
+    workspace_context: params.workspaceContext || "chat",
+    is_content_gen: Boolean(params.isContentGen),
+    latency_ms: params.latencyMs,
+    ok: Boolean(params.ok),
+    error: params.errorMessage || null,
+    created_at: new Date().toISOString(),
+  };
+
+  console.log("chat_prompt_telemetry", payload);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return;
+  try {
+    const sb = createClient(supabaseUrl, serviceKey);
+    await sb.from("prompt_telemetry_logs").insert(payload);
+  } catch (err) {
+    console.warn("prompt telemetry persistence failed:", (err as Error)?.message || err);
+  }
+}
+
 /* ── Groq chat + function calling ── */
 type CallGroqResult = {
   content: string;
@@ -872,6 +911,16 @@ function extractUserId(authHeader: string | null): string | null {
 
 /* ── Main handler ── */
 serve(async (req: Request) => {
+  const startedAt = Date.now();
+  const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  let telemetry: {
+    userId: string | null;
+    promptVersion: string | null;
+    contextChars: number | null;
+    inputTokensEst: number | null;
+    workspaceContext: string;
+    isContentGen: boolean;
+  } | null = null;
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -931,11 +980,22 @@ serve(async (req: Request) => {
       imageBase64,
       imageMimeType,
       workspaceContext,
+      prompt_version,
+      context_chars,
+      input_tokens_est,
     } = body;
+    const userId = extractUserId(req.headers.get("Authorization"));
+    telemetry = {
+      userId,
+      promptVersion: typeof prompt_version === "string" ? prompt_version : null,
+      contextChars: Number.isFinite(Number(context_chars)) ? Number(context_chars) : null,
+      inputTokensEst: Number.isFinite(Number(input_tokens_est)) ? Number(input_tokens_est) : null,
+      workspaceContext: typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "chat",
+      isContentGen: Boolean(isContentGen),
+    };
 
     // Rate limiting for content generation
     if (isContentGen) {
-      const userId = extractUserId(req.headers.get("Authorization"));
       if (userId) {
         const { allowed, used } = await checkContentRateLimit(userId);
         if (!allowed) {
@@ -971,12 +1031,35 @@ serve(async (req: Request) => {
       BACKUP_MODEL  // fallback if primary fails or returns empty
     );
 
+    await persistPromptTelemetry({
+      userId: telemetry?.userId || null,
+      requestId,
+      promptVersion: telemetry?.promptVersion || null,
+      contextChars: telemetry?.contextChars || null,
+      inputTokensEst: telemetry?.inputTokensEst || null,
+      workspaceContext: telemetry?.workspaceContext || "chat",
+      isContentGen: telemetry?.isContentGen || false,
+      latencyMs: Date.now() - startedAt,
+      ok: true,
+    });
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     const errMsg = (err as Error).message || "Internal server error";
     const errStack = (err as Error).stack || "";
+    await persistPromptTelemetry({
+      userId: telemetry?.userId || null,
+      requestId,
+      promptVersion: telemetry?.promptVersion || null,
+      contextChars: telemetry?.contextChars || null,
+      inputTokensEst: telemetry?.inputTokensEst || null,
+      workspaceContext: telemetry?.workspaceContext || "chat",
+      isContentGen: telemetry?.isContentGen || false,
+      latencyMs: Date.now() - startedAt,
+      ok: false,
+      errorMessage: errMsg,
+    });
     console.error("sos-chat error:", errMsg, errStack);
     return new Response(
       JSON.stringify({ error: errMsg }),
