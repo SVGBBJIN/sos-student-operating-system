@@ -394,6 +394,129 @@ function parseFailedGeneration(failedGen) {
   return results;
 }
 
+const TOOL_SPEC_BY_NAME = new Map(
+  ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
+);
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DEFAULT_MAX_STRING_LENGTH = 500;
+const LONG_TEXT_MAX_STRING_LENGTH = 5000;
+
+function isValidDateString(value) {
+  if (!DATE_RE.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+function isValidTimeString(value) {
+  return TIME_RE.test(value);
+}
+
+function validateToolArguments(toolName, args) {
+  const spec = TOOL_SPEC_BY_NAME.get(toolName);
+  if (!spec || spec.type !== "object") return { issues: [], missingFields: [] };
+  const properties = spec.properties || {};
+  const required = spec.required || [];
+  const issues = [];
+  const missingFields = [];
+
+  for (const field of required) {
+    const value = args[field];
+    const missing =
+      value === undefined ||
+      value === null ||
+      (typeof value === "string" && value.trim().length === 0);
+    if (missing) {
+      missingFields.push(field);
+      issues.push({ field, issue: "missing", expected: "required field" });
+    }
+  }
+
+  for (const [field, schema] of Object.entries(properties)) {
+    const value = args[field];
+    if (value === undefined || value === null) continue;
+    const expectedType = schema.type;
+
+    if (expectedType === "string") {
+      if (typeof value !== "string") {
+        issues.push({ field, issue: "type", expected: "string", actual: typeof value });
+        continue;
+      }
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
+      }
+      const maxLen = ["content", "new_content", "description", "reason", "question"].includes(field)
+        ? LONG_TEXT_MAX_STRING_LENGTH
+        : DEFAULT_MAX_STRING_LENGTH;
+      if (value.length > maxLen) {
+        issues.push({ field, issue: "length", expected: `<= ${maxLen} chars`, actual: `${value.length} chars` });
+      }
+      if ((field.includes("date") || field === "due") && !isValidDateString(trimmed)) {
+        issues.push({ field, issue: "format", expected: "YYYY-MM-DD", actual: String(value) });
+      }
+      if (["time", "start", "end"].includes(field) && !isValidTimeString(trimmed)) {
+        issues.push({ field, issue: "format", expected: "HH:MM", actual: String(value) });
+      }
+      if (schema.enum && !schema.enum.includes(value)) {
+        issues.push({ field, issue: "enum", expected: schema.enum.join(", "), actual: String(value) });
+      }
+      continue;
+    }
+
+    if (expectedType === "number") {
+      if (typeof value !== "number" || Number.isNaN(value)) {
+        issues.push({ field, issue: "type", expected: "number", actual: typeof value });
+      }
+      continue;
+    }
+
+    if (expectedType === "boolean") {
+      if (typeof value !== "boolean") {
+        issues.push({ field, issue: "type", expected: "boolean", actual: typeof value });
+      }
+      continue;
+    }
+
+    if (expectedType === "array") {
+      if (!Array.isArray(value)) {
+        issues.push({ field, issue: "type", expected: "array", actual: typeof value });
+      }
+      continue;
+    }
+
+    if (expectedType === "object" && (typeof value !== "object" || Array.isArray(value))) {
+      issues.push({
+        field,
+        issue: "type",
+        expected: "object",
+        actual: Array.isArray(value) ? "array" : typeof value,
+      });
+    }
+  }
+
+  return { issues, missingFields };
+}
+
+function toValidationClarification(toolName, missingFields, issues) {
+  const detail = issues
+    .map((issue) => issue.field)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+  const humanFields = (missingFields.length > 0 ? missingFields : detail).join(", ");
+  return {
+    reason: `I need a couple details before I can run ${toolName}.`,
+    question: humanFields
+      ? `Can you provide valid values for: ${humanFields}?`
+      : `Can you clarify the details for ${toolName}?`,
+    options: ["Provide details", "Skip this action"],
+    multi_select: false,
+    context_action: toolName,
+    missing_fields: missingFields,
+  };
+}
+
 /* ── Groq chat + function calling ── */
 async function callGroq(apiKey, model, systemPrompt, messages, maxTokens, imageBase64, imageMimeType, includeTools = true, toolsOverride = null, backupModel = null) {
   // Inner attempt: builds the request for a specific model and runs it with 429 retry logic.
@@ -524,6 +647,7 @@ function parseLlmResponse(data) {
   const message = data.choices?.[0]?.message;
   const textContent = message?.content || "";
   const clarifications = [];
+  const validationWarnings = [];
   const actions = (message?.tool_calls || []).flatMap((tc) => {
     let parsedArgs;
     try {
@@ -547,6 +671,17 @@ function parseLlmResponse(data) {
       return [];
     }
 
+    const { issues, missingFields } = validateToolArguments(tc.function.name, parsedArgs);
+    if (issues.length > 0) {
+      validationWarnings.push({
+        tool: tc.function.name,
+        missing_fields: missingFields,
+        issues,
+      });
+      clarifications.push(toValidationClarification(tc.function.name, missingFields, issues));
+      return [];
+    }
+
     return [{
       type: tc.function.name,
       ...parsedArgs,
@@ -555,7 +690,13 @@ function parseLlmResponse(data) {
 
   // Return single clarification for backward compat, plus full array
   const clarification = clarifications.length > 0 ? clarifications[0] : null;
-  return { content: textContent.trim(), actions, clarification, clarifications };
+  return {
+    content: textContent.trim(),
+    actions,
+    clarification,
+    clarifications,
+    validation_warnings: validationWarnings,
+  };
 }
 
 /* ── Extract user ID from JWT ── */
