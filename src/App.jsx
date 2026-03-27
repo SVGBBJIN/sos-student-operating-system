@@ -705,7 +705,7 @@ Corrections: "actually / wait / I meant / oops" should update the latest related
 Notes/docs: use them as references when relevant; cite note names naturally.
 Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
 Image input: describe what is visible first, then extract assignments/dates when legible.
-Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return valid JSON only.`;
+Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).`;
 
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
@@ -714,130 +714,6 @@ Content generation requests (flashcards/quizzes/plans/outlines/summaries/project
     contextChars: contextBlock.length,
     estimatedInputTokens: estimateInputTokens(prompt)
   };
-}
-
-/* ─── Action parser ─── */
-function parseActions(text) {
-  const actions = []; const regex = /<action>([\s\S]*?)<\/action>/g; let match;
-  while ((match = regex.exec(text)) !== null) {
-    try { actions.push(JSON.parse(match[1].trim())); } catch (e) { console.error('Failed to parse action:', match[1], e); }
-  }
-  return actions;
-}
-function parseActionsDetailed(text) {
-  const actions = []; const malformedFragments = [];
-  const regex = /<action>([\s\S]*?)<\/action>/g; let match;
-  while ((match = regex.exec(text)) !== null) {
-    const raw = match[1].trim();
-    try { actions.push(JSON.parse(raw)); } catch (e) { console.error('Malformed action JSON:', raw, e); malformedFragments.push(raw); }
-  }
-  return { actions, malformedFragments };
-}
-async function parseActionsWithRecovery(rawContent, token) {
-  const { actions, malformedFragments } = parseActionsDetailed(rawContent);
-  if (malformedFragments.length === 0) return actions;
-  console.warn('Attempting JSON recovery for', malformedFragments.length, 'malformed fragment(s)');
-  try {
-    const fixPrompt = 'Fix the following malformed JSON action tags. Return ONLY valid <action>JSON</action> tags, nothing else.\n\nMalformed fragments:\n' +
-      malformedFragments.map((f, i) => 'Fragment ' + (i+1) + ': ' + f).join('\n') +
-      '\n\nRules:\n- Fix syntax errors (missing quotes, trailing commas, unescaped characters)\n- Do NOT change the intent or values — only fix the JSON syntax\n- Return each fixed action in <action>...</action> tags';
-    const response = await fetch(EDGE_FN_URL, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({ systemPrompt:fixPrompt, messages:[{role:'user',content:'Fix the JSON above.'}], maxTokens:512, model:'llama-3.1-8b-instant', provider:'groq', isContentGen:false })
-    });
-    if (response.ok) {
-      const data = await response.json();
-      const fixedActions = parseActions(data?.content || '');
-      return [...actions, ...fixedActions];
-    }
-  } catch (e) { console.error('JSON recovery re-prompt failed:', e); }
-  return actions;
-}
-function stripActionTags(text) {
-  return (text || '')
-    .replace(/<action>[\s\S]*?<\/action>/gi, '')
-    .replace(/<action[\s\S]*$/gi, '')
-    .trim();
-}
-
-function parseActionDecisionResponse(text) {
-  const raw = (text || '').trim();
-  if (!raw || /^no$/i.test(raw)) return [];
-
-  // Preferred format: command lines mapped into local templates
-  // Example: add_event; title=Math Test; date=2026-02-14; event_type=test; subject=Math
-  const parseScalar = (v) => {
-    const t = (v || '').trim();
-    if (!t) return '';
-    if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return t.slice(1, -1);
-    if (/^-?\d+$/.test(t)) return Number(t);
-    if (/^(true|false)$/i.test(t)) return /^true$/i.test(t);
-    return t;
-  };
-
-  const parseParams = (paramText) => {
-    const out = {};
-    for (const part of (paramText || '').split(';')) {
-      const seg = part.trim();
-      if (!seg) continue;
-      const idx = seg.indexOf('=');
-      if (idx === -1) continue;
-      const key = seg.slice(0, idx).trim();
-      const valueRaw = seg.slice(idx + 1).trim();
-      if (!key) continue;
-      if (key === 'days') {
-        out.days = valueRaw.replace(/^\[|\]$/g, '').split(',').map(s => s.trim()).filter(Boolean);
-        continue;
-      }
-      if (key === 'subtasks') {
-        try { out.subtasks = JSON.parse(valueRaw); } catch (_) { out.subtasks = []; }
-        continue;
-      }
-      out[key] = parseScalar(valueRaw);
-    }
-    return out;
-  };
-
-  const fromTemplate = (type, p) => {
-    switch ((type || '').trim()) {
-      case 'add_task': return { type:'add_task', title:p.title||'Untitled', subject:p.subject||'', due:p.due||today(), estimated_minutes:Number(p.estimated_minutes||30) };
-      case 'add_event': return { type:'add_event', title:p.title||'Event', date:p.date||today(), event_type:p.event_type||'event', subject:p.subject||'' };
-      case 'add_block': return { type:'add_block', activity:p.activity||'Block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00', category:p.category||'school' };
-      case 'complete_task': return { type:'complete_task', task_id:p.task_id||'' };
-      case 'delete_task': return { type:'delete_task', title:p.title||p.task_id||'' };
-      case 'delete_event': return { type:'delete_event', title:p.title||p.event_id||'' };
-      case 'update_event': return { type:'update_event', title:p.title||'', new_title:p.new_title||undefined, date:p.date||undefined, event_type:p.event_type||undefined, subject:p.subject };
-      case 'delete_block': return { type:'delete_block', date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00' };
-      case 'convert_event_to_block': return { type:'convert_event_to_block', title:p.title||p.event_id||'', event_id:p.event_id||undefined, date:p.date||today(), start:p.start||'16:00', end:p.end||'17:00', category:p.category||'school' };
-      case 'convert_block_to_event': return { type:'convert_block_to_event', date:p.date||today(), start:p.start||'16:00', end:p.end||undefined, title:p.title||'Event', event_type:p.event_type||'event', subject:p.subject||'' };
-      case 'break_task': return { type:'break_task', parent_title:p.parent_title||p.title||'Task', subtasks:Array.isArray(p.subtasks)?p.subtasks:[] };
-      case 'add_recurring_event': return { type:'add_recurring_event', title:p.title||'Recurring Event', event_type:p.event_type||'practice', subject:p.subject||'', days:Array.isArray(p.days)?p.days:[], start_date:p.start_date||today(), end_date:p.end_date||today() };
-      case 'clear_all': return { type:'clear_all' };
-      default: return null;
-    }
-  };
-
-  const commandActions = raw.split(/\|\|/).map(s => s.trim()).filter(Boolean).map(cmd => {
-    const [typePart, ...rest] = cmd.split(';');
-    const type = (typePart || '').trim().toLowerCase();
-    const params = parseParams(rest.join(';'));
-    return fromTemplate(type, params);
-  }).filter(Boolean);
-  if (commandActions.length > 0) return commandActions;
-
-  const tagged = parseActions(raw);
-  if (tagged.length > 0) return tagged;
-
-  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === 'object') return [parsed];
-  } catch (e) {
-    console.warn('Failed to parse action decision JSON:', e);
-  }
-  return [];
 }
 
 /* ─── Google Docs text extractor (shared by import modal + daily brief) ─── */
@@ -877,6 +753,32 @@ function parseDocId(input) {
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|study\s*plan|study\s*guide|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const TUTOR_STUDY_REGEX = /flashcards?|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?/i;
+
+function isStringArray(value, min = 0) {
+  return Array.isArray(value) && value.length >= min && value.every(v => typeof v === 'string' && v.trim().length > 0);
+}
+
+function isValidContentAction(action) {
+  if (!action || typeof action !== 'object' || !CONTENT_TYPES.includes(action.type)) return false;
+  switch (action.type) {
+    case 'create_flashcards':
+      return Array.isArray(action.cards) && action.cards.length > 0 && action.cards.every(c => typeof c?.q === 'string' && typeof c?.a === 'string');
+    case 'create_quiz':
+      return Array.isArray(action.questions) && action.questions.length > 0 && action.questions.every(q => typeof q?.q === 'string' && isStringArray(q?.choices, 2) && typeof q?.answer === 'string');
+    case 'create_outline':
+      return Array.isArray(action.sections) && action.sections.length > 0 && action.sections.every(s => typeof s?.heading === 'string' && isStringArray(s?.points, 1));
+    case 'create_summary':
+      return isStringArray(action.bullets, 1);
+    case 'create_study_plan':
+      return Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.step === 'string');
+    case 'create_project_breakdown':
+      return Array.isArray(action.phases) && action.phases.length > 0 && action.phases.every(p => typeof p?.phase === 'string' && isStringArray(p?.tasks, 1));
+    case 'make_plan':
+      return typeof action.title === 'string' && Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.title === 'string');
+    default:
+      return false;
+  }
+}
 
 /* Regex-based classifier (kept as fast fallback) */
 function classifyMessageRegex(text) {
@@ -5015,27 +4917,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const chatData = await chatResponse.json();
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
-      // For content gen, parse content types from raw text response (AI outputs JSON when tools are disabled)
-      if (isContentGen && actions.length === 0 && chatData?.content) {
-        const raw = (chatData.content || '').trim();
-        // Try parsing as JSON (AI may output raw JSON object)
-        const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
-        try {
-          const parsed = JSON.parse(cleaned);
-          if (parsed && typeof parsed === 'object' && parsed.type && CONTENT_TYPES.includes(parsed.type)) {
-            actions = [parsed];
-          } else if (Array.isArray(parsed)) {
-            actions = parsed.filter(p => p && p.type && CONTENT_TYPES.includes(p.type));
-          }
-        } catch (_) {
-          // Also try parsing <action> tags from text
-          const taggedActions = parseActions(raw);
-          if (taggedActions.length > 0) {
-            actions = taggedActions.filter(a => CONTENT_TYPES.includes(a.type));
-          }
-        }
-      }
-
       // Support multiple clarifications (array) or single (object)
       const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
         ? chatData.clarifications
@@ -5180,7 +5061,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
-        const contentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        const rawContentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
+        const contentActions = rawContentActions.filter(isValidContentAction);
+        if (rawContentActions.length > contentActions.length) {
+          console.warn('Dropped invalid content payload(s) from server actions[] response.');
+        }
         const tutorContentActions = contentActions.filter(a => a.type === 'create_flashcards' || a.type === 'create_quiz');
         if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
