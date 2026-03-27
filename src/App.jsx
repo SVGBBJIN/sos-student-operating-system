@@ -4954,6 +4954,45 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         return;
       }
 
+      const validationWarnings = Array.isArray(chatData?.validation_warnings) ? chatData.validation_warnings : [];
+      if (validationWarnings.length > 0) {
+        try {
+          const validationFailures = validationWarnings.map(w => ({
+            action_type: w?.tool || 'unknown_action',
+            category: 'validation_failed',
+            detail: `Validation failed for ${(w?.tool || 'action')}.`,
+            suggestions: (Array.isArray(w?.issues) ? w.issues : []).map(issue => issue?.field).filter(Boolean),
+          }));
+          const fallback = await fetch(EDGE_FN_URL, {
+            method:'POST',
+            headers: {
+              'Content-Type':'application/json',
+              'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
+            },
+            body: JSON.stringify({
+              mode: 'tool_fallback',
+              systemPrompt: promptPayload.prompt,
+              messages: historyForApi,
+              maxTokens: 512,
+              workspaceContext: effectiveWorkspaceContext,
+              tool_failures: validationFailures,
+            }),
+          });
+          if (fallback.ok) {
+            const fallbackData = await fallback.json();
+            const followupText = typeof fallbackData?.content === 'string' ? fallbackData.content.trim() : '';
+            if (followupText) {
+              const assistantMsg = { role:'assistant', content:followupText, timestamp:Date.now() };
+              setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+              if (user) dbInsertChatMsg('assistant', followupText, user.id);
+              return;
+            }
+          }
+        } catch (validationFallbackErr) {
+          console.error('Validation fallback clarification failed:', validationFallbackErr);
+        }
+      }
+
       const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
       const actionAckByType = {
         update_event: 'got it — I can update that event.',
@@ -4990,20 +5029,55 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       // Actions come back as structured tool_use results — no text parsing needed
 
+      async function requestToolFailureFollowup(toolFailures) {
+        const fallbackResponse = await fetch(EDGE_FN_URL, {
+          method:'POST',
+          headers: {
+            'Content-Type':'application/json',
+            'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
+          },
+          body: JSON.stringify({
+            mode: 'tool_fallback',
+            systemPrompt: promptPayload.prompt,
+            messages: historyForApi,
+            maxTokens: 512,
+            workspaceContext: effectiveWorkspaceContext,
+            tool_failures: toolFailures,
+          }),
+        });
+        if (!fallbackResponse.ok) {
+          const errData = await fallbackResponse.json().catch(() => ({}));
+          throw new Error(errData?.error || `tool fallback failed (${fallbackResponse.status})`);
+        }
+        return fallbackResponse.json();
+      }
+
+      function buildResolutionFailure(actionType, detail, candidates = []) {
+        const filtered = (candidates || []).filter(Boolean).slice(0, 3);
+        return {
+          action_type: actionType,
+          category: filtered.length > 1 ? 'ambiguous' : 'not_found',
+          detail,
+          suggestions: filtered,
+        };
+      }
+
       // ── Resolve actions: translate AI names → real IDs/ranges using resolveEvent/resolveTask helpers ──
       const resolved = [];
+      const resolutionFailures = [];
       for (const a of actions) {
         if (a.type === 'delete_event' || a.type === 'update_event' || a.type === 'convert_event_to_block') {
           const match = resolveEvent(a.title || a.event_id, events);
           if (match) {
             resolved.push({ ...a, event_id: match.id, title: match.title, date: a.date || match.date });
           } else {
-            const msg = { role:'assistant', content: a.type === 'delete_event'
-              ? "hmm, I couldn't find that event to remove. what's the exact name?"
-              : a.type === 'update_event'
-                ? "I couldn't find that event to update. which one did you mean?"
-                : "I couldn't find that event to convert. which one did you mean?", timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            const query = (a.title || a.event_id || '').trim();
+            const eventCandidates = events
+              .map(ev => ({ title: ev.title, score: matchScore(query, ev.title) }))
+              .filter(v => v.score >= 30)
+              .sort((x, y) => y.score - x.score)
+              .map(v => v.title);
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve event "${query}".`, eventCandidates));
           }
           continue;
         }
@@ -5012,8 +5086,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (range) {
             resolved.push({ ...a, date: range.date, start: range.start, end: a.end || range.end, title: a.title || range.name || 'Event' });
           } else {
-            const msg = { role:'assistant', content:"I couldn't find that block to convert. can you share the date/time?", timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            resolutionFailures.push({
+              action_type: a.type,
+              category: 'not_found',
+              detail: `Unable to resolve block for date="${a.date || ''}" start="${a.start || ''}".`,
+            });
           }
           continue;
         }
@@ -5022,8 +5099,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
           } else {
-            const msg = { role:'assistant', content:"hmm, I couldn't find that task. what's the exact name?", timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            const query = (a.title || a.task_id || '').trim();
+            const taskCandidates = tasks
+              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
+              .filter(v => v.score >= 30)
+              .sort((x, y) => y.score - x.score)
+              .map(v => v.title);
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
           }
           continue;
         }
@@ -5032,8 +5114,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
           } else {
-            const msg = { role:'assistant', content:"hmm, I couldn't find that task to mark done. what's the exact name?", timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            const query = (a.title || a.task_id || '').trim();
+            const taskCandidates = tasks
+              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
+              .filter(v => v.score >= 30)
+              .sort((x, y) => y.score - x.score)
+              .map(v => v.title);
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
           }
           continue;
         }
@@ -5045,8 +5132,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (match) {
             resolved.push({ ...a, note_id: match.id, tab_name: match.name });
           } else {
-            const msg = { role:'assistant', content:"I couldn't find that note. what's the exact name?", timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            const query = (a.tab_name || '').trim();
+            const noteCandidates = notes
+              .map(n => ({ name: n.name, score: matchScore(query, n.name) }))
+              .filter(v => v.score >= 30)
+              .sort((x, y) => y.score - x.score)
+              .map(v => v.name);
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve note "${query}".`, noteCandidates));
           }
           continue;
         }
@@ -5058,6 +5150,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         resolved.push(a);
       }
       actions = resolved;
+
+      if (resolutionFailures.length > 0) {
+        try {
+          const fallback = await requestToolFailureFollowup(resolutionFailures);
+          const followupText = typeof fallback?.content === 'string' ? fallback.content.trim() : '';
+          if (followupText) {
+            const msg = { role:'assistant', content: followupText, timestamp:Date.now() };
+            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+            if (user) dbInsertChatMsg('assistant', followupText, user.id);
+          }
+        } catch (fallbackErr) {
+          console.error('Tool fallback clarification failed:', fallbackErr);
+          const fallbackMsg = { role:'assistant', content:"I couldn't match part of that action. can you share the exact item name and date/time?", timestamp:Date.now() };
+          setMessages(prev => { const n=[...prev,fallbackMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', fallbackMsg.content, user.id);
+        }
+      }
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
