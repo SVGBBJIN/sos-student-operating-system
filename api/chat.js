@@ -982,6 +982,34 @@ function parseLlmResponse(data) {
   };
 }
 
+function buildToolFallbackPrompt(failures = []) {
+  const lines = failures.map((failure, idx) => {
+    const actionType = failure?.action_type || "unknown_action";
+    const category = failure?.category || "execution_failed";
+    const detail = typeof failure?.detail === "string" ? failure.detail.trim() : "";
+    const suggestion = Array.isArray(failure?.suggestions) ? failure.suggestions.filter(Boolean).join(" | ") : "";
+    const parts = [
+      `#${idx + 1}`,
+      `action=${actionType}`,
+      `category=${category}`,
+      detail ? `detail=${detail}` : "",
+      suggestion ? `candidates=${suggestion}` : "",
+    ].filter(Boolean);
+    return parts.join(" ; ");
+  });
+  return [
+    "Tool execution failed client-side for one or more proposed actions.",
+    "Write a concise, helpful follow-up question that asks only for the missing/ambiguous details needed to continue.",
+    "If category=not_found: ask for exact title/date/time.",
+    "If category=ambiguous: ask user to choose between candidate options.",
+    "If category=validation_failed: ask for corrected fields using expected formats.",
+    "Do not claim any action was completed.",
+    "",
+    "FAILURE_REPORT:",
+    lines.join("\n"),
+  ].join("\n");
+}
+
 async function persistPromptTelemetry({
   supabaseUrl,
   serviceKey,
@@ -1153,6 +1181,7 @@ export default async function handler(req, res) {
     }
 
     const {
+      mode,
       systemPrompt,
       messages,
       maxTokens = 1024,
@@ -1163,6 +1192,7 @@ export default async function handler(req, res) {
       prompt_version,
       context_chars,
       input_tokens_est,
+      tool_failures,
     } = body;
     const userId = extractUserId(req.headers.authorization);
     telemetry = {
@@ -1173,6 +1203,38 @@ export default async function handler(req, res) {
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
       isContentGen: Boolean(isContentGen),
     };
+
+    if (mode === "tool_fallback") {
+      const fallbackMessages = Array.isArray(messages) ? messages.filter((m) => m && typeof m.content === "string") : [];
+      const failureReport = buildToolFallbackPrompt(Array.isArray(tool_failures) ? tool_failures : []);
+      const followupMessages = [
+        ...fallbackMessages,
+        { role: "user", content: failureReport },
+      ];
+      const fallbackResult = await callGroq(
+        GROQ_API_KEY,
+        PRIMARY_MODEL,
+        `${systemPrompt || ""}\n\nWhen tool execution fails, ask a targeted clarification question.`,
+        followupMessages,
+        Math.min(Number(maxTokens) || 512, 512),
+        null,
+        null,
+        false,
+        null,
+        "auto",
+        BACKUP_MODEL,
+        {
+          isContentGen: false,
+          routeType: "conversational",
+        }
+      );
+      return res.status(200).json({
+        ...fallbackResult,
+        actions: [],
+        executed_actions: [],
+        orchestration: { mode: "tool_fallback", executed_on: "server" },
+      });
+    }
 
     // Rate limiting for content generation
     if (isContentGen && SUPABASE_SERVICE_ROLE_KEY) {
@@ -1240,7 +1302,11 @@ export default async function handler(req, res) {
       latencyMs: Date.now() - startedAt,
       ok: true,
     });
-    return res.status(200).json(result);
+    return res.status(200).json({
+      ...result,
+      executed_actions: [],
+      orchestration: { mode: "client_execution", executed_on: "client" },
+    });
   } catch (err) {
     await persistPromptTelemetry({
       supabaseUrl: SUPABASE_URL,
