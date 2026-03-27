@@ -14,6 +14,15 @@ const GROQ_CIRCUIT = {
   openedUntilMs: 0,
   spikes: [],
 };
+const CONTENT_ACTION_TYPES = new Set([
+  "create_flashcards",
+  "create_quiz",
+  "create_outline",
+  "create_summary",
+  "create_study_plan",
+  "create_project_breakdown",
+  "make_plan",
+]);
 
 /* ── Tool definitions for Groq (OpenAI function-calling format) ── */
 const ACTION_TOOLS = [
@@ -330,6 +339,187 @@ const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "create_flashcards",
+      description: "Create flashcards for study. Return concise question/answer pairs.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_flashcards"] },
+          title: { type: "string" },
+          summary: { type: "string" },
+          cards: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                q: { type: "string" },
+                a: { type: "string" },
+              },
+              required: ["q", "a"],
+            },
+          },
+        },
+        required: ["type", "cards"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_quiz",
+      description: "Create a multiple-choice quiz with answer key.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_quiz"] },
+          title: { type: "string" },
+          summary: { type: "string" },
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                q: { type: "string" },
+                choices: { type: "array", items: { type: "string" } },
+                answer: { type: "string" },
+                explanation: { type: "string" },
+              },
+              required: ["q", "choices", "answer"],
+            },
+          },
+        },
+        required: ["type", "questions"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_outline",
+      description: "Create a topic outline with sections and bullet points.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_outline"] },
+          title: { type: "string" },
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                heading: { type: "string" },
+                points: { type: "array", items: { type: "string" } },
+              },
+              required: ["heading", "points"],
+            },
+          },
+        },
+        required: ["type", "sections"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_summary",
+      description: "Create a concise summary as bullets.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_summary"] },
+          title: { type: "string" },
+          bullets: { type: "array", items: { type: "string" } },
+        },
+        required: ["type", "bullets"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_study_plan",
+      description: "Create a practical study plan with timed steps.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_study_plan"] },
+          title: { type: "string" },
+          steps: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                step: { type: "string" },
+                time_minutes: { type: "number" },
+                day: { type: "string" },
+              },
+              required: ["step"],
+            },
+          },
+        },
+        required: ["type", "steps"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_project_breakdown",
+      description: "Break a project into phases with concrete tasks.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["create_project_breakdown"] },
+          title: { type: "string" },
+          phases: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                phase: { type: "string" },
+                deadline: { type: "string" },
+                tasks: { type: "array", items: { type: "string" } },
+              },
+              required: ["phase", "tasks"],
+            },
+          },
+        },
+        required: ["type", "phases"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "make_plan",
+      description: "Create an actionable multi-step plan suitable for adding tasks.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["make_plan"] },
+          title: { type: "string" },
+          summary: { type: "string" },
+          steps: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                date: { type: "string", description: "YYYY-MM-DD" },
+                time: { type: "string", description: "HH:MM 24-hour" },
+                estimated_minutes: { type: "number" },
+              },
+              required: ["title"],
+            },
+          },
+        },
+        required: ["type", "title", "steps"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "ask_clarification",
       description:
         "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. Use this proactively — don't guess when asking would be better. Also use for content generation requests that lack a topic or scope.",
@@ -402,6 +592,7 @@ function parseFailedGeneration(failedGen) {
 const TOOL_SPEC_BY_NAME = new Map(
   ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
 );
+const CONTENT_ACTION_TOOLS = ACTION_TOOLS.filter((tool) => CONTENT_ACTION_TYPES.has(tool.function.name) || tool.function.name === "ask_clarification");
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -533,6 +724,7 @@ async function callGroq(
   imageMimeType,
   includeTools = true,
   toolsOverride = null,
+  toolChoiceOverride = "auto",
   backupModel = null,
   options = {}
 ) {
@@ -608,7 +800,7 @@ async function callGroq(
     const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
-      body.tool_choice = "auto";
+      body.tool_choice = toolChoiceOverride;
     }
 
     // Retry loop: capped by both retry count and remaining budget.
@@ -772,8 +964,9 @@ function parseLlmResponse(data) {
       return [];
     }
 
+    const actionType = CONTENT_ACTION_TYPES.has(tc.function.name) ? tc.function.name : (parsedArgs.type || tc.function.name);
     return [{
-      type: tc.function.name,
+      type: actionType,
       ...parsedArgs,
     }];
   });
@@ -1006,6 +1199,8 @@ export default async function handler(req, res) {
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
+    const toolsForRequest = isContentGen ? CONTENT_ACTION_TOOLS : null;
+    const toolChoice = isContentGen ? "required" : "auto";
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
@@ -1020,13 +1215,17 @@ export default async function handler(req, res) {
       imageBase64,
       imageMimeType,
       true,         // includeTools — always on; model decides when to call tools
-      null,         // toolsOverride — use full ACTION_TOOLS
+      toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
+      toolChoice,
       BACKUP_MODEL, // fallback if primary fails or returns empty
       {
         isContentGen: Boolean(isContentGen),
         routeType,
       }
     );
+    if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
+      throw new Error("Content generation must return typed actions[] payloads.");
+    }
 
     await persistPromptTelemetry({
       supabaseUrl: SUPABASE_URL,
