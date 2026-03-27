@@ -519,6 +519,56 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
+const SYSTEM_PROMPT_VERSION = 'sos-policy-v2';
+const SYSTEM_PROMPT_CHAR_BUDGET = 7000;
+const CONTEXT_SECTION_BUDGETS = {
+  tasks: 2000,
+  events: 1000,
+  week: 1200,
+  notes: 2400,
+  schedule: 900,
+};
+
+function estimateInputTokens(text = '') {
+  return Math.max(1, Math.ceil((text || '').length / 4));
+}
+
+function truncateWithEllipsis(text = '', maxChars = 300) {
+  if (!text || text.length <= maxChars) return text || '';
+  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
+}
+
+function capLines(lines = [], maxChars = 1000, summaryLabel = 'items') {
+  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
+  const kept = [];
+  let used = 0;
+  for (let i = 0; i < safeLines.length; i++) {
+    const line = String(safeLines[i]).trim();
+    if (!line) continue;
+    const lineLen = line.length + 1;
+    if (used + lineLen > maxChars) break;
+    kept.push(line);
+    used += lineLen;
+  }
+  const omitted = Math.max(0, safeLines.length - kept.length);
+  if (omitted > 0) kept.push('… +' + omitted + ' more ' + summaryLabel + ' omitted for context budget');
+  return kept.join('\n');
+}
+
+function dedupeRepeatedLines(blockText = '') {
+  const seen = new Set();
+  return (blockText || '')
+    .split('\n')
+    .filter(line => {
+      const key = line.trim().toLowerCase();
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join('\n');
+}
+
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const tutorMode = !!options.tutorMode;
   const workspaceContext = options.workspaceContext || 'chat';
@@ -579,172 +629,91 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const doneThisWeek = tasks.filter(t => t.status === 'done' && t.completedAt && new Date(t.completedAt) >= weekStart).length;
   const dailyLoad = {}; activeTasks.forEach(t => { dailyLoad[t.dueDate] = (dailyLoad[t.dueDate] || 0) + (t.estTime || 30); });
   const overloadedDays = Object.entries(dailyLoad).filter(([d, mins]) => mins > 120).map(([d, mins]) => fmt(d) + ' (' + mins + ' min)');
-  const taskList = activeTasks.map(t =>
-    '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') +
+  const taskLines = activeTasks.map(t =>
+    '- ' + truncateWithEllipsis(t.title, 90) + (t.subject ? ' [' + t.subject + ']' : '') +
     ' | due ' + fmt(t.dueDate) + ' (' + daysUntil(t.dueDate) + 'd)' +
     ' | ' + t.estTime + 'min | ' + t.status.replace('_',' ') + ' | id:' + t.id
-  ).join('\n');
+  );
 
-  // ── Build notes section for AI context ──
   const noteNames = notes.map(n => n.name).join(', ') || 'none';
-  let notesSection = '';
+  const noteLines = [];
   if (notes.length > 0) {
-    // Sort: PDF-sourced first (reference docs), then Docs, then AI-generated
     const sortOrder = { pdf: 0, google_docs: 1 };
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
-    const maxTotal = 8000;
-    let totalLen = 0;
     sorted.forEach(n => {
-      if (totalLen >= maxTotal) return;
       const src = n.source === 'pdf' ? 'PDF' : n.source === 'google_docs' ? 'Google Doc' : 'study material';
-      const maxPer = 2000;
-      const content = (n.content || '').slice(0, maxPer) + ((n.content || '').length > maxPer ? '\n[truncated]' : '');
-      const entry = '--- ' + n.name + ' (source: ' + src + ') ---\n' + content + '\n\n';
-      if (totalLen + entry.length <= maxTotal) {
-        notesSection += entry;
-        totalLen += entry.length;
-      }
+      const preview = truncateWithEllipsis((n.content || '').replace(/\s+/g, ' ').trim(), 500);
+      noteLines.push('- ' + n.name + ' (' + src + '): ' + preview);
     });
   }
 
-  // ── Tier 1 (Llama) gets a lean prompt — no task list to hallucinate from ──
+  const dynamicSections = [
+    'DYNAMIC CONTEXT:',
+    'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
+    '',
+    'TODAY\'S SCHEDULE:',
+    capLines(summarizeBlockSlots(todayBlocks), CONTEXT_SECTION_BUDGETS.schedule, 'schedule blocks') || '(nothing scheduled)',
+    '',
+    'ACTIVE TASKS (budgeted):',
+    capLines(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks') || '(none)',
+    (overdueTasks.length > 0 ? ('OVERDUE: ' + overdueTasks.map(t => truncateWithEllipsis(t.title, 80) + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ')) : ''),
+    '',
+    'THIS WEEK (budgeted):',
+    capLines(weekSummary, CONTEXT_SECTION_BUDGETS.week, 'weekly entries') || '(no scheduled activities)',
+    '',
+    'UPCOMING EVENTS (budgeted):',
+    capLines(upcomingEvents, CONTEXT_SECTION_BUDGETS.events, 'events') || 'none',
+    (overloadedDays.length > 0 ? 'OVERLOADED DAYS: ' + overloadedDays.join(', ') : ''),
+    'COMPLETED THIS WEEK: ' + doneThisWeek + ' tasks',
+    '',
+    'NOTES INDEX: ' + noteNames,
+    'NOTES PREVIEWS (budgeted):',
+    capLines(noteLines, CONTEXT_SECTION_BUDGETS.notes, 'note previews') || '(none)',
+    '',
+    'MODE FLAGS:',
+    '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
+    '- workspace_context: ' + workspaceContext,
+  ].filter(Boolean).join('\n');
+
+  const contextBlock = truncateWithEllipsis(dedupeRepeatedLines(dynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
+
+  const stablePolicyTier1 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
+You are SOS, a supportive study sidekick. Keep replies casual, brief (2-3 sentences), and never condescending.
+Never invent tasks/events/deadlines that are not present in dynamic context.
+If schedule/tasks are clear, say so directly and upbeat.
+If student asks about note content, reference only available notes and ask focused follow-ups when details are missing.`;
+
   if (tier === 1) {
     const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
     const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
-    return `You are SOS, a chill study sidekick. Talk like a supportive friend — casual, brief (2-3 sentences max), never condescending.
-
+    const dynamicTier1 = `DYNAMIC CONTEXT:
 TODAY: ${todayStr}
 TODAY'S SCHEDULE: ${scheduleStr}
 COMPLETED THIS WEEK: ${doneThisWeek} task${doneThisWeek !== 1 ? 's' : ''}
-${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} task${activeTasks.length !== 1 ? 's' : ''} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
-NOTES: ${noteNames}
-
-RULES:
-1. NEVER invent specific tasks, deadlines, or events. If it's not explicitly listed above, it doesn't exist — do not make it up.
-2. If student asks about their schedule/tasks and STATUS is "All clear", respond with an upbeat "all clear" message. Examples: "you're free! no overdue stuff, nothing coming up — go enjoy yourself 🎉" or "all good! completely clear schedule, go take a break ✌️"
-3. If student asks how they're doing and there ARE tasks, just say something like "you've got [N] things on the list" without inventing specific titles.
-4. If asked about notes content, say you can see they have notes on those topics but suggest they ask a study question for detailed help.
-5. Stay warm, brief, and casual.`;
+${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
+NOTES: ${noteNames}`;
+    const prompt = stablePolicyTier1 + '\n\n' + truncateWithEllipsis(dynamicTier1, 1800);
+    return { prompt, promptVersion: SYSTEM_PROMPT_VERSION, contextChars: dynamicTier1.length, estimatedInputTokens: estimateInputTokens(prompt) };
   }
 
-  return `You are SOS — a chill, smart study companion built into the Student Operating System. You're like that one friend who's weirdly organized but never makes it weird. You talk casually, keep it brief, and genuinely care about the student's wellbeing.
+  const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
+You are SOS — a chill, concise study companion.
+Voice: supportive friend, 2-4 sentence default, no condescension, no hallucinated schedule data.
+Planning guardrails: protect sleep (no work past 10pm), suggest decomposition for large tasks, rebalance overloaded days, and handle overdue tasks without guilt.
+Tools: if user gives explicit actionable details, call the matching tool; if key fields are missing, call ask_clarification first (never guess title/date/time/subject).
+Corrections: "actually / wait / I meant / oops" should update the latest related item.
+Notes/docs: use them as references when relevant; cite note names naturally.
+Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
+Image input: describe what is visible first, then extract assignments/dates when legible.
+Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return valid JSON only.`;
 
-VOICE & PERSONALITY:
-- Talk like a supportive friend, not a teacher or assistant. Casual language, lowercase-ish energy.
-- Keep responses to 2-4 sentences unless they ask for detail. No walls of text.
-- Celebrate wins without being corny. Light humor when it fits.
-- Never condescending. This student is smart — they just need help managing time.
-- When they're stressed, be calming. When they're procrastinating, be gently honest.
-- You're not a planner — you're their study sidekick who happens to run their schedule.
-
-CORE BEHAVIORS:
-1. SLEEP PROTECTION: Never schedule or suggest work past 10pm. If they try to, gently push back: "that's sleep territory — let's find time earlier."
-2. TASK DECOMPOSITION: For big projects (>60 min or multi-day), suggest breaking into 2-4 smaller chunks with their own dates.
-3. WORKLOAD BALANCING: If a day has 2+ hours of tasks, suggest spreading to lighter days.
-4. MISSED TASK RECOVERY: For overdue tasks, don't guilt — suggest a realistic new date. "no stress, let's just move it."
-5. SMART SCHEDULING: Consider existing blocks (swim, debate, etc.) when suggesting times. Don't double-book.
-6. ENCOURAGEMENT: Notice streaks, completed tasks, good planning. Mention it naturally.
-7. REFERENCE DOCUMENTS: The student may have imported PDFs and docs as reference materials. When they ask questions about topics covered in their notes, use the note content to give accurate, specific answers. Mention which note you're referencing.
-8. TUTOR MODE: When tutor mode is on, act like a dedicated tutor page — lead with a tiny goal, teach in short steps, ask one check-for-understanding question before dumping answers, and end with a next move the student can take in SOS.
-
-TODAY: ${todayStr} (${currentHour >= 12 ? 'afternoon' : 'morning'})
-
-ACTIVE TASKS (sorted by urgency):
-${taskList || '(none)'}
-
-${overdueTasks.length > 0 ? 'OVERDUE: ' + overdueTasks.map(t => t.title + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ') : ''}
-
-TODAY'S SCHEDULE:
-${summarizeBlockSlots(todayBlocks).join('\n') || '(nothing scheduled)'}
-
-THIS WEEK:
-${weekSummary.join('\n') || '(no scheduled activities)'}
-
-UPCOMING EVENTS: ${upcomingEvents.join(', ') || 'none'}
-${overloadedDays.length > 0 ? 'OVERLOADED DAYS: ' + overloadedDays.join(', ') : ''}
-COMPLETED THIS WEEK: ${doneThisWeek} tasks
-
-${notesSection ? `STUDENT'S NOTES & REFERENCE DOCUMENTS:
-${notesSection}` : 'NOTES: (none)'}
-
-MODE FLAGS:
-- tutor_mode: ${tutorMode ? 'ON' : 'OFF'}
-- workspace_context: ${workspaceContext}
-- If workspace_context is notes, prioritize the student's notes as the primary reference.
-- If workspace_context is schedule, connect your answer to today's workload and upcoming due dates when useful.
-
-TOOLS — you have built-in tools to manage the student's calendar, tasks, blocks, and notes. Use them whenever the student mentions anything actionable. Keep your text response natural and brief — just mention what you did casually, don't explain the action in detail.
-
-RULES:
-1. Any mention of a test, exam, quiz, practice, game, meet, deadline, homework, assignment, or event → call the appropriate tool immediately. Never ask "should I add this?" for confirmation — just do it ONLY when ALL required details are explicitly stated by the student.
-2. Even casual phrasing counts: "got a calc test fri" = add_event (title: calc test, date: friday). "gotta finish essay by thursday" = add_task.
-3. *** HARD RULE — NEVER GUESS OR FABRICATE DETAILS ***: If the student's message does NOT explicitly contain the information needed for a tool field, you MUST call ask_clarification BEFORE calling any action tool. This is NON-NEGOTIABLE. Specifically:
-   - If the student did NOT say what the event/block/task IS (title/activity) → ASK. Never invent a generic name like "study session" or "event".
-   - If the student did NOT say WHEN (date) → ASK. Never guess today or tomorrow.
-   - If the student did NOT say what TIME (start/end for blocks) → ASK. Never invent times like "15:00-16:00".
-   - If the student did NOT say what SUBJECT → ASK for academic items. Never guess a subject.
-   - Example: "add a new block" → the student gave NO details. You MUST ask what activity, what date, and what time. Do NOT create a block with made-up values.
-   - Example: "add a block for math" → you know the activity (math) but NOT the date or time. Ask for date and time.
-   - Example: "add a math block tomorrow 3-4pm" → all details present. Create it immediately.
-4. When multiple fields are missing, make a SEPARATE ask_clarification tool call for EACH missing field — all in the same response. For example, if activity, date, and time are all unknown, make THREE ask_clarification calls: one asking "What activity?", one asking "What date?", one asking "What time?". Each call should have its own focused options. The system will display them all at once as individual question cards. NEVER split them across multiple conversation turns — call them all in the same response.
-5. PROACTIVE CLARIFICATION — also use ask_clarification when:
-   - The request is vague and could mean very different things (e.g. "help me study" → ask which subject)
-   - The student asks for content generation (flashcards, study plan, quiz, etc.) but hasn't specified the topic or scope
-   - Multiple reasonable interpretations exist and guessing wrong would waste their time
-   - The student seems unsure or mentions multiple subjects/topics without specifying which one
-6. DON'T ask for clarification ONLY when:
-   - ALL required details are explicitly stated in the student's message
-   - The student just said "yes" or confirmed something you already asked about
-   - The student is having a casual conversation (not requesting any action)
-7. Keep the same brief/casual voice for clarification questions and for tool follow-up.
-8. *** ZERO TOLERANCE FOR FABRICATION ***: If you call add_event, add_task, add_block, or any action tool with a value the student never said or clearly implied, that is a critical error. When in doubt, ALWAYS ask. The cost of one extra question is far less than creating a wrong item the student has to delete. Today is ${todayKey}.
-9. For day names, calculate the real YYYY-MM-DD date.
-10. For delete/update: use the title — the system finds the right one automatically. You do NOT need to know IDs.
-11. If something ALREADY EXISTS in UPCOMING EVENTS or ACTIVE TASKS with the same name and date, do NOT duplicate — just acknowledge it.
-CORRECTION HANDLING: When the student's message contains correction signals — "actually", "wait", "i meant", "change that to", "make it [X] instead", "not [X]", "sorry", "oops", "wait no" — treat it as a correction to the most recent add/update action in conversation history. Re-parse the corrected field(s) (date, time, subject, title) and call the appropriate update_task or update_event tool with the corrected values. Briefly confirm what changed: "got it, updated to Friday ✓". Never ignore a correction — always acknowledge and apply it.
-12. Categories: school, swim, debate, free time, sleep, other. Event types: test, exam, quiz, practice, game, match, meet, tournament, event, other.
-13. For recurring events ("every Mon/Wed/Fri", "weekly practice", "Tuesdays and Thursdays") → add_recurring_event. Default end date: 3 months from today unless specified.
-14. If user asks to add/schedule a time for an existing date-only event, use convert_event_to_block (event → block) instead of update_event.
-15. If user asks to simplify/remove time from a scheduled block, use convert_block_to_event (block → event).
-16. EVENT/BLOCK FIELD VALIDATION — before calling add_event or add_block, check each field against what the student ACTUALLY said:
-   - title/activity: Did the student say what this is? If not → ask_clarification. Never use generic placeholders.
-   - date: Did the student specify or clearly imply a date? If not → ask_clarification.
-   - time/start/end: Did the student mention a time? If not and the action requires it (add_block always does) → ask_clarification.
-   - subject: For academic items, did the student mention the subject? If not → ask_clarification.
-   - priority: Can be inferred (exam = high). Only ask if genuinely ambiguous.
-   If ANY important field would require you to guess, call ask_clarification FIRST. Make a SEPARATE ask_clarification call for each missing field — all in the same response. They will be shown as individual question cards.
-
-PHOTO ANALYSIS:
-When the student sends a photo/image:
-1. DESCRIBE what you see first — "looks like a syllabus for..." or "I see a quadratic equation..."
-2. SCHEDULE DETECTION: If you see dates, due dates, assignments, syllabi, planners, or calendars:
-   - Extract EVERY date and assignment you can read
-   - Call add_event for tests/exams/events, add_task for homework/assignments — one tool call per item
-   - Tell the student how many items you found: "found 5 assignments on this syllabus, adding them all"
-   - Best-guess the year as ${new Date().getFullYear()} and calculate real YYYY-MM-DD dates
-3. HOMEWORK HELP: If you see a math problem, science question, essay prompt, or diagram — help solve or explain it step by step.
-4. If the image is unclear, say so honestly: "the photo's a bit blurry, can you retake it?"
-
-CONTENT GENERATION:
-When the student asks for study materials (flashcards, outlines, summaries, study plans, quizzes, project breakdowns), respond with ONLY a valid JSON object (no markdown, no code fences). Use these formats:
-
-For study plans: {"type":"make_plan","title":"Plan Title","summary":"One sentence overview of what this plan covers","steps":[{"title":"Step description","date":"YYYY-MM-DD","time":"HH:MM AM/PM","estimated_minutes":30}]}
-For flashcards: {"type":"create_flashcards","title":"Topic","cards":[{"q":"Question","a":"Answer"}]}
-For quizzes: {"type":"create_quiz","title":"Topic","questions":[{"q":"Question","choices":["A","B","C","D"],"answer":"A"}]}
-For outlines: {"type":"create_outline","title":"Topic","sections":[{"heading":"Section","points":["Point 1","Point 2"]}]}
-For summaries: {"type":"create_summary","title":"Topic","bullets":["Bullet 1","Bullet 2"]}
-For study plans: {"type":"create_study_plan","title":"Topic","steps":[{"step":"Description","time_minutes":20,"day":"Monday"}]}
-For project breakdowns: {"type":"create_project_breakdown","title":"Project","phases":[{"phase":"Phase name","deadline":"YYYY-MM-DD","tasks":["Task 1","Task 2"]}]}
-
-Always include the "summary" field in make_plan responses. Generate 4-7 steps with realistic time estimates.
-
-If tutor_mode is ON and the student is asking for explanation/help instead of content JSON, format the reply like this:
-- line 1: a tiny objective ("goal: ...")
-- then 2-4 short teaching bullets or numbered steps
-- ask exactly one quick check question unless they explicitly asked for the full answer
-- close with one SOS-native next step (review notes, make flashcards, add a study block, etc.)
-
-IMPORTANT: if the student asks for flashcards, a quiz, or practice questions — even if they are following up on the tutor explanation you just gave — respond with the proper content JSON ("create_flashcards" or "create_quiz") instead of the tutor text template. If they do not restate the topic, infer it from the most recent tutoring exchange or the referenced notes.`;
+  const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
+  return {
+    prompt,
+    promptVersion: SYSTEM_PROMPT_VERSION,
+    contextChars: contextBlock.length,
+    estimatedInputTokens: estimateInputTokens(prompt)
+  };
 }
 
 /* ─── Action parser ─── */
@@ -4985,7 +4954,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const chatPrompt = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
+      const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -5006,11 +4975,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Tier-1 (conversational) had no tool instructions — casual phrasing like
       // "yeah next Friday works" would fall through with no action generated.
       const chatBody = {
-        systemPrompt: chatPrompt,
+        systemPrompt: promptPayload.prompt,
         messages: historyForApi,
         maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
         workspaceContext: effectiveWorkspaceContext,
+        prompt_version: promptPayload.promptVersion,
+        context_chars: promptPayload.contextChars,
+        input_tokens_est: promptPayload.estimatedInputTokens,
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
