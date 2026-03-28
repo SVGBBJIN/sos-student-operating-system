@@ -705,7 +705,8 @@ Corrections: "actually / wait / I meant / oops" should update the latest related
 Notes/docs: use them as references when relevant; cite note names naturally.
 Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
 Image input: describe what is visible first, then extract assignments/dates when legible.
-Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).`;
+Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).
+Date resolution: when resolving weekday references (e.g. "due Monday", "due Friday"), if today IS that weekday use today's date. Never resolve a weekday to a past date — always use the current or next upcoming occurrence.`;
 
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
@@ -3573,6 +3574,7 @@ function App() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
+  const [authNudge, setAuthNudge] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
   // ── Data stores ──
@@ -3920,7 +3922,18 @@ function App() {
         case 'add_task': {
           const rawDue = action.due || today();
           const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:normalizedDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
+          const todayVal = today();
+          let finalDue = normalizedDue;
+          if (normalizedDue < todayVal) {
+            const dueDayOfWeek = new Date(normalizedDue + 'T12:00:00').getDay();
+            const todayDayOfWeek = new Date(todayVal + 'T12:00:00').getDay();
+            const daysAhead = (dueDayOfWeek - todayDayOfWeek + 7) % 7; // 0 = today (same weekday)
+            const corrected = new Date(todayVal + 'T12:00:00');
+            corrected.setDate(corrected.getDate() + daysAhead);
+            finalDue = toDateStr(corrected);
+          }
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -5683,10 +5696,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
-          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
+          <button onClick={()=>{ openCompanionPanel('schedule'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
+          <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Enter tutor mode</span></button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>History</span></button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
         </div>
       </div>}
@@ -6012,7 +6025,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
             <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
             {workspaceModeLabel && (
-              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
+              <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
             )}
             <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
               style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
@@ -6092,6 +6105,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
       {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {authNudge&&(
+        <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
+          <span>Sign in to save notes across sessions →</span>
+          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);setAuthNudge(false);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.74rem',fontWeight:700,padding:'3px 9px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free</button>
+          <button onClick={()=>setAuthNudge(false)} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 5px',fontSize:'1rem',lineHeight:1}}>×</button>
+        </div>
+      )}
       {showChatSidebar&&(
         <>
           <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
@@ -6103,8 +6123,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {savedChats.length === 0 ? (
               <div className="chat-sidebar-empty">
                 <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-                <div>No saved chats yet. Like bookmarks, but smarter.</div>
-                <div style={{fontSize:'0.78rem',marginTop:4}}>Click New chat to save your current conversation</div>
+                <div>No saved chats yet.</div>
+                <div style={{fontSize:'0.78rem',marginTop:4}}>Save this conversation using the bookmark icon above.</div>
               </div>
             ) : (
               <div className="chat-sidebar-list">

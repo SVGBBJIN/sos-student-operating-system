@@ -450,6 +450,10 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
   /* Main content fills all remaining vertical space */
   .sos-main{flex:1;min-height:0;overflow:hidden}
 }
+@media(max-width:519px){
+  /* Hide topbar button labels so icons-only fit within narrow viewports */
+  .g-hdr-btn span{display:none}
+}
 @media(max-width:500px){
   .sos-input-area{padding:6px 10px 10px}
   .sos-bubble{max-width:92%;font-size:0.88rem}
