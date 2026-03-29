@@ -9,7 +9,7 @@ const WAVE_DELAYS = [0, 0.1, 0.2, 0.05, 0.15, 0.25, 0.08, 0.18, 0.03, 0.12, 0.22
 
 // Open-Meteo WMO weathercode → emoji
 function getWeatherEmoji(weatherData) {
-  const code = weatherData?.current?.weathercode;
+  const code = weatherData?.current?.weather_code ?? weatherData?.current?.weathercode;
   if (code == null) return '🌙';
   if (code === 0 || code === 1) return '☀️';
   if (code <= 3) return '⛅';

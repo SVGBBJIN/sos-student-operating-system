@@ -4015,7 +4015,7 @@ const [ambientMode, setAmbientMode] = useState(null);
   const fetchWeather = useCallback(async (coords, city) => {
     try {
       const { lat, lon } = coords || weatherCoords;
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weathercode,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
       const res = await fetch(url); if (!res.ok) throw new Error('Weather fetch failed');
       const data = await res.json();
       setWeatherData({ current:data.current, daily:data.daily, city: city || weatherCity, fetchedAt:Date.now() });
