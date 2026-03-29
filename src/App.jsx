@@ -723,6 +723,10 @@ Date resolution: when resolving weekday references (e.g. "due Monday", "due Frid
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
     prompt,
+    // stablePrompt/dynamicContext are sent separately so the backend can put the static
+    // policy in an immutable system message (Groq caches it + tool definitions across requests).
+    stablePrompt: stablePolicyTier2,
+    dynamicContext: contextBlock,
     promptVersion: SYSTEM_PROMPT_VERSION,
     contextChars: contextBlock.length,
     estimatedInputTokens: estimateInputTokens(prompt),
@@ -5014,8 +5018,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Always use the full tier-2 prompt so the AI always has tool definitions.
       // Tier-1 (conversational) had no tool instructions — casual phrasing like
       // "yeah next Friday works" would fall through with no action generated.
+      // useStreaming: enabled for pure conversational messages only. The backend streams
+      // text deltas via SSE; tool-call JSON is buffered and sent in the final 'done' event.
+      const useStreaming = isConversational && !photo && !isContentGen;
       const chatBody = {
         systemPrompt: promptPayload.prompt,
+        // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
+        staticSystemPrompt: promptPayload.stablePrompt,
+        dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
         maxTokens: isContentGen ? 4096 : 1024,
         isContentGen,
@@ -5023,6 +5033,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
+        ...(useStreaming ? { streaming: true } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5052,7 +5063,73 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
       }
 
-      const chatData = await chatResponse.json();
+      // ── Streaming path ────────────────────────────────────────────────────────────
+      // Consume SSE text deltas in real-time, updating a placeholder message as tokens
+      // arrive. Tool-call JSON is never shown — it arrives only in the final 'done' event.
+      let chatData;
+      if (useStreaming && chatResponse.headers.get('content-type')?.includes('text/event-stream')) {
+        const streamTs = Date.now();
+        // Add an empty placeholder message; spinner is replaced by inline streaming text.
+        setMessages(prev => {
+          const n = [...prev, { role: 'assistant', content: '', timestamp: streamTs, streaming: true }];
+          while (n.length > CHAT_MAX_MESSAGES) n.shift();
+          return n;
+        });
+        setIsLoading(false);
+
+        const reader = chatResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let streamedText = '';
+        let sseBuffer = '';
+        outerStream: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop();
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            const raw = trimmed.slice(6).trim();
+            if (!raw) continue;
+            let evt;
+            try { evt = JSON.parse(raw); } catch (_) { continue; }
+            if (evt.type === 'text_delta') {
+              streamedText += evt.delta;
+              setMessages(prev => prev.map(m =>
+                m.timestamp === streamTs ? { ...m, content: streamedText } : m
+              ));
+            } else if (evt.type === 'done') {
+              chatData = evt;
+              // Finalise the streaming message content (use server's canonical version)
+              const finalContent = typeof evt.content === 'string' && evt.content.trim()
+                ? evt.content.trim()
+                : streamedText;
+              setMessages(prev => prev.map(m =>
+                m.timestamp === streamTs ? { ...m, content: finalContent, streaming: false } : m
+              ));
+              if (finalContent) {
+                sfx.arrive();
+                if (user) dbInsertChatMsg('assistant', finalContent, user.id);
+                else {
+                  try {
+                    const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+                    demoChat.push({ role: 'assistant', content: finalContent });
+                    localStorage.setItem('cc_chat', JSON.stringify(demoChat));
+                  } catch (_) {}
+                }
+              }
+              break outerStream;
+            }
+          }
+        }
+        // If no 'done' event arrived, use accumulated text as chatData
+        if (!chatData) chatData = { content: streamedText, actions: [], clarifications: [] };
+      } else {
+        chatData = await chatResponse.json();
+      }
+      // ── End streaming path ────────────────────────────────────────────────────────
+
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
       // Support multiple clarifications (array) or single (object)
@@ -5149,7 +5226,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
-      if (displayContent) {
+      // For streamed responses the message was already inserted + persisted above.
+      // Only insert here for non-streaming paths.
+      if (displayContent && !useStreaming) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
         sfx.arrive();
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -6015,7 +6094,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
             )}
             <div className={`sos-msg ${msg.role==='user'?'sos-msg-user':'sos-msg-ai'}`}>
-              <div className={`sos-bubble ${msg.role==='user'?'sos-bubble-user':'sos-bubble-ai'}`}>
+              <div className={`sos-bubble ${msg.role==='user'?'sos-bubble-user':'sos-bubble-ai'}${msg.streaming?' streaming':''}`}>
                 {(msg.photoUrl||msg.photoPreview)&&(
                   <img src={msg.photoUrl||msg.photoPreview} alt="photo"
                     onClick={()=>setLightboxUrl(msg.photoUrl||msg.photoPreview)}

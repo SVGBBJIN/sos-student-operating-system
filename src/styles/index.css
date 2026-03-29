@@ -169,6 +169,9 @@ html[data-theme-mode="weather"][data-weather-theme="stormy"] .sos-app{background
 .sos-bubble-user{background:linear-gradient(135deg,var(--accent) 0%,#5a54d4 100%);color:#fff;border-bottom-right-radius:16px;box-shadow:0 2px 12px rgba(245,158,11,0.2);background-size:200% 200%;animation:gradientShift 6s ease infinite}
 .sos-bubble-ai{background:linear-gradient(135deg,rgba(26,26,46,0.95) 0%,rgba(15,15,26,0.95) 100%);border:1px solid rgba(245,158,11,0.08);border-bottom-left-radius:16px;backdrop-filter:blur(8px);animation:borderGlow 3s ease-in-out infinite}
 .sos-bubble-time{font-size:0.6rem;opacity:0.45;margin-top:4px;text-align:right}
+/* Streaming cursor shown while AI response is being received */
+.sos-bubble-ai.streaming::after{content:'▌';display:inline-block;opacity:0.8;color:var(--accent);animation:blink-cursor 0.8s step-end infinite;margin-left:1px}
+@keyframes blink-cursor{0%,100%{opacity:0.8}50%{opacity:0}}
 .sos-chip{background:rgba(64,89,196,0.18);border:1px solid rgba(86,120,242,0.36);color:#7e8fff;padding:6px 14px;border-radius:24px;font-size:0.82rem;cursor:pointer;transition:all .25s cubic-bezier(0.16,1,0.3,1);white-space:nowrap;position:relative;overflow:hidden;flex-shrink:0}
 .sos-chip::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(87,140,255,0.12),transparent);transform:translateX(-100%);transition:none}
 .sos-chip:hover{background:linear-gradient(135deg,rgba(92,118,245,0.24),rgba(67,90,220,0.18));border-color:rgba(128,170,255,0.8);box-shadow:0 2px 16px rgba(46,80,196,0.22);transform:translateY(-1px)}

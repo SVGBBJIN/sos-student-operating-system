@@ -4,9 +4,10 @@
 export const CORE_VERSION = "chat-core-v1-2026-03-27";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL = "openai/gpt-oss-120b";
-export const BACKUP_MODEL = "llama-3.3-70b-versatile";
-export const FAST_MODEL = "llama-3.1-8b-instant";
+export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
+export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
+export const BACKUP_MODEL         = "llama-3.3-70b-versatile";
+export const FAST_MODEL           = "llama-3.1-8b-instant";
 
 const GROQ_CIRCUIT = {
   openedUntilMs: 0,
@@ -791,8 +792,8 @@ export async function callGroq(
   };
 
   const routeType = options?.routeType || (isContentGen ? "content_gen" : "conversational");
-  const selectedPrimary = routeType === "conversational" ? (backupModel || FAST_MODEL) : model;
-  const selectedBackup = routeType === "conversational" ? model : (backupModel || null);
+  const selectedPrimary = routeType === "conversational" ? CONVERSATIONAL_MODEL : model;
+  const selectedBackup = routeType === "conversational" ? (backupModel || null) : (backupModel || null);
 
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
@@ -816,7 +817,18 @@ export async function callGroq(
 
   // Inner attempt: builds the request for a specific model and runs it with budget-aware retries.
   async function attempt(mdl) {
-    const groqMessages = [{ role: "system", content: systemPrompt }];
+    // Prompt-caching: when staticSystemPrompt + dynamicContext are provided separately,
+    // the static policy becomes a single unchanging system message (Groq can cache it
+    // alongside the tool definitions). The dynamic per-user context is sent as a second
+    // system message so it doesn't pollute the cached prefix.
+    const staticPrompt = options?.staticSystemPrompt;
+    const dynamicContext = options?.dynamicContext;
+    const groqMessages = staticPrompt
+      ? [
+          { role: "system", content: staticPrompt },
+          { role: "system", content: dynamicContext || "" },
+        ]
+      : [{ role: "system", content: systemPrompt }];
 
     if (imageBase64) {
       const effectiveMime = imageMimeType || "image/jpeg";
@@ -977,6 +989,132 @@ export async function callGroq(
     }
     throw primaryErr;
   }
+}
+
+/**
+ * Single-shot streaming call to Groq.
+ * Calls `onTextDelta(chunk)` for each text token as it arrives.
+ * Tool-call tokens are accumulated silently — they are never passed to onTextDelta,
+ * so raw JSON is never shown in the chat window.
+ * Returns a full ParsedLlmResponse when the stream ends.
+ */
+export async function callGroqStream(
+  apiKey,
+  model,
+  systemPrompt,
+  messages,
+  maxTokens,
+  tools,
+  toolChoice,
+  onTextDelta,
+  options = {}
+) {
+  const staticPrompt = options?.staticSystemPrompt;
+  const dynamicContext = options?.dynamicContext;
+  const groqMessages = staticPrompt
+    ? [
+        { role: "system", content: staticPrompt },
+        { role: "system", content: dynamicContext || "" },
+      ]
+    : [{ role: "system", content: systemPrompt }];
+
+  for (const m of messages) {
+    const text = typeof m.content === "string" ? m.content.trim() : "";
+    if (text) groqMessages.push({ role: m.role, content: text });
+  }
+
+  const effectiveTools = tools ? withNullableOptionals(tools) : null;
+  const body = {
+    model,
+    messages: groqMessages,
+    max_tokens: maxTokens,
+    stream: true,
+  };
+  if (effectiveTools && effectiveTools.length > 0) {
+    body.tools = effectiveTools;
+    body.tool_choice = toolChoice || "auto";
+  }
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Groq ${model} stream error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let accumulatedText = "";
+  // tool_calls[index] → { id, name, argumentsRaw }
+  const toolCallMap = {};
+  let finishReason = null;
+
+  let buffer = "";
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop(); // keep incomplete last line
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const payload = trimmed.slice(6);
+      if (payload === "[DONE]") break outer;
+      let chunk;
+      try { chunk = JSON.parse(payload); } catch (_) { continue; }
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      const delta = choice.delta;
+      if (!delta) continue;
+
+      // Text delta — send to caller for live rendering
+      if (typeof delta.content === "string" && delta.content) {
+        accumulatedText += delta.content;
+        if (typeof onTextDelta === "function") onTextDelta(delta.content);
+      }
+
+      // Tool-call delta — accumulate silently, never surfaced to onTextDelta
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tcDelta of delta.tool_calls) {
+          const idx = tcDelta.index ?? 0;
+          if (!toolCallMap[idx]) {
+            toolCallMap[idx] = { id: tcDelta.id || `tc_${idx}`, name: "", argumentsRaw: "" };
+          }
+          if (tcDelta.function?.name) toolCallMap[idx].name += tcDelta.function.name;
+          if (tcDelta.function?.arguments) toolCallMap[idx].argumentsRaw += tcDelta.function.arguments;
+        }
+      }
+    }
+  }
+
+  // Reconstruct a Groq-compatible response object and parse it
+  const toolCalls = Object.values(toolCallMap).map((tc) => ({
+    id: tc.id,
+    type: "function",
+    function: { name: tc.name, arguments: tc.argumentsRaw },
+  }));
+  const syntheticData = {
+    choices: [{
+      message: {
+        content: accumulatedText || null,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      },
+      finish_reason: finishReason,
+    }],
+  };
+  return {
+    ...parseLlmResponse(syntheticData),
+    model_used: model,
+  };
 }
 
 export function parseLlmResponse(data) {

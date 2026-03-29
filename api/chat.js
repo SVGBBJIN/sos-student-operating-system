@@ -1,9 +1,12 @@
 import {
   BACKUP_MODEL,
   callGroq,
+  callGroqStream,
   CONTENT_ACTION_TOOLS,
+  CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
   CORE_VERSION,
+  FAST_MODEL,
   PRIMARY_MODEL,
 } from "../shared/ai/chat-core.js";
 
@@ -252,6 +255,8 @@ export default async function handler(req, res) {
     const {
       mode,
       systemPrompt,
+      staticSystemPrompt,
+      dynamicContext,
       messages,
       maxTokens = 1024,
       isContentGen,
@@ -262,6 +267,7 @@ export default async function handler(req, res) {
       context_chars,
       input_tokens_est,
       tool_failures,
+      streaming,
     } = body;
     const userId = extractUserId(req.headers.authorization);
     telemetry = {
@@ -286,9 +292,11 @@ export default async function handler(req, res) {
         { role: "user", content: failureReport },
       ];
       const llmStartedAt = Date.now();
+      // tool_fallback only needs a short clarifying question — use FAST_MODEL directly
+      // (bypasses conversational routing which would select CONVERSATIONAL_MODEL).
       const fallbackResult = await callGroq(
         GROQ_API_KEY,
-        PRIMARY_MODEL,
+        FAST_MODEL,
         `${systemPrompt || ""}\n\nWhen tool execution fails, ask a targeted clarification question.`,
         followupMessages,
         Math.min(Number(maxTokens) || 512, 512),
@@ -300,7 +308,7 @@ export default async function handler(req, res) {
         BACKUP_MODEL,
         {
           isContentGen: false,
-          routeType: "conversational",
+          routeType: "tool_heavy", // use FAST_MODEL directly as primary
         }
       );
       stageTimings.llm_call_ms = Date.now() - llmStartedAt;
@@ -376,11 +384,72 @@ export default async function handler(req, res) {
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
+    // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context
+    // so the static policy stays identical across all requests (Groq can cache it).
+    const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
     stageTimings.prompt_build_ms = Date.now() - promptBuildStartedAt;
+
+    const callOptions = {
+      isContentGen: Boolean(isContentGen),
+      routeType,
+      staticSystemPrompt: staticSystemPrompt || null,
+      dynamicContext: effectiveDynamic,
+    };
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
     // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
     const llmStartedAt = Date.now();
+
+    // Streaming path: only for conversational (non-content-gen, non-image) requests.
+    // Text deltas are piped via SSE; tool-call JSON is buffered and sent in the final event.
+    const useStreaming = Boolean(streaming) && !isContentGen && !imageBase64;
+    if (useStreaming) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      let streamResult;
+      try {
+        streamResult = await callGroqStream(
+          GROQ_API_KEY,
+          CONVERSATIONAL_MODEL,
+          effectiveSystemPrompt,
+          messages,
+          maxTokens,
+          toolsForRequest,
+          toolChoice,
+          (delta) => {
+            res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
+          },
+          callOptions
+        );
+      } catch (streamErr) {
+        // Fall back to non-streaming on error
+        console.warn("[chat] stream failed, falling back to non-streaming:", streamErr.message);
+        streamResult = await callGroq(
+          GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, messages, maxTokens,
+          imageBase64, imageMimeType, true, toolsForRequest, toolChoice, BACKUP_MODEL, callOptions
+        );
+      }
+      stageTimings.llm_call_ms = Date.now() - llmStartedAt;
+      const donePayload = {
+        ...streamResult,
+        executed_actions: [],
+        orchestration: { mode: "client_execution", executed_on: "client" },
+      };
+      res.write(`data: ${JSON.stringify({ type: "done", ...donePayload })}\n\n`);
+      res.end();
+      // fire-and-forget telemetry
+      persistPromptTelemetry({
+        supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        userId: telemetry?.userId || null, requestId,
+        promptVersion: telemetry?.promptVersion, contextChars: telemetry?.contextChars,
+        inputTokensEst: telemetry?.inputTokensEst, workspaceContext: telemetry?.workspaceContext,
+        isContentGen: telemetry?.isContentGen, latencyMs: Date.now() - startedAt, ok: true,
+      }).catch(() => {});
+      return;
+    }
+
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
@@ -393,10 +462,7 @@ export default async function handler(req, res) {
       toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
       toolChoice,
       BACKUP_MODEL, // fallback if primary fails or returns empty
-      {
-        isContentGen: Boolean(isContentGen),
-        routeType,
-      }
+      callOptions
     );
     stageTimings.llm_call_ms = Date.now() - llmStartedAt;
     const parseStartedAt = Date.now();

@@ -1,9 +1,12 @@
 import {
   BACKUP_MODEL,
   callGroq,
+  callGroqStream,
   CONTENT_ACTION_TOOLS,
+  CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
   CORE_VERSION,
+  FAST_MODEL,
   PRIMARY_MODEL,
 } from "../../../shared/ai/chat-core.js";
 
@@ -179,6 +182,8 @@ serve(async (req: Request) => {
 
     const {
       systemPrompt,
+      staticSystemPrompt,
+      dynamicContext,
       messages,
       maxTokens = 1024,
       isContentGen,
@@ -188,6 +193,7 @@ serve(async (req: Request) => {
       prompt_version,
       context_chars,
       input_tokens_est,
+      streaming,
     } = body;
     const userId = extractUserId(req.headers.get("Authorization"));
     telemetry = {
@@ -231,6 +237,69 @@ serve(async (req: Request) => {
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
+    const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
+
+    const callOptions = {
+      isContentGen: Boolean(isContentGen),
+      routeType,
+      staticSystemPrompt: staticSystemPrompt || null,
+      dynamicContext: effectiveDynamic,
+    };
+
+    // Streaming path: conversational non-content-gen non-image requests only.
+    const useStreaming = Boolean(streaming) && !isContentGen && !imageBase64;
+    if (useStreaming) {
+      const encoder = new TextEncoder();
+      let streamResult: Awaited<ReturnType<typeof callGroqStream>>;
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            streamResult = await callGroqStream(
+              GROQ_API_KEY,
+              CONVERSATIONAL_MODEL,
+              effectiveSystemPrompt,
+              messages,
+              maxTokens,
+              toolsForRequest,
+              toolChoice,
+              (delta: string) => {
+                controller.enqueue(encoder.encode(
+                  `data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`
+                ));
+              },
+              callOptions
+            );
+          } catch (_streamErr) {
+            // fall back to non-streaming result
+            streamResult = await callGroq(
+              GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, messages, maxTokens,
+              imageBase64, imageMimeType, true, toolsForRequest, toolChoice, BACKUP_MODEL, callOptions
+            ) as any;
+          }
+          const donePayload = {
+            ...streamResult,
+            executed_actions: [],
+            orchestration: { mode: "client_execution", executed_on: "client" },
+          };
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ type: "done", ...donePayload })}\n\n`
+          ));
+          controller.close();
+          persistPromptTelemetry({
+            userId: telemetry?.userId || null, requestId,
+            promptVersion: telemetry?.promptVersion || null,
+            contextChars: telemetry?.contextChars || null,
+            inputTokensEst: telemetry?.inputTokensEst || null,
+            workspaceContext: telemetry?.workspaceContext || "chat",
+            isContentGen: telemetry?.isContentGen || false,
+            latencyMs: Date.now() - startedAt, ok: true,
+          }).catch(() => {});
+        },
+      });
+      return new Response(stream, {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+      });
+    }
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
     // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
@@ -246,10 +315,7 @@ serve(async (req: Request) => {
       toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
       toolChoice,
       BACKUP_MODEL, // fallback if primary fails or returns empty
-      {
-        isContentGen: Boolean(isContentGen),
-        routeType,
-      }
+      callOptions
     );
     if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
       throw new Error("Content generation must return typed actions[] payloads.");
