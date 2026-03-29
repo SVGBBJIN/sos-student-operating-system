@@ -1,4 +1,5 @@
 import {
+  ACTION_TOOLS,
   BACKUP_MODEL,
   callGroq,
   callGroqStream,
@@ -408,29 +409,20 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("Access-Control-Allow-Origin", "*");
-      let streamResult;
-      try {
-        streamResult = await callGroqStream(
-          GROQ_API_KEY,
-          CONVERSATIONAL_MODEL,
-          effectiveSystemPrompt,
-          messages,
-          maxTokens,
-          toolsForRequest,
-          toolChoice,
-          (delta) => {
-            res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
-          },
-          callOptions
-        );
-      } catch (streamErr) {
-        // Fall back to non-streaming on error
-        console.warn("[chat] stream failed, falling back to non-streaming:", streamErr.message);
-        streamResult = await callGroq(
-          GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, messages, maxTokens,
-          imageBase64, imageMimeType, true, toolsForRequest, toolChoice, BACKUP_MODEL, callOptions
-        );
-      }
+      res.flushHeaders(); // send headers immediately so the client can start reading
+      const streamResult = await callGroqStream(
+        GROQ_API_KEY,
+        CONVERSATIONAL_MODEL,
+        effectiveSystemPrompt,
+        messages,
+        maxTokens,
+        ACTION_TOOLS, // pass full tools so model can handle borderline messages
+        "auto",
+        (delta) => {
+          res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
+        },
+        { ...callOptions, backupModel: BACKUP_MODEL } // auto-retries with BACKUP_MODEL if CONVERSATIONAL_MODEL fails
+      );
       stageTimings.llm_call_ms = Date.now() - llmStartedAt;
       const donePayload = {
         ...streamResult,

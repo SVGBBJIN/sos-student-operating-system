@@ -1009,6 +1009,29 @@ export async function callGroqStream(
   onTextDelta,
   options = {}
 ) {
+  const backupModel = options?.backupModel || null;
+  try {
+    return await _callGroqStreamInner(apiKey, model, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, options);
+  } catch (err) {
+    if (backupModel && backupModel !== model) {
+      console.warn(`[callGroqStream] ${model} failed (${err.message}) — retrying with ${backupModel}`);
+      return _callGroqStreamInner(apiKey, backupModel, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, { ...options, backupModel: null });
+    }
+    throw err;
+  }
+}
+
+async function _callGroqStreamInner(
+  apiKey,
+  model,
+  systemPrompt,
+  messages,
+  maxTokens,
+  tools,
+  toolChoice,
+  onTextDelta,
+  options = {}
+) {
   const staticPrompt = options?.staticSystemPrompt;
   const dynamicContext = options?.dynamicContext;
   const groqMessages = staticPrompt

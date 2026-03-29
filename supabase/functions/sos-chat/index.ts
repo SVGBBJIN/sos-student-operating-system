@@ -1,4 +1,5 @@
 import {
+  ACTION_TOOLS,
   BACKUP_MODEL,
   callGroq,
   callGroqStream,
@@ -253,29 +254,22 @@ serve(async (req: Request) => {
       let streamResult: Awaited<ReturnType<typeof callGroqStream>>;
       const stream = new ReadableStream({
         async start(controller) {
-          try {
-            streamResult = await callGroqStream(
-              GROQ_API_KEY,
-              CONVERSATIONAL_MODEL,
-              effectiveSystemPrompt,
-              messages,
-              maxTokens,
-              toolsForRequest,
-              toolChoice,
-              (delta: string) => {
-                controller.enqueue(encoder.encode(
-                  `data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`
-                ));
-              },
-              callOptions
-            );
-          } catch (_streamErr) {
-            // fall back to non-streaming result
-            streamResult = await callGroq(
-              GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, messages, maxTokens,
-              imageBase64, imageMimeType, true, toolsForRequest, toolChoice, BACKUP_MODEL, callOptions
-            ) as any;
-          }
+          // callGroqStream auto-retries with backupModel if CONVERSATIONAL_MODEL fails
+          streamResult = await callGroqStream(
+            GROQ_API_KEY,
+            CONVERSATIONAL_MODEL,
+            effectiveSystemPrompt,
+            messages,
+            maxTokens,
+            ACTION_TOOLS, // pass full tools so model can handle borderline messages
+            "auto",
+            (delta: string) => {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`
+              ));
+            },
+            { ...callOptions, backupModel: BACKUP_MODEL }
+          );
           const donePayload = {
             ...streamResult,
             executed_actions: [],
