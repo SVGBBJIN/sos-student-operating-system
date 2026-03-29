@@ -10,6 +10,10 @@ import IdleLockScreen from './components/IdleLockScreen';
 import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
+import StudyTopBar from './components/StudyTopBar';
+import StudyBottomBar from './components/StudyBottomBar';
+import LofiLeftPanel from './components/LofiLeftPanel';
+import LofiRightPanel from './components/LofiRightPanel';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -3719,7 +3723,8 @@ function App() {
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'sidebar');
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -4006,15 +4011,39 @@ function App() {
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
 
   // ── Weather fetch ──
-  const fetchWeather = useCallback(async () => {
+  const [weatherCity, setWeatherCity] = useState(null);
+  const fetchWeather = useCallback(async (coords, city) => {
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${weatherCoords.lat}&longitude=${weatherCoords.lon}&current=temperature_2m,weathercode,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weathercode,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
+      const { lat, lon } = coords || weatherCoords;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
       const res = await fetch(url); if (!res.ok) throw new Error('Weather fetch failed');
       const data = await res.json();
-      setWeatherData({ current:data.current, daily:data.daily, fetchedAt:Date.now() });
+      setWeatherData({ current:data.current, daily:data.daily, city: city || weatherCity, fetchedAt:Date.now() });
     } catch(e) { console.error('Weather fetch error:', e); }
-  }, [weatherCoords]);
-  useEffect(() => { if (dataLoaded) { const stale = !weatherData?.fetchedAt || (Date.now() - weatherData.fetchedAt > 3600000); if (stale) fetchWeather(); } }, [dataLoaded]);
+  }, [weatherCoords, weatherCity]);
+  // IP-based geolocation on first load (only when using default Boston coords)
+  useEffect(() => {
+    if (!dataLoaded) return;
+    const isDefault = weatherCoords.lat === 42.33 && weatherCoords.lon === -71.21;
+    if (isDefault) {
+      fetch('https://ipapi.co/json/')
+        .then(r => r.json())
+        .then(d => {
+          if (d.latitude && d.longitude) {
+            const coords = { lat: d.latitude, lon: d.longitude };
+            setWeatherCoords(coords);
+            setWeatherCity(d.city || null);
+            fetchWeather(coords, d.city || null);
+          } else {
+            fetchWeather();
+          }
+        })
+        .catch(() => fetchWeather());
+    } else {
+      const stale = !weatherData?.fetchedAt || (Date.now() - weatherData.fetchedAt > 3600000);
+      if (stale) fetchWeather();
+    }
+  }, [dataLoaded]);
 
   // ── Sync helper: wraps a DB write with sync status ──
   async function syncOp(fn) {
@@ -5745,14 +5774,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
-      <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
-      <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
-      <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
-      <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
+      {layoutMode !== 'lofi' && <>
+        <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
+        <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
+        <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
+        <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
+      </>}
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
+      {layoutMode === 'lofi' && <StudyTopBar
+        user={user}
+        syncStatus={syncStatus}
+        tutorMode={tutorMode}
+        ambientMode={ambientMode}
+        onAmbientMode={setAmbientMode}
+        onNewChat={() => { sfx.nav(); startNewChat(); }}
+        onTutorMode={() => { sfx.nav(); enterTutorMode(); }}
+        onImport={() => { sfx.nav(); setShowGoogleModal(true); }}
+        onSettings={() => { sfx.nav(); setActivePanel('settings'); }}
+        onSwitchLayout={() => setLayoutMode('sidebar')}
+        onAuthAction={() => user ? handleLogout() : setShowAuthModal(true)}
+      />}
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -5817,7 +5861,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
-      <div className="sos-main">
+      {layoutMode === 'lofi' && <LofiLeftPanel
+        tasks={tasks}
+        onToggleTask={(task) => {
+          if (task.status === 'done') {
+            updateTask(task.id, { status: 'not_started', completedAt: null });
+          } else {
+            updateTask(task.id, { status: 'done', completedAt: new Date().toISOString() });
+            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(task.id); return n; });
+            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(task.id); return n; }), 900);
+          }
+        }}
+      />}
+      <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
@@ -5862,9 +5918,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between topbar and sidebar navigation.</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between lofi grid, sidebar, and topbar navigation.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>setLayoutMode(layoutMode==='topbar'?'sidebar':'topbar')}>{layoutMode==='topbar'?'Use sidebar':'Use topbar'}</button>
+                <div style={{display:'flex',gap:8}}>
+                  <button className={'settings-toggle'+(layoutMode==='lofi'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('lofi')}>Lofi</button>
+                  <button className={'settings-toggle'+(layoutMode==='sidebar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('sidebar')}>Sidebar</button>
+                  <button className={'settings-toggle'+(layoutMode==='topbar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('topbar')}>Topbar</button>
+                </div>
               </div>
               <div className="settings-row">
                 <div>
@@ -6203,7 +6263,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </form>
           </>
         )}
-        <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{display:'flex',justifyContent:'center',marginTop:8,fontSize:'0.68rem'}}><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
       </div>
       {showSidebarCompanion && (
@@ -6247,6 +6307,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </>
       )}
       </div>
+
+      {layoutMode === 'lofi' && <LofiRightPanel
+        weatherData={weatherData}
+        tasks={tasks}
+        blocks={blocks}
+        events={events}
+        notes={notes}
+        onDeleteNote={handleDeleteNote}
+        onUpdateNote={handleUpdateNote}
+        onCreateNote={handleCreateNote}
+      />}
+      {layoutMode === 'lofi' && <StudyBottomBar
+        tasks={tasks}
+        recentlyCompleted={[...tasks].filter(t => recentlyCompleted.has(t.id))}
+      />}
 
       {showSideBySide && (
         <>
@@ -6334,7 +6409,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
       <IdleLockScreen />
-      <SfxToggle />
+      {layoutMode !== 'lofi' && <SfxToggle />}
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>
