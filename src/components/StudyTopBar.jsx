@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '../lib/icons';
 
-const SESSION_LABELS = {
-  pomodoro: 'Deep Work',
-  short:    'Short Break',
-  long:     'Long Break',
-};
-
 const AMBIENT_LABELS = {
   rain:    'Rain',
   ambient: 'Ambient',
@@ -17,8 +11,6 @@ export default function StudyTopBar({
   user,
   syncStatus,
   tutorMode,
-  sessionType,
-  onSessionType,
   ambientMode,
   onAmbientMode,
   onNewChat,
@@ -52,22 +44,6 @@ export default function StudyTopBar({
       <div className="study-topbar-logo">
         <img src="/brain-logo.svg" alt="SOS" />
         SOS <span>/ study room</span>
-      </div>
-
-      <div className="study-pill-divider" />
-
-      {/* Session type pills */}
-      <div className="study-topbar-pills">
-        {Object.entries(SESSION_LABELS).map(([key, label]) => (
-          <button
-            key={key}
-            className={'study-pill' + (sessionType === key ? ' active' : '')}
-            onClick={() => onSessionType(key)}
-            title={label}
-          >
-            {label}
-          </button>
-        ))}
       </div>
 
       <div className="study-pill-divider" />

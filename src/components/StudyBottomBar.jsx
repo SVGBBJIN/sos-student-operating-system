@@ -44,17 +44,6 @@ function calcStreak(recentlyCompleted) {
   return streak;
 }
 
-function calcScore(tasks) {
-  const today = getTodayStr();
-  const todayTasks = (tasks || []).filter(t => {
-    if (t.due_date) return t.due_date.slice(0, 10) === today;
-    return false;
-  });
-  if (todayTasks.length === 0) return 0;
-  const done = todayTasks.filter(t => t.status === 'done' || t.completed).length;
-  return Math.round((done / todayTasks.length) * 10);
-}
-
 export default function StudyBottomBar({ tasks, recentlyCompleted }) {
   const [time, setTime] = useState('');
 
@@ -70,8 +59,6 @@ export default function StudyBottomBar({ tasks, recentlyCompleted }) {
 
   const streak = calcStreak(recentlyCompleted);
   const focusMins = calcFocusMinutes(tasks);
-  const score = calcScore(tasks);
-  const scoreSegs = Array.from({ length: 10 }, (_, i) => i < score);
 
   return (
     <div className="study-bottombar study-glass">
@@ -88,18 +75,6 @@ export default function StudyBottomBar({ tasks, recentlyCompleted }) {
           {formatFocusTime(focusMins)} focus today
         </span>
       )}
-
-      <div className="study-bottom-spacer" />
-
-      <div className="study-focus-score">
-        <span>focus</span>
-        <div className="study-score-bar">
-          {scoreSegs.map((on, i) => (
-            <div key={i} className={'study-score-seg' + (on ? ' on' : '')} />
-          ))}
-        </div>
-        <span>{score}/10</span>
-      </div>
     </div>
   );
 }

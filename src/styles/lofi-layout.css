@@ -389,200 +389,8 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   CENTER PANEL — pomodoro timer + chat
+   CENTER PANEL — chat
    ══════════════════════════════════════════════════════════════════ */
-
-/* Pomodoro section (collapsible) */
-.study-pomodoro {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--lofi-border);
-  transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
-  overflow: hidden;
-}
-
-.study-pomodoro.collapsed {
-  border-bottom: none;
-}
-
-.study-pomodoro-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.study-pomodoro-header:hover {
-  background: rgba(255,255,255,0.02);
-}
-
-.study-pomodoro-mini {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--lofi-font-mono);
-  font-size: 13px;
-  color: var(--lofi-text-muted);
-}
-
-.study-pomodoro-mini-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--lofi-amber);
-  box-shadow: 0 0 6px rgba(245,200,66,0.5);
-  flex-shrink: 0;
-}
-
-.study-pomodoro-mini-dot.paused {
-  background: var(--lofi-text-dim);
-  box-shadow: none;
-}
-
-.study-pomodoro-expand-btn {
-  background: none;
-  border: none;
-  color: var(--lofi-text-dim);
-  cursor: pointer;
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  transition: color 0.2s;
-}
-
-.study-pomodoro-expand-btn:hover {
-  color: var(--lofi-text-muted);
-}
-
-/* Full timer body */
-.study-pomodoro-body {
-  padding: 12px 20px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.study-session-tabs {
-  display: flex;
-  gap: 3px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--lofi-border);
-  border-radius: 10px;
-  padding: 3px;
-}
-
-.study-session-tab {
-  padding: 4px 12px;
-  border-radius: 7px;
-  font-size: 11px;
-  font-family: var(--lofi-font-mono);
-  color: var(--lofi-text-dim);
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-  background: none;
-  border: none;
-  outline: none;
-}
-
-.study-session-tab:hover {
-  color: var(--lofi-text-muted);
-}
-
-.study-session-tab.active {
-  background: var(--lofi-amber-dim);
-  color: var(--lofi-amber);
-  border: 1px solid rgba(245,200,66,0.2);
-}
-
-.study-timer-ring {
-  position: relative;
-  width: 140px;
-  height: 140px;
-  flex-shrink: 0;
-}
-
-.study-timer-ring svg {
-  transform: rotate(-90deg);
-}
-
-.study-timer-ring-track {
-  stroke: rgba(255,255,255,0.06);
-}
-
-.study-timer-ring-fill {
-  stroke: var(--lofi-amber);
-  stroke-dasharray: 377;
-  transition: stroke-dashoffset 1s linear;
-  filter: drop-shadow(0 0 5px rgba(245,200,66,0.4));
-}
-
-.study-timer-digits {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-}
-
-.study-timer-time {
-  font-size: 30px;
-  font-weight: 300;
-  letter-spacing: -1px;
-  color: var(--lofi-text);
-  font-family: var(--lofi-font-mono);
-  line-height: 1;
-}
-
-.study-timer-session-label {
-  font-size: 9px;
-  color: var(--lofi-text-dim);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-family: var(--lofi-font-mono);
-}
-
-.study-timer-controls {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  align-items: center;
-}
-
-.study-timer-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--lofi-border);
-  background: rgba(255,255,255,0.03);
-  color: var(--lofi-text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  transition: all 0.2s;
-  outline: none;
-}
-
-.study-timer-btn:hover {
-  border-color: var(--lofi-amber);
-  color: var(--lofi-amber);
-  background: var(--lofi-amber-dim);
-}
-
-.study-timer-btn.primary {
-  width: 40px;
-  height: 40px;
-  border-color: var(--lofi-amber);
-  color: var(--lofi-amber);
-  background: var(--lofi-amber-dim);
-  font-size: 14px;
-}
 
 /* Chat area inside center */
 .study-chat-wrap {
@@ -620,26 +428,22 @@
   flex-shrink: 0;
 }
 
-/* window pane cross-lines */
-.study-cat-scene::before {
-  content: '';
-  position: absolute;
-  top: 50%; left: 0; right: 0;
-  height: 1px;
-  background: var(--lofi-border);
-  pointer-events: none;
+/* ── Cat (exact class names from lofi-study-ui.html) ──────────── */
+.study-cat-scene .cat-svg { width: 80px; }
+
+.study-cat-scene .window-frame {
+  position: absolute; inset: 0; pointer-events: none;
+}
+.study-cat-scene .window-frame::before {
+  content: ''; position: absolute; top: 50%; left: 0; right: 0;
+  height: 1px; background: var(--lofi-border);
+}
+.study-cat-scene .window-frame::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 1px; background: var(--lofi-border);
 }
 
-.study-cat-scene::after {
-  content: '';
-  position: absolute;
-  top: 0; bottom: 0; left: 50%;
-  width: 1px;
-  background: var(--lofi-border);
-  pointer-events: none;
-}
-
-.study-cat-wrap {
+.study-cat-scene .cat-wrap {
   position: relative;
   animation: catBob 4s ease-in-out infinite;
   transform-origin: bottom center;
@@ -651,7 +455,7 @@
   50%       { transform: translateY(-3px); }
 }
 
-.study-cat-tail {
+.study-cat-scene .tail {
   animation: tailSwing 2.5s ease-in-out infinite;
   transform-origin: 50% 0%;
 }
@@ -661,13 +465,9 @@
   50%       { transform: rotate(12deg); }
 }
 
-.study-cat-eye {
-  animation: catBlink 5s ease-in-out infinite;
-}
-
-.study-cat-eye-r {
-  animation: catBlink 5s ease-in-out 0.05s infinite;
-}
+.study-cat-scene .eye-l,
+.study-cat-scene .eye-r { animation: catBlink 5s ease-in-out infinite; }
+.study-cat-scene .eye-r  { animation-delay: 0.05s; }
 
 @keyframes catBlink {
   0%, 92%, 100% { transform: scaleY(1); }
@@ -892,36 +692,6 @@
   color: var(--lofi-text-dim);
   font-family: var(--lofi-font-mono);
   flex-shrink: 0;
-}
-
-.study-bottom-spacer {
-  flex: 1;
-}
-
-.study-focus-score {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--lofi-text-dim);
-  font-size: 10px;
-  font-family: var(--lofi-font-mono);
-  flex-shrink: 0;
-}
-
-.study-score-bar {
-  display: flex;
-  gap: 2px;
-}
-
-.study-score-seg {
-  width: 16px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.07);
-}
-
-.study-score-seg.on {
-  background: var(--lofi-amber);
 }
 
 /* status dot colors (reuse existing sync-dot vars or define here) */
