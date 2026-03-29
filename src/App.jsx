@@ -10,6 +10,11 @@ import IdleLockScreen from './components/IdleLockScreen';
 import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
+import StudyTopBar from './components/StudyTopBar';
+import StudyBottomBar from './components/StudyBottomBar';
+import LofiLeftPanel from './components/LofiLeftPanel';
+import LofiRightPanel from './components/LofiRightPanel';
+import PomodoroTimer from './components/PomodoroTimer';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -3719,7 +3724,9 @@ function App() {
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'sidebar');
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+  const [pomodoroSessionType, setPomodoroSessionType] = useState('pomodoro');
+  const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -5745,7 +5752,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className="sos-app" style={{flexDirection: layoutMode === 'topbar' ? 'column' : 'row'}}>
+    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
       <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
@@ -5753,6 +5760,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
+      {layoutMode === 'lofi' && <StudyTopBar
+        user={user}
+        syncStatus={syncStatus}
+        tutorMode={tutorMode}
+        sessionType={pomodoroSessionType}
+        onSessionType={setPomodoroSessionType}
+        ambientMode={ambientMode}
+        onAmbientMode={setAmbientMode}
+        onNewChat={() => { sfx.nav(); startNewChat(); }}
+        onTutorMode={() => { sfx.nav(); enterTutorMode(); }}
+        onImport={() => { sfx.nav(); setShowGoogleModal(true); }}
+        onSettings={() => { sfx.nav(); setActivePanel('settings'); }}
+        onSwitchLayout={() => setLayoutMode('sidebar')}
+        onAuthAction={() => user ? handleLogout() : setShowAuthModal(true)}
+      />}
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -5817,7 +5839,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
-      <div className="sos-main">
+      {layoutMode === 'lofi' && <LofiLeftPanel
+        tasks={tasks}
+        onToggleTask={(task) => {
+          if (task.status === 'done') {
+            updateTask(task.id, { status: 'not_started', completedAt: null });
+          } else {
+            updateTask(task.id, { status: 'done', completedAt: new Date().toISOString() });
+            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(task.id); return n; });
+            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(task.id); return n; }), 900);
+          }
+        }}
+      />}
+      <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
@@ -5838,6 +5872,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </div>}
 
+      {layoutMode === 'lofi' && activePanel === 'chat' && (
+        <PomodoroTimer
+          sessionType={pomodoroSessionType}
+          onSessionType={setPomodoroSessionType}
+        />
+      )}
       {activePanel === 'tutor' ? (
         <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
           <TutorMissionPage
@@ -6247,6 +6287,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </>
       )}
       </div>
+
+      {layoutMode === 'lofi' && <LofiRightPanel
+        weatherData={weatherData}
+        tasks={tasks}
+        blocks={blocks}
+        events={events}
+        notes={notes}
+        onDeleteNote={handleDeleteNote}
+        onUpdateNote={handleUpdateNote}
+        onCreateNote={handleCreateNote}
+      />}
+      {layoutMode === 'lofi' && <StudyBottomBar
+        tasks={tasks}
+        recentlyCompleted={[...tasks].filter(t => recentlyCompleted.has(t.id))}
+      />}
 
       {showSideBySide && (
         <>
