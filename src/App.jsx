@@ -522,11 +522,11 @@ async function migrateLocalStorage(userId) {
 const SYSTEM_PROMPT_VERSION = 'sos-policy-v2';
 const SYSTEM_PROMPT_CHAR_BUDGET = 7000;
 const CONTEXT_SECTION_BUDGETS = {
-  tasks: 2000,
-  events: 1000,
-  week: 1200,
-  notes: 2400,
-  schedule: 900,
+  tasks: 1800,
+  events: 800,
+  week: 1000,
+  notes: 2000,
+  schedule: 600,
 };
 
 function estimateInputTokens(text = '') {
@@ -553,6 +553,16 @@ function capLines(lines = [], maxChars = 1000, summaryLabel = 'items') {
   const omitted = Math.max(0, safeLines.length - kept.length);
   if (omitted > 0) kept.push('… +' + omitted + ' more ' + summaryLabel + ' omitted for context budget');
   return kept.join('\n');
+}
+// Returns { text, shown, total } for trim-aware callers
+function capLinesInfo(lines = [], maxChars = 1000, summaryLabel = 'items') {
+  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
+  const text = capLines(safeLines, maxChars, summaryLabel);
+  const total = safeLines.length;
+  // count kept lines = total lines minus the '… +N more' line if present
+  const omitted = Math.max(0, safeLines.filter(l => String(l).trim()).length - text.split('\n').filter(l => !l.startsWith('…')).length);
+  const shown = total - omitted;
+  return { text, shown, total, trimmed: omitted > 0 };
 }
 
 function dedupeRepeatedLines(blockText = '') {
@@ -647,6 +657,8 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     });
   }
 
+  const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
+
   const dynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
@@ -655,7 +667,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     capLines(summarizeBlockSlots(todayBlocks), CONTEXT_SECTION_BUDGETS.schedule, 'schedule blocks') || '(nothing scheduled)',
     '',
     'ACTIVE TASKS (budgeted):',
-    capLines(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks') || '(none)',
+    taskCapInfo.text || '(none)',
     (overdueTasks.length > 0 ? ('OVERDUE: ' + overdueTasks.map(t => truncateWithEllipsis(t.title, 80) + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ')) : ''),
     '',
     'THIS WEEK (budgeted):',
@@ -705,14 +717,18 @@ Corrections: "actually / wait / I meant / oops" should update the latest related
 Notes/docs: use them as references when relevant; cite note names naturally.
 Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
 Image input: describe what is visible first, then extract assignments/dates when legible.
-Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).`;
+Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).
+Date resolution: when resolving weekday references (e.g. "due Monday", "due Friday"), if today IS that weekday use today's date. Never resolve a weekday to a past date — always use the current or next upcoming occurrence.`;
 
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
     prompt,
     promptVersion: SYSTEM_PROMPT_VERSION,
     contextChars: contextBlock.length,
-    estimatedInputTokens: estimateInputTokens(prompt)
+    estimatedInputTokens: estimateInputTokens(prompt),
+    trimInfo: taskCapInfo.trimmed
+      ? { shown: taskCapInfo.shown, total: taskCapInfo.total }
+      : null,
   };
 }
 
@@ -2968,7 +2984,7 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
 /* ═══════════════════════════════════════════════
    SCHEDULE PEEK PANEL (with fullscreen calendar)
    ═══════════════════════════════════════════════ */
-function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false }) {
+function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false, recentlyCompleted = new Set() }) {
   const todayKey = today(); const todayDow = new Date().getDay();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [calView, setCalView] = useState('month');
@@ -2997,7 +3013,13 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
   },[timeline]);
 
   const overduePeekTasks=useMemo(()=>tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).sort((a,b)=>daysUntil(a.dueDate)-daysUntil(b.dueDate)),[tasks]);
-  const activeTasks=useMemo(()=>tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)>=0).sort((a,b)=>getPriority(a)-getPriority(b)).slice(0,5),[tasks]);
+  const activeTasks=useMemo(()=>{
+    const completing = tasks.filter(t => recentlyCompleted.has(t.id));
+    const active = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)>=0).sort((a,b)=>getPriority(a)-getPriority(b)).slice(0,5);
+    // prepend any completing tasks not already in list
+    const completing2 = completing.filter(t => !active.some(a => a.id === t.id));
+    return [...completing2, ...active];
+  },[tasks, recentlyCompleted]);
   const upcomingEvents=useMemo(()=>events.filter(ev=>{const d=daysUntil(ev.date);return d>=0&&d<=7}).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4),[events]);
   const currentHour=new Date().getHours();
   const greeting=currentHour<12?'Good morning':currentHour<17?'Good afternoon':'Good evening';
@@ -3206,9 +3228,12 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
           <div style={{color:'var(--danger)',display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div>
         </div>))}
       </div>}
-      {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.length})</div>
-        {activeTasks.map(task=>{const d=daysUntil(task.dueDate);const dotColor=d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          return(<div key={task.id} className="peek-task-item"><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{' · '+(task.estTime||30)+'min'}</div></div><div style={{color:dotColor,display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
+      {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.filter(t=>t.status!=='done').length})</div>
+        {activeTasks.map(task=>{
+          const completing = recentlyCompleted.has(task.id);
+          const d=daysUntil(task.dueDate);
+          const dotColor=completing?'var(--success)':d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
+          return(<div key={task.id} className={'peek-task-item'+(completing?' task-completing':'')} style={completing?{background:'rgba(46,213,115,0.08)',borderRadius:10,padding:'4px 6px',transition:'all .3s'}:{}}><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500,color:completing?'var(--success)':undefined}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{completing?'Completed! 🎉':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{!completing&&' · '+(task.estTime||30)+'min'}</div></div><div style={{color:completing?'var(--success)':dotColor,display:'flex'}}>{completing?Icon.checkCircle(14):task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
         })}
       </div>}
       {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
@@ -3566,6 +3591,96 @@ const ThinkingIndicator=({message="thinkisizing…"})=>(
 );
 
 /* ═══════════════════════════════════════════════
+   FIRST-RUN ONBOARDING MODAL
+   ═══════════════════════════════════════════════ */
+function FirstRunModal({ onClose, onConnectGoogle, onWeatherToggle, weatherEnabled }) {
+  const [step, setStep] = useState(1);
+  const TOTAL = 3;
+
+  function handleClose() {
+    try { localStorage.setItem('sos_onboarded', '1'); } catch(_) {}
+    onClose();
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)',backdropFilter:'blur(8px)',animation:'overlayIn .2s ease'}}>
+      <div style={{background:'var(--bg2)',border:'1px solid var(--border-mid)',borderRadius:24,padding:'28px 28px 24px',maxWidth:440,width:'calc(100% - 32px)',boxShadow:'0 20px 60px rgba(0,0,0,0.6)',animation:'cardPop .25s ease',position:'relative'}}>
+        {/* Progress dots */}
+        <div style={{display:'flex',justifyContent:'center',gap:6,marginBottom:24}}>
+          {Array.from({length:TOTAL},(_,i)=>(
+            <div key={i} style={{width:8,height:8,borderRadius:'50%',background: i+1<=step ? 'var(--accent)' : 'var(--border)',transition:'background .3s'}}/>
+          ))}
+        </div>
+
+        {step === 1 && (
+          <>
+            <div style={{fontSize:'1.4rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Welcome to SOS 👋</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
+              Your AI study sidekick. It knows your tasks, schedule, and notes — so you can just talk to it like a friend.
+            </div>
+            <div style={{background:'var(--bg)',borderRadius:14,padding:'14px 16px',marginBottom:12,border:'1px solid var(--border)'}}>
+              <div style={{fontWeight:700,fontSize:'0.88rem',marginBottom:4}}>Connect Google Calendar</div>
+              <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:10}}>Auto-sync your events so SOS always knows what's coming up.</div>
+              <button onClick={()=>{onConnectGoogle();}} style={{background:'var(--accent)',border:'none',borderRadius:10,color:'#fff',fontWeight:700,fontSize:'0.82rem',padding:'8px 14px',cursor:'pointer',width:'100%'}}>Connect Calendar →</button>
+            </div>
+            <div style={{background:'var(--bg)',borderRadius:14,padding:'12px 16px',marginBottom:20,border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:'0.85rem',marginBottom:2}}>Weather-based theme ✨</div>
+                <div style={{fontSize:'0.76rem',color:'var(--text-dim)'}}>App colors react to your local weather. Try it.</div>
+              </div>
+              <button onClick={onWeatherToggle} style={{background:weatherEnabled?'var(--success)':'var(--border)',border:'none',borderRadius:20,color:'#fff',fontWeight:700,fontSize:'0.78rem',padding:'6px 14px',cursor:'pointer',transition:'all .2s',whiteSpace:'nowrap'}}>{weatherEnabled?'On ✓':'Turn on'}</button>
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setStep(2)} style={{flex:1,background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.88rem',padding:'10px',cursor:'pointer'}}>Next →</button>
+              <button onClick={()=>setStep(2)} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:12,color:'var(--text-dim)',fontSize:'0.82rem',padding:'10px 14px',cursor:'pointer'}}>Skip for now</button>
+            </div>
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Add your first task 📋</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
+              Just describe your work and SOS will add it. You can say things like:<br/>
+              <span style={{color:'var(--accent)',fontStyle:'italic'}}>"Add a math essay due Friday, 45 mins"</span>
+            </div>
+            <div style={{background:'rgba(108,99,255,0.08)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:20}}>
+              <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:8,fontWeight:600}}>Quick examples to try:</div>
+              {['I have a bio test on Thursday','Add essay due next Monday, 2 hours','Finish problem set by tomorrow'].map(ex=>(
+                <div key={ex} style={{fontSize:'0.80rem',color:'var(--text)',padding:'6px 10px',borderRadius:8,background:'var(--bg)',marginBottom:4,border:'1px solid var(--border)'}}>{ex}</div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setStep(3)} style={{flex:1,background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.88rem',padding:'10px',cursor:'pointer'}}>Got it →</button>
+              <button onClick={()=>setStep(s=>s-1)} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:12,color:'var(--text-dim)',fontSize:'0.82rem',padding:'10px 14px',cursor:'pointer'}}>← Back</button>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Pro tip: Voice input 🎤</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
+              Tap the mic button in the chat bar and just speak. SOS will transcribe and respond instantly — great for hands-free studying.
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',background:'var(--bg)',borderRadius:14,border:'1px solid var(--border)',marginBottom:20}}>
+              <div style={{width:44,height:44,borderRadius:'50%',background:'rgba(56,216,232,0.12)',border:'1px solid rgba(56,216,232,0.3)',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--accent)',flexShrink:0}}>
+                {Icon.mic(20)}
+              </div>
+              <div>
+                <div style={{fontWeight:600,fontSize:'0.85rem',marginBottom:2}}>Mic button</div>
+                <div style={{fontSize:'0.76rem',color:'var(--text-dim)'}}>Available in the chat input bar below. Tap to start, tap again to send.</div>
+              </div>
+            </div>
+            <button onClick={handleClose} style={{width:'100%',background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.9rem',padding:'12px',cursor:'pointer'}}>Let's go!</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
@@ -3573,6 +3688,10 @@ function App() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
+  const [authNudge, setAuthNudge] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try { return !localStorage.getItem('sos_onboarded'); } catch(_) { return false; }
+  });
   const [authChecked, setAuthChecked] = useState(false);
 
   // ── Data stores ──
@@ -3590,6 +3709,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
+  const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
+  const [recentlyCompleted, setRecentlyCompleted] = useState(new Set()); // task IDs completing right now
   const [pendingActions, setPendingActions] = useState([]);
   const [pendingContent, setPendingContent] = useState([]);
   const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
@@ -3920,7 +4041,18 @@ function App() {
         case 'add_task': {
           const rawDue = action.due || today();
           const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:normalizedDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
+          const todayVal = today();
+          let finalDue = normalizedDue;
+          if (normalizedDue < todayVal) {
+            const dueDayOfWeek = new Date(normalizedDue + 'T12:00:00').getDay();
+            const todayDayOfWeek = new Date(todayVal + 'T12:00:00').getDay();
+            const daysAhead = (dueDayOfWeek - todayDayOfWeek + 7) % 7; // 0 = today (same weekday)
+            const corrected = new Date(todayVal + 'T12:00:00');
+            corrected.setDate(corrected.getDate() + daysAhead);
+            finalDue = toDateStr(corrected);
+          }
+          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -3951,7 +4083,12 @@ function App() {
           break;
         }
         case 'complete_task':
-          if (action.task_id) updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
+          if (action.task_id) {
+            updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
+            // Brief delight animation — add to set, clear after animation duration
+            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(action.task_id); return n; });
+            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(action.task_id); return n; }), 900);
+          }
           break;
         case 'update_task':
           if (action.task_id) {
@@ -4857,6 +4994,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
+      setContextTrimInfo(promptPayload.trimInfo || null);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
@@ -5172,8 +5310,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
         const rawContentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
         const contentActions = rawContentActions.filter(isValidContentAction);
-        if (rawContentActions.length > contentActions.length) {
+        const droppedContentActions = rawContentActions.filter(a => !isValidContentAction(a));
+        if (droppedContentActions.length > 0) {
           console.warn('Dropped invalid content payload(s) from server actions[] response.');
+          droppedContentActions.forEach(a => {
+            const label = a.type?.replace('create_','').replace('make_','') || 'content';
+            const errMsg = { role:'assistant', content:`couldn't generate ${label} — the response was incomplete. try rephrasing your request.`, timestamp:Date.now(), isValidationError: true };
+            setMessages(prev => { const n=[...prev,errMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          });
         }
         const tutorContentActions = contentActions.filter(a => a.type === 'create_flashcards' || a.type === 'create_quiz');
         if (tutorContentActions.length > 0) primeTutorSession();
@@ -5444,7 +5588,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Auto-send the transcribed message directly
       sendMessage(transcript);
     } else {
-      setToastMsg("Couldn't catch that — try speaking louder or closer");
+      const hasBrowserSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+      setToastMsg(hasBrowserSR
+        ? "Couldn't catch that — try speaking louder or closer"
+        : "Voice isn't available right now — try typing instead");
     }
     setIsTranscribing(false);
   }
@@ -5683,10 +5830,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>openCompanionPanel('schedule')} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
-          <button onClick={()=>openCompanionPanel('notes')} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
+          <button onClick={()=>{ openCompanionPanel('schedule'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
+          <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Enter tutor mode</span></button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>History</span></button>
+          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
         </div>
       </div>}
@@ -5894,6 +6041,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         )}
         {pendingClarification && (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,fontSize:'0.72rem',color:'var(--text-dim)',fontWeight:600,letterSpacing:'0.02em'}}>
+              <span style={{display:'flex',color:'var(--accent)'}}>{Icon.clipboard(12)}</span>
+              <span style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>Collecting details to complete action</span>
+            </div>
             <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
           </div>
         )}
@@ -5976,6 +6127,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {/* ── Input Area ── */}
       <div className="sos-input-area">
+        {contextTrimInfo&&(
+          <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
+            showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context
+          </div>
+        )}
         {messages.length>0&&(
           <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
             <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
@@ -6007,28 +6163,45 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <div style={{width:18,height:18,border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/>
             <span style={{fontSize:'0.85rem',color:'var(--text-dim)'}}>Transcribing...</span>
           </div>
+        ) : messages.length >= CHAT_MAX_MESSAGES ? (
+          /* ── Chat at hard limit ── */
+          <div style={{textAlign:'center',padding:'14px 16px',background:'rgba(255,71,87,0.06)',border:'1px solid rgba(255,71,87,0.2)',borderRadius:18,animation:'fadeIn .2s ease'}}>
+            <div style={{fontSize:'0.85rem',color:'var(--danger)',fontWeight:600,marginBottom:10}}>Chat history is full</div>
+            <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+              <button onClick={startNewChat} style={{background:'var(--accent)',border:'none',borderRadius:10,color:'#fff',fontSize:'0.82rem',fontWeight:700,padding:'8px 16px',cursor:'pointer'}}>Start fresh conversation</button>
+              <button onClick={clearChat} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:10,color:'var(--text-dim)',fontSize:'0.82rem',padding:'8px 14px',cursor:'pointer'}}>Clear history</button>
+            </div>
+          </div>
         ) : (
           /* ── Normal chat input form ── */
-          <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-            <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-            {workspaceModeLabel && (
-              <span style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap'}}>{workspaceModeLabel}</span>
+          <>
+            {messages.length >= 55 && (
+              <div style={{fontSize:'0.76rem',color:'var(--warning)',marginBottom:8,padding:'6px 10px',background:'rgba(255,159,67,0.08)',borderRadius:10,border:'1px solid rgba(255,159,67,0.18)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span>Chat is getting long — consider starting fresh for better AI responses</span>
+                <button onClick={startNewChat} style={{background:'transparent',border:'1px solid rgba(255,159,67,0.3)',borderRadius:8,color:'var(--warning)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Start fresh</button>
+              </div>
             )}
-            <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-              {Icon.camera(18)}
-            </button>
-            <button type="button" onClick={startRecording} disabled={isLoading}
-              style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-              {Icon.mic(18)}
-            </button>
-            <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-              placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
-              disabled={isLoading}
-              style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
-              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
-            <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
-          </form>
+            <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
+              {workspaceModeLabel && (
+                <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
+              )}
+              <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
+                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+                {Icon.camera(18)}
+              </button>
+              <button type="button" onClick={startRecording} disabled={isLoading}
+                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+                {Icon.mic(18)}
+              </button>
+              <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
+                placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+                disabled={isLoading}
+                style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
+                onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
+              <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
+            </form>
+          </>
         )}
         <div style={{display:'flex',justifyContent:'center',gap:16,marginTop:8,fontSize:'0.68rem',color:'var(--text-dim)',flexWrap:'wrap'}}><span>/ focus input</span><span>S opens Schedule tab</span><span>N opens Notes tab</span><span>Shift+S closes side panel</span><span>H history</span><span>Cam photo</span><span>Mic voice</span><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
       </div>
@@ -6063,7 +6236,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
-            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} embedded/></ErrorBoundary>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
             <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
@@ -6084,14 +6257,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <button className="g-modal-close" onClick={() => { setShowPeek(false); setShowNotes(false); }}>{Icon.x(16)}</button>
             </div>
             <div className="split-workspace-grid">
-              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} embedded/></ErrorBoundary>
+              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} embedded/></ErrorBoundary>
               <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
             </div>
           </div>
         </>
       )}
-      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
+      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
       {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {authNudge&&(
+        <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
+          <span>Sign in to save notes across sessions →</span>
+          <button onClick={()=>{setAuthModalInitialMode('signup');setShowAuthModal(true);setAuthNudge(false);}} style={{background:'var(--accent)',border:'none',borderRadius:8,color:'#fff',fontSize:'0.74rem',fontWeight:700,padding:'3px 9px',cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>Sign up free</button>
+          <button onClick={()=>setAuthNudge(false)} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 5px',fontSize:'1rem',lineHeight:1}}>×</button>
+        </div>
+      )}
       {showChatSidebar&&(
         <>
           <div className="chat-sidebar-overlay" onClick={()=>setShowChatSidebar(false)}/>
@@ -6103,8 +6283,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {savedChats.length === 0 ? (
               <div className="chat-sidebar-empty">
                 <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-                <div>No saved chats yet. Like bookmarks, but smarter.</div>
-                <div style={{fontSize:'0.78rem',marginTop:4}}>Click New chat to save your current conversation</div>
+                <div>No saved chats yet.</div>
+                <div style={{fontSize:'0.78rem',marginTop:4}}>Save this conversation using the bookmark icon above.</div>
               </div>
             ) : (
               <div className="chat-sidebar-list">
@@ -6144,6 +6324,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onSyncNow={()=>syncCalendarRef.current()}
         />
       )}
+      {showOnboarding && <FirstRunModal
+        onClose={()=>setShowOnboarding(false)}
+        onConnectGoogle={()=>{connectGoogle();}}
+        onWeatherToggle={()=>setWeatherThemeEnabled(v=>!v)}
+        weatherEnabled={weatherThemeEnabled}
+      />}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
