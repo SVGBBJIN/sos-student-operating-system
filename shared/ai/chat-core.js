@@ -741,6 +741,31 @@ function toValidationClarification(toolName, missingFields, issues) {
   };
 }
 
+/* ── Tool schema helpers ── */
+
+/**
+ * Returns a copy of the tools array where every non-required property
+ * accepts null in addition to its declared type.  This prevents Groq's
+ * server-side schema validation from returning HTTP 400 when the LLM
+ * explicitly emits `null` for an optional field (e.g. context_action: null).
+ */
+function withNullableOptionals(tools) {
+  return tools.map((tool) => {
+    const params = tool.function.parameters;
+    const required = new Set(params.required || []);
+    const properties = Object.fromEntries(
+      Object.entries(params.properties || {}).map(([key, val]) => {
+        if (required.has(key) || !val.type) return [key, val];
+        const t = val.type;
+        const types = Array.isArray(t) ? t : [t];
+        if (types.includes("null")) return [key, val];
+        return [key, { ...val, type: [...types, "null"] }];
+      })
+    );
+    return { ...tool, function: { ...tool.function, parameters: { ...params, properties } } };
+  });
+}
+
 /* ── Groq chat + function calling ── */
 export async function callGroq(
   apiKey,
@@ -825,7 +850,8 @@ export async function callGroq(
       max_tokens: maxTokens,
     };
 
-    const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+    const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+    const effectiveTools = rawTools ? withNullableOptionals(rawTools) : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
       body.tool_choice = toolChoiceOverride;
