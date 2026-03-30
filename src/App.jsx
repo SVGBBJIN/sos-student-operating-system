@@ -1454,7 +1454,9 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const c = clarifications[currentQIdx] || {};
   const options = Array.isArray(c?.options) ? c.options : [];
   const multiSelect = !!c?.multiSelect || !!c?.multi_select;
-  const normalizedOptions = options.map(normalizeOption);
+  const normalizedOptions = options.map(normalizeOption).filter(
+    opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
+  );
   const answer = answers[currentQIdx] || { selected: [], otherText: '' };
   const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim();
 
@@ -6119,7 +6121,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         )}
         {pendingClarification && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px', flexDirection:'column'}}>
             <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,fontSize:'0.72rem',color:'var(--text-dim)',fontWeight:600,letterSpacing:'0.02em'}}>
               <span style={{display:'flex',color:'var(--accent)'}}>{Icon.clipboard(12)}</span>
               <span style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>Collecting details to complete action</span>
