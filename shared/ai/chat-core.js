@@ -4,9 +4,10 @@
 export const CORE_VERSION = "chat-core-v1-2026-03-27";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL = "openai/gpt-oss-120b";
-export const BACKUP_MODEL = "llama-3.3-70b-versatile";
-export const FAST_MODEL = "llama-3.1-8b-instant";
+export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
+export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
+export const BACKUP_MODEL         = "llama-3.3-70b-versatile";
+export const FAST_MODEL           = "llama-3.1-8b-instant";
 
 const GROQ_CIRCUIT = {
   openedUntilMs: 0,
@@ -336,7 +337,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -627,6 +628,18 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_MAX_STRING_LENGTH = 500;
 const LONG_TEXT_MAX_STRING_LENGTH = 5000;
 
+// Generic/placeholder strings the model might use when it doesn't know the real value.
+// If any name field (title, activity) matches one of these, it is treated as missing —
+// triggering ask_clarification instead of executing the action.
+const PLACEHOLDER_TITLE_STRINGS = new Set([
+  "task title", "new task", "task", "untitled task", "untitled",
+  "event title", "new event", "event", "untitled event",
+  "activity", "new activity", "block", "new block",
+  "assignment", "homework", "new homework",
+  "title", "name", "item", "add task", "add event",
+  "event name", "task name", "activity name",
+]);
+
 function isValidDateString(value) {
   if (!DATE_RE.test(value)) return false;
   const [y, m, d] = value.split("-").map(Number);
@@ -671,6 +684,10 @@ function validateToolArguments(toolName, args) {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
+      }
+      if (["title", "activity"].includes(field) && PLACEHOLDER_TITLE_STRINGS.has(trimmed.toLowerCase())) {
+        missingFields.push(field);
+        issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
       }
       const maxLen = ["content", "new_content", "description", "reason", "question"].includes(field)
         ? LONG_TEXT_MAX_STRING_LENGTH
@@ -741,6 +758,31 @@ function toValidationClarification(toolName, missingFields, issues) {
   };
 }
 
+/* ── Tool schema helpers ── */
+
+/**
+ * Returns a copy of the tools array where every non-required property
+ * accepts null in addition to its declared type.  This prevents Groq's
+ * server-side schema validation from returning HTTP 400 when the LLM
+ * explicitly emits `null` for an optional field (e.g. context_action: null).
+ */
+function withNullableOptionals(tools) {
+  return tools.map((tool) => {
+    const params = tool.function.parameters;
+    const required = new Set(params.required || []);
+    const properties = Object.fromEntries(
+      Object.entries(params.properties || {}).map(([key, val]) => {
+        if (required.has(key) || !val.type) return [key, val];
+        const t = val.type;
+        const types = Array.isArray(t) ? t : [t];
+        if (types.includes("null")) return [key, val];
+        return [key, { ...val, type: [...types, "null"] }];
+      })
+    );
+    return { ...tool, function: { ...tool.function, parameters: { ...params, properties } } };
+  });
+}
+
 /* ── Groq chat + function calling ── */
 export async function callGroq(
   apiKey,
@@ -766,8 +808,8 @@ export async function callGroq(
   };
 
   const routeType = options?.routeType || (isContentGen ? "content_gen" : "conversational");
-  const selectedPrimary = routeType === "conversational" ? (backupModel || FAST_MODEL) : model;
-  const selectedBackup = routeType === "conversational" ? model : (backupModel || null);
+  const selectedPrimary = routeType === "conversational" ? CONVERSATIONAL_MODEL : model;
+  const selectedBackup = routeType === "conversational" ? (backupModel || null) : (backupModel || null);
 
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
@@ -791,7 +833,18 @@ export async function callGroq(
 
   // Inner attempt: builds the request for a specific model and runs it with budget-aware retries.
   async function attempt(mdl) {
-    const groqMessages = [{ role: "system", content: systemPrompt }];
+    // Prompt-caching: when staticSystemPrompt + dynamicContext are provided separately,
+    // the static policy becomes a single unchanging system message (Groq can cache it
+    // alongside the tool definitions). The dynamic per-user context is sent as a second
+    // system message so it doesn't pollute the cached prefix.
+    const staticPrompt = options?.staticSystemPrompt;
+    const dynamicContext = options?.dynamicContext;
+    const groqMessages = staticPrompt
+      ? [
+          { role: "system", content: staticPrompt },
+          { role: "system", content: dynamicContext || "" },
+        ]
+      : [{ role: "system", content: systemPrompt }];
 
     if (imageBase64) {
       const effectiveMime = imageMimeType || "image/jpeg";
@@ -825,7 +878,8 @@ export async function callGroq(
       max_tokens: maxTokens,
     };
 
-    const effectiveTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+    const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
+    const effectiveTools = rawTools ? withNullableOptionals(rawTools) : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
       body.tool_choice = toolChoiceOverride;
@@ -951,6 +1005,155 @@ export async function callGroq(
     }
     throw primaryErr;
   }
+}
+
+/**
+ * Single-shot streaming call to Groq.
+ * Calls `onTextDelta(chunk)` for each text token as it arrives.
+ * Tool-call tokens are accumulated silently — they are never passed to onTextDelta,
+ * so raw JSON is never shown in the chat window.
+ * Returns a full ParsedLlmResponse when the stream ends.
+ */
+export async function callGroqStream(
+  apiKey,
+  model,
+  systemPrompt,
+  messages,
+  maxTokens,
+  tools,
+  toolChoice,
+  onTextDelta,
+  options = {}
+) {
+  const backupModel = options?.backupModel || null;
+  try {
+    return await _callGroqStreamInner(apiKey, model, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, options);
+  } catch (err) {
+    if (backupModel && backupModel !== model) {
+      console.warn(`[callGroqStream] ${model} failed (${err.message}) — retrying with ${backupModel}`);
+      return _callGroqStreamInner(apiKey, backupModel, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, { ...options, backupModel: null });
+    }
+    throw err;
+  }
+}
+
+async function _callGroqStreamInner(
+  apiKey,
+  model,
+  systemPrompt,
+  messages,
+  maxTokens,
+  tools,
+  toolChoice,
+  onTextDelta,
+  options = {}
+) {
+  const staticPrompt = options?.staticSystemPrompt;
+  const dynamicContext = options?.dynamicContext;
+  const groqMessages = staticPrompt
+    ? [
+        { role: "system", content: staticPrompt },
+        { role: "system", content: dynamicContext || "" },
+      ]
+    : [{ role: "system", content: systemPrompt }];
+
+  for (const m of messages) {
+    const text = typeof m.content === "string" ? m.content.trim() : "";
+    if (text) groqMessages.push({ role: m.role, content: text });
+  }
+
+  const effectiveTools = tools ? withNullableOptionals(tools) : null;
+  const body = {
+    model,
+    messages: groqMessages,
+    max_tokens: maxTokens,
+    stream: true,
+  };
+  if (effectiveTools && effectiveTools.length > 0) {
+    body.tools = effectiveTools;
+    body.tool_choice = toolChoice || "auto";
+  }
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Groq ${model} stream error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let accumulatedText = "";
+  // tool_calls[index] → { id, name, argumentsRaw }
+  const toolCallMap = {};
+  let finishReason = null;
+
+  let buffer = "";
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop(); // keep incomplete last line
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const payload = trimmed.slice(6);
+      if (payload === "[DONE]") break outer;
+      let chunk;
+      try { chunk = JSON.parse(payload); } catch (_) { continue; }
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      const delta = choice.delta;
+      if (!delta) continue;
+
+      // Text delta — send to caller for live rendering
+      if (typeof delta.content === "string" && delta.content) {
+        accumulatedText += delta.content;
+        if (typeof onTextDelta === "function") onTextDelta(delta.content);
+      }
+
+      // Tool-call delta — accumulate silently, never surfaced to onTextDelta
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tcDelta of delta.tool_calls) {
+          const idx = tcDelta.index ?? 0;
+          if (!toolCallMap[idx]) {
+            toolCallMap[idx] = { id: tcDelta.id || `tc_${idx}`, name: "", argumentsRaw: "" };
+          }
+          if (tcDelta.function?.name) toolCallMap[idx].name += tcDelta.function.name;
+          if (tcDelta.function?.arguments) toolCallMap[idx].argumentsRaw += tcDelta.function.arguments;
+        }
+      }
+    }
+  }
+
+  // Reconstruct a Groq-compatible response object and parse it
+  const toolCalls = Object.values(toolCallMap).map((tc) => ({
+    id: tc.id,
+    type: "function",
+    function: { name: tc.name, arguments: tc.argumentsRaw },
+  }));
+  const syntheticData = {
+    choices: [{
+      message: {
+        content: accumulatedText || null,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      },
+      finish_reason: finishReason,
+    }],
+  };
+  return {
+    ...parseLlmResponse(syntheticData),
+    model_used: model,
+  };
 }
 
 export function parseLlmResponse(data) {
