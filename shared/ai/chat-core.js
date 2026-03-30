@@ -337,7 +337,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -628,6 +628,18 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_MAX_STRING_LENGTH = 500;
 const LONG_TEXT_MAX_STRING_LENGTH = 5000;
 
+// Generic/placeholder strings the model might use when it doesn't know the real value.
+// If any name field (title, activity) matches one of these, it is treated as missing —
+// triggering ask_clarification instead of executing the action.
+const PLACEHOLDER_TITLE_STRINGS = new Set([
+  "task title", "new task", "task", "untitled task", "untitled",
+  "event title", "new event", "event", "untitled event",
+  "activity", "new activity", "block", "new block",
+  "assignment", "homework", "new homework",
+  "title", "name", "item", "add task", "add event",
+  "event name", "task name", "activity name",
+]);
+
 function isValidDateString(value) {
   if (!DATE_RE.test(value)) return false;
   const [y, m, d] = value.split("-").map(Number);
@@ -672,6 +684,10 @@ function validateToolArguments(toolName, args) {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
+      }
+      if (["title", "activity"].includes(field) && PLACEHOLDER_TITLE_STRINGS.has(trimmed.toLowerCase())) {
+        missingFields.push(field);
+        issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
       }
       const maxLen = ["content", "new_content", "description", "reason", "question"].includes(field)
         ? LONG_TEXT_MAX_STRING_LENGTH
