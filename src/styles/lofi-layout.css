@@ -101,6 +101,68 @@
   grid-row: 3;
 }
 
+.editable-sortable-module {
+  position: relative;
+  min-height: 0;
+}
+
+.editable-sortable-slot {
+  min-height: 0;
+  height: 100%;
+}
+
+.editable-sortable-slot > * {
+  height: 100%;
+}
+
+.editable-sortable-module.dragging {
+  opacity: 0.7;
+}
+
+.editable-sortable-handle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 12, 20, 0.82);
+  border: 1px solid var(--lofi-border);
+  border-radius: 10px;
+  padding: 4px 6px;
+  backdrop-filter: blur(8px);
+}
+
+.editable-sortable-grip {
+  color: var(--lofi-text-dim);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+}
+
+.editable-sortable-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.editable-sortable-action-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--lofi-border);
+  background: rgba(255,255,255,0.03);
+  color: var(--lofi-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.editable-sortable-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ══════════════════════════════════════════════════════════════════
    TOP BAR
    ══════════════════════════════════════════════════════════════════ */

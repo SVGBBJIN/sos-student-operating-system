@@ -14,9 +14,7 @@ import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
-import { EditModeProvider } from './features/edit-mode/EditModeContext';
-import EditableSurface from './features/edit-mode/EditableSurface';
-import { useEditableField } from './features/edit-mode/useEditableField';
+import EditableSortableContainer from './features/edit-mode/dnd/EditableSortableContainer';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -3776,6 +3774,7 @@ function App() {
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+  const [homeLayoutEditMode, setHomeLayoutEditMode] = useState(false);
 const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
@@ -5857,6 +5856,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  useEffect(() => {
+    if (layoutMode !== 'lofi') setHomeLayoutEditMode(false);
+  }, [layoutMode]);
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
@@ -5989,18 +5991,58 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
-      {layoutMode === 'lofi' && <LofiLeftPanel
-        tasks={tasks}
-        onToggleTask={(task) => {
-          if (task.status === 'done') {
-            updateTask(task.id, { status: 'not_started', completedAt: null });
-          } else {
-            updateTask(task.id, { status: 'done', completedAt: new Date().toISOString() });
-            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(task.id); return n; });
-            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(task.id); return n; }), 900);
-          }
-        }}
-      />}
+      {layoutMode === 'lofi' && (
+        <EditableSortableContainer
+          isEditMode={homeLayoutEditMode}
+          storageKey="sos_home_layout_order"
+          modules={[
+            {
+              editableId: 'lofi-left-panel',
+              order: 1,
+              label: 'Today panel',
+              render: () => (
+                <LofiLeftPanel
+                  tasks={tasks}
+                  onToggleTask={(task) => {
+                    if (task.status === 'done') {
+                      updateTask(task.id, { status: 'not_started', completedAt: null });
+                    } else {
+                      updateTask(task.id, { status: 'done', completedAt: new Date().toISOString() });
+                      setRecentlyCompleted(prev => { const n = new Set(prev); n.add(task.id); return n; });
+                      setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(task.id); return n; }), 900);
+                    }
+                  }}
+                />
+              ),
+            },
+            {
+              editableId: 'lofi-right-panel',
+              order: 2,
+              label: 'Utility panel',
+              render: () => (
+                <LofiRightPanel
+                  weatherData={weatherData}
+                  tasks={tasks}
+                  blocks={blocks}
+                  events={events}
+                  notes={notes}
+                  onDeleteNote={handleDeleteNote}
+                  onUpdateNote={handleUpdateNote}
+                  onCreateNote={handleCreateNote}
+                />
+              ),
+            },
+          ]}
+          renderModule={(module, index) => {
+            const slot = index === 0 ? '1' : '3';
+            return (
+              <div className="editable-sortable-slot" style={{ gridColumn: slot, gridRow: 2 }}>
+                {module.render()}
+              </div>
+            );
+          }}
+        />
+      )}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
@@ -6054,6 +6096,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <button className={'settings-toggle'+(layoutMode==='topbar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('topbar')}>Topbar</button>
                 </div>
               </div>
+              {layoutMode === 'lofi' && (
+                <div className="settings-row">
+                  <div>
+                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Home layout edit mode</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Drag panels or use move up/down controls to reorder your lofi side panels.</div>
+                  </div>
+                  <button className={'settings-toggle'+(homeLayoutEditMode?' settings-toggle-active':'')} onClick={()=>setHomeLayoutEditMode(prev=>!prev)}>{homeLayoutEditMode ? 'On' : 'Off'}</button>
+                </div>
+              )}
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar collapsed</div>
@@ -6444,16 +6495,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       </div>
 
-      {layoutMode === 'lofi' && <LofiRightPanel
-        weatherData={weatherData}
-        tasks={tasks}
-        blocks={blocks}
-        events={events}
-        notes={notes}
-        onDeleteNote={handleDeleteNote}
-        onUpdateNote={handleUpdateNote}
-        onCreateNote={handleCreateNote}
-      />}
       {layoutMode === 'lofi' && <StudyBottomBar
         tasks={tasks}
         recentlyCompleted={[...tasks].filter(t => recentlyCompleted.has(t.id))}
