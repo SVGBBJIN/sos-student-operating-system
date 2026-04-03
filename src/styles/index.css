@@ -649,13 +649,3 @@ select option{background:#fffbeb;color:var(--text)}
 .editable-surface-affordance.active {
   background: rgba(108, 99, 255, 0.12);
 }
-
-.editable-surface-affordance-missing {
-  justify-content: flex-start;
-  border-bottom-color: rgba(255, 71, 87, 0.35);
-  color: #ff6b81;
-  background: rgba(255, 71, 87, 0.1);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}

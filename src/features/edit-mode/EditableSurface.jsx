@@ -23,7 +23,7 @@ export default function EditableSurface({
 }) {
   const { isEditMode, selectedEditableId, setSelectedEditableId } = useEditModeContext();
 
-  const { hasContract, showAffordance, missingEditableId, shouldFlagMissingRegistration } = getEditableSurfaceMeta({
+  const { hasContract, showAffordance, missingEditableId } = getEditableSurfaceMeta({
     isEditMode,
     editableId,
     editableFields,
@@ -46,12 +46,6 @@ export default function EditableSurface({
       data-editable-surface={hasContract ? 'registered' : 'missing-contract'}
       onClick={isEditMode && editableId ? () => setSelectedEditableId(editableId) : undefined}
     >
-      {shouldFlagMissingRegistration && (
-        <div className="editable-surface-affordance editable-surface-affordance-missing" data-testid="editable-affordance-missing">
-          <span style={{ display: 'inline-flex' }}>{Icon.alertTriangle(12)}</span>
-          <span>Missing editable registration</span>
-        </div>
-      )}
       {showAffordance && (
         <div className={'editable-surface-affordance' + (isSelected ? ' active' : '')} data-testid={`editable-affordance-${editableId}`}>
           <span style={{ display: 'inline-flex' }}>{Icon.edit(12)}</span>
