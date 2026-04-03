@@ -19,6 +19,7 @@
 - [ ] CSS variable names used match existing `var(--...)` references in App.jsx
 - [ ] No hardcoded colors outside `:root` variables (unless spec-mandated)
 - [ ] `[data-perf="low"]` and `[data-perf="mid"]` rules updated if new effects added
+- [ ] Feature includes admin editability/customization or approved exemption.
 
 ## Performance impact notes
 
