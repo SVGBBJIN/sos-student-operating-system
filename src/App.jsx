@@ -14,9 +14,6 @@ import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
-import { EditModeProvider } from './features/edit-mode/EditModeContext';
-import EditableSurface from './features/edit-mode/EditableSurface';
-import { useEditableField } from './features/edit-mode/useEditableField';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -1139,14 +1136,11 @@ function AuthModal({ onAuth, onClose, initialMode = 'login' }) {
 /* ═══════════════════════════════════════════════
    CONFIRMATION CARD
    ═══════════════════════════════════════════════ */
-function ConfirmationCard({ action, onConfirm, onCancel, isFallback, editableId, editableFields, onPatch }) {
+function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   const [editing, setEditing] = useState(!!isFallback);
-  const { draft: editData, editingField, isEditable, startEditing, patchField, stopEditing } = useEditableField({
-    editableId,
-    editableFields,
-    onPatch,
-    sourceData: action,
-  });
+  const [editingField, setEditingField] = useState(null); // P1.3: inline field editing
+  const [editData, setEditData] = useState({});
+  useEffect(() => { setEditData({ ...action }); }, [action]);
 
   // P1.3: field type map for inline editing
   const fieldTypes = { due:'date', date:'date', estimated_minutes:'number', start:'time', end:'time' };
@@ -1208,13 +1202,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback, editableId,
   const hasEdits = Object.keys(editData).some(k => k !== 'type' && editData[k] !== action[k]);
 
   return (
-    <EditableSurface
-      className="confirm-card"
-      style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}
-      editableId={editableId}
-      editableFields={editableFields}
-      onPatch={onPatch}
-    >
+    <div className="confirm-card" style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
       {isFallback && (
         <div style={{fontSize:'0.75rem',color:'var(--warning)',padding:'8px 16px',background:'rgba(255,165,2,0.05)',borderBottom:'1px solid rgba(255,165,2,0.1)',display:'flex',alignItems:'center',gap:6}}>
           {Icon.helpCircle(14)} I think you want to add this — check the details?
@@ -1230,43 +1218,43 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback, editableId,
       <div className="confirm-card-body">
       {!editing ? info.fields.map(f => (
         <div key={f.key} className="confirm-card-field"
-          onClick={f.editable && isEditable(f.key) ? () => startEditing(f.key) : undefined}
-          style={f.editable && isEditable(f.key) ? {cursor:'pointer'} : {}}>
+          onClick={f.editable ? () => { setEditingField(f.key); setEditData(prev => ({...prev})); } : undefined}
+          style={f.editable ? {cursor:'pointer'} : {}}>
           <span className="confirm-card-label">{f.label}</span>
           {editingField === f.key ? (
             <input className="confirm-edit-input" type={fieldTypes[f.key]||'text'}
               value={editData[f.key]??action[f.key]??''} autoFocus
               min={f.key==='estimated_minutes'?'5':undefined} step={f.key==='estimated_minutes'?'5':undefined}
-              onChange={e=>patchField(f.key, fieldTypes[f.key]==='number'?Number(e.target.value):e.target.value)}
-              onBlur={stopEditing}
-              onKeyDown={e=>{if(e.key==='Enter')stopEditing();}}
+              onChange={e=>setEditData(p=>({...p,[f.key]:fieldTypes[f.key]==='number'?Number(e.target.value):e.target.value}))}
+              onBlur={()=>setEditingField(null)}
+              onKeyDown={e=>{if(e.key==='Enter')setEditingField(null);}}
               style={{flex:1,maxWidth:160}}/>
           ) : (
-            <span className="confirm-card-value" style={f.editable && isEditable(f.key)?{borderBottom:'1px dashed rgba(108,99,255,0.3)'}:{}}>
+            <span className="confirm-card-value" style={f.editable?{borderBottom:'1px dashed rgba(108,99,255,0.3)'}:{}}>
               {editData[f.key] && editData[f.key] !== action[f.key]
                 ? (fieldTypes[f.key]==='date'?fmt(editData[f.key]):fieldTypes[f.key]==='number'?editData[f.key]+' min':editData[f.key])
                 : f.value}
-              {f.editable && isEditable(f.key) && <span style={{marginLeft:4,opacity:0.4,display:'inline-flex'}}>{Icon.edit(10)}</span>}
+              {f.editable && <span style={{marginLeft:4,opacity:0.4,display:'inline-flex'}}>{Icon.edit(10)}</span>}
             </span>
           )}
         </div>
       )) : (
         <div>
           {(action.type === 'add_task') && <>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>patchField('title',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Due</span><input className="confirm-edit-input" type="date" value={editData.due||''} onChange={e=>patchField('due',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Mins</span><input className="confirm-edit-input" type="number" min="5" step="5" value={editData.estimated_minutes||30} onChange={e=>patchField('estimated_minutes',Number(e.target.value))}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Class</span><input className="confirm-edit-input" value={editData.subject||''} onChange={e=>patchField('subject',e.target.value)} placeholder="e.g. Math"/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>setEditData(p=>({...p,title:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Due</span><input className="confirm-edit-input" type="date" value={editData.due||''} onChange={e=>setEditData(p=>({...p,due:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Mins</span><input className="confirm-edit-input" type="number" min="5" step="5" value={editData.estimated_minutes||30} onChange={e=>setEditData(p=>({...p,estimated_minutes:Number(e.target.value)}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Class</span><input className="confirm-edit-input" value={editData.subject||''} onChange={e=>setEditData(p=>({...p,subject:e.target.value}))} placeholder="e.g. Math"/></div>
           </>}
           {(action.type === 'add_event') && <>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>patchField('title',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>patchField('date',e.target.value)}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>setEditData(p=>({...p,title:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>setEditData(p=>({...p,date:e.target.value}))}/></div>
           </>}
           {(action.type === 'add_block') && <>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>What</span><input className="confirm-edit-input" value={editData.activity||''} onChange={e=>patchField('activity',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>patchField('date',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Start</span><input className="confirm-edit-input" type="time" value={editData.start||''} onChange={e=>patchField('start',e.target.value)}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>End</span><input className="confirm-edit-input" type="time" value={editData.end||''} onChange={e=>patchField('end',e.target.value)}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>What</span><input className="confirm-edit-input" value={editData.activity||''} onChange={e=>setEditData(p=>({...p,activity:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Date</span><input className="confirm-edit-input" type="date" value={editData.date||''} onChange={e=>setEditData(p=>({...p,date:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Start</span><input className="confirm-edit-input" type="time" value={editData.start||''} onChange={e=>setEditData(p=>({...p,start:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>End</span><input className="confirm-edit-input" type="time" value={editData.end||''} onChange={e=>setEditData(p=>({...p,end:e.target.value}))}/></div>
           </>}
         </div>
       )}
@@ -1278,7 +1266,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback, editableId,
         {!editing && action.type !== 'complete_task' && <button className="confirm-btn confirm-btn-edit" onClick={() => setEditing(true)}>{Icon.edit(14)} Edit</button>}
         <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>{Icon.x(14)} Dismiss</button>
       </div>
-    </EditableSurface>
+    </div>
   );
 }
 
@@ -5867,7 +5855,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <EditModeProvider>
     <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       {layoutMode !== 'lofi' && <>
@@ -6252,15 +6239,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 onCancel={()=>handleCancelAction(idx)}
               />
             ) : (
-              <ConfirmationCard
-                action={pa.action}
-                onConfirm={(action)=>handleConfirmAction(idx,action)}
-                onCancel={()=>handleCancelAction(idx)}
-                isFallback={pa.isFallback}
-                editableId={`confirmation-card-${idx}-${pa.action.type || 'action'}`}
-                editableFields={['title','subject','due','estimated_minutes','date','event_type','activity','start','end']}
-                onPatch={(_patch, nextDraft) => { void nextDraft; }}
-              />
+              <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
             )}
           </div>
         ))}
@@ -6519,7 +6498,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
     </div>
-    </EditModeProvider>
   );
 }
 

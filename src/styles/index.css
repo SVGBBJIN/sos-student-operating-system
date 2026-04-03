@@ -631,18 +631,3 @@ select option{background:#fffbeb;color:var(--text)}
 .tutor-integration-card{display:flex;flex-direction:column;gap:12px}
 .tutor-integration-card .tutor-secondary-btn{margin-top:auto;align-self:flex-start}
 @media (max-width: 980px){.tutor-hero,.tutor-stats,.tutor-integration-grid,.tutor-prompt-grid{grid-template-columns:1fr}.tutor-section-head{align-items:flex-start;flex-direction:column}.tutor-hero-copy h1{max-width:none}}
-
-.editable-surface-affordance {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid rgba(108, 99, 255, 0.15);
-  color: var(--accent);
-  background: rgba(108, 99, 255, 0.06);
-}
-
-.editable-surface-affordance.active {
-  background: rgba(108, 99, 255, 0.12);
-}
