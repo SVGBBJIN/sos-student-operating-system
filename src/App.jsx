@@ -3396,6 +3396,35 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
     setNewNoteName('');
   }
 
+  function duplicateNote(note, e) {
+    e.stopPropagation();
+    onCreateNote({
+      name: `${note.name} (Copy)`,
+      content: note.content || '',
+      source: note.source || 'manual'
+    });
+  }
+
+  function handleNoteToolbarAction(action, note, isExpanded, e) {
+    e.stopPropagation();
+    switch (action) {
+      case 'edit':
+        startEdit(note, e);
+        break;
+      case 'duplicate':
+        duplicateNote(note, e);
+        break;
+      case 'delete':
+        onDeleteNote(note.id);
+        break;
+      case 'visibility':
+        setExpandedId(isExpanded ? null : note.id);
+        break;
+      default:
+        break;
+    }
+  }
+
   const FormatToolbar = useCallback(() => (
     <div className="notes-toolbar">
       <button className="notes-toolbar-btn" onClick={() => execFormat('bold')} title="Bold"><b>B</b></button>
@@ -3509,8 +3538,13 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
                       <div className="notes-item-meta">
                         {getSourceBadge(note)}
                         {note.updatedAt && <span className="notes-item-date">{fmt(note.updatedAt)}</span>}
-                        <button className="notes-toolbar-btn" onClick={e => startEdit(note, e)} title="Edit" style={{fontSize:'0.72rem',padding:'3px 7px'}}>✎</button>
-                        <button className="notes-delete" style={{display:'flex',alignItems:'center',gap:2}} onClick={e => { e.stopPropagation(); onDeleteNote(note.id); }}>{Icon.trash(12)} Delete</button>
+                        <EditToolbar
+                          className="notes-item-edit-toolbar"
+                          enabledActions={['edit', 'drag-handle', 'duplicate', 'delete', 'visibility']}
+                          activeAction={{ visibility: isExpanded }}
+                          onAction={(action, event) => handleNoteToolbarAction(action, note, isExpanded, event)}
+                          ariaLabel={`Edit toolbar for ${note.name}`}
+                        />
                       </div>
                     </div>
                     {!isExpanded && snippet && (
