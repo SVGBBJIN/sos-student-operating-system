@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test src/features/edit-mode/components/__tests__/editToolbar.snapshot.test.mjs",
     "preview": "vite preview",
     "eval:harness": "node scripts/eval-harness.mjs"
   },
