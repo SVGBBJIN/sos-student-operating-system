@@ -6,7 +6,25 @@ All newly introduced user-facing features must provide admin-editable/customizab
 ## Policy Rule
 Any new user-facing feature **must include admin editability/customization** unless a documented exemption is explicitly approved.
 
-## Minimum Requirements
+## Hard Requirement: Homepage Blocks
+All **new user-facing homepage blocks** must satisfy every requirement below before merge:
+
+1. **Registered in edit mode**
+   - The block must expose a stable editable registration ID and participate in edit mode registration.
+2. **Field-driven content**
+   - User-facing copy and configurable values must come from editable fields/schema (not hardcoded strings embedded only in component markup).
+3. **Persisted through approved storage**
+   - Updates must persist via approved config/content storage paths (for example: canonical config documents, managed content records, or sanctioned app persistence keys).
+
+## Implementation Checklist for New Blocks
+When introducing a new homepage block, include:
+
+- Editable registration ID(s)
+- Schema path list for editable fields
+- Persistence location(s) used by the block
+- Screenshot showing edit controls in edit mode
+
+## Minimum Requirements (All User-Facing Features)
 Each qualifying feature must include all of the following:
 
 1. **Visible control in settings/admin UI**

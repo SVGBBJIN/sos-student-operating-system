@@ -20,6 +20,7 @@
 - [ ] No hardcoded colors outside `:root` variables (unless spec-mandated)
 - [ ] `[data-perf="low"]` and `[data-perf="mid"]` rules updated if new effects added
 - [ ] Feature includes admin editability/customization or approved exemption.
+- [ ] For new homepage blocks: include editable registration ID, schema path list, and screenshot of edit controls in edit mode.
 
 ## Performance impact notes
 
