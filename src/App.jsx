@@ -5998,6 +5998,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           modules={[
             {
               editableId: 'lofi-left-panel',
+              editableRegistration: {
+                schemaPaths: ['homepage.blocks.lofi-left-panel'],
+                storage: ['localStorage:sos_home_layout_order'],
+              },
               order: 1,
               label: 'Today panel',
               render: () => (
@@ -6017,6 +6021,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             },
             {
               editableId: 'lofi-right-panel',
+              editableRegistration: {
+                schemaPaths: ['homepage.blocks.lofi-right-panel'],
+                storage: ['localStorage:sos_home_layout_order'],
+              },
               order: 2,
               label: 'Utility panel',
               render: () => (
