@@ -15,6 +15,10 @@ import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
 import EditableSortableContainer from './features/edit-mode/dnd/EditableSortableContainer';
+import { EditModeProvider } from './features/edit-mode/EditModeContext';
+import EditableSurface from './features/edit-mode/EditableSurface';
+import { useEditableField } from './features/edit-mode/useEditableField';
+import { DEFAULT_HOMEPAGE_CONTENT, normalizeHomepageContent, iconForHomepageContent } from './features/homepage/contentSchema';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -123,6 +127,50 @@ function weatherThemeKey(code) {
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 10;
+const HOMEPAGE_CONTENT_STORAGE_KEY = 'sos_homepage_content_v1';
+
+function getHomepageContentFromStorage() {
+  try {
+    const raw = localStorage.getItem(HOMEPAGE_CONTENT_STORAGE_KEY);
+    if (!raw) return DEFAULT_HOMEPAGE_CONTENT;
+    return normalizeHomepageContent(JSON.parse(raw));
+  } catch (e) {
+    console.warn('Failed to parse homepage content from localStorage, using defaults.', e);
+    return DEFAULT_HOMEPAGE_CONTENT;
+  }
+}
+
+function updateAtPath(source, path, value) {
+  const tokens = String(path || '')
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean);
+  if (tokens.length === 0) return source;
+  const next = structuredClone(source);
+  let cursor = next;
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const token = tokens[i];
+    const idx = Number(token);
+    if (Number.isInteger(idx)) {
+      if (!Array.isArray(cursor)) return source;
+      if (cursor[idx] === undefined || cursor[idx] === null || typeof cursor[idx] !== 'object') {
+        cursor[idx] = {};
+      }
+      cursor = cursor[idx];
+    } else {
+      if (cursor[token] === undefined || cursor[token] === null || typeof cursor[token] !== 'object') {
+        const nextToken = tokens[i + 1];
+        cursor[token] = Number.isInteger(Number(nextToken)) ? [] : {};
+      }
+      cursor = cursor[token];
+    }
+  }
+  const leaf = tokens[tokens.length - 1];
+  const leafIdx = Number(leaf);
+  if (Number.isInteger(leafIdx) && Array.isArray(cursor)) cursor[leafIdx] = value;
+  else cursor[leaf] = value;
+  return next;
+}
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -1757,24 +1805,66 @@ function TutorIndicator({ active }) {
   );
 }
 
-function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTutorMode, onPrompt, onOpenNotes, onOpenSchedule, onOpenSettings }) {
+function TutorMissionPage({
+  tutorMode,
+  tasks,
+  events,
+  notes,
+  homepageContent,
+  isContentEditMode,
+  onPatchHomepageField,
+  onBack,
+  onToggleTutorMode,
+  onPrompt,
+  onOpenNotes,
+  onOpenSchedule,
+  onOpenSettings
+}) {
   const activeTasks = tasks.filter(t => t.status !== 'done');
   const overdueTasks = activeTasks.filter(t => daysUntil(t.dueDate) < 0);
   const dueSoon = activeTasks.filter(t => { const d = daysUntil(t.dueDate); return d >= 0 && d <= 3; });
   const upcomingEvents = events.filter(e => { const d = daysUntil(e.date); return d >= 0 && d <= 7; });
   const hasNotes = notes.length > 0;
   const primaryFocus = overdueTasks[0] || dueSoon[0] || activeTasks[0] || null;
-  const prompts = [
-    { label: 'Teach me from my notes', msg: hasNotes ? `Teach me the most important ideas from my notes and quiz me one question at a time.` : 'Help me study a topic step by step and quiz me one question at a time.' },
-    { label: 'Build a study sprint', msg: 'Plan a focused 45-minute study sprint for my highest-priority work.' },
-    { label: 'Explain this simply', msg: 'Explain this like I am learning it for the first time, then check my understanding with one question.' },
-    { label: 'Make flashcards', msg: hasNotes ? 'Make flashcards from my notes for the topic I need most right now.' : 'Make me flashcards for the topic I need to study.' },
-  ];
-  const integrations = [
-    { title: 'Notes-aware tutoring', description: hasNotes ? `Pulls from ${notes.length} saved note${notes.length === 1 ? '' : 's'} so explanations can cite your actual material.` : 'Import notes or PDFs and tutor mode will teach from them instead of starting from scratch.', action: onOpenNotes, cta: hasNotes ? 'Open notes' : 'Add notes', icon: Icon.fileText(16) },
-    { title: 'Schedule-aware coaching', description: primaryFocus ? `Your next likely focus is ${primaryFocus.title}${primaryFocus.subject ? ` in ${primaryFocus.subject}` : ''}. Tutor mode can turn that into a plan without losing track of due dates.` : 'Tutor mode can turn explanations into realistic study blocks that fit around your calendar.', action: onOpenSchedule, cta: 'Open schedule', icon: Icon.calendarClock(16) },
-    { title: 'One-click study actions', description: 'Jump from tutoring into flashcards, quizzes, plans, and task support without leaving the workspace.', action: onPrompt, cta: 'Start guided help', icon: Icon.sparkles(16), prompt: 'Help me study step by step using tutor mode.' },
-  ];
+  const programs = homepageContent.programs || [];
+  const values = homepageContent.values || [];
+  const contactFaq = homepageContent.contactFaq || [];
+
+  function FieldEditor({ path, value, className = '', multiline = false }) {
+    if (!isContentEditMode) return <>{value}</>;
+    if (multiline) {
+      return (
+        <textarea
+          className={className}
+          value={value || ''}
+          onChange={(e) => onPatchHomepageField(path, e.target.value)}
+          style={{ width: '100%', minHeight: 76 }}
+        />
+      );
+    }
+    return (
+      <input
+        className={className}
+        value={value || ''}
+        onChange={(e) => onPatchHomepageField(path, e.target.value)}
+      />
+    );
+  }
+
+  function runValueAction(item, secondary = false) {
+    if (secondary) {
+      if (item.action === 'startPrompt') { onOpenSettings(); return; }
+      if (item.action === 'openNotes') { onOpenNotes(); return; }
+      if (item.action === 'openSchedule') { onPrompt('Plan my next week around upcoming tasks and events.'); return; }
+      onBack();
+      return;
+    }
+    if (item.action === 'openNotes') { onOpenNotes(); return; }
+    if (item.action === 'openSchedule') { onOpenSchedule(); return; }
+    if (item.action === 'startPrompt') { onPrompt(item.prompt || 'Help me study step by step using tutor mode.'); return; }
+    if (item.action === 'openSettings') { onOpenSettings(); return; }
+    if (item.action === 'faqWorkflow') { onPrompt('How can I get better answers from tutor mode using my notes and schedule?'); return; }
+  }
 
   return (
     <div className="tutor-page">
@@ -1785,7 +1875,7 @@ function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTut
           <p>Tutor mode now has a home base for guided explanations, note-aware studying, and schedule-aware next steps. Turn it on when you want SOS to teach, coach, and keep you moving.</p>
           <div className="tutor-hero-actions">
             <button className="tutor-primary-btn" onClick={() => onToggleTutorMode(!tutorMode)}>{tutorMode ? 'Tutor mode on' : 'Turn tutor mode on'}</button>
-            <button className="tutor-secondary-btn" onClick={() => onPrompt(prompts[0].msg)}>Try a guided session</button>
+            <button className="tutor-secondary-btn" onClick={() => onPrompt(programs[0]?.prompt || 'Help me study a topic step by step and quiz me one question at a time.')}>Try a guided session</button>
             <button className="tutor-secondary-btn" onClick={onBack}>Back to chat</button>
           </div>
         </div>
@@ -1820,19 +1910,31 @@ function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTut
         <div className="tutor-section-head">
           <div>
             <div className="tutor-section-eyebrow">Start here</div>
-            <h2>Quick tutor workflows</h2>
+            <h2>Programs</h2>
           </div>
           <button className="tutor-text-btn" onClick={() => onPrompt('Help me study step by step using tutor mode and my current workload.')}>Open in chat</button>
         </div>
         <div className="tutor-prompt-grid">
-          {prompts.map(prompt => (
-            <button key={prompt.label} className="tutor-prompt-card" onClick={() => onPrompt(prompt.msg)}>
-              <div className="tutor-prompt-icon">{Icon.sparkles(15)}</div>
+          {programs.map((program, idx) => (
+            <div key={`${program.title}-${idx}`} className="tutor-prompt-card">
+              <div className="tutor-prompt-icon">{iconForHomepageContent(Icon, program.icon, 15)}</div>
               <div>
-                <div className="tutor-prompt-title">{prompt.label}</div>
-                <div className="tutor-prompt-copy">{prompt.msg}</div>
+                <div className="tutor-prompt-title">
+                  <FieldEditor path={`homepage.programs[${idx}].title`} value={program.title} className="tutor-edit-input" />
+                </div>
+                <div className="tutor-prompt-copy">
+                  <FieldEditor path={`homepage.programs[${idx}].description`} value={program.description} multiline className="tutor-edit-input" />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button className="tutor-primary-btn" disabled={isContentEditMode} onClick={() => onPrompt(program.prompt)}>
+                    <FieldEditor path={`homepage.programs[${idx}].ctaPrimary`} value={program.ctaPrimary} className="tutor-edit-input" />
+                  </button>
+                  <button className="tutor-secondary-btn" disabled={isContentEditMode} onClick={() => onOpenNotes()}>
+                    <FieldEditor path={`homepage.programs[${idx}].ctaSecondary`} value={program.ctaSecondary} className="tutor-edit-input" />
+                  </button>
+                </div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </section>
@@ -1841,17 +1943,58 @@ function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTut
         <div className="tutor-section-head">
           <div>
             <div className="tutor-section-eyebrow">Integration upgrades</div>
-            <h2>Tutor mode is connected to the rest of SOS</h2>
+            <h2>Values</h2>
           </div>
           <button className="tutor-text-btn" onClick={onOpenSettings}>Tune settings</button>
         </div>
         <div className="tutor-integration-grid">
-          {integrations.map(item => (
-            <div key={item.title} className="tutor-integration-card">
-              <div className="tutor-integration-icon">{item.icon}</div>
-              <div className="tutor-integration-title">{item.title}</div>
-              <p>{item.description}</p>
-              <button className="tutor-secondary-btn" onClick={() => item.prompt ? item.action(item.prompt) : item.action()}>{item.cta}</button>
+          {values.map((item, idx) => (
+            <div key={`${item.title}-${idx}`} className="tutor-integration-card">
+              <div className="tutor-integration-icon">{iconForHomepageContent(Icon, item.icon, 16)}</div>
+              <div className="tutor-integration-title">
+                <FieldEditor path={`homepage.values[${idx}].title`} value={item.title} className="tutor-edit-input" />
+              </div>
+              <p>
+                <FieldEditor path={`homepage.values[${idx}].description`} value={item.description} multiline className="tutor-edit-input" />
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="tutor-secondary-btn" disabled={isContentEditMode} onClick={() => runValueAction(item, false)}>
+                  <FieldEditor path={`homepage.values[${idx}].ctaPrimary`} value={item.ctaPrimary} className="tutor-edit-input" />
+                </button>
+                <button className="tutor-secondary-btn" disabled={isContentEditMode} onClick={() => runValueAction(item, true)}>
+                  <FieldEditor path={`homepage.values[${idx}].ctaSecondary`} value={item.ctaSecondary} className="tutor-edit-input" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="tutor-section">
+        <div className="tutor-section-head">
+          <div>
+            <div className="tutor-section-eyebrow">Support</div>
+            <h2>Contact / FAQ</h2>
+          </div>
+        </div>
+        <div className="tutor-integration-grid">
+          {contactFaq.map((item, idx) => (
+            <div key={`${item.title}-${idx}`} className="tutor-integration-card">
+              <div className="tutor-integration-icon">{iconForHomepageContent(Icon, item.icon, 16)}</div>
+              <div className="tutor-integration-title">
+                <FieldEditor path={`homepage.contactFaq[${idx}].title`} value={item.title} className="tutor-edit-input" />
+              </div>
+              <p>
+                <FieldEditor path={`homepage.contactFaq[${idx}].description`} value={item.description} multiline className="tutor-edit-input" />
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="tutor-secondary-btn" disabled={isContentEditMode} onClick={() => runValueAction(item, false)}>
+                  <FieldEditor path={`homepage.contactFaq[${idx}].ctaPrimary`} value={item.ctaPrimary} className="tutor-edit-input" />
+                </button>
+                <button className="tutor-secondary-btn" disabled={isContentEditMode} onClick={() => runValueAction(item, true)}>
+                  <FieldEditor path={`homepage.contactFaq[${idx}].ctaSecondary`} value={item.ctaSecondary} className="tutor-edit-input" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -3775,7 +3918,8 @@ function App() {
   const [showNotes, setShowNotes] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
   const [homeLayoutEditMode, setHomeLayoutEditMode] = useState(false);
-const [ambientMode, setAmbientMode] = useState(null);
+  const [homepageContent, setHomepageContent] = useState(() => getHomepageContentFromStorage());
+  const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -5853,9 +5997,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  const patchHomepageField = useCallback((path, value) => {
+    setHomepageContent((prev) => {
+      const normalized = normalizeHomepageContent(prev);
+      const next = updateAtPath(normalized, path, value);
+      return normalizeHomepageContent(next);
+    });
+  }, []);
+
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HOMEPAGE_CONTENT_STORAGE_KEY, JSON.stringify(normalizeHomepageContent(homepageContent)));
+    } catch (e) {
+      console.error('Failed to persist homepage content', e);
+    }
+  }, [homepageContent]);
   useEffect(() => {
     if (layoutMode !== 'lofi') setHomeLayoutEditMode(false);
   }, [layoutMode]);
@@ -6071,6 +6230,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             tasks={tasks}
             events={events}
             notes={notes}
+            homepageContent={homepageContent}
+            isContentEditMode={homeLayoutEditMode}
+            onPatchHomepageField={patchHomepageField}
             onBack={() => { toggleTutorMode(false); setActivePanel('chat'); }}
             onToggleTutorMode={toggleTutorMode}
             onPrompt={launchTutorPrompt}
