@@ -570,45 +570,6 @@
   padding: 0;
 }
 
-/* Weather widget */
-.study-weather {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--lofi-border);
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.study-weather-icon {
-  font-size: 22px;
-  flex-shrink: 0;
-}
-
-.study-weather-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.study-weather-temp {
-  font-size: 16px;
-  color: var(--lofi-text);
-  line-height: 1;
-  font-family: var(--lofi-font-mono);
-}
-
-.study-weather-desc {
-  font-size: 9px;
-  color: var(--lofi-text-muted);
-  margin-top: 2px;
-  font-family: var(--lofi-font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Right panel sub-panel tabs (schedule / notes) */
 .study-right-tabs {
   display: flex;
