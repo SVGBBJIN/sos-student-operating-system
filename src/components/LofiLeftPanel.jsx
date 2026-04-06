@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 
 const SUBJECT_COLORS = {
   math:     { fill: 'var(--lofi-lavender)', tag: 'study-tag-math',    label: 'MTH' },
@@ -33,8 +33,22 @@ function getTodayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function useSrsDueCount() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    try {
+      const schedule = JSON.parse(localStorage.getItem('sos-fc-schedule') || '{}');
+      const today = getTodayStr();
+      const due = Object.values(schedule).filter(v => !v.nextReview || v.nextReview <= today).length;
+      setCount(due);
+    } catch(_) {}
+  }, []);
+  return count;
+}
+
 export default function LofiLeftPanel({ tasks, onToggleTask }) {
   const today = getTodayStr();
+  const srsDue = useSrsDueCount();
 
   // show tasks due today or not yet completed, up to 10
   const visibleTasks = useMemo(() => {
@@ -73,7 +87,7 @@ export default function LofiLeftPanel({ tasks, onToggleTask }) {
       <div className="study-section-label">Today</div>
 
       {visibleTasks.length === 0 ? (
-        <div className="study-left-empty">No tasks yet —<br/>ask SOS to add some!</div>
+        <div className="study-left-empty">Nothing on your plate yet —<br/>what's coming up?</div>
       ) : (
         <div className="study-task-list">
           {visibleTasks.map(task => {
@@ -96,6 +110,13 @@ export default function LofiLeftPanel({ tasks, onToggleTask }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {srsDue > 0 && (
+        <div className="study-section-label" style={{marginTop:4,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>Due for review</span>
+          <span style={{background:'rgba(253,164,175,0.2)',color:'#fda4af',borderRadius:999,padding:'1px 7px',fontSize:'0.7rem',fontWeight:700}}>{srsDue}</span>
         </div>
       )}
 

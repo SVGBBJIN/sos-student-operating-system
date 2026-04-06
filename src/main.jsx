@@ -8,6 +8,13 @@ import SkyBackground from './components/SkyBackground';
 import { PresenceProvider } from './context/PresenceContext';
 import { startPerfAdjuster } from './lib/perfAdjuster';
 
+// Register service worker for push notifications
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 try {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
