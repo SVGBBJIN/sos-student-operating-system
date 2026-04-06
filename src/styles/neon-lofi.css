@@ -70,6 +70,8 @@
 
 /* ─── Sky State Overrides ──────────────────────────────────────────── */
 /* Applied via data-sky attribute on <html> by SkyBackground.jsx       */
+/* SkyBackground canvas hidden until weather theme is re-enabled       */
+.sky-layer { opacity: 0 !important; }
 
 [data-sky="sunrise"] {
   --neon-cyan:   rgba(0, 229, 204, 0.4);
