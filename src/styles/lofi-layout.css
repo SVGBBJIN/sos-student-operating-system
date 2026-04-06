@@ -747,3 +747,135 @@
     grid-template-columns: 200px 1fr 190px;
   }
 }
+
+/* ── Mobile: collapse to single-column with 64px panel strip ──── */
+@media (max-width: 768px) {
+  .study-app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 64px 1fr auto;
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .study-topbar {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  /* Compact horizontal strip — left + right panels side by side */
+  .study-left,
+  .study-right {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    height: 64px;
+    overflow: hidden;
+    padding: 0 10px;
+    gap: 8px;
+    border-radius: 12px;
+  }
+
+  /* Strip: left takes 60%, right takes 40% */
+  .study-left {
+    grid-column: 1;
+    grid-row: 2;
+    flex: 3;
+    min-height: unset;
+  }
+
+  .study-right {
+    grid-column: 1;
+    grid-row: 2;
+    flex: 2;
+    min-height: unset;
+    overflow-y: visible;
+  }
+
+  /* Row 2 becomes a flex row containing both panels */
+  .study-app {
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  /* Use a wrapper trick: put left+right in a flex row at row 2 */
+  .study-left { order: 0; }
+  .study-right { order: 1; }
+
+  /* Hide verbose content in strip mode */
+  .study-task-list,
+  .study-subject-list,
+  .study-left-empty,
+  .study-section-label {
+    display: none !important;
+  }
+
+  /* Show only a task count label */
+  .study-left::before {
+    content: 'Tasks';
+    font-size: 10px;
+    color: var(--lofi-text-muted);
+    font-family: var(--lofi-font-mono);
+    white-space: nowrap;
+  }
+
+  .study-center {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .study-bottombar {
+    grid-column: 1;
+    grid-row: 4;
+  }
+
+  /* Compact cat */
+  .study-cat-scene {
+    width: 44px;
+    height: 44px;
+    aspect-ratio: unset;
+    flex-shrink: 0;
+    border-radius: 8px;
+  }
+
+  .study-cat-scene .cat-svg {
+    width: 36px;
+  }
+
+  /* Compact music player */
+  .study-music-player {
+    padding: 6px 8px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .study-now-playing-label { display: none; }
+
+  .study-track-name {
+    font-size: 10px;
+  }
+
+  .study-music-controls {
+    gap: 6px;
+  }
+
+  .study-ctrl-btn {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  /* Hide weather and notes panels in strip */
+  .study-weather-widget,
+  .study-notes-panel,
+  .study-schedule-panel,
+  .study-right > *:not(.study-cat-scene):not(.study-music-player) {
+    display: none !important;
+  }
+}
+
+/* ── Very small phones: further trim music strip ──────────────── */
+@media (max-width: 375px) {
+  .study-track-artist { display: none !important; }
+
+  .study-music-player {
+    padding: 4px 6px;
+  }
+}

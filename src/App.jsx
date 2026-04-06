@@ -35,6 +35,48 @@ function daysUntil(dateStr) {
   const target = new Date(dateStr + 'T00:00:00');
   return Math.round((target - now) / 86400000);
 }
+
+/* ── Notification scheduling helper ──────────────────────────── */
+function buildNotifications(tasks, events, prefs) {
+  const notes = [];
+  const now = Date.now();
+  function atDate(dateStr, hour = 9) {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setHours(hour, 0, 0, 0);
+    return d.getTime();
+  }
+  if (prefs.tasks) {
+    tasks.filter(t => t.status !== 'done' && t.dueDate).forEach(t => {
+      const d = daysUntil(t.dueDate);
+      if (d === 1) notes.push({ title: '⏰ Due tomorrow', body: t.title, fireAt: atDate(t.dueDate, 8), tag: 'task-' + t.id + '-1d' });
+      if (d === 0) notes.push({ title: '🔴 Due today', body: t.title, fireAt: now + 60000, tag: 'task-' + t.id + '-today' });
+    });
+  }
+  if (prefs.exams) {
+    events.filter(ev => /exam|test|midterm|final/i.test(ev.title || '')).forEach(ev => {
+      const d = daysUntil(ev.date);
+      if (d === 3) notes.push({ title: '📚 Exam in 3 days', body: ev.title, fireAt: atDate(ev.date, 8) - 2 * 86400000, tag: 'exam-' + ev.id + '-3d' });
+      if (d === 1) notes.push({ title: '📚 Exam tomorrow!', body: ev.title, fireAt: atDate(ev.date, 8) - 86400000, tag: 'exam-' + ev.id + '-1d' });
+    });
+  }
+  if (prefs.daily) {
+    const dailyHour = parseInt(localStorage.getItem('sos-notif-daily-hour') || '8', 10);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const fireAt = atDate(todayStr, dailyHour);
+    if (fireAt > now) {
+      notes.push({ title: '📋 Good morning — here\'s your plan', body: `You have ${tasks.filter(t=>t.status!=='done').length} active tasks today.`, fireAt, tag: 'daily-plan' });
+    }
+  }
+  return notes;
+}
+
+async function scheduleNotificationsToSW(notifications) {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.active?.postMessage({ type: 'SCHEDULE_NOTIFICATIONS', notifications });
+  } catch(_) {}
+}
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function fmtTime(h, m) {
   const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
@@ -1202,7 +1244,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   const hasEdits = Object.keys(editData).some(k => k !== 'type' && editData[k] !== action[k]);
 
   return (
-    <div className="confirm-card" style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
+    <div className="confirm-card sos-confirm-card" data-action={action.type} style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
       {isFallback && (
         <div style={{fontSize:'0.75rem',color:'var(--warning)',padding:'8px 16px',background:'rgba(255,165,2,0.05)',borderBottom:'1px solid rgba(255,165,2,0.1)',display:'flex',alignItems:'center',gap:6}}>
           {Icon.helpCircle(14)} I think you want to add this — check the details?
@@ -1850,15 +1892,59 @@ function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTut
   );
 }
 
+/* ── SM-2 SRS helpers ──────────────────────────────────────────────── */
+function srsCardKey(title, q) {
+  return ('fc:' + (title || '') + ':' + (q || '')).slice(0, 120);
+}
+function srsLoad() {
+  try { return JSON.parse(localStorage.getItem('sos-fc-schedule') || '{}'); } catch(_) { return {}; }
+}
+function srsSave(schedule) {
+  try { localStorage.setItem('sos-fc-schedule', JSON.stringify(schedule)); } catch(_) {}
+}
+function srsDaysUntil(isoDate) {
+  if (!isoDate) return null;
+  const diff = new Date(isoDate) - new Date(new Date().toDateString());
+  return Math.round(diff / 86400000);
+}
+function srsRate(cardKey, rating) {
+  // rating: 'know' | 'unsure' | 'nope'
+  const schedule = srsLoad();
+  const prev = schedule[cardKey] || { interval: 1, easiness: 2.5 };
+  let { interval, easiness } = prev;
+  if (rating === 'know') {
+    easiness = Math.min(3.0, easiness + 0.1);
+    interval = Math.max(7, Math.round(interval * easiness));
+  } else if (rating === 'unsure') {
+    easiness = Math.max(1.3, easiness - 0.15);
+    interval = 1;
+  } else {
+    easiness = Math.max(1.3, easiness - 0.2);
+    interval = 0;
+  }
+  const nextReview = new Date();
+  nextReview.setDate(nextReview.getDate() + interval);
+  schedule[cardKey] = { interval, easiness, nextReview: nextReview.toISOString().slice(0, 10) };
+  srsSave(schedule);
+  return interval;
+}
+
 function FlashcardDisplay({ data, onSave, onDismiss }) {
   const cards = data.cards || [];
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [lastInterval, setLastInterval] = useState(null);
 
-  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards generated.</div></ContentCard>;
+  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards yet — tell me what you're studying</div></ContentCard>;
 
-  function goNext() { if (idx < cards.length - 1) { setFlipped(false); setTimeout(() => setIdx(i => i + 1), 100); } }
-  function goPrev() { if (idx > 0) { setFlipped(false); setTimeout(() => setIdx(i => i - 1), 100); } }
+  function goNext() { if (idx < cards.length - 1) { setFlipped(false); setLastInterval(null); setTimeout(() => setIdx(i => i + 1), 100); } }
+  function goPrev() { if (idx > 0) { setFlipped(false); setLastInterval(null); setTimeout(() => setIdx(i => i - 1), 100); } }
+  function rate(rating) {
+    const key = srsCardKey(data.title, cards[idx]?.q);
+    const interval = srsRate(key, rating);
+    setLastInterval(interval);
+    setTimeout(() => { setLastInterval(null); goNext(); }, 900);
+  }
 
   return (
     <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)">
@@ -1872,16 +1958,21 @@ function FlashcardDisplay({ data, onSave, onDismiss }) {
           </div>
         </div>
       </div>
+      {lastInterval !== null && (
+        <div style={{textAlign:'center',fontSize:'0.76rem',color:'var(--teal)',animation:'fadeIn .2s ease',marginTop:4,fontStyle:'italic'}}>
+          {lastInterval === 0 ? 'Back in the queue — you\'ll see this again today' : `Next review: in ${lastInterval} day${lastInterval===1?'':'s'}`}
+        </div>
+      )}
       <div className="fc-nav">
         <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goPrev(); }} disabled={idx === 0}>{Icon.chevronLeft(16)}</button>
         <span className="fc-counter">{idx + 1} / {cards.length}</span>
         <button className="fc-nav-btn" onClick={(e) => { e.stopPropagation(); goNext(); }} disabled={idx === cards.length - 1}>{Icon.chevronRight(16)}</button>
       </div>
-      {flipped && (
+      {flipped && lastInterval === null && (
         <div className="fc-chips">
-          <button className="fc-chip chip-know" onClick={(e) => { e.stopPropagation(); goNext(); }}>✓ Got it</button>
-          <button className="fc-chip chip-unsure" onClick={(e) => { e.stopPropagation(); goNext(); }}>~ Almost</button>
-          <button className="fc-chip chip-nope" onClick={(e) => { e.stopPropagation(); goNext(); }}>✗ Nope</button>
+          <button className="fc-chip chip-know" onClick={(e) => { e.stopPropagation(); rate('know'); }}>✓ Got it</button>
+          <button className="fc-chip chip-unsure" onClick={(e) => { e.stopPropagation(); rate('unsure'); }}>~ Almost</button>
+          <button className="fc-chip chip-nope" onClick={(e) => { e.stopPropagation(); rate('nope'); }}>✗ Nope</button>
         </div>
       )}
       <div className="fc-hint">tap card to flip</div>
@@ -3428,7 +3519,7 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
             <input className="notes-title-input" value={newNoteName} onChange={e => setNewNoteName(e.target.value)}
               placeholder="Note title..." autoFocus/>
             <FormatToolbar/>
-            <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="Start writing your note..."
+            <div ref={editorRef} className="notes-editor" contentEditable data-placeholder="What are you studying today?"
               onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); execFormat('indent'); }}}/>
             <div className="notes-edit-actions">
               <button className="notes-cancel-btn" onClick={cancelNewNote}>Cancel</button>
@@ -3601,11 +3692,20 @@ const ThinkingIndicator=({message="thinkisizing…"})=>(
 );
 
 /* ═══════════════════════════════════════════════
-   FIRST-RUN ONBOARDING MODAL
+   FIRST-RUN ONBOARDING MODAL  (4 steps)
    ═══════════════════════════════════════════════ */
-function FirstRunModal({ onClose, onConnectGoogle, onWeatherToggle, weatherEnabled }) {
+const ONBOARDING_FEATURES = [
+  { icon: '💬', label: 'Chat', desc: 'Ask SOS anything — it knows your whole workload' },
+  { icon: '✅', label: 'Tasks', desc: 'Just say "add essay due Friday" and it\'s done' },
+  { icon: '📅', label: 'Calendar', desc: 'Syncs with Google so you never miss a deadline' },
+  { icon: '🃏', label: 'Flashcards', desc: 'AI-generated cards with spaced repetition built in' },
+  { icon: '📝', label: 'Quiz', desc: 'Auto-quizzes from any topic or uploaded PDF' },
+  { icon: '📓', label: 'Notes', desc: 'Your notes in context so answers are grounded in your work' },
+];
+
+function FirstRunModal({ onClose, onConnectGoogle, onWeatherToggle, weatherEnabled, onSwitchLofi }) {
   const [step, setStep] = useState(1);
-  const TOTAL = 3;
+  const TOTAL = 4;
 
   function handleClose() {
     try { localStorage.setItem('sos_onboarded', '1'); } catch(_) {}
@@ -3614,50 +3714,47 @@ function FirstRunModal({ onClose, onConnectGoogle, onWeatherToggle, weatherEnabl
 
   return (
     <div style={{position:'fixed',inset:0,zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)',backdropFilter:'blur(8px)',animation:'overlayIn .2s ease'}}>
-      <div style={{background:'var(--bg2)',border:'1px solid var(--border-mid)',borderRadius:24,padding:'28px 28px 24px',maxWidth:440,width:'calc(100% - 32px)',boxShadow:'0 20px 60px rgba(0,0,0,0.6)',animation:'cardPop .25s ease',position:'relative'}}>
+      <div style={{background:'var(--bg2)',border:'1px solid var(--border-mid)',borderRadius:24,padding:'28px 28px 24px',maxWidth:460,width:'calc(100% - 32px)',boxShadow:'0 20px 60px rgba(0,0,0,0.6)',animation:'cardPop .25s ease',position:'relative'}}>
         {/* Progress dots */}
-        <div style={{display:'flex',justifyContent:'center',gap:6,marginBottom:24}}>
+        <div style={{display:'flex',justifyContent:'center',gap:6,marginBottom:22}}>
           {Array.from({length:TOTAL},(_,i)=>(
             <div key={i} style={{width:8,height:8,borderRadius:'50%',background: i+1<=step ? 'var(--accent)' : 'var(--border)',transition:'background .3s'}}/>
           ))}
         </div>
 
+        {/* Step 1 — Feature overview */}
         {step === 1 && (
           <>
-            <div style={{fontSize:'1.4rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Welcome to SOS 👋</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
-              Your AI study sidekick. It knows your tasks, schedule, and notes — so you can just talk to it like a friend.
+            <div style={{fontSize:'1.4rem',fontWeight:800,marginBottom:6,letterSpacing:'-0.5px'}}>Welcome to SOS 👋</div>
+            <div style={{fontSize:'0.86rem',color:'var(--text-dim)',lineHeight:1.5,marginBottom:16}}>
+              Your AI study sidekick — it talks to you like a friend and knows your whole workload.
             </div>
-            <div style={{background:'var(--bg)',borderRadius:14,padding:'14px 16px',marginBottom:12,border:'1px solid var(--border)'}}>
-              <div style={{fontWeight:700,fontSize:'0.88rem',marginBottom:4}}>Connect Google Calendar</div>
-              <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:10}}>Auto-sync your events so SOS always knows what's coming up.</div>
-              <button onClick={()=>{onConnectGoogle();}} style={{background:'var(--accent)',border:'none',borderRadius:10,color:'#fff',fontWeight:700,fontSize:'0.82rem',padding:'8px 14px',cursor:'pointer',width:'100%'}}>Connect Calendar →</button>
-            </div>
-            <div style={{background:'var(--bg)',borderRadius:14,padding:'12px 16px',marginBottom:20,border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:'0.85rem',marginBottom:2}}>Weather-based theme ✨</div>
-                <div style={{fontSize:'0.76rem',color:'var(--text-dim)'}}>App colors react to your local weather. Try it.</div>
-              </div>
-              <button onClick={onWeatherToggle} style={{background:weatherEnabled?'var(--success)':'var(--border)',border:'none',borderRadius:20,color:'#fff',fontWeight:700,fontSize:'0.78rem',padding:'6px 14px',cursor:'pointer',transition:'all .2s',whiteSpace:'nowrap'}}>{weatherEnabled?'On ✓':'Turn on'}</button>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:20}}>
+              {ONBOARDING_FEATURES.map(f=>(
+                <div key={f.label} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:12,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>
+                  <div style={{fontSize:'1.1rem'}}>{f.icon} <span style={{fontWeight:700,fontSize:'0.83rem'}}>{f.label}</span></div>
+                  <div style={{fontSize:'0.74rem',color:'var(--text-dim)',lineHeight:1.4}}>{f.desc}</div>
+                </div>
+              ))}
             </div>
             <div style={{display:'flex',gap:10}}>
-              <button onClick={()=>setStep(2)} style={{flex:1,background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.88rem',padding:'10px',cursor:'pointer'}}>Next →</button>
-              <button onClick={()=>setStep(2)} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:12,color:'var(--text-dim)',fontSize:'0.82rem',padding:'10px 14px',cursor:'pointer'}}>Skip for now</button>
+              <button onClick={()=>setStep(2)} style={{flex:1,background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.88rem',padding:'10px',cursor:'pointer'}}>Let me in →</button>
             </div>
           </>
         )}
 
+        {/* Step 2 — First task */}
         {step === 2 && (
           <>
             <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Add your first task 📋</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:16}}>
               Just describe your work and SOS will add it. You can say things like:<br/>
               <span style={{color:'var(--accent)',fontStyle:'italic'}}>"Add a math essay due Friday, 45 mins"</span>
             </div>
-            <div style={{background:'rgba(108,99,255,0.08)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:20}}>
-              <div style={{fontSize:'0.82rem',color:'var(--text-dim)',marginBottom:8,fontWeight:600}}>Quick examples to try:</div>
+            <div style={{background:'rgba(108,99,255,0.08)',border:'1px solid rgba(108,99,255,0.2)',borderRadius:14,padding:'12px 16px',marginBottom:20}}>
+              <div style={{fontSize:'0.80rem',color:'var(--text-dim)',marginBottom:8,fontWeight:600}}>Quick examples to try:</div>
               {['I have a bio test on Thursday','Add essay due next Monday, 2 hours','Finish problem set by tomorrow'].map(ex=>(
-                <div key={ex} style={{fontSize:'0.80rem',color:'var(--text)',padding:'6px 10px',borderRadius:8,background:'var(--bg)',marginBottom:4,border:'1px solid var(--border)'}}>{ex}</div>
+                <div key={ex} style={{fontSize:'0.79rem',color:'var(--text)',padding:'5px 10px',borderRadius:8,background:'var(--bg)',marginBottom:4,border:'1px solid var(--border)'}}>{ex}</div>
               ))}
             </div>
             <div style={{display:'flex',gap:10}}>
@@ -3667,25 +3764,96 @@ function FirstRunModal({ onClose, onConnectGoogle, onWeatherToggle, weatherEnabl
           </>
         )}
 
+        {/* Step 3 — Google Calendar */}
         {step === 3 && (
           <>
-            <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Pro tip: Voice input 🎤</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:20}}>
-              Tap the mic button in the chat bar and just speak. SOS will transcribe and respond instantly — great for hands-free studying.
+            <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Connect your calendar 📅</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:16}}>
+              Link Google Calendar so SOS knows what's coming up — and can plan around it automatically.
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',background:'var(--bg)',borderRadius:14,border:'1px solid var(--border)',marginBottom:20}}>
-              <div style={{width:44,height:44,borderRadius:'50%',background:'rgba(56,216,232,0.12)',border:'1px solid rgba(56,216,232,0.3)',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--accent)',flexShrink:0}}>
-                {Icon.mic(20)}
-              </div>
-              <div>
-                <div style={{fontWeight:600,fontSize:'0.85rem',marginBottom:2}}>Mic button</div>
-                <div style={{fontSize:'0.76rem',color:'var(--text-dim)'}}>Available in the chat input bar below. Tap to start, tap again to send.</div>
-              </div>
+            <div style={{background:'var(--bg)',borderRadius:14,padding:'14px 16px',marginBottom:12,border:'1px solid var(--border)'}}>
+              <div style={{fontWeight:700,fontSize:'0.88rem',marginBottom:4}}>What you unlock:</div>
+              <ul style={{fontSize:'0.80rem',color:'var(--text-dim)',paddingLeft:18,margin:0,lineHeight:1.8}}>
+                <li>SOS sees your events while planning</li>
+                <li>Exam countdowns and smart reminders</li>
+                <li>Schedule blocks that don't clash with class</li>
+              </ul>
             </div>
-            <button onClick={handleClose} style={{width:'100%',background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.9rem',padding:'12px',cursor:'pointer'}}>Let's go!</button>
+            <button onClick={()=>{onConnectGoogle();}} style={{background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.86rem',padding:'10px',cursor:'pointer',width:'100%',marginBottom:10}}>Connect Google Calendar →</button>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setStep(4)} style={{flex:1,background:'transparent',border:'1px solid var(--border)',borderRadius:12,color:'var(--text-dim)',fontSize:'0.82rem',padding:'10px',cursor:'pointer'}}>Skip for now →</button>
+              <button onClick={()=>setStep(s=>s-1)} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:12,color:'var(--text-dim)',fontSize:'0.82rem',padding:'10px 14px',cursor:'pointer'}}>← Back</button>
+            </div>
+          </>
+        )}
+
+        {/* Step 4 — Study Mode tour */}
+        {step === 4 && (
+          <>
+            <div style={{fontSize:'1.3rem',fontWeight:800,marginBottom:8,letterSpacing:'-0.5px'}}>Try Study Mode 🎧</div>
+            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:16}}>
+              Study Mode gives you a lo-fi vibe: a task panel, a cat window, a music player, and your AI — all in one focused grid.
+            </div>
+            <div style={{background:'rgba(134,239,172,0.08)',border:'1px solid rgba(134,239,172,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:16,display:'flex',flexDirection:'column',gap:8}}>
+              {['Lo-fi grid layout with ambient breathing background','Spaced-repetition flashcard panel','Pomodoro timer + music player + cat widget','Works great on big screens and phones'].map(item=>(
+                <div key={item} style={{display:'flex',alignItems:'center',gap:8,fontSize:'0.81rem',color:'var(--text)'}}>
+                  <span style={{color:'#86efac',fontSize:'0.75rem',flexShrink:0}}>✓</span>{item}
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>{ onSwitchLofi && onSwitchLofi(); handleClose(); }} style={{flex:1,background:'rgba(134,239,172,0.15)',border:'1px solid rgba(134,239,172,0.35)',borderRadius:12,color:'#86efac',fontWeight:700,fontSize:'0.86rem',padding:'10px',cursor:'pointer'}}>Switch to Study Mode</button>
+              <button onClick={handleClose} style={{flex:1,background:'var(--accent)',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:'0.86rem',padding:'10px',cursor:'pointer'}}>Start chatting →</button>
+            </div>
+            <button onClick={()=>setStep(s=>s-1)} style={{marginTop:8,background:'transparent',border:'none',color:'var(--text-dim)',fontSize:'0.80rem',cursor:'pointer',width:'100%'}}>← Back</button>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   SLASH COMMAND PALETTE
+   ═══════════════════════════════════════════════ */
+const SLASH_COMMANDS = [
+  { cmd: '/task',      hint: '/task [description]',      desc: 'Add a task or assignment',           fill: '/task ' },
+  { cmd: '/flashcard', hint: '/flashcard [topic]',        desc: 'Generate flashcards on a topic',     fill: '/flashcard ' },
+  { cmd: '/quiz',      hint: '/quiz [topic]',             desc: 'Create a practice quiz',             fill: '/quiz ' },
+  { cmd: '/timer',     hint: '/timer [minutes]',          desc: 'Start a focus timer',                fill: '/timer ' },
+  { cmd: '/remind',    hint: '/remind [time] [what]',     desc: 'Set a reminder',                     fill: '/remind ' },
+  { cmd: '/calendar',  hint: '/calendar',                 desc: 'Open schedule + chat',               fill: '/calendar' },
+  { cmd: '/notes',     hint: '/notes',                    desc: 'Open notes + chat',                  fill: '/notes' },
+  { cmd: '/study',     hint: '/study',                    desc: 'Switch to Study Mode',               fill: '/study' },
+  { cmd: '/upload',    hint: '/upload',                   desc: 'Upload a PDF to make study materials', fill: '/upload' },
+];
+
+function SlashPalette({ query, onSelect, onClose }) {
+  const filtered = SLASH_COMMANDS.filter(c =>
+    !query || c.cmd.slice(1).startsWith(query.toLowerCase())
+  );
+  if (filtered.length === 0) return null;
+  return (
+    <div style={{
+      position:'absolute',bottom:'100%',left:0,right:0,marginBottom:6,
+      background:'rgba(10,12,24,0.97)',border:'1px solid rgba(0,229,204,0.2)',
+      borderRadius:14,overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,0.5)',
+      backdropFilter:'blur(16px)',zIndex:50,animation:'fadeIn .12s ease',
+    }}>
+      <div style={{padding:'6px 12px',fontSize:'0.68rem',color:'var(--text-dim)',borderBottom:'1px solid rgba(255,255,255,0.05)',letterSpacing:'0.05em',textTransform:'uppercase',fontWeight:600}}>
+        Commands
+      </div>
+      {filtered.map(c=>(
+        <button key={c.cmd} onMouseDown={e=>{e.preventDefault();onSelect(c.fill);}}
+          style={{display:'flex',alignItems:'center',gap:12,width:'100%',background:'transparent',border:'none',
+            padding:'9px 14px',cursor:'pointer',textAlign:'left',transition:'background .1s'}}
+          onMouseEnter={e=>e.currentTarget.style.background='rgba(0,229,204,0.07)'}
+          onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+        >
+          <span style={{fontFamily:'var(--font-mono)',fontSize:'0.80rem',color:'var(--neon-cyan)',width:90,flexShrink:0}}>{c.hint}</span>
+          <span style={{fontSize:'0.77rem',color:'var(--text-dim)'}}>{c.desc}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -3716,6 +3884,9 @@ function App() {
 
   // ── UI state ──
   const [input, setInput] = useState('');
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [pasteStudyPrompt, setPasteStudyPrompt] = useState(null); // holds pasted text when >500 chars
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
@@ -3730,6 +3901,9 @@ function App() {
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+  const [notifPrefs, setNotifPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
+  });
 const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
@@ -3825,6 +3999,7 @@ const [ambientMode, setAmbientMode] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null); // { base64, preview, mimeType }
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
+  const pdfUploadRef = useRef(null);
 
   // Voice-to-text state
   const [isRecording, setIsRecording] = useState(false);
@@ -4050,6 +4225,20 @@ const [ambientMode, setAmbientMode] = useState(null);
       if (stale) fetchWeather();
     }
   }, [dataLoaded]);
+
+  // ── Notification scheduling: re-run whenever tasks, events, or prefs change ──
+  useEffect(() => {
+    if (!dataLoaded) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const notifications = buildNotifications(tasks, events, notifPrefs);
+    scheduleNotificationsToSW(notifications);
+  }, [tasks, events, notifPrefs, dataLoaded]);
+
+  function updateNotifPref(key, val) {
+    const next = { ...notifPrefs, [key]: val };
+    setNotifPrefs(next);
+    try { localStorage.setItem('sos-notif-prefs', JSON.stringify(next)); } catch(_) {}
+  }
 
   // ── Sync helper: wraps a DB write with sync status ──
   async function syncOp(fn) {
@@ -4992,6 +5181,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setIsLoading(true);
     setLoadingMessage(getLoadingMessage(msgContent, photo, isPlanRequest));
 
+    // Request notification permission once after first message (non-intrusive)
+    if ('Notification' in window && Notification.permission === 'default' && !sessionStorage.getItem('sos-notif-asked')) {
+      sessionStorage.setItem('sos-notif-asked', '1');
+      setTimeout(() => Notification.requestPermission(), 2000);
+    }
+
     // Persist demo messages to localStorage so they're migrated to Supabase on sign-up
     if (!user && msgContent) {
       try {
@@ -5460,7 +5655,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       } else if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('network')) {
         friendlyMsg = "couldn't reach the server — check your connection and try again.";
       } else {
-        friendlyMsg = raw || "something went wrong — please try again.";
+        friendlyMsg = raw || "Hmm, that hiccuped — want to try again?";
       }
       setChatError(friendlyMsg);
     } finally { setIsLoading(false); }
@@ -5538,6 +5733,38 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       setToastMsg("Couldn't process that photo — try a different one");
     }
   }
+  // ── PDF / text upload → instant study materials ──
+  async function handleUploadStudy(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    let text = '';
+    try {
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const ab = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+        const pages = [];
+        for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          pages.push(content.items.map(item => item.str).join(' '));
+        }
+        text = pages.join('\n\n');
+      } else {
+        text = await file.text();
+      }
+    } catch(err) {
+      setToastMsg("Couldn't read that file — try a PDF or plain text file.");
+      return;
+    }
+    if (!text.trim()) { setToastMsg('That file appears to be empty.'); return; }
+    const truncated = text.slice(0, 4000);
+    const msg = `I uploaded "${file.name}". Based on this content, please: 1) create a set of flashcards, 2) write a short quiz, and 3) give me a quick summary.\n\nContent:\n${truncated}`;
+    if (!user) { if (guestMsgCount >= GUEST_DEMO_LIMIT) { setShowAuthModal(true); return; } incrementGuestCount(); }
+    setInput('');
+    sendMessage(msg);
+  }
+
   // ── Voice-to-text recording ──
   // ── Audio animation helpers ──
   function startWaveformAnimation(stream) {
@@ -5892,11 +6119,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
+          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
         <div className="sos-side-meta">
@@ -6101,6 +6328,40 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the topbar.</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
+              </div>
+              <div className="settings-row" style={{borderTop:'1px solid var(--border)',paddingTop:10,marginTop:4}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Notifications</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>{'Notification' in window && Notification.permission === 'denied' ? '⚠ Notifications blocked — check your browser settings' : 'Get browser reminders for tasks, exams, and your daily plan.'}</div>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Task due-date reminders</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Alert 1 day before and day-of when a task is due.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>updateNotifPref('tasks',!notifPrefs.tasks)}>{notifPrefs.tasks ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Exam countdown alerts</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>3 days before and day-before reminders for exams/tests.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>updateNotifPref('exams',!notifPrefs.exams)}>{notifPrefs.exams ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily plan reminder (8am)</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Morning nudge with your active task count.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>updateNotifPref('daily',!notifPrefs.daily)}>{notifPrefs.daily ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Replay intro</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Walk through the onboarding again to rediscover features.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ setActivePanel('chat'); setShowOnboarding(true); }}>Replay</button>
               </div>
               <div className="settings-row">
                 <div>
@@ -6322,8 +6583,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 <button onClick={startNewChat} style={{background:'transparent',border:'1px solid rgba(255,159,67,0.3)',borderRadius:8,color:'var(--warning)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Start fresh</button>
               </div>
             )}
+            {pasteStudyPrompt && (
+              <div style={{marginBottom:8,padding:'8px 12px',background:'rgba(134,239,172,0.07)',border:'1px solid rgba(134,239,172,0.2)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,animation:'fadeIn .2s ease',fontSize:'0.80rem',color:'var(--text-dim)'}}>
+                <span>Looks like you pasted a lot of text — want me to make study materials?</span>
+                <div style={{display:'flex',gap:6,flexShrink:0}}>
+                  <button onClick={()=>{ const t=pasteStudyPrompt; setPasteStudyPrompt(null); sendMessage(`Based on this content, please: 1) create flashcards, 2) write a short quiz, and 3) give a brief summary.\n\nContent:\n${t.slice(0,4000)}`); }} style={{background:'rgba(134,239,172,0.15)',border:'1px solid rgba(134,239,172,0.3)',borderRadius:8,color:'#86efac',fontSize:'0.76rem',fontWeight:600,padding:'4px 10px',cursor:'pointer'}}>Yes, do it</button>
+                  <button onClick={()=>setPasteStudyPrompt(null)} style={{background:'transparent',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-dim)',fontSize:'0.76rem',padding:'4px 10px',cursor:'pointer'}}>No thanks</button>
+                </div>
+              </div>
+            )}
+            <div style={{position:'relative'}}>
+              {slashMenuOpen && (
+                <SlashPalette query={slashQuery} onSelect={cmd=>{
+                  setInput(cmd);
+                  setSlashMenuOpen(false);
+                  setSlashQuery('');
+                  setTimeout(()=>inputRef.current?.focus(),0);
+                }} onClose={()=>setSlashMenuOpen(false)} />
+              )}
             <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
+              <input ref={pdfUploadRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleUploadStudy}/>
               {workspaceModeLabel && (
                 <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
               )}
@@ -6335,13 +6615,41 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
               </button>
-              <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
-                placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"type anything..."}
+              <button type="button" onClick={()=>pdfUploadRef.current?.click()} disabled={isLoading}
+                title="Upload PDF or text to generate study materials"
+                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+                {Icon.link(18)}
+              </button>
+              <input ref={inputRef} value={input}
+                onPaste={e=>{
+                  const text = e.clipboardData?.getData('text') || '';
+                  if (text.length > 500) {
+                    setTimeout(()=>setPasteStudyPrompt(text), 50);
+                  }
+                }}
+                onChange={e=>{
+                  const v = e.target.value;
+                  setInput(v);
+                  if (v.startsWith('/')) {
+                    setSlashMenuOpen(true);
+                    setSlashQuery(v.slice(1));
+                  } else {
+                    setSlashMenuOpen(false);
+                    setSlashQuery('');
+                  }
+                }}
+                placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"Ask anything · / for commands"}
                 disabled={isLoading}
                 style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
-                onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit()}}}/>
+                onKeyDown={e=>{
+                  if(e.key==='Escape'){setSlashMenuOpen(false);setSlashQuery('');}
+                  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();setSlashMenuOpen(false);handleSubmit();}
+                }}
+                onBlur={()=>setTimeout(()=>setSlashMenuOpen(false),150)}
+              />
               <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
             </form>
+            </div>
           </>
         )}
         <div style={{display:'flex',justifyContent:'center',marginTop:8,fontSize:'0.68rem'}}><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
@@ -6485,6 +6793,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onConnectGoogle={()=>{connectGoogle();}}
         onWeatherToggle={()=>setWeatherThemeEnabled(v=>!v)}
         weatherEnabled={weatherThemeEnabled}
+        onSwitchLofi={()=>setLayoutMode('lofi')}
       />}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}

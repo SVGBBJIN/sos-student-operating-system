@@ -64,9 +64,13 @@ export default function StudyBottomBar({ tasks, recentlyCompleted }) {
     <div className="study-bottombar study-glass">
       <span className="study-bottom-clock">{time}</span>
 
-      {streak > 0 && (
+      {streak > 0 ? (
         <span className="study-streak-badge">
           🔥 {streak}-day streak
+        </span>
+      ) : (
+        <span className="study-streak-badge" style={{opacity:0.45}}>
+          Start your streak today
         </span>
       )}
 
