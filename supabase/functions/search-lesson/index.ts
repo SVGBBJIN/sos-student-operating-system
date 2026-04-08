@@ -18,8 +18,8 @@ const corsHeaders = {
 };
 
 const GROQ_API_KEY      = Deno.env.get("GROQ_API_KEY") || "";
-const COMPOUND_MODEL    = "compound-beta";     // Groq's model with native web search
-const COMPOUND_MINI     = "compound-beta-mini"; // Lower latency option
+const COMPOUND_MODEL    = "groq/compound";      // Groq's model with native web search
+const COMPOUND_MINI     = "groq/compound-mini"; // Lower latency option (~3x faster)
 
 // ── Groq LLM call (compound model auto-searches web) ──────────────────────────
 async function callGroqCompound(userContent: string): Promise<{
