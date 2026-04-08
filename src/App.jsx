@@ -14,6 +14,13 @@ import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
+import SkillHub from './components/skillhub/SkillHub';
+import NudgeCard from './components/skillhub/NudgeCard';
+import ModePillSwitcher from './components/skillhub/ModePillSwitcher';
+import SkillHubLessons from './components/skillhub/SkillHubLessons';
+import { evaluateTriggers } from './lib/skillHubUtils';
+import { getModeConfig } from './lib/tutorModeConfig';
+import './styles/skillhub.css';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -3904,6 +3911,13 @@ const [ambientMode, setAmbientMode] = useState(null);
   const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
   const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
+  // Skill Hub smart trigger nudge state
+  const [skillHubNudgeTrigger, setSkillHubNudgeTrigger] = useState(null);
+  const [skillHubDismissals, setSkillHubDismissals] = useState([]);
+  // Skill Hub lifted state (shared with App sidebar)
+  const [skillHubTab, setSkillHubTab] = useState('home');
+  const [skillHubMode, setSkillHubMode] = useState(() => localStorage.getItem('sos_skill_hub_mode') || 'cause-effect');
+  const [skillHubLessons, setSkillHubLessons] = useState([]);
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSideBySide = showPeek && showNotes;
@@ -3957,6 +3971,13 @@ const [ambientMode, setAmbientMode] = useState(null);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
+
+  // Skill Hub nudge — evaluate on tasks load
+  useEffect(() => {
+    if (!tasks.length) return;
+    const triggers = evaluateTriggers(tasks, skillHubDismissals);
+    setSkillHubNudgeTrigger(triggers[0] || null);
+  }, [tasks, skillHubDismissals]);
   const [guestMsgCount, setGuestMsgCount] = useState(
     () => parseInt(localStorage.getItem('sos_guest_msg_count') || '0', 10)
   );
@@ -5995,6 +6016,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function enterTutorMode() {
     toggleTutorMode(true);
     setActivePanel('tutor');
+    setSkillHubTab('home');
+  }
+
+  function switchSkillHubMode(newMode) {
+    if (newMode === skillHubMode) return;
+    setSkillHubMode(newMode);
+    localStorage.setItem('sos_skill_hub_mode', newMode);
+    const cfg = getModeConfig(newMode);
+    setToastMsg?.(`${cfg.icon} Switched to ${cfg.label} mode`);
   }
 
   function primeTutorSession() {
@@ -6056,7 +6086,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined}>
+    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined} data-tutor-mode={activePanel === 'tutor' ? skillHubMode : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       {layoutMode !== 'lofi' && <>
         <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
@@ -6093,12 +6123,36 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Enter tutor mode">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Enter tutor mode</span></button>
-          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+          {activePanel === 'tutor' ? (
+            <>
+              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }} title="Back to chat">
+                {Icon.chevronLeft(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Back to chat</span>
+              </button>
+              {[{id:'home',label:'Home',icon:'🏠'},{id:'chat',label:'Chat',icon:'💬'},{id:'lessons',label:'Lessons',icon:'📖'}].map(tab => (
+                <button
+                  key={tab.id}
+                  className={'sos-side-btn' + (skillHubTab === tab.id ? ' active' : '')}
+                  onClick={() => { sfx.nav(); setSkillHubTab(tab.id); }}
+                  title={tab.label}
+                >
+                  <span style={{fontSize:13}}>{tab.icon}</span>
+                  <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>{tab.label}</span>
+                </button>
+              ))}
+              <div style={{padding:'6px 0 2px'}}>
+                <ModePillSwitcher activeMode={skillHubMode} onSwitch={switchSkillHubMode} />
+              </div>
+            </>
+          ) : (
+            <>
+              <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+              <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+              <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+              <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
+              <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+            </>
+          )}
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
@@ -6109,6 +6163,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {showTutorIndicatorSidebar && <TutorIndicator active={tutorMode} />}
             {showPerfIndicatorSidebar && <PerfPill />}
           </div>
+        )}
+        {skillHubNudgeTrigger && activePanel !== 'tutor' && (
+          <NudgeCard
+            trigger={skillHubNudgeTrigger}
+            compact={true}
+            onGo={() => { enterTutorMode(); }}
+            onDismiss={() => {
+              const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+              const d = { task_id: skillHubNudgeTrigger.task.id, expires_at: expiresAt, id: 'local-' + Date.now() };
+              setSkillHubDismissals(prev => [...prev, d]);
+              setSkillHubNudgeTrigger(null);
+            }}
+          />
         )}
         <div className="sos-side-list">
           {savedChats.length === 0 ? (
@@ -6170,25 +6237,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={()=>{ openCompanionPanel('schedule'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
-          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Enter tutor mode</span></button>
+          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Skill Hub</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
         </div>
       </div>}
 
       {activePanel === 'tutor' ? (
-        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
-          <TutorMissionPage
-            tutorMode={tutorMode}
+        <div style={{height:'100%',overflow:'hidden'}}>
+          <SkillHub
             tasks={tasks}
             events={events}
             notes={notes}
-            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); }}
-            onToggleTutorMode={toggleTutorMode}
-            onPrompt={launchTutorPrompt}
-            onOpenNotes={() => openCompanionPanel('notes')}
-            onOpenSchedule={() => openCompanionPanel('schedule')}
-            onOpenSettings={() => setActivePanel('settings')}
+            user={user}
+            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }}
+            setToastMsg={setToastMsg}
+            activeTab={skillHubTab}
+            setActiveTab={setSkillHubTab}
+            activeMode={skillHubMode}
+            onModeSwitch={switchSkillHubMode}
+            lessons={skillHubLessons}
+            onLessonsChange={setSkillHubLessons}
           />
         </div>
       ) : activePanel === 'settings' ? (
