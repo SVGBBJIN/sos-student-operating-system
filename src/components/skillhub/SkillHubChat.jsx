@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { sb, EDGE_FN_URL, SUPABASE_ANON_KEY } from '../../lib/supabase.js';
-import { getModeConfig } from '../../lib/tutorModeConfig.js';
+import { getModeConfig, detectModeFromText } from '../../lib/tutorModeConfig.js';
 import {
   parseSocraticResponse,
   parseInterpretationButtons,
@@ -51,7 +51,7 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, user, onSessionSave }) {
+export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, user, onSessionSave, onAutoSwitchMode }) {
   const modeConfig = getModeConfig(activeMode);
 
   const [messages, setMessages]       = useState([]);
@@ -124,6 +124,17 @@ export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, use
     const photo = photoOverride || pendingPhoto;
     if (!msgContent && !photo) return;
     if (isLoading) return;
+
+    // Auto-detect tutor mode from the first typed message (not photo uploads)
+    if (!photo && onAutoSwitchMode) {
+      const userMsgs = messages.filter(m => m.role === 'user');
+      if (userMsgs.length === 0 && msgContent) {
+        const detected = detectModeFromText(msgContent);
+        if (detected && detected !== activeMode) {
+          onAutoSwitchMode(detected);
+        }
+      }
+    }
 
     const userMsg = {
       role: 'user',

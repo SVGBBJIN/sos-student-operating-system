@@ -46,6 +46,44 @@
   --sh-accent-glow: rgba(52,211,153,0.22);
 }
 
+/* ─── Root App Tutor Mode Theme ───────────────────────────────────────────── */
+/* Applied to .sos-app via data-tutor-mode when Skill Hub is active.
+   Promotes --sh-* vars to root so ModePillSwitcher renders correctly inside .sos-sidebar. */
+.sos-app[data-tutor-mode] {
+  --sh-surface:      rgba(255,255,255,0.04);
+  --sh-surface-mid:  rgba(255,255,255,0.07);
+  --sh-border:       rgba(255,255,255,0.08);
+  --sh-border-mid:   rgba(255,255,255,0.14);
+  --sh-text-dim:     rgba(200,210,240,0.5);
+  --sh-text-muted:   rgba(180,195,230,0.35);
+  --sh-radius-sm:    8px;
+}
+.sos-app[data-tutor-mode="cause-effect"] {
+  --sh-accent:      #f5c842;
+  --sh-accent-dim:  rgba(245,200,66,0.15);
+  --sh-accent-glow: rgba(245,200,66,0.22);
+}
+.sos-app[data-tutor-mode="interpretation"] {
+  --sh-accent:      #a78bfa;
+  --sh-accent-dim:  rgba(167,139,250,0.15);
+  --sh-accent-glow: rgba(167,139,250,0.22);
+}
+.sos-app[data-tutor-mode="study"] {
+  --sh-accent:      #34d399;
+  --sh-accent-dim:  rgba(52,211,153,0.15);
+  --sh-accent-glow: rgba(52,211,153,0.22);
+}
+
+/* Sidebar active buttons inherit mode accent in tutor mode */
+.sos-app[data-tutor-mode] .sos-side-btn.active {
+  color: var(--sh-accent);
+  background: var(--sh-accent-dim);
+  border-left: 2px solid var(--sh-accent);
+}
+.sos-app[data-tutor-mode] .sos-side-btn:hover {
+  background: rgba(255,255,255,0.05);
+}
+
 /* ─── Layout Shell ────────────────────────────────────────────────────────── */
 .skill-hub {
   display: flex;
@@ -57,87 +95,6 @@
   overflow: hidden;
   animation: fadeIn 0.2s ease;
 }
-
-/* ─── Sidebar ─────────────────────────────────────────────────────────────── */
-.sh-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  background: rgba(8,10,22,0.9);
-  border-right: 1px solid var(--sh-border);
-  padding: 20px 0 16px;
-  gap: 0;
-  transition: width 0.25s cubic-bezier(0.16,1,0.3,1);
-}
-
-.sh-sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 16px 20px;
-  border-bottom: 1px solid var(--sh-border);
-}
-
-.sh-back-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  color: var(--sh-text-dim);
-  font-size: 0.78rem;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: var(--sh-radius-sm);
-  transition: color 0.15s, background 0.15s;
-  font-family: inherit;
-}
-.sh-back-btn:hover { color: var(--sh-text); background: var(--sh-surface); }
-
-.sh-brand {
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: var(--sh-text);
-  opacity: 0.9;
-  margin-left: auto;
-}
-
-/* ─── Sidebar Nav Tabs ────────────────────────────────────────────────────── */
-.sh-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 16px 10px;
-  flex: 1;
-}
-
-.sh-nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--sh-radius-sm);
-  border: none;
-  background: none;
-  color: var(--sh-text-dim);
-  font-size: 0.84rem;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.15s, color 0.15s;
-  font-family: inherit;
-  width: 100%;
-}
-.sh-nav-btn:hover {
-  background: var(--sh-surface);
-  color: var(--sh-text);
-}
-.sh-nav-btn.active {
-  background: var(--sh-accent-dim);
-  color: var(--sh-accent);
-  font-weight: 600;
-}
-.sh-nav-icon { font-size: 1rem; flex-shrink: 0; width: 20px; text-align: center; }
 
 /* ─── Mode Pill Switcher ──────────────────────────────────────────────────── */
 .sh-mode-switcher {
@@ -1047,6 +1004,224 @@
   .sh-mc-grid { grid-template-columns: 1fr; }
   .sh-chat-wrap { padding: 0 8px; }
 }
+
+/* ─── Progress Dashboard (Home Tab) ─────────────────────────────────────── */
+.sh-stats-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.sh-stat-chip {
+  flex: 1;
+  min-width: 80px;
+  padding: 12px 14px;
+  background: var(--sh-surface);
+  border: 1px solid var(--sh-border);
+  border-radius: var(--sh-radius);
+  text-align: center;
+}
+.sh-stat-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--sh-text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.sh-stat-label {
+  font-size: 0.68rem;
+  color: var(--sh-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Weekly activity dots */
+.sh-week-grid {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.sh-week-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+}
+.sh-week-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--sh-surface-mid);
+  border: 1px solid var(--sh-border);
+  transition: background 0.2s, border-color 0.2s;
+}
+.sh-week-dot.active {
+  background: var(--sh-accent-dim);
+  border-color: var(--sh-accent);
+}
+.sh-week-label {
+  font-size: 0.66rem;
+  color: var(--sh-text-muted);
+  text-transform: uppercase;
+}
+
+/* Skills tracker */
+.sh-skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sh-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sh-skill-icon { font-size: 1rem; flex-shrink: 0; width: 24px; text-align: center; }
+.sh-skill-info {
+  flex: 1;
+  min-width: 0;
+}
+.sh-skill-label {
+  font-size: 0.8rem;
+  color: var(--sh-text);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-skill-bar-wrap {
+  height: 4px;
+  background: var(--sh-surface-mid);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sh-skill-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.16,1,0.3,1);
+}
+.sh-skill-pct {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--sh-text-dim);
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.sh-skill-count {
+  font-size: 0.68rem;
+  color: var(--sh-text-muted);
+  width: 42px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Topic chips */
+.sh-topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sh-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--sh-surface);
+  border: 1px solid var(--sh-border);
+  border-radius: 20px;
+  font-size: 0.76rem;
+  color: var(--sh-text-dim);
+}
+.sh-topic-chip-count {
+  background: var(--sh-surface-mid);
+  border-radius: 10px;
+  padding: 1px 5px;
+  font-size: 0.66rem;
+  color: var(--sh-text-muted);
+}
+
+/* ─── Compact Lessons (sidebar companion mode) ───────────────────────────── */
+.sh-lessons-compact {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.sh-lessons-compact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--sh-border);
+  flex-shrink: 0;
+}
+.sh-lessons-compact-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--sh-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.sh-lessons-compact-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sh-compact-lesson-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: var(--sh-surface);
+  border: 1px solid var(--sh-border);
+  border-radius: var(--sh-radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.sh-compact-lesson-card:hover {
+  background: var(--sh-surface-mid);
+  border-color: var(--sh-accent);
+}
+.sh-compact-lesson-topic {
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--sh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-compact-lesson-pct {
+  font-size: 0.7rem;
+  color: var(--sh-text-muted);
+  flex-shrink: 0;
+}
+
+/* ─── Web search button ──────────────────────────────────────────────────── */
+.sh-websearch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--sh-border-mid);
+  background: none;
+  color: var(--sh-text-dim);
+  font-size: 0.76rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.sh-websearch-toggle.active {
+  border-color: var(--sh-accent);
+  color: var(--sh-accent);
+  background: var(--sh-accent-dim);
+}
+.sh-websearch-toggle:hover { border-color: var(--sh-accent); color: var(--sh-accent); }
 
 /* Main app sidebar nudge card (outside skill hub) */
 .app-nudge-card {

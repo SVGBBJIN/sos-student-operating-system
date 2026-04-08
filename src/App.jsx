@@ -16,7 +16,10 @@ import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
 import SkillHub from './components/skillhub/SkillHub';
 import NudgeCard from './components/skillhub/NudgeCard';
+import ModePillSwitcher from './components/skillhub/ModePillSwitcher';
+import SkillHubLessons from './components/skillhub/SkillHubLessons';
 import { evaluateTriggers } from './lib/skillHubUtils';
+import { getModeConfig } from './lib/tutorModeConfig';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -3911,6 +3914,10 @@ const [ambientMode, setAmbientMode] = useState(null);
   // Skill Hub smart trigger nudge state
   const [skillHubNudgeTrigger, setSkillHubNudgeTrigger] = useState(null);
   const [skillHubDismissals, setSkillHubDismissals] = useState([]);
+  // Skill Hub lifted state (shared with App sidebar)
+  const [skillHubTab, setSkillHubTab] = useState('home');
+  const [skillHubMode, setSkillHubMode] = useState(() => localStorage.getItem('sos_skill_hub_mode') || 'cause-effect');
+  const [skillHubLessons, setSkillHubLessons] = useState([]);
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSideBySide = showPeek && showNotes;
@@ -6009,6 +6016,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   function enterTutorMode() {
     toggleTutorMode(true);
     setActivePanel('tutor');
+    setSkillHubTab('home');
+  }
+
+  function switchSkillHubMode(newMode) {
+    if (newMode === skillHubMode) return;
+    setSkillHubMode(newMode);
+    localStorage.setItem('sos_skill_hub_mode', newMode);
+    const cfg = getModeConfig(newMode);
+    setToastMsg?.(`${cfg.icon} Switched to ${cfg.label} mode`);
   }
 
   function primeTutorSession() {
@@ -6070,7 +6086,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined}>
+    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined} data-tutor-mode={activePanel === 'tutor' ? skillHubMode : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       {layoutMode !== 'lofi' && <>
         <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
@@ -6107,12 +6123,36 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
-          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
-          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+          {activePanel === 'tutor' ? (
+            <>
+              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }} title="Back to chat">
+                {Icon.chevronLeft(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Back to chat</span>
+              </button>
+              {[{id:'home',label:'Home',icon:'🏠'},{id:'chat',label:'Chat',icon:'💬'},{id:'lessons',label:'Lessons',icon:'📖'}].map(tab => (
+                <button
+                  key={tab.id}
+                  className={'sos-side-btn' + (skillHubTab === tab.id ? ' active' : '')}
+                  onClick={() => { sfx.nav(); setSkillHubTab(tab.id); }}
+                  title={tab.label}
+                >
+                  <span style={{fontSize:13}}>{tab.icon}</span>
+                  <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>{tab.label}</span>
+                </button>
+              ))}
+              <div style={{padding:'6px 0 2px'}}>
+                <ModePillSwitcher activeMode={skillHubMode} onSwitch={switchSkillHubMode} />
+              </div>
+            </>
+          ) : (
+            <>
+              <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+              <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
+              <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+              <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
+              <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+            </>
+          )}
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
@@ -6210,8 +6250,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             events={events}
             notes={notes}
             user={user}
-            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); }}
+            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }}
             setToastMsg={setToastMsg}
+            activeTab={skillHubTab}
+            setActiveTab={setSkillHubTab}
+            activeMode={skillHubMode}
+            onModeSwitch={switchSkillHubMode}
+            lessons={skillHubLessons}
+            onLessonsChange={setSkillHubLessons}
           />
         </div>
       ) : activePanel === 'settings' ? (
