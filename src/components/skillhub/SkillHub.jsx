@@ -137,7 +137,6 @@ export default function SkillHub({
       case 'chat':
         return (
           <SkillHubChat
-            key={activeMode}
             activeMode={activeMode}
             linkedTask={linkedTask}
             tasks={tasks}

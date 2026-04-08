@@ -1,19 +1,13 @@
 /**
  * search-lesson Edge Function
  *
+ * Uses Groq's compound model which has native web search built-in.
+ * No external search API key required — just GROQ_API_KEY.
+ *
  * Flow:
  *   1. Receives { topic } from client
- *   2. Calls Brave Search API (BRAVE_SEARCH_API_KEY env secret) to get top results
- *   3. Sends results + topic to Groq LLM to generate:
- *        - A 300-400 word educational report
- *        - 5-7 lesson screens as JSON
- *   4. Returns { report: string, screens: LessonScreen[] }
- *
- * Requires Supabase secret:
- *   supabase secrets set BRAVE_SEARCH_API_KEY=<your-key>
- *
- * Fallback: If BRAVE_SEARCH_API_KEY is not set, generates lesson from LLM knowledge only
- *           and marks report as "(generated from AI knowledge)".
+ *   2. Calls groq/compound model — it automatically searches the web
+ *   3. Returns { report: string, screens: LessonScreen[], usedWebSearch: boolean }
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -23,38 +17,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GROQ_API_KEY   = Deno.env.get("GROQ_API_KEY")   || "";
-const BRAVE_API_KEY  = Deno.env.get("BRAVE_SEARCH_API_KEY") || "";
-const GROQ_MODEL     = "llama-3.3-70b-versatile";
+const GROQ_API_KEY      = Deno.env.get("GROQ_API_KEY") || "";
+const COMPOUND_MODEL    = "compound-beta";     // Groq's model with native web search
+const COMPOUND_MINI     = "compound-beta-mini"; // Lower latency option
 
-// ── Brave Search ───────────────────────────────────────────────────────────────
-async function braveSearch(query: string): Promise<string> {
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&search_lang=en&text_decorations=false`;
-  const res = await fetch(url, {
-    headers: {
-      "Accept": "application/json",
-      "X-Subscription-Token": BRAVE_API_KEY,
-    },
-  });
+// ── Groq LLM call (compound model auto-searches web) ──────────────────────────
+async function callGroqCompound(userContent: string): Promise<{
+  content: string;
+  usedWebSearch: boolean;
+}> {
+  const systemPrompt = `You are an expert educator. A student wants to learn about a topic.
+Search the web for accurate, up-to-date information about the topic, then create a structured educational lesson.
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Brave Search error ${res.status}: ${body}`);
-  }
-
-  const data = await res.json();
-  const results = data?.web?.results ?? [];
-
-  return results
-    .slice(0, 5)
-    .map((r: { title: string; description: string; url: string }) =>
-      `TITLE: ${r.title}\nSNIPPET: ${r.description || ""}\nURL: ${r.url}`
-    )
-    .join("\n\n---\n\n");
+Return ONLY a valid JSON object (no markdown fences, no prose outside JSON):
+{
+  "report": "A 300-400 word educational summary of the topic in clear plain text, based on your web search",
+  "screens": [
+    5-7 lesson screens in this exact format:
+    concept screens: { "type": "concept", "content": "2-3 sentences" }
+    example screens: { "type": "example", "content": "worked example", "annotation": "brief note" }
+    question screens: { "type": "question", "question": "...", "options": {"A":"..","B":"..","C":"..","D":".."}, "correct": "A", "hint": "..." }
+  ]
 }
 
-// ── Groq LLM call ─────────────────────────────────────────────────────────────
-async function callGroq(systemPrompt: string, userContent: string): Promise<string> {
+Rules:
+- Start with 1-2 concept screens, then 1-2 examples, then at least 2 questions
+- Base content on what you find via web search
+- Questions must have exactly one correct answer (A/B/C/D)`;
+
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -62,7 +52,7 @@ async function callGroq(systemPrompt: string, userContent: string): Promise<stri
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model: COMPOUND_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user",   content: userContent },
@@ -74,37 +64,87 @@ async function callGroq(systemPrompt: string, userContent: string): Promise<stri
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Groq error ${res.status}: ${body}`);
+    // Fallback to mini if compound unavailable
+    if (res.status === 404 || res.status === 400) {
+      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI}`);
+      return callGroqCompoundMini(userContent, systemPrompt);
+    }
+    throw new Error(`Groq compound error ${res.status}: ${body}`);
   }
 
   const data = await res.json();
-  return data?.choices?.[0]?.message?.content?.trim() ?? "";
+  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
+  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
+  const usedWebSearch = executedTools.some(
+    (t: { type: string }) => t.type === "web_search" || t.type === "visit_website"
+  );
+
+  return { content, usedWebSearch };
+}
+
+async function callGroqCompoundMini(userContent: string, systemPrompt: string): Promise<{
+  content: string;
+  usedWebSearch: boolean;
+}> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: COMPOUND_MINI,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userContent },
+      ],
+      max_tokens: 3000,
+      temperature: 0.3,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Groq compound-mini error ${res.status}: ${body}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
+  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
+  const usedWebSearch = executedTools.some(
+    (t: { type: string }) => t.type === "web_search"
+  );
+
+  return { content, usedWebSearch };
 }
 
 // ── Parse lesson JSON from LLM response ──────────────────────────────────────
 function parseLessonResponse(raw: string): { report: string; screens: unknown[] } {
-  // Strip markdown fences
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  // Strip markdown fences if present
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
 
   let parsed: { report?: string; screens?: unknown[] };
   try {
     parsed = JSON.parse(cleaned);
   } catch (_) {
-    // Try to extract JSON object
+    // Try to extract JSON object from response
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("Could not parse LLM response as JSON");
     parsed = JSON.parse(match[0]);
   }
 
   if (!parsed.screens || !Array.isArray(parsed.screens)) {
-    throw new Error("Missing screens array in LLM response");
+    throw new Error("Missing screens array in response");
   }
   if (parsed.screens.length < 2) {
     throw new Error("Not enough lesson screens generated");
   }
 
   return {
-    report:  parsed.report  ?? "(AI-generated lesson)",
+    report:  parsed.report ?? "(AI-generated lesson from web search)",
     screens: parsed.screens,
   };
 }
@@ -131,44 +171,14 @@ serve(async (req: Request) => {
       });
     }
 
-    let searchContext = "";
-    let usedWebSearch = false;
+    console.log(`[search-lesson] Generating web search lesson for: ${topic}`);
 
-    // Try web search if API key is configured
-    if (BRAVE_API_KEY) {
-      try {
-        searchContext = await braveSearch(topic);
-        usedWebSearch = true;
-        console.log(`[search-lesson] Web search succeeded for: ${topic}`);
-      } catch (searchErr) {
-        console.warn(`[search-lesson] Search failed, falling back to LLM: ${searchErr}`);
-      }
-    } else {
-      console.log("[search-lesson] No BRAVE_SEARCH_API_KEY — using LLM knowledge only");
-    }
+    const userContent = `Search the web and create an educational lesson about: "${topic}"`;
+    const { content, usedWebSearch } = await callGroqCompound(userContent);
 
-    const systemPrompt = `You are an expert educator creating a structured lesson for a student.
-Return ONLY a valid JSON object (no markdown, no prose outside JSON) with this structure:
-{
-  "report": "A 300-400 word educational summary of the topic in clear plain text",
-  "screens": [
-    array of 5-7 lesson screens
-  ]
-}
+    const { report, screens } = parseLessonResponse(content);
 
-Each screen in "screens":
-- concept: { "type": "concept", "content": "2-3 sentences" }
-- example: { "type": "example", "content": "worked example", "annotation": "brief note" }
-- question: { "type": "question", "question": "...", "options": {"A":"..","B":"..","C":"..","D":".."}, "correct": "A", "hint": "..." }
-
-Start with 1-2 concept screens, then examples, then questions (at least 2).`;
-
-    const userContent = usedWebSearch
-      ? `Create an educational lesson on: "${topic}"\n\nBased on these web search results:\n\n${searchContext}`
-      : `Create an educational lesson on: "${topic}"\n\nUse your knowledge to write the report and generate the lesson screens.`;
-
-    const rawResponse = await callGroq(systemPrompt, userContent);
-    const { report, screens } = parseLessonResponse(rawResponse);
+    console.log(`[search-lesson] Done. usedWebSearch=${usedWebSearch}, screens=${screens.length}`);
 
     return new Response(JSON.stringify({ report, screens, usedWebSearch }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

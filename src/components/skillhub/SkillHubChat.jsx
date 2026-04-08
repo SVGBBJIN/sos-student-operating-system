@@ -67,8 +67,9 @@ export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, use
   const sessionStartRef = useRef(Date.now());
   const prevModeRef    = useRef(activeMode);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom only when there are actual conversation messages (not initial welcome)
   useEffect(() => {
+    if (messages.length <= 1) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -83,8 +84,8 @@ export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, use
     }
   }, [activeMode]);
 
-  // Auto-focus textarea
-  useEffect(() => { textareaRef.current?.focus(); }, [activeMode]);
+  // Auto-focus textarea — preventScroll avoids the viewport jumping to the input
+  useEffect(() => { textareaRef.current?.focus({ preventScroll: true }); }, [activeMode]);
 
   // Add welcome message on first render or when linked task changes
   useEffect(() => {

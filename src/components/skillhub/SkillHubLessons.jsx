@@ -100,7 +100,7 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Web search failed');
+        throw new Error(errData.error || 'Web search lesson generation failed');
       }
 
       const data = await res.json();
