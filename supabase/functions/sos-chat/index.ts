@@ -8,6 +8,7 @@ import {
   CORE_CHECKSUM,
   CORE_VERSION,
   FAST_MODEL,
+  LARGE_BACKUP_MODEL,
   PRIMARY_MODEL,
 } from "../../../shared/ai/chat-core.js";
 
@@ -268,7 +269,7 @@ serve(async (req: Request) => {
                 `data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`
               ));
             },
-            { ...callOptions, backupModel: BACKUP_MODEL }
+            { ...callOptions, backupModel: FAST_MODEL }
           );
           const donePayload = {
             ...streamResult,
@@ -308,7 +309,7 @@ serve(async (req: Request) => {
       true,         // includeTools — always on; model decides when to call tools
       toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
       toolChoice,
-      BACKUP_MODEL, // fallback if primary fails or returns empty
+      isContentGen ? LARGE_BACKUP_MODEL : BACKUP_MODEL, // reserve 70b fallback for content-gen only
       callOptions
     );
     if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {

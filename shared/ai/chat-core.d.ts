@@ -41,7 +41,9 @@ export type CallGroqRequest = {
 export const CORE_VERSION: string;
 export const CORE_CHECKSUM: string;
 export const PRIMARY_MODEL: string;
+export const CONVERSATIONAL_MODEL: string;
 export const BACKUP_MODEL: string;
+export const LARGE_BACKUP_MODEL: string;
 export const FAST_MODEL: string;
 export const ACTION_TOOLS: any[];
 export const CONTENT_ACTION_TYPES: Set<string>;

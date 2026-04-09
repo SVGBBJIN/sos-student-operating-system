@@ -8,6 +8,7 @@ import {
   CORE_CHECKSUM,
   CORE_VERSION,
   FAST_MODEL,
+  LARGE_BACKUP_MODEL,
   PRIMARY_MODEL,
 } from "../shared/ai/chat-core.js";
 
@@ -330,7 +331,7 @@ export default async function handler(req, res) {
         prompt_version: telemetry?.promptVersion || null,
         model: {
           primary: PRIMARY_MODEL,
-          backup: BACKUP_MODEL,
+          backup: FAST_MODEL,
           selected: fallbackResult?.model_used || null,
           fallback_used: Boolean(fallbackResult?.fallback_used),
         },
@@ -421,7 +422,7 @@ export default async function handler(req, res) {
         (delta) => {
           res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
         },
-        { ...callOptions, backupModel: BACKUP_MODEL } // auto-retries with BACKUP_MODEL if CONVERSATIONAL_MODEL fails
+        { ...callOptions, backupModel: FAST_MODEL } // auto-retries with FAST_MODEL if CONVERSATIONAL_MODEL fails
       );
       stageTimings.llm_call_ms = Date.now() - llmStartedAt;
       const donePayload = {
@@ -453,7 +454,7 @@ export default async function handler(req, res) {
       true,         // includeTools — always on; model decides when to call tools
       toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
       toolChoice,
-      BACKUP_MODEL, // fallback if primary fails or returns empty
+      isContentGen ? LARGE_BACKUP_MODEL : BACKUP_MODEL, // reserve 70b fallback for content-gen only
       callOptions
     );
     stageTimings.llm_call_ms = Date.now() - llmStartedAt;
@@ -483,7 +484,7 @@ export default async function handler(req, res) {
       prompt_version: telemetry?.promptVersion || null,
       model: {
         primary: PRIMARY_MODEL,
-        backup: BACKUP_MODEL,
+        backup: isContentGen ? LARGE_BACKUP_MODEL : BACKUP_MODEL,
         selected: result?.model_used || null,
         fallback_used: Boolean(result?.fallback_used),
       },

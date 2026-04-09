@@ -6,7 +6,8 @@ export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
 export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
 export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
-export const BACKUP_MODEL         = "llama-3.3-70b-versatile";
+export const BACKUP_MODEL         = "openai/gpt-oss-20b";
+export const LARGE_BACKUP_MODEL   = "llama-3.3-70b-versatile";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
 
 const GROQ_CIRCUIT = {
