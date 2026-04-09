@@ -1237,10 +1237,11 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   }
   const info = getCardInfo();
   const isDanger = ['delete_task','delete_event','delete_block','clear_all'].includes(action.type);
+  const isEditFlow = ['update_event','convert_event_to_block','convert_block_to_event','edit_note'].includes(action.type);
   const hasEdits = Object.keys(editData).some(k => k !== 'type' && editData[k] !== action[k]);
 
   return (
-    <div className="confirm-card sos-confirm-card" data-action={action.type} style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
+    <div className={'confirm-card sos-confirm-card' + (isEditFlow ? ' confirm-card-edit-flow' : '')} data-action={action.type} style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
       {isFallback && (
         <div style={{fontSize:'0.75rem',color:'var(--warning)',padding:'8px 16px',background:'rgba(255,165,2,0.05)',borderBottom:'1px solid rgba(255,165,2,0.1)',display:'flex',alignItems:'center',gap:6}}>
           {Icon.helpCircle(14)} I think you want to add this — check the details?
@@ -3687,6 +3688,24 @@ const ThinkingIndicator=({message="thinkisizing…"})=>(
   </div>
 );
 
+const AutoApproveIndicator = ({ status }) => {
+  if (!status) return null;
+  const done = status.state === 'done';
+  return (
+    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+      <div className={'auto-approve-indicator' + (done ? ' done' : '')}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+          <span>{done ? 'Applied' : 'Applying'} {status.count} change{status.count === 1 ? '' : 's'}{status.label ? ` · ${status.label}` : ''}</span>
+          <span style={{display:'inline-flex',alignItems:'center'}}>{done ? Icon.checkCircle(14) : Icon.circleDot(14)}</span>
+        </div>
+        <div className="auto-approve-track">
+          <div className="auto-approve-fill" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ═══════════════════════════════════════════════
    FIRST-RUN ONBOARDING MODAL  (4 steps)
    ═══════════════════════════════════════════════ */
@@ -3886,6 +3905,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
+  const [autoApproveStatus, setAutoApproveStatus] = useState(null);
   const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
   const [recentlyCompleted, setRecentlyCompleted] = useState(new Set()); // task IDs completing right now
   const [pendingActions, setPendingActions] = useState([]);
@@ -5456,7 +5476,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const displayContent = rawContent
         ? rawContent
         : actions.length > 0
-          ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
+          ? (aiAutoApprove ? '' : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
       // For streamed responses the message was already inserted + persisted above.
@@ -5640,7 +5660,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
           if (aiAutoApprove && !blockExecution) {
+            const editingActionTypes = ['update_event','convert_event_to_block','convert_block_to_event','edit_note'];
+            const hasEditingAction = needsConfirm.some(a => editingActionTypes.includes(a.type));
+            setAutoApproveStatus({
+              state: 'running',
+              count: needsConfirm.length,
+              label: hasEditingAction ? 'editing notes / schedule' : 'auto-approve mode'
+            });
             needsConfirm.forEach(executeAction);
+            setTimeout(() => {
+              setAutoApproveStatus({
+                state: 'done',
+                count: needsConfirm.length,
+                label: hasEditingAction ? 'edits applied' : 'all set'
+              });
+            }, 450);
+            setTimeout(() => setAutoApproveStatus(null), 2200);
           } else {
             setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
           }
@@ -6550,6 +6585,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         ))}
         {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
+        {autoApproveStatus && <AutoApproveIndicator status={autoApproveStatus} />}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:16,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>
       </div>

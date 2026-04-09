@@ -1099,3 +1099,56 @@ button {
   border-color: rgba(143, 168, 255, 0.5) !important;
   color: #e7edff !important;
 }
+
+/* Auto-approve feedback (replaces token-heavy ack text in auto mode) */
+@keyframes autoApproveSweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0%); }
+}
+.auto-approve-indicator {
+  min-width: 280px;
+  max-width: 520px;
+  width: fit-content;
+  background: rgba(18, 22, 32, 0.95);
+  border: 1px solid rgba(143, 168, 255, 0.28);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auto-approve-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.auto-approve-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(143, 168, 255, 0.35), rgba(143, 168, 255, 0.92));
+  transform: translateX(-100%);
+  animation: autoApproveSweep 900ms ease forwards;
+}
+.auto-approve-indicator.done {
+  border-color: rgba(134, 239, 172, 0.45);
+}
+.auto-approve-indicator.done .auto-approve-fill {
+  transform: translateX(0);
+  animation: none;
+  background: linear-gradient(90deg, rgba(134, 239, 172, 0.55), rgba(134, 239, 172, 0.95));
+}
+
+/* Secondary animation for note/schedule edit actions */
+@keyframes editFlowGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 168, 255, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(143, 168, 255, 0.16); }
+}
+.confirm-card-edit-flow {
+  animation: cardPop .25s ease, editFlowGlow 2s ease-in-out infinite;
+  border-color: rgba(143, 168, 255, 0.3) !important;
+}
