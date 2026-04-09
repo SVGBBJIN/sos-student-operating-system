@@ -11,7 +11,6 @@ import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
-import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
 import SkillHub from './components/skillhub/SkillHub';
@@ -3901,7 +3900,6 @@ function App() {
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
-const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -4009,7 +4007,6 @@ const [ambientMode, setAmbientMode] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null); // { base64, preview, mimeType }
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
-  const pdfUploadRef = useRef(null);
 
   // Voice-to-text state
   const [isRecording, setIsRecording] = useState(false);
@@ -5743,6 +5740,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       setToastMsg("Couldn't process that photo — try a different one");
     }
   }
+  async function handleAttachmentSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type.startsWith('image/')) {
+      await handlePhotoSelect(e);
+      return;
+    }
+    await handleUploadStudy(e);
+  }
   // ── PDF / text upload → instant study materials ──
   async function handleUploadStudy(e) {
     const file = e.target.files?.[0];
@@ -6100,8 +6106,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         user={user}
         syncStatus={syncStatus}
         tutorMode={tutorMode}
-        ambientMode={ambientMode}
-        onAmbientMode={setAmbientMode}
         onNewChat={() => { sfx.nav(); startNewChat(); }}
         onTutorMode={() => { sfx.nav(); enterTutorMode(); }}
         onImport={() => { sfx.nav(); setShowGoogleModal(true); }}
@@ -6638,23 +6642,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 }} onClose={()=>setSlashMenuOpen(false)} />
               )}
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-              <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-              <input ref={pdfUploadRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleUploadStudy}/>
+              <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
               {workspaceModeLabel && (
                 <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
               )}
-              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-                {Icon.camera(18)}
+                {Icon.link(18)}
               </button>
               <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
-              </button>
-              <button type="button" className="sos-input-icon-btn" onClick={()=>pdfUploadRef.current?.click()} disabled={isLoading}
-                title="Upload PDF or text to generate study materials"
-                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-                {Icon.link(18)}
               </button>
               <input className="sos-chat-input" ref={inputRef} value={input}
                 onPaste={e=>{
@@ -6743,11 +6741,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onUpdateNote={handleUpdateNote}
         onCreateNote={handleCreateNote}
       />}
-      {layoutMode === 'lofi' && <StudyBottomBar
-        tasks={tasks}
-        recentlyCompleted={[...tasks].filter(t => recentlyCompleted.has(t.id))}
-      />}
-
       {showSideBySide && (
         <>
           <div className="peek-overlay" onClick={() => { setShowPeek(false); setShowNotes(false); }}/>
