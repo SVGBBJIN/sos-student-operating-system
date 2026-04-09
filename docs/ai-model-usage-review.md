@@ -7,7 +7,7 @@ Date: 2026-04-09
 - The runtime uses a Groq-only stack with four configured models:
   - `openai/gpt-oss-120b` (primary)
   - `openai/gpt-oss-20b` (conversational)
-  - `llama-3.3-70b-versatile` (backup)
+  - `openai/gpt-oss-20b` (default backup)
   - `llama-3.1-8b-instant` (fast fallback)
 - Chat requests route to conversational vs tool-heavy paths based on lightweight heuristics, plus an `isContentGen` flag.
 - Streaming is enabled only for non-image, non-content-generation requests.

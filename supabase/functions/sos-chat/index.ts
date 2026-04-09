@@ -8,7 +8,6 @@ import {
   CORE_CHECKSUM,
   CORE_VERSION,
   FAST_MODEL,
-  LARGE_BACKUP_MODEL,
   PRIMARY_MODEL,
 } from "../../../shared/ai/chat-core.js";
 
@@ -309,7 +308,7 @@ serve(async (req: Request) => {
       true,         // includeTools — always on; model decides when to call tools
       toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
       toolChoice,
-      isContentGen ? LARGE_BACKUP_MODEL : BACKUP_MODEL, // reserve 70b fallback for content-gen only
+      BACKUP_MODEL,
       callOptions
     );
     if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
