@@ -992,3 +992,110 @@ button {
   -webkit-backdrop-filter: blur(18px) saturate(135%) !important;
   border-color: rgba(0, 229, 204, 0.2) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Minimal Dark Refresh
+   - Removes grid/high-tech chrome
+   - Keeps dark mode with softer neutral styling
+   - Creates isolated ChatGPT-like input shell
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg-deep: #0f1115;
+  --bg-panel: #151821;
+  --bg-surface: rgba(21, 24, 33, 0.92);
+  --accent: #8fa8ff;
+  --text-primary: #f0f2f6;
+  --text-secondary: #9aa3b8;
+}
+
+/* Remove tech overlays / scanlines / grid */
+#root::before,
+#root::after,
+.sos-app::before,
+.corner-bracket,
+.sos-loading-scan,
+.sos-main::after {
+  display: none !important;
+}
+
+.sos-main::before {
+  animation: none !important;
+  filter: none !important;
+  background: radial-gradient(ellipse at 50% 0%, rgba(143, 168, 255, 0.08), transparent 55%) !important;
+  inset: -5% -5% 30% !important;
+}
+
+/* Tone down futuristic shapes/glows */
+.sos-side-btn,
+.confirm-btn,
+.g-hdr-btn,
+.settings-toggle,
+.sos-send-btn {
+  clip-path: none !important;
+  box-shadow: none !important;
+}
+
+.sos-app :is(button,input,textarea,select,.sos-bubble,.sos-chip,.sos-side-btn,.settings-toggle,.settings-card,.chat-sidebar-item,.notes-item,.g-btn,.g-input,.g-event-row,.g-picker-btn,.g-picked-file,.voice-bar,.voice-bar-send,.voice-bar-cancel,.confirm-card,.content-card,.auth-form,.g-modal,.peek-panel,.notes-panel,.split-workspace,.sos-companion-toggle) {
+  border-radius: 14px !important;
+}
+
+.sos-sidebar,
+.sos-chat-companion,
+.sos-header,
+.sos-input-area {
+  background: rgba(15, 17, 24, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.sos-side-btn {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--text-secondary) !important;
+}
+.sos-side-btn.active {
+  background: rgba(143, 168, 255, 0.14) !important;
+  color: var(--text-primary) !important;
+  border-color: rgba(143, 168, 255, 0.45) !important;
+  border-left: 1px solid rgba(143, 168, 255, 0.45) !important;
+}
+
+/* Isolated input bar */
+.sos-input-area {
+  border-top: none !important;
+  background: transparent !important;
+  padding: 10px 16px 14px !important;
+}
+
+.sos-chat-form {
+  width: min(880px, 100%);
+  margin: 0 auto;
+  background: #1a1f2b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+}
+
+.sos-chat-input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+.sos-chat-input::placeholder {
+  color: rgba(240, 242, 246, 0.5) !important;
+}
+
+.sos-input-icon-btn {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+
+.sos-send-btn {
+  background: rgba(143, 168, 255, 0.22) !important;
+  border-color: rgba(143, 168, 255, 0.5) !important;
+  color: #e7edff !important;
+}

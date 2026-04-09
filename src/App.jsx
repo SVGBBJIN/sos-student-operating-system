@@ -6637,26 +6637,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   setTimeout(()=>inputRef.current?.focus(),0);
                 }} onClose={()=>setSlashMenuOpen(false)} />
               )}
-            <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
+            <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
               <input ref={pdfUploadRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleUploadStudy}/>
               {workspaceModeLabel && (
                 <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
               )}
-              <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.camera(18)}
               </button>
-              <button type="button" onClick={startRecording} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
               </button>
-              <button type="button" onClick={()=>pdfUploadRef.current?.click()} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={()=>pdfUploadRef.current?.click()} disabled={isLoading}
                 title="Upload PDF or text to generate study materials"
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.link(18)}
               </button>
-              <input ref={inputRef} value={input}
+              <input className="sos-chat-input" ref={inputRef} value={input}
                 onPaste={e=>{
                   const text = e.clipboardData?.getData('text') || '';
                   if (text.length > 500) {
