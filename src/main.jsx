@@ -4,7 +4,7 @@ import App from './App';
 import './styles/index.css';
 import './styles/neon-lofi.css';   // override layer — cascades on top of index.css
 import './styles/lofi-layout.css'; // lofi 3-column grid layout
-import SkyBackground from './components/SkyBackground';
+import './styles/minimal-ui.css'; // minimal override layer
 import { PresenceProvider } from './context/PresenceContext';
 import { startPerfAdjuster } from './lib/perfAdjuster';
 
@@ -18,12 +18,9 @@ if ('serviceWorker' in navigator) {
 try {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
-    <>
-      <SkyBackground />
-      <PresenceProvider>
+    <PresenceProvider>
         <App />
       </PresenceProvider>
-    </>
   );
   startPerfAdjuster();
 } catch (e) {
