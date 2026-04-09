@@ -1,18 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '../lib/icons';
 
-const AMBIENT_LABELS = {
-  rain:    'Rain',
-  ambient: 'Ambient',
-  zen:     'Zen',
-};
-
 export default function StudyTopBar({
   user,
   syncStatus,
   tutorMode,
-  ambientMode,
-  onAmbientMode,
   onNewChat,
   onTutorMode,
   onImport,
@@ -44,22 +36,6 @@ export default function StudyTopBar({
       <div className="study-topbar-logo">
         <img src="/brain-logo.svg" alt="SOS" />
         SOS <span>/ study room</span>
-      </div>
-
-      <div className="study-pill-divider" />
-
-      {/* Ambient mode pills */}
-      <div className="study-topbar-pills">
-        {Object.entries(AMBIENT_LABELS).map(([key, label]) => (
-          <button
-            key={key}
-            className={'study-pill' + (ambientMode === key ? ' active' : '')}
-            onClick={() => onAmbientMode(ambientMode === key ? null : key)}
-            title={label}
-          >
-            {label}
-          </button>
-        ))}
       </div>
 
       <div className="study-topbar-spacer" />

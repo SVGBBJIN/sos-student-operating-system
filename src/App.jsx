@@ -11,7 +11,6 @@ import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
-import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
 import SkillHub from './components/skillhub/SkillHub';
@@ -1238,10 +1237,11 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   }
   const info = getCardInfo();
   const isDanger = ['delete_task','delete_event','delete_block','clear_all'].includes(action.type);
+  const isEditFlow = ['update_event','convert_event_to_block','convert_block_to_event','edit_note'].includes(action.type);
   const hasEdits = Object.keys(editData).some(k => k !== 'type' && editData[k] !== action[k]);
 
   return (
-    <div className="confirm-card sos-confirm-card" data-action={action.type} style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
+    <div className={'confirm-card sos-confirm-card' + (isEditFlow ? ' confirm-card-edit-flow' : '')} data-action={action.type} style={{borderLeftColor:info.borderColor,background:info.bgTint?`linear-gradient(160deg,${info.bgTint},rgba(15,15,30,0.92))`:''}}>
       {isFallback && (
         <div style={{fontSize:'0.75rem',color:'var(--warning)',padding:'8px 16px',background:'rgba(255,165,2,0.05)',borderBottom:'1px solid rgba(255,165,2,0.1)',display:'flex',alignItems:'center',gap:6}}>
           {Icon.helpCircle(14)} I think you want to add this — check the details?
@@ -3688,6 +3688,24 @@ const ThinkingIndicator=({message="thinkisizing…"})=>(
   </div>
 );
 
+const AutoApproveIndicator = ({ status }) => {
+  if (!status) return null;
+  const done = status.state === 'done';
+  return (
+    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+      <div className={'auto-approve-indicator' + (done ? ' done' : '')}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+          <span>{done ? 'Applied' : 'Applying'} {status.count} change{status.count === 1 ? '' : 's'}{status.label ? ` · ${status.label}` : ''}</span>
+          <span style={{display:'inline-flex',alignItems:'center'}}>{done ? Icon.checkCircle(14) : Icon.circleDot(14)}</span>
+        </div>
+        <div className="auto-approve-track">
+          <div className="auto-approve-fill" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ═══════════════════════════════════════════════
    FIRST-RUN ONBOARDING MODAL  (4 steps)
    ═══════════════════════════════════════════════ */
@@ -3887,6 +3905,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [chatError, setChatError] = useState(null);
+  const [autoApproveStatus, setAutoApproveStatus] = useState(null);
   const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
   const [recentlyCompleted, setRecentlyCompleted] = useState(new Set()); // task IDs completing right now
   const [pendingActions, setPendingActions] = useState([]);
@@ -3901,7 +3920,6 @@ function App() {
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
-const [ambientMode, setAmbientMode] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [activePanel, setActivePanel] = useState('chat');
@@ -4009,7 +4027,6 @@ const [ambientMode, setAmbientMode] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null); // { base64, preview, mimeType }
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
-  const pdfUploadRef = useRef(null);
 
   // Voice-to-text state
   const [isRecording, setIsRecording] = useState(false);
@@ -5459,7 +5476,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const displayContent = rawContent
         ? rawContent
         : actions.length > 0
-          ? (actionAckByType[actions[0]?.type] || 'got it — I can do that.')
+          ? (aiAutoApprove ? '' : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
       // For streamed responses the message was already inserted + persisted above.
@@ -5643,7 +5660,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
           if (aiAutoApprove && !blockExecution) {
+            const editingActionTypes = ['update_event','convert_event_to_block','convert_block_to_event','edit_note'];
+            const hasEditingAction = needsConfirm.some(a => editingActionTypes.includes(a.type));
+            setAutoApproveStatus({
+              state: 'running',
+              count: needsConfirm.length,
+              label: hasEditingAction ? 'editing notes / schedule' : 'auto-approve mode'
+            });
             needsConfirm.forEach(executeAction);
+            setTimeout(() => {
+              setAutoApproveStatus({
+                state: 'done',
+                count: needsConfirm.length,
+                label: hasEditingAction ? 'edits applied' : 'all set'
+              });
+            }, 450);
+            setTimeout(() => setAutoApproveStatus(null), 2200);
           } else {
             setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
           }
@@ -5742,6 +5774,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       console.error('Failed to process photo:', err);
       setToastMsg("Couldn't process that photo — try a different one");
     }
+  }
+  async function handleAttachmentSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type.startsWith('image/')) {
+      await handlePhotoSelect(e);
+      return;
+    }
+    await handleUploadStudy(e);
   }
   // ── PDF / text upload → instant study materials ──
   async function handleUploadStudy(e) {
@@ -6100,8 +6141,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         user={user}
         syncStatus={syncStatus}
         tutorMode={tutorMode}
-        ambientMode={ambientMode}
-        onAmbientMode={setAmbientMode}
         onNewChat={() => { sfx.nav(); startNewChat(); }}
         onTutorMode={() => { sfx.nav(); enterTutorMode(); }}
         onImport={() => { sfx.nav(); setShowGoogleModal(true); }}
@@ -6546,6 +6585,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>
         ))}
         {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
+        {autoApproveStatus && <AutoApproveIndicator status={autoApproveStatus} />}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:16,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>
       </div>
@@ -6637,26 +6677,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   setTimeout(()=>inputRef.current?.focus(),0);
                 }} onClose={()=>setSlashMenuOpen(false)} />
               )}
-            <form onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
-              <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={handlePhotoSelect}/>
-              <input ref={pdfUploadRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleUploadStudy}/>
+            <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
               {workspaceModeLabel && (
                 <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
               )}
-              <button type="button" onClick={()=>photoInputRef.current?.click()} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-                {Icon.camera(18)}
+                {Icon.link(18)}
               </button>
-              <button type="button" onClick={startRecording} disabled={isLoading}
+              <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
               </button>
-              <button type="button" onClick={()=>pdfUploadRef.current?.click()} disabled={isLoading}
-                title="Upload PDF or text to generate study materials"
-                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-                {Icon.link(18)}
-              </button>
-              <input ref={inputRef} value={input}
+              <input className="sos-chat-input" ref={inputRef} value={input}
                 onPaste={e=>{
                   const text = e.clipboardData?.getData('text') || '';
                   if (text.length > 500) {
@@ -6743,11 +6777,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onUpdateNote={handleUpdateNote}
         onCreateNote={handleCreateNote}
       />}
-      {layoutMode === 'lofi' && <StudyBottomBar
-        tasks={tasks}
-        recentlyCompleted={[...tasks].filter(t => recentlyCompleted.has(t.id))}
-      />}
-
       {showSideBySide && (
         <>
           <div className="peek-overlay" onClick={() => { setShowPeek(false); setShowNotes(false); }}/>
