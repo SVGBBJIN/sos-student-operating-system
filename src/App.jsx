@@ -624,6 +624,8 @@ function dedupeRepeatedLines(blockText = '') {
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const tutorMode = !!options.tutorMode;
   const workspaceContext = options.workspaceContext || 'chat';
+  const intentType = options.intentType || 'chat';
+  const actionFocusedPrompt = intentType === 'action';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
@@ -694,11 +696,12 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
     sorted.forEach(n => {
       const src = n.source === 'pdf' ? 'PDF' : n.source === 'google_docs' ? 'Google Doc' : 'study material';
-      const preview = truncateWithEllipsis((n.content || '').replace(/\s+/g, ' ').trim(), 500);
+      const preview = truncateWithEllipsis((n.content || '').replace(/\s+/g, ' ').trim(), actionFocusedPrompt ? 180 : 500);
       noteLines.push('- ' + n.name + ' (' + src + '): ' + preview);
     });
   }
 
+  const notesBudget = actionFocusedPrompt ? 700 : CONTEXT_SECTION_BUDGETS.notes;
   const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
 
   const dynamicSections = [
@@ -722,11 +725,12 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     '',
     'NOTES INDEX: ' + noteNames,
     'NOTES PREVIEWS (budgeted):',
-    capLines(noteLines, CONTEXT_SECTION_BUDGETS.notes, 'note previews') || '(none)',
+    capLines(noteLines, notesBudget, 'note previews') || '(none)',
     '',
     'MODE FLAGS:',
     '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
     '- workspace_context: ' + workspaceContext,
+    '- intent_type: ' + intentType,
   ].filter(Boolean).join('\n');
 
   const contextBlock = truncateWithEllipsis(dedupeRepeatedLines(dynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
@@ -860,47 +864,9 @@ function classifyMessageRegex(text) {
 
 /* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
 async function classifyMessage(text) {
-  try {
-    const session = await sb.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const classifyPrompt = `You are a message classifier for a student planner app. Classify the user message into exactly one category and return ONLY a JSON object.
-
-Categories:
-- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets
-- NOTES_REF: Questions about the student's own notes, reference docs, PDFs, or looking things up in saved documents
-- ACTION: Any scheduling, task, event, block, calendar, or organizational request. Includes mentions of dates, times, school subjects, activities, verbs like add/delete/schedule/cancel/move, and slang equivalents
-- CHAT: General conversation, greetings, questions, or anything with no scheduling or content generation intent
-
-Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"category":"ACTION"} or {"category":"CHAT"}`;
-
-    const response = await fetch(EDGE_FN_URL, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({
-        systemPrompt:classifyPrompt,
-        messages:[{role:'user',content:text}],
-        maxTokens:32,
-        model:'llama-3.1-8b-instant',
-        provider:'groq',
-        isContentGen:false
-      })
-    });
-    if (!response.ok) throw new Error('Classification request failed');
-    const data = await response.json();
-    const raw = (data?.content || '').trim();
-    const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
-    const result = JSON.parse(jsonStr);
-    switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-      // CHAT and all other categories also use GPT-OSS so every capability stays available
-      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-    }
-  } catch (e) {
-    console.warn('LLM classification failed, using regex fallback:', e);
-    return classifyMessageRegex(text);
-  }
+  // Deprecated: keep this wrapper to avoid dead-call confusion.
+  // We now use direct intent heuristics in sendMessage and always build tier-2 prompt.
+  return classifyMessageRegex(text);
 }
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
@@ -5250,7 +5216,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
+      const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
+      const inferredIntentType = isContentGen ? 'content_gen' : (likelyActionIntent ? 'action' : 'chat');
+      const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
+        tutorMode,
+        workspaceContext: effectiveWorkspaceContext,
+        intentType: inferredIntentType,
+      });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
       const session = await sb.auth.getSession();
@@ -5286,6 +5258,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
+        prompt_flags: {
+          intent_type: inferredIntentType,
+          tutor_mode: Boolean(tutorMode),
+          workspace_context: effectiveWorkspaceContext,
+          use_streaming: useStreaming,
+          likely_action_intent: likelyActionIntent,
+        },
         ...(useStreaming ? { streaming: true } : {}),
       };
       if (photo) {

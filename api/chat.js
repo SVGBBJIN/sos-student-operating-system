@@ -267,6 +267,7 @@ export default async function handler(req, res) {
       prompt_version,
       context_chars,
       input_tokens_est,
+      prompt_flags,
       tool_failures,
       streaming,
     } = body;
@@ -278,6 +279,7 @@ export default async function handler(req, res) {
       inputTokensEst: Number(input_tokens_est),
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
       isContentGen: Boolean(isContentGen),
+      promptFlags: (prompt_flags && typeof prompt_flags === "object") ? prompt_flags : null,
     };
     const inputTokensEstimated = estimateInputTokens({
       systemPrompt,
@@ -327,7 +329,11 @@ export default async function handler(req, res) {
       emitRequestEvent({
         event_type: "chat_request",
         request_id: requestId,
-        prompt_version: telemetry?.promptVersion || null,
+        prompt: {
+          version: telemetry?.promptVersion || null,
+          flags: telemetry?.promptFlags || null,
+          workspace_context: telemetry?.workspaceContext || "chat",
+        },
         model: {
           primary: PRIMARY_MODEL,
           backup: FAST_MODEL,
@@ -477,19 +483,30 @@ export default async function handler(req, res) {
     const outputTokensEstimated = estimateTokensFromText(
       `${result?.content || ""}\n${JSON.stringify(result?.actions || [])}`
     );
-    emitRequestEvent({
-      event_type: "chat_request",
-      request_id: requestId,
-      prompt_version: telemetry?.promptVersion || null,
-      model: {
-        primary: PRIMARY_MODEL,
-        backup: BACKUP_MODEL,
+      emitRequestEvent({
+        event_type: "chat_request",
+        request_id: requestId,
+        prompt: {
+          version: telemetry?.promptVersion || null,
+          flags: telemetry?.promptFlags || null,
+          workspace_context: telemetry?.workspaceContext || "chat",
+        },
+        model: {
+          primary: PRIMARY_MODEL,
+          backup: BACKUP_MODEL,
         selected: result?.model_used || null,
         fallback_used: Boolean(result?.fallback_used),
       },
       tokens: {
         input_est: inputTokensEstimated,
         output_est: outputTokensEstimated,
+      },
+      clarification: {
+        asked: Boolean(
+          (Array.isArray(result?.clarifications) && result.clarifications.length > 0)
+          || (result?.clarification && typeof result.clarification === "object")
+        ),
+        count: Array.isArray(result?.clarifications) ? result.clarifications.length : 0,
       },
       stages: stageTimings,
       tool_calls: {
@@ -523,7 +540,11 @@ export default async function handler(req, res) {
     emitRequestEvent({
       event_type: "chat_request",
       request_id: requestId,
-      prompt_version: telemetry?.promptVersion || null,
+      prompt: {
+        version: telemetry?.promptVersion || null,
+        flags: telemetry?.promptFlags || null,
+        workspace_context: telemetry?.workspaceContext || "chat",
+      },
       model: {
         primary: PRIMARY_MODEL,
         backup: BACKUP_MODEL,
