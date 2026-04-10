@@ -987,7 +987,9 @@ export async function callGroq(
     };
   }
 
-  // Try primary model; fall back to backupModel on hard errors OR empty responses
+  // Try primary model; fall back to backupModel on hard errors OR empty responses.
+  // Universal final safety-net: FAST_MODEL (llama-3.1-8b-instant).
+  const canUseFastFallback = FAST_MODEL && FAST_MODEL !== selectedPrimary && FAST_MODEL !== selectedBackup;
   try {
     let result = await attempt(selectedPrimary);
     if (!result.content && result.actions.length === 0 && selectedBackup && selectedBackup !== selectedPrimary) {
@@ -995,15 +997,36 @@ export async function callGroq(
       console.warn(`[callGroq] Primary model (${selectedPrimary}) returned empty response — retrying with backup ${selectedBackup}`);
       result = await attempt(selectedBackup);
     }
+    if (!result.content && result.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
+      metrics.fallback_used = true;
+      console.warn(`[callGroq] Backup path returned empty response — retrying with universal fallback ${FAST_MODEL}`);
+      result = await attempt(FAST_MODEL);
+    }
     return { ...result, ...metrics };
   } catch (primaryErr) {
+    let fallbackErr = primaryErr;
     if (selectedBackup && selectedBackup !== selectedPrimary && remainingBudgetMs() > 900) {
       metrics.fallback_used = true;
       console.warn(`[callGroq] Primary model (${selectedPrimary}) failed: ${primaryErr.message} — retrying with backup ${selectedBackup}`);
-      const fallbackResult = await attempt(selectedBackup);
-      return { ...fallbackResult, ...metrics };
+      try {
+        const fallbackResult = await attempt(selectedBackup);
+        if (!fallbackResult.content && fallbackResult.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
+          console.warn(`[callGroq] Backup model (${selectedBackup}) returned empty response — retrying with universal fallback ${FAST_MODEL}`);
+          const fastResult = await attempt(FAST_MODEL);
+          return { ...fastResult, ...metrics };
+        }
+        return { ...fallbackResult, ...metrics };
+      } catch (backupErr) {
+        fallbackErr = backupErr;
+      }
     }
-    throw primaryErr;
+    if (canUseFastFallback && remainingBudgetMs() > 900) {
+      metrics.fallback_used = true;
+      console.warn(`[callGroq] Fallback chain failed (${fallbackErr.message}) — retrying with universal fallback ${FAST_MODEL}`);
+      const fastResult = await attempt(FAST_MODEL);
+      return { ...fastResult, ...metrics };
+    }
+    throw fallbackErr;
   }
 }
 
