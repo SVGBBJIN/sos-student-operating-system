@@ -5394,7 +5394,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             ? [chatData.clarification_payload]
             : []));
 
-      const validClarifications = clarificationsArr.filter(c => c?.question && Array.isArray(c?.options) && c.options.length > 0);
+      // Accept clarification prompts even when the model provides no quick-pick options.
+      // Some valid asks come back as free-text-only follow-ups (question + reason, options=[]).
+      // Previously these were dropped, which could lead to the generic "no response" fallback.
+      const validClarifications = clarificationsArr
+        .filter(c => c?.question && typeof c.question === 'string' && c.question.trim().length > 0)
+        .map(c => ({
+          ...c,
+          options: Array.isArray(c?.options) ? c.options : [],
+        }));
 
       if (validClarifications.length > 0) {
         // Build assistant message summarizing all questions
@@ -5423,7 +5431,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
 
       const validationWarnings = Array.isArray(chatData?.validation_warnings) ? chatData.validation_warnings : [];
-      if (validationWarnings.length > 0) {
+      // Avoid "fan-out" extra AI calls when the model already asked a clarification.
+      // The parser can synthesize clarifications from validation errors; prefer those
+      // instead of issuing another tool_fallback request that may hit multiple models.
+      const shouldRunValidationFallback =
+        validationWarnings.length > 0 &&
+        validClarifications.length === 0 &&
+        actions.length === 0 &&
+        !(typeof chatData?.content === 'string' && chatData.content.trim().length > 0);
+      if (shouldRunValidationFallback) {
         try {
           const validationFailures = validationWarnings.map(w => ({
             action_type: w?.tool || 'unknown_action',
@@ -5473,10 +5489,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         edit_note: 'got it — I can update that note.',
         delete_note: 'got it — I can delete that note.',
       };
+      const hasClarificationPrompt = clarificationsArr.some(c => c?.question && String(c.question).trim().length > 0);
       const displayContent = rawContent
         ? rawContent
         : actions.length > 0
           ? (aiAutoApprove ? '' : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
+          : hasClarificationPrompt
+            ? "i need one quick detail before i can do that."
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
       // For streamed responses the message was already inserted + persisted above.
