@@ -561,16 +561,31 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-const SYSTEM_PROMPT_VERSION = 'sos-policy-v2';
-const SYSTEM_PROMPT_CHAR_BUDGET = 7000;
+const SYSTEM_PROMPT_VERSION = 'sos-policy-v3-modular';
+const SYSTEM_PROMPT_CHAR_BUDGET = 3200;
 const CONVERSATIONAL_CONTEXT_TOKEN_MAX = 100;
 const CONVERSATIONAL_CONTEXT_CHAR_BUDGET = Math.floor(CONVERSATIONAL_CONTEXT_TOKEN_MAX * 3.8); // keep under ~100 tokens with buffer
 const CONTEXT_SECTION_BUDGETS = {
-  tasks: 1800,
-  events: 800,
-  week: 1000,
-  notes: 2000,
+  tasks: 900,
+  events: 500,
+  week: 700,
+  notes: 900,
   schedule: 600,
+};
+
+const POLICY_MODULES = {
+  core: 'You are SOS — a concise, supportive study companion. No condescension.',
+  no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
+  workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
+  clarification: 'If required fields are missing, call ask_clarification before any action.',
+  clarification_style: 'Clarifications can be text-box-only (empty options). Keep wording natural and specific.',
+  action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
+  planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
+  corrections: '"actually / wait / I meant / oops" updates the latest related item.',
+  web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
+  content_gen: 'Content-gen requests must return canonical typed actions only.',
+  date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
+  vision: 'For image input, describe what is visible first, then extract actionable details.',
 };
 
 function estimateInputTokens(text = '') {
@@ -767,20 +782,33 @@ NOTES: ${noteNames}`;
     return { prompt, promptVersion: SYSTEM_PROMPT_VERSION, contextChars: dynamicTier1.length, estimatedInputTokens: estimateInputTokens(prompt) };
   }
 
+  const baseModules = [
+    POLICY_MODULES.core,
+    POLICY_MODULES.no_hallucination,
+    POLICY_MODULES.workspace,
+    POLICY_MODULES.clarification,
+    POLICY_MODULES.clarification_style,
+  ];
+  const intentModules = intentType === 'chat'
+    ? [
+        POLICY_MODULES.web_refs,
+      ]
+    : intentType === 'content_gen'
+      ? [
+          POLICY_MODULES.action_tools,
+          POLICY_MODULES.content_gen,
+          POLICY_MODULES.date_resolution,
+        ]
+      : [
+          POLICY_MODULES.action_tools,
+          POLICY_MODULES.planning_guardrails,
+          POLICY_MODULES.corrections,
+          POLICY_MODULES.web_refs,
+          POLICY_MODULES.date_resolution,
+          POLICY_MODULES.vision,
+        ];
   const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
-You are SOS — a chill, concise study companion.
-Voice: supportive friend, 2-4 sentence default, no condescension, no hallucinated schedule data.
-Planning guardrails: protect sleep (no work past 10pm), suggest decomposition for large tasks, rebalance overloaded days, and handle overdue tasks without guilt.
-Tools: if user gives explicit actionable details, call the matching tool; if ANY key field (title/date/time/subject) is missing or unnamed — including vague requests like "add a task" or "create an event" with no specifics — call ask_clarification FIRST. The title must be a specific name the student actually said; generic labels like "New task", "Task title", or "Event" are treated as missing and are never acceptable.
-Web references: if the student asks for general knowledge from the internet, source-backed facts, or direct quotes/citations, call web_search_reference with a focused query (and optional quote_count).
-Clarification protocol: for multiple missing details, ask all of them in the same assistant turn by returning multiple ask_clarification tool calls (one focused question each). Keep each question atomic so every question maps cleanly to its own clarification input card.
-Clarification style: text-box-only clarifications are allowed (options can be empty). Ask natural, student-friendly questions (e.g., "What should the title be?"), and avoid robotic wording like "provide valid values for title".
-Corrections: "actually / wait / I meant / oops" should update the latest related item.
-Notes/docs: use them as references when relevant; cite note names naturally.
-Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
-Image input: describe what is visible first, then extract assignments/dates when legible.
-Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).
-Date resolution: when resolving weekday references (e.g. "due Monday", "due Friday"), if today IS that weekday use today's date. Never resolve a weekday to a past date — always use the current or next upcoming occurrence.`;
+${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
