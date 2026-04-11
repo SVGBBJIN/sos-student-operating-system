@@ -589,6 +589,22 @@ export const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "web_search_reference",
+      description:
+        "Search the web for general knowledge, source-backed references, and direct quotes. Use this when the student asks for facts with citations or quote evidence from the web.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query or question to research" },
+          quote_count: { type: "number", description: "Desired number of direct quotes (1-6)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "clear_all",
       description:
         "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",

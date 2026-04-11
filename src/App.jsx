@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
-import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, SEARCH_LESSON_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -772,6 +772,7 @@ You are SOS — a chill, concise study companion.
 Voice: supportive friend, 2-4 sentence default, no condescension, no hallucinated schedule data.
 Planning guardrails: protect sleep (no work past 10pm), suggest decomposition for large tasks, rebalance overloaded days, and handle overdue tasks without guilt.
 Tools: if user gives explicit actionable details, call the matching tool; if ANY key field (title/date/time/subject) is missing or unnamed — including vague requests like "add a task" or "create an event" with no specifics — call ask_clarification FIRST. The title must be a specific name the student actually said; generic labels like "New task", "Task title", or "Event" are treated as missing and are never acceptable.
+Web references: if the student asks for general knowledge from the internet, source-backed facts, or direct quotes/citations, call web_search_reference with a focused query (and optional quote_count).
 Clarification protocol: for multiple missing details, ask all of them in the same assistant turn by returning multiple ask_clarification tool calls (one focused question each). Keep each question atomic so every question maps cleanly to its own clarification input card.
 Clarification style: text-box-only clarifications are allowed (options can be empty). Ask natural, student-friendly questions (e.g., "What should the title be?"), and avoid robotic wording like "provide valid values for title".
 Corrections: "actually / wait / I meant / oops" should update the latest related item.
@@ -4591,6 +4592,59 @@ function App() {
             ]));
           }
           break;
+        case 'web_search_reference': {
+          const query = String(action.query || '').trim();
+          if (!query) break;
+          (async () => {
+            try {
+              const session = await sb.auth.getSession();
+              const token = session?.data?.session?.access_token;
+              const res = await fetch(SEARCH_LESSON_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY),
+                },
+                body: JSON.stringify({
+                  mode: 'reference',
+                  query,
+                  quote_count: Math.max(1, Math.min(6, Number(action.quote_count) || 3)),
+                }),
+              });
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData?.error || 'Web reference search failed');
+              }
+              const data = await res.json();
+              const summary = typeof data?.summary === 'string' ? data.summary.trim() : '';
+              const quotes = Array.isArray(data?.quotes) ? data.quotes : [];
+              const sources = Array.isArray(data?.sources) ? data.sources : [];
+              const quoteText = quotes.slice(0, 6).map((q, i) => {
+                const sourceLabel = q?.source || q?.title || q?.url || 'source';
+                const quote = String(q?.quote || '').trim();
+                return quote ? `${i + 1}) "${quote}" — ${sourceLabel}` : null;
+              }).filter(Boolean).join('\n');
+              const sourceText = sources.slice(0, 6).map((s, i) => {
+                const title = s?.title || s?.url || `Source ${i + 1}`;
+                return `- ${title}${s?.url ? ` (${s.url})` : ''}`;
+              }).join('\n');
+              const content = [
+                summary || `Here’s what I found for "${query}".`,
+                quoteText ? `\nQuotes:\n${quoteText}` : '',
+                sourceText ? `\nSources:\n${sourceText}` : '',
+              ].filter(Boolean).join('\n');
+              if (content.trim()) {
+                const assistantMsg = { role:'assistant', content:content.trim(), timestamp:Date.now() };
+                setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+                if (user) dbInsertChatMsg('assistant', assistantMsg.content, user.id);
+              }
+            } catch (err) {
+              console.error('web_search_reference failed:', err);
+              setToastMsg('Couldn\'t fetch web references right now.');
+            }
+          })();
+          break;
+        }
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
@@ -5482,6 +5536,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         complete_task: 'got it — I can mark that complete.',
         edit_note: 'got it — I can update that note.',
         delete_note: 'got it — I can delete that note.',
+        web_search_reference: 'got it — I can search the web and cite sources.',
       };
       const hasClarificationPrompt = clarificationsArr.some(c => c?.question && String(c.question).trim().length > 0);
       const displayContent = rawContent
