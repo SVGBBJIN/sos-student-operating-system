@@ -551,7 +551,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. Use this proactively — don't guess when asking would be better. Also use for content generation requests that lack a topic or scope. IMPORTANT: If multiple independent details are missing, emit MULTIPLE ask_clarification tool calls in the same turn (one focused question per missing detail) so the UI can render dedicated input cards.",
+        "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. Use this proactively — don't guess when asking would be better. Also use for content generation requests that lack a topic or scope. IMPORTANT: If multiple independent details are missing, emit MULTIPLE ask_clarification tool calls in the same turn (one focused question per missing detail) so the UI can render dedicated input cards. You may use a free-text clarification with no options (text-box only). Keep wording natural and specific; avoid template phrasing like 'provide valid values'.",
       parameters: {
         type: "object",
         properties: {
@@ -582,7 +582,7 @@ export const ACTION_TOOLS = [
             items: { type: "string" },
           },
         },
-        required: ["reason", "question", "options", "multi_select"],
+        required: ["reason", "question"],
       },
     },
   },
@@ -745,13 +745,45 @@ function toValidationClarification(toolName, missingFields, issues) {
   const detail = issues
     .map((issue) => issue.field)
     .filter((v, i, arr) => arr.indexOf(v) === i);
-  const humanFields = (missingFields.length > 0 ? missingFields : detail).join(", ");
+  const fields = (missingFields.length > 0 ? missingFields : detail);
+  const labelForField = (field) => {
+    const map = {
+      title: "title",
+      due: "due date (YYYY-MM-DD)",
+      date: "date (YYYY-MM-DD)",
+      time: "time (HH:MM)",
+      start: "start time (HH:MM)",
+      end: "end time (HH:MM)",
+      subject: "subject",
+      activity: "activity name",
+      tab_name: "note name",
+    };
+    return map[field] || field.replace(/_/g, " ");
+  };
+  const humanFields = fields.map(labelForField).join(", ");
+  const oneFieldQuestion = fields.length === 1
+    ? (() => {
+        switch (fields[0]) {
+          case "title": return "What should the title be?";
+          case "due": return "What due date should I use? (YYYY-MM-DD)";
+          case "date": return "What date should I use? (YYYY-MM-DD)";
+          case "time": return "What time should I use? (HH:MM)";
+          case "start": return "What start time should I use? (HH:MM)";
+          case "end": return "What end time should I use? (HH:MM)";
+          case "subject": return "Which subject is this for?";
+          case "activity": return "What activity should I schedule?";
+          case "tab_name": return "Which note should I use?";
+          default: return `Can you share the ${labelForField(fields[0])}?`;
+        }
+      })()
+    : null;
   return {
     reason: `I need a couple details before I can run ${toolName}.`,
-    question: humanFields
-      ? `Can you provide valid values for: ${humanFields}?`
-      : `Can you clarify the details for ${toolName}?`,
-    options: ["Provide details", "Skip this action"],
+    question: oneFieldQuestion
+      || (humanFields
+        ? `I still need these details: ${humanFields}. Can you share them in one reply?`
+        : `Can you clarify the details for ${toolName}?`),
+    options: [],
     multi_select: false,
     context_action: toolName,
     missing_fields: missingFields,
