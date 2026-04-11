@@ -1,8 +1,8 @@
 import {
   ACTION_TOOLS,
   BACKUP_MODEL,
-  callGroq,
-  callGroqStream,
+  callGemini,
+  callGeminiStream,
   CONTENT_ACTION_TOOLS,
   CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
@@ -22,47 +22,38 @@ const corsHeaders = {
 
 console.log(`[chat-core] adapter=supabase version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
-async function callGroqWhisper(
+async function callGeminiTranscribe(
   apiKey: string,
   audioBase64: string,
   audioMimeType: string
 ): Promise<string> {
-  const binaryStr = atob(audioBase64);
-  const bytes = new Uint8Array(binaryStr.length);
-  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
   const effectiveMime = audioMimeType || "audio/webm";
-  const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
-    ? "m4a"
-    : effectiveMime.includes("ogg")
-    ? "ogg"
-    : effectiveMime.includes("mp3")
-    ? "mp3"
-    : "webm";
-  const audioBlob = new Blob([bytes], { type: effectiveMime });
-  const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
-
-  const groqForm = new FormData();
-  groqForm.append("file", audioFile, `voice.${audioExt}`);
-  groqForm.append("model", "whisper-large-v3-turbo");
-  groqForm.append("response_format", "json");
-  groqForm.append("language", "en");
-
-  const groqRes = await fetch(
-    "https://api.groq.com/openai/v1/audio/transcriptions",
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: groqForm,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: effectiveMime, data: audioBase64 } },
+            { text: "Transcribe this audio recording. Return only the spoken words, nothing else." },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
     }
   );
 
-  if (!groqRes.ok) {
-    const errText = await groqRes.text();
-    throw new Error(`Groq Whisper error ${groqRes.status}: ${errText}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini transcription error ${res.status}: ${errText}`);
   }
 
-  const result = await groqRes.json();
-  return result.text || "";
+  const data = await res.json();
+  const parts: Array<{ text?: string }> = data?.candidates?.[0]?.content?.parts || [];
+  return parts.map((p) => p.text || "").join("").trim();
 }
 
 /* ── Rate limiting for content generation ── */
@@ -136,15 +127,15 @@ serve(async (req: Request) => {
   }
 
   try {
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     const body = await req.json();
 
-    // ── Voice transcription path (Groq Whisper) ──
+    // ── Voice transcription path (Gemini audio) ──
     if (body.mode === "voice") {
-      if (!GROQ_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return new Response(
-          JSON.stringify({ error: "GROQ_API_KEY not configured" }),
+          JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -156,7 +147,7 @@ serve(async (req: Request) => {
         );
       }
       try {
-        const text = await callGroqWhisper(GROQ_API_KEY, audioBase64, audioMimeType || "audio/webm");
+        const text = await callGeminiTranscribe(GEMINI_API_KEY, audioBase64, audioMimeType || "audio/webm");
         return new Response(
           JSON.stringify({ text }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -171,10 +162,10 @@ serve(async (req: Request) => {
       }
     }
 
-    // ── Chat completion path (Groq) ──
-    if (!GROQ_API_KEY) {
+    // ── Chat completion path (Gemini) ──
+    if (!GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "GROQ_API_KEY not configured" }),
+        JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -254,12 +245,12 @@ serve(async (req: Request) => {
     const useStreaming = Boolean(streaming) && !isContentGen && !imageBase64;
     if (useStreaming) {
       const encoder = new TextEncoder();
-      let streamResult: Awaited<ReturnType<typeof callGroqStream>>;
+      let streamResult: Awaited<ReturnType<typeof callGeminiStream>>;
       const stream = new ReadableStream({
         async start(controller) {
-          // callGroqStream auto-retries with backupModel if CONVERSATIONAL_MODEL fails
-          streamResult = await callGroqStream(
-            GROQ_API_KEY,
+          // callGeminiStream auto-retries with backupModel if CONVERSATIONAL_MODEL fails
+          streamResult = await callGeminiStream(
+            GEMINI_API_KEY,
             CONVERSATIONAL_MODEL,
             effectiveSystemPrompt,
             messages,
@@ -314,9 +305,9 @@ serve(async (req: Request) => {
     }
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
-    const result = await callGroq(
-      GROQ_API_KEY,
+    // not regex-gated detection. Gemini handles chat + tool calling in one pass.
+    const result = await callGemini(
+      GEMINI_API_KEY,
       PRIMARY_MODEL,
       effectiveSystemPrompt,
       messages,

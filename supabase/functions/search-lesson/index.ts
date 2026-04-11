@@ -1,12 +1,12 @@
 /**
  * search-lesson Edge Function
  *
- * Uses Groq's compound model which has native web search built-in.
- * No external search API key required — just GROQ_API_KEY.
+ * Uses Gemini with Google Search grounding for up-to-date web information.
+ * Requires only GEMINI_API_KEY — Google Search grounding is built into Gemini.
  *
  * Flow:
- *   1. Receives { topic } from client
- *   2. Calls groq/compound model — it automatically searches the web
+ *   1. Receives { topic } or { query, mode } from client
+ *   2. Calls gemini-2.0-flash with googleSearch tool — it automatically searches the web
  *   3. Returns { report: string, screens: LessonScreen[], usedWebSearch: boolean }
  */
 
@@ -17,165 +17,43 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GROQ_API_KEY      = Deno.env.get("GROQ_API_KEY") || "";
-const COMPOUND_MODEL    = "groq/compound";      // Groq's model with native web search
-const COMPOUND_MINI     = "groq/compound-mini"; // Lower latency option (~3x faster)
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+const GEMINI_MODEL   = "gemini-2.0-flash";
 
-// ── Groq LLM call (compound model auto-searches web) ──────────────────────────
-async function callGroqCompound(userContent: string): Promise<{
-  content: string;
-  usedWebSearch: boolean;
-}> {
-  const systemPrompt = `You are an expert educator. A student wants to learn about a topic.
-Search the web for accurate, up-to-date information about the topic, then create a structured educational lesson.
-
-Return ONLY a valid JSON object (no markdown fences, no prose outside JSON):
-{
-  "report": "A 300-400 word educational summary of the topic in clear plain text, based on your web search",
-  "screens": [
-    5-7 lesson screens in this exact format:
-    concept screens: { "type": "concept", "content": "2-3 sentences" }
-    example screens: { "type": "example", "content": "worked example", "annotation": "brief note" }
-    question screens: { "type": "question", "question": "...", "options": {"A":"..","B":"..","C":"..","D":".."}, "correct": "A", "hint": "..." }
-  ]
-}
-
-async function callGroqReferenceSearch(query: string, quoteCount = 3): Promise<{
-  content: string;
-  usedWebSearch: boolean;
-}> {
-  const requestedQuotes = Math.max(1, Math.min(6, Number(quoteCount) || 3));
-  const systemPrompt = `You are a research assistant with web browsing.
-Search the web for up-to-date sources about the user's query and return ONLY valid JSON:
-{
-  "summary": "A concise 4-8 sentence answer grounded in sources.",
-  "quotes": [
+// ── Gemini LLM call with Google Search grounding ──────────────────────────────
+async function callGeminiSearch(
+  systemPrompt: string,
+  userContent: string,
+  maxTokens = 3000,
+): Promise<{ content: string; usedWebSearch: boolean }> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
     {
-      "quote": "Short direct quote (<= 180 chars)",
-      "title": "Source title",
-      "url": "https://...",
-      "source": "Publisher/site name"
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: userContent }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        tools: [{ googleSearch: {} }],
+        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
+      }),
     }
-  ],
-  "sources": [
-    { "title": "Source title", "url": "https://..." }
-  ]
-}
-
-Rules:
-- Include exactly ${requestedQuotes} quotes when possible.
-- Quotes must be verbatim snippets from the source.
-- Prioritize reputable primary sources.
-- Do not include markdown fences or extra prose.`;
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: COMPOUND_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `Search the web and answer: "${query}"` },
-      ],
-      max_tokens: 2200,
-      temperature: 0.2,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI} for reference mode`);
-      return callGroqCompoundMini(`Search the web and answer: "${query}"`, systemPrompt);
-    }
-    throw new Error(`Groq reference search error ${res.status}: ${body}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
-  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
-  const usedWebSearch = executedTools.some(
-    (t: { type: string }) => t.type === "web_search" || t.type === "visit_website"
-  );
-  return { content, usedWebSearch };
-}
-
-Rules:
-- Start with 1-2 concept screens, then 1-2 examples, then at least 2 questions
-- Base content on what you find via web search
-- Questions must have exactly one correct answer (A/B/C/D)`;
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: COMPOUND_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: userContent },
-      ],
-      max_tokens: 3000,
-      temperature: 0.3,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    // Fallback to mini if compound unavailable
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI}`);
-      return callGroqCompoundMini(userContent, systemPrompt);
-    }
-    throw new Error(`Groq compound error ${res.status}: ${body}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
-  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
-  const usedWebSearch = executedTools.some(
-    (t: { type: string }) => t.type === "web_search" || t.type === "visit_website"
   );
 
-  return { content, usedWebSearch };
-}
-
-async function callGroqCompoundMini(userContent: string, systemPrompt: string): Promise<{
-  content: string;
-  usedWebSearch: boolean;
-}> {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: COMPOUND_MINI,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: userContent },
-      ],
-      max_tokens: 3000,
-      temperature: 0.3,
-    }),
-  });
-
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Groq compound-mini error ${res.status}: ${body}`);
+    throw new Error(`Gemini search error ${res.status}: ${body}`);
   }
 
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
-  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
-  const usedWebSearch = executedTools.some(
-    (t: { type: string }) => t.type === "web_search"
+  const parts: Array<{ text?: string }> = data?.candidates?.[0]?.content?.parts || [];
+  const content = parts.map((p) => p.text || "").join("").trim();
+
+  // Detect whether web search grounding was used
+  const groundingMetadata = data?.candidates?.[0]?.groundingMetadata;
+  const usedWebSearch = Boolean(
+    Array.isArray(groundingMetadata?.webSearchQueries) &&
+    groundingMetadata.webSearchQueries.length > 0
   );
 
   return { content, usedWebSearch };
@@ -267,25 +145,74 @@ serve(async (req: Request) => {
       });
     }
 
-    if (!GROQ_API_KEY) {
-      return new Response(JSON.stringify({ error: "GROQ_API_KEY not configured" }), {
+    if (!GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: "GEMINI_API_KEY not configured" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     if (normalizedMode === "reference" || normalizedMode === "search") {
+      const requestedQuotes = Math.max(1, Math.min(6, Number(quote_count) || 3));
+      const systemPrompt = `You are a research assistant with web browsing.
+Search the web for up-to-date sources about the user's query and return ONLY valid JSON:
+{
+  "summary": "A concise 4-8 sentence answer grounded in sources.",
+  "quotes": [
+    {
+      "quote": "Short direct quote (<= 180 chars)",
+      "title": "Source title",
+      "url": "https://...",
+      "source": "Publisher/site name"
+    }
+  ],
+  "sources": [
+    { "title": "Source title", "url": "https://..." }
+  ]
+}
+
+Rules:
+- Include exactly ${requestedQuotes} quotes when possible.
+- Quotes must be verbatim snippets from the source.
+- Prioritize reputable primary sources.
+- Do not include markdown fences or extra prose.`;
+
       console.log(`[search-lesson] Generating web references for: ${effectiveQuery}`);
-      const { content, usedWebSearch } = await callGroqReferenceSearch(effectiveQuery, quote_count);
+      const { content, usedWebSearch } = await callGeminiSearch(
+        systemPrompt,
+        `Search the web and answer: "${effectiveQuery}"`,
+        2200,
+      );
       const { summary, quotes, sources } = parseReferenceResponse(content);
       return new Response(JSON.stringify({ summary, quotes, sources, usedWebSearch, mode: "reference" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    const systemPrompt = `You are an expert educator. A student wants to learn about a topic.
+Search the web for accurate, up-to-date information about the topic, then create a structured educational lesson.
+
+Return ONLY a valid JSON object (no markdown fences, no prose outside JSON):
+{
+  "report": "A 300-400 word educational summary of the topic in clear plain text, based on your web search",
+  "screens": [
+    5-7 lesson screens in this exact format:
+    concept screens: { "type": "concept", "content": "2-3 sentences" }
+    example screens: { "type": "example", "content": "worked example", "annotation": "brief note" }
+    question screens: { "type": "question", "question": "...", "options": {"A":"..","B":"..","C":"..","D":".."}, "correct": "A", "hint": "..." }
+  ]
+}
+
+Rules:
+- Start with 1-2 concept screens, then 1-2 examples, then at least 2 questions
+- Base content on what you find via web search
+- Questions must have exactly one correct answer (A/B/C/D)`;
+
     console.log(`[search-lesson] Generating web search lesson for: ${effectiveQuery}`);
-    const userContent = `Search the web and create an educational lesson about: "${effectiveQuery}"`;
-    const { content, usedWebSearch } = await callGroqCompound(userContent);
+    const { content, usedWebSearch } = await callGeminiSearch(
+      systemPrompt,
+      `Search the web and create an educational lesson about: "${effectiveQuery}"`,
+    );
     const { report, screens } = parseLessonResponse(content);
     console.log(`[search-lesson] Done. usedWebSearch=${usedWebSearch}, screens=${screens.length}`);
     return new Response(JSON.stringify({ report, screens, usedWebSearch, mode: "lesson" }), {

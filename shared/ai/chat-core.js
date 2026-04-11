@@ -1,15 +1,15 @@
 // Shared chat orchestration core used by both Vercel (Node) and Supabase Edge (Deno).
 // Keep this file runtime-agnostic (Web APIs only).
 
-export const CORE_VERSION = "chat-core-v1-2026-03-27";
+export const CORE_VERSION = "chat-core-v2-2026-04-11";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
-export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
-export const BACKUP_MODEL         = "openai/gpt-oss-20b";
-export const FAST_MODEL           = "llama-3.1-8b-instant";
+export const PRIMARY_MODEL        = "gemini-2.0-flash";
+export const CONVERSATIONAL_MODEL = "gemini-2.0-flash";
+export const BACKUP_MODEL         = "gemini-1.5-flash";
+export const FAST_MODEL           = "gemini-1.5-flash-8b";
 
-const GROQ_CIRCUIT = {
+const GEMINI_CIRCUIT = {
   openedUntilMs: 0,
   spikes: [],
 };
@@ -831,8 +831,79 @@ function withNullableOptionals(tools) {
   });
 }
 
-/* ── Groq chat + function calling ── */
-export async function callGroq(
+/* ── Gemini format helpers ── */
+
+/**
+ * Converts OpenAI-format tool definitions to Gemini functionDeclarations format.
+ * Uppercases JSON Schema type values as required by the Gemini API.
+ */
+function openaiToolsToGemini(tools) {
+  function upTypes(schema) {
+    if (!schema || typeof schema !== "object") return schema;
+    const s = { ...schema };
+    if (typeof s.type === "string") s.type = s.type.toUpperCase();
+    if (s.properties && typeof s.properties === "object") {
+      s.properties = Object.fromEntries(
+        Object.entries(s.properties).map(([k, v]) => [k, upTypes(v)])
+      );
+    }
+    if (s.items) s.items = upTypes(s.items);
+    return s;
+  }
+  return [{
+    functionDeclarations: tools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      parameters: upTypes(t.function.parameters),
+    })),
+  }];
+}
+
+/**
+ * Converts OpenAI-format messages array to Gemini contents format.
+ * Maps "assistant" role → "model" role as required by Gemini.
+ */
+function openaiMessagesToGemini(messages) {
+  return messages
+    .map((m) => ({
+      role: m.role === "assistant" ? "model" : m.role,
+      parts: [{ text: typeof m.content === "string" ? m.content.trim() : "" }],
+    }))
+    .filter((m) => m.parts[0].text);
+}
+
+/**
+ * Converts a Gemini generateContent response to the OpenAI-shaped object
+ * that parseLlmResponse() expects, so the rest of the app is unchanged.
+ */
+function geminiToOpenAI(geminiData) {
+  const candidate = geminiData?.candidates?.[0];
+  if (!candidate) return { choices: [{ message: { content: "", tool_calls: [] } }] };
+  const parts = candidate.content?.parts || [];
+  const text = parts.filter((p) => p.text != null).map((p) => p.text).join("");
+  const toolCalls = parts
+    .filter((p) => p.functionCall != null)
+    .map((p, i) => ({
+      id: `fc_${i}`,
+      type: "function",
+      function: {
+        name: p.functionCall.name,
+        arguments: JSON.stringify(p.functionCall.args || {}),
+      },
+    }));
+  return {
+    choices: [{
+      message: {
+        content: text || null,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      },
+      finish_reason: candidate.finishReason || "STOP",
+    }],
+  };
+}
+
+/* ── Gemini chat + function calling ── */
+export async function callGemini(
   apiKey,
   model,
   systemPrompt,
@@ -857,7 +928,7 @@ export async function callGroq(
 
   const routeType = options?.routeType || (isContentGen ? "content_gen" : "conversational");
   const selectedPrimary = routeType === "conversational" ? CONVERSATIONAL_MODEL : model;
-  const selectedBackup = routeType === "conversational" ? (backupModel || null) : (backupModel || null);
+  const selectedBackup = backupModel || null;
 
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
@@ -865,35 +936,31 @@ export async function callGroq(
 
   function noteSpike(statusCode) {
     const now = Date.now();
-    GROQ_CIRCUIT.spikes = GROQ_CIRCUIT.spikes.filter((ts) => now - ts <= 60000);
+    GEMINI_CIRCUIT.spikes = GEMINI_CIRCUIT.spikes.filter((ts) => now - ts <= 60000);
     if (statusCode === 429 || statusCode >= 500) {
-      GROQ_CIRCUIT.spikes.push(now);
-      if (GROQ_CIRCUIT.spikes.length >= 4) {
-        GROQ_CIRCUIT.openedUntilMs = now + 15000;
+      GEMINI_CIRCUIT.spikes.push(now);
+      if (GEMINI_CIRCUIT.spikes.length >= 4) {
+        GEMINI_CIRCUIT.openedUntilMs = now + 15000;
       }
     }
   }
 
   function resetCircuit() {
-    GROQ_CIRCUIT.spikes = [];
-    GROQ_CIRCUIT.openedUntilMs = 0;
+    GEMINI_CIRCUIT.spikes = [];
+    GEMINI_CIRCUIT.openedUntilMs = 0;
   }
 
-  // Inner attempt: builds the request for a specific model and runs it with budget-aware retries.
+  // Inner attempt: builds the Gemini request for a specific model and runs it with budget-aware retries.
   async function attempt(mdl) {
-    // Prompt-caching: when staticSystemPrompt + dynamicContext are provided separately,
-    // the static policy becomes a single unchanging system message (Groq can cache it
-    // alongside the tool definitions). The dynamic per-user context is sent as a second
-    // system message so it doesn't pollute the cached prefix.
+    // Combine static + dynamic system prompts into one Gemini systemInstruction
     const staticPrompt = options?.staticSystemPrompt;
     const dynamicContext = options?.dynamicContext;
-    const groqMessages = staticPrompt
-      ? [
-          { role: "system", content: staticPrompt },
-          { role: "system", content: dynamicContext || "" },
-        ]
-      : [{ role: "system", content: systemPrompt }];
+    const combinedSystem = staticPrompt
+      ? [staticPrompt, dynamicContext || ""].filter(Boolean).join("\n\n")
+      : (systemPrompt || "");
 
+    // Build Gemini contents — all Gemini models support vision natively via inlineData
+    let geminiContents;
     if (imageBase64) {
       const effectiveMime = imageMimeType || "image/jpeg";
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
@@ -901,36 +968,33 @@ export async function callGroq(
         lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
           ? lastUser.content.trim()
           : "What do you see in this image?";
-      groqMessages.push({
+      geminiContents = [{
         role: "user",
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: `data:${effectiveMime};base64,${imageBase64}` },
-          },
-          { type: "text", text: textContent },
+        parts: [
+          { inlineData: { mimeType: effectiveMime, data: imageBase64 } },
+          { text: textContent },
         ],
-      });
+      }];
     } else {
-      for (const m of messages) {
-        const text = typeof m.content === "string" ? m.content.trim() : "";
-        if (text) groqMessages.push({ role: m.role, content: text });
-      }
+      geminiContents = openaiMessagesToGemini(messages);
     }
 
-    // Vision requests always use the vision-capable model regardless of mdl
-    const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : mdl;
     const body = {
-      model: effectiveModel,
-      messages: groqMessages,
-      max_tokens: maxTokens,
+      contents: geminiContents,
+      generationConfig: { maxOutputTokens: maxTokens },
     };
+    if (combinedSystem) {
+      body.systemInstruction = { parts: [{ text: combinedSystem }] };
+    }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-    const effectiveTools = rawTools ? withNullableOptionals(rawTools) : null;
-    if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
-      body.tools = effectiveTools;
-      body.tool_choice = toolChoiceOverride;
+    if (rawTools && rawTools.length > 0 && !imageBase64) {
+      body.tools = openaiToolsToGemini(rawTools);
+      body.toolConfig = {
+        functionCallingConfig: {
+          mode: toolChoiceOverride === "required" ? "ANY" : "AUTO",
+        },
+      };
     }
 
     // Retry loop: capped by both retry count and remaining budget.
@@ -938,12 +1002,12 @@ export async function callGroq(
     const MIN_REMAINING_FOR_RETRY_MS = 900;
     let res;
     for (let i = 0; i <= MAX_RETRIES; i++) {
-      if (Date.now() < GROQ_CIRCUIT.openedUntilMs) {
-        throw new Error(`Groq circuit open until ${new Date(GROQ_CIRCUIT.openedUntilMs).toISOString()}`);
+      if (Date.now() < GEMINI_CIRCUIT.openedUntilMs) {
+        throw new Error(`Gemini circuit open until ${new Date(GEMINI_CIRCUIT.openedUntilMs).toISOString()}`);
       }
       const remaining = remainingBudgetMs();
       if (remaining <= MIN_REMAINING_FOR_RETRY_MS) {
-        throw new Error(`Groq ${mdl} budget exhausted (${budgetMs}ms)`);
+        throw new Error(`Gemini ${mdl} budget exhausted (${budgetMs}ms)`);
       }
       metrics.attempt_count += 1;
       const controller = new AbortController();
@@ -952,20 +1016,20 @@ export async function callGroq(
         Math.max(700, Math.min(remaining - 250, 8000))
       );
       try {
-        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
+        res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${mdl}:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          }
+        );
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === "AbortError") {
           noteSpike(503);
-          throw new Error(`Groq ${mdl} request timed out within budget (${budgetMs}ms)`);
+          throw new Error(`Gemini ${mdl} request timed out within budget (${budgetMs}ms)`);
         }
         throw err;
       }
@@ -977,14 +1041,14 @@ export async function callGroq(
 
       if (res.status === 429 && i < MAX_RETRIES) {
         const errBody = await res.text().catch(() => "");
-        const retryMatch = errBody.match(/try again in ([\d.]+)s/i);
+        const retryMatch = errBody.match(/retryDelay[^\d]*(\d+)/i);
         const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 8) : Math.min((2 ** i) * 0.8, 8);
         const waitMs = Math.floor(waitSec * 1000);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
-          throw new Error(`Groq ${mdl} rate limited with insufficient budget to retry`);
+          throw new Error(`Gemini ${mdl} rate limited with insufficient budget to retry`);
         }
         metrics.retry_wait_ms_total += waitMs;
-        console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
+        console.warn(`Gemini 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
@@ -993,36 +1057,16 @@ export async function callGroq(
         const waitMs = Math.min(300 * (2 ** i), 2500);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
           const errText = await res.text().catch(() => "");
-          throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+          throw new Error(`Gemini ${mdl} error ${res.status}: ${errText}`);
         }
         metrics.retry_wait_ms_total += waitMs;
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
 
-      // Recover from Groq's malformed tool call errors (400 tool_use_failed)
-      if (res.status === 400) {
-        const errText = await res.text().catch(() => "");
-        let errData;
-        try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
-
-        if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
-          const recovered = parseFailedGeneration(errData.error.failed_generation);
-          if (recovered.length > 0) {
-            const syntheticToolCalls = recovered.map((r, k) => ({
-              id: `recovered_${k}`,
-              type: "function",
-              function: { name: r.name, arguments: JSON.stringify(r.arguments) },
-            }));
-            return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
-          }
-        }
-        throw new Error(`Groq ${mdl} error 400: ${errText.slice(0, 200)}`);
-      }
-
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+        throw new Error(`Gemini ${mdl} error ${res.status}: ${errText}`);
       }
       resetCircuit();
       break;
@@ -1030,24 +1074,24 @@ export async function callGroq(
 
     const data = await res.json();
     return {
-      ...parseLlmResponse(data),
-      model_used: effectiveModel,
+      ...parseLlmResponse(geminiToOpenAI(data)),
+      model_used: mdl,
     };
   }
 
   // Try primary model; fall back to backupModel on hard errors OR empty responses.
-  // Universal final safety-net: FAST_MODEL (llama-3.1-8b-instant).
+  // Universal final safety-net: FAST_MODEL.
   const canUseFastFallback = FAST_MODEL && FAST_MODEL !== selectedPrimary && FAST_MODEL !== selectedBackup;
   try {
     let result = await attempt(selectedPrimary);
     if (!result.content && result.actions.length === 0 && selectedBackup && selectedBackup !== selectedPrimary) {
       metrics.fallback_used = true;
-      console.warn(`[callGroq] Primary model (${selectedPrimary}) returned empty response — retrying with backup ${selectedBackup}`);
+      console.warn(`[callGemini] Primary model (${selectedPrimary}) returned empty response — retrying with backup ${selectedBackup}`);
       result = await attempt(selectedBackup);
     }
     if (!result.content && result.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
       metrics.fallback_used = true;
-      console.warn(`[callGroq] Backup path returned empty response — retrying with universal fallback ${FAST_MODEL}`);
+      console.warn(`[callGemini] Backup path returned empty response — retrying with universal fallback ${FAST_MODEL}`);
       result = await attempt(FAST_MODEL);
     }
     return { ...result, ...metrics };
@@ -1055,11 +1099,11 @@ export async function callGroq(
     let fallbackErr = primaryErr;
     if (selectedBackup && selectedBackup !== selectedPrimary && remainingBudgetMs() > 900) {
       metrics.fallback_used = true;
-      console.warn(`[callGroq] Primary model (${selectedPrimary}) failed: ${primaryErr.message} — retrying with backup ${selectedBackup}`);
+      console.warn(`[callGemini] Primary model (${selectedPrimary}) failed: ${primaryErr.message} — retrying with backup ${selectedBackup}`);
       try {
         const fallbackResult = await attempt(selectedBackup);
         if (!fallbackResult.content && fallbackResult.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
-          console.warn(`[callGroq] Backup model (${selectedBackup}) returned empty response — retrying with universal fallback ${FAST_MODEL}`);
+          console.warn(`[callGemini] Backup model (${selectedBackup}) returned empty response — retrying with universal fallback ${FAST_MODEL}`);
           const fastResult = await attempt(FAST_MODEL);
           return { ...fastResult, ...metrics };
         }
@@ -1070,7 +1114,7 @@ export async function callGroq(
     }
     if (canUseFastFallback && remainingBudgetMs() > 900) {
       metrics.fallback_used = true;
-      console.warn(`[callGroq] Fallback chain failed (${fallbackErr.message}) — retrying with universal fallback ${FAST_MODEL}`);
+      console.warn(`[callGemini] Fallback chain failed (${fallbackErr.message}) — retrying with universal fallback ${FAST_MODEL}`);
       const fastResult = await attempt(FAST_MODEL);
       return { ...fastResult, ...metrics };
     }
@@ -1079,13 +1123,13 @@ export async function callGroq(
 }
 
 /**
- * Single-shot streaming call to Groq.
+ * Single-shot streaming call to Gemini.
  * Calls `onTextDelta(chunk)` for each text token as it arrives.
- * Tool-call tokens are accumulated silently — they are never passed to onTextDelta,
+ * Function-call parts are accumulated silently — they are never passed to onTextDelta,
  * so raw JSON is never shown in the chat window.
  * Returns a full ParsedLlmResponse when the stream ends.
  */
-export async function callGroqStream(
+export async function callGeminiStream(
   apiKey,
   model,
   systemPrompt,
@@ -1098,17 +1142,17 @@ export async function callGroqStream(
 ) {
   const backupModel = options?.backupModel || null;
   try {
-    return await _callGroqStreamInner(apiKey, model, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, options);
+    return await _callGeminiStreamInner(apiKey, model, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, options);
   } catch (err) {
     if (backupModel && backupModel !== model) {
-      console.warn(`[callGroqStream] ${model} failed (${err.message}) — retrying with ${backupModel}`);
-      return _callGroqStreamInner(apiKey, backupModel, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, { ...options, backupModel: null });
+      console.warn(`[callGeminiStream] ${model} failed (${err.message}) — retrying with ${backupModel}`);
+      return _callGeminiStreamInner(apiKey, backupModel, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, { ...options, backupModel: null });
     }
     throw err;
   }
 }
 
-async function _callGroqStreamInner(
+async function _callGeminiStreamInner(
   apiKey,
   model,
   systemPrompt,
@@ -1121,52 +1165,46 @@ async function _callGroqStreamInner(
 ) {
   const staticPrompt = options?.staticSystemPrompt;
   const dynamicContext = options?.dynamicContext;
-  const groqMessages = staticPrompt
-    ? [
-        { role: "system", content: staticPrompt },
-        { role: "system", content: dynamicContext || "" },
-      ]
-    : [{ role: "system", content: systemPrompt }];
+  const combinedSystem = staticPrompt
+    ? [staticPrompt, dynamicContext || ""].filter(Boolean).join("\n\n")
+    : (systemPrompt || "");
 
-  for (const m of messages) {
-    const text = typeof m.content === "string" ? m.content.trim() : "";
-    if (text) groqMessages.push({ role: m.role, content: text });
-  }
-
-  const effectiveTools = tools ? withNullableOptionals(tools) : null;
+  const geminiContents = openaiMessagesToGemini(messages);
   const body = {
-    model,
-    messages: groqMessages,
-    max_tokens: maxTokens,
-    stream: true,
+    contents: geminiContents,
+    generationConfig: { maxOutputTokens: maxTokens },
   };
-  if (effectiveTools && effectiveTools.length > 0) {
-    body.tools = effectiveTools;
-    body.tool_choice = toolChoice || "auto";
+  if (combinedSystem) {
+    body.systemInstruction = { parts: [{ text: combinedSystem }] };
+  }
+  if (tools && tools.length > 0) {
+    body.tools = openaiToolsToGemini(tools);
+    body.toolConfig = {
+      functionCallingConfig: { mode: toolChoice === "required" ? "ANY" : "AUTO" },
+    };
   }
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${apiKey}&alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} stream error ${res.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Gemini ${model} stream error ${res.status}: ${errText.slice(0, 200)}`);
   }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let accumulatedText = "";
-  // tool_calls[index] → { id, name, argumentsRaw }
-  const toolCallMap = {};
+  const functionCalls = []; // Collect function call parts silently
   let finishReason = null;
-
   let buffer = "";
+
   outer: while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -1180,37 +1218,29 @@ async function _callGroqStreamInner(
       if (payload === "[DONE]") break outer;
       let chunk;
       try { chunk = JSON.parse(payload); } catch (_) { continue; }
-      const choice = chunk.choices?.[0];
-      if (!choice) continue;
-      if (choice.finish_reason) finishReason = choice.finish_reason;
-      const delta = choice.delta;
-      if (!delta) continue;
-
-      // Text delta — send to caller for live rendering
-      if (typeof delta.content === "string" && delta.content) {
-        accumulatedText += delta.content;
-        if (typeof onTextDelta === "function") onTextDelta(delta.content);
-      }
-
-      // Tool-call delta — accumulate silently, never surfaced to onTextDelta
-      if (Array.isArray(delta.tool_calls)) {
-        for (const tcDelta of delta.tool_calls) {
-          const idx = tcDelta.index ?? 0;
-          if (!toolCallMap[idx]) {
-            toolCallMap[idx] = { id: tcDelta.id || `tc_${idx}`, name: "", argumentsRaw: "" };
-          }
-          if (tcDelta.function?.name) toolCallMap[idx].name += tcDelta.function.name;
-          if (tcDelta.function?.arguments) toolCallMap[idx].argumentsRaw += tcDelta.function.arguments;
+      const candidate = chunk.candidates?.[0];
+      if (!candidate) continue;
+      if (candidate.finishReason) finishReason = candidate.finishReason;
+      const parts = candidate.content?.parts || [];
+      for (const part of parts) {
+        // Text parts — send to caller for live rendering
+        if (typeof part.text === "string" && part.text) {
+          accumulatedText += part.text;
+          if (typeof onTextDelta === "function") onTextDelta(part.text);
+        }
+        // Function call parts — accumulate silently, never surfaced to onTextDelta
+        if (part.functionCall) {
+          functionCalls.push(part.functionCall);
         }
       }
     }
   }
 
-  // Reconstruct a Groq-compatible response object and parse it
-  const toolCalls = Object.values(toolCallMap).map((tc) => ({
-    id: tc.id,
+  // Reconstruct synthetic OpenAI-shaped response and parse it
+  const toolCalls = functionCalls.map((fc, i) => ({
+    id: `fc_${i}`,
     type: "function",
-    function: { name: tc.name, arguments: tc.argumentsRaw },
+    function: { name: fc.name, arguments: JSON.stringify(fc.args || {}) },
   }));
   const syntheticData = {
     choices: [{
