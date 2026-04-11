@@ -24,7 +24,7 @@ export type ParsedLlmResponse = {
   retry_wait_ms_total?: number;
   fallback_used?: boolean;
 };
-export type CallGroqRequest = {
+export type CallGeminiRequest = {
   apiKey: string;
   model: string;
   systemPrompt: string;
@@ -49,7 +49,7 @@ export const CONTENT_ACTION_TYPES: Set<string>;
 export const CONTENT_ACTION_TOOLS: any[];
 export function parseFailedGeneration(failedGen: string): Array<{ name: string; arguments: Record<string, unknown> }>;
 export function parseLlmResponse(data: any): ParsedLlmResponse;
-export function callGroq(
+export function callGemini(
   apiKey: string,
   model: string,
   systemPrompt: string,
@@ -61,5 +61,16 @@ export function callGroq(
   toolsOverride?: any[] | null,
   toolChoiceOverride?: "auto" | "required",
   backupModel?: string | null,
-  options?: CallGroqRequest["options"],
+  options?: CallGeminiRequest["options"],
+): Promise<ParsedLlmResponse>;
+export function callGeminiStream(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  maxTokens?: number,
+  tools?: any[] | null,
+  toolChoice?: "auto" | "required",
+  onTextDelta?: (chunk: string) => void,
+  options?: CallGeminiRequest["options"] & { backupModel?: string | null },
 ): Promise<ParsedLlmResponse>;

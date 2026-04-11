@@ -1,8 +1,8 @@
 import {
   ACTION_TOOLS,
   BACKUP_MODEL,
-  callGroq,
-  callGroqStream,
+  callGemini,
+  callGeminiStream,
   CONTENT_ACTION_TOOLS,
   CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
@@ -12,7 +12,7 @@ import {
 } from "../shared/ai/chat-core.js";
 
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
-// Reads ANTHROPIC_API_KEY, GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
+// Reads GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -184,7 +184,7 @@ export default async function handler(req, res) {
     return res.status(200).end("ok");
   }
 
-  const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -201,10 +201,10 @@ export default async function handler(req, res) {
   try {
     const body = req.body;
 
-    // ── Voice transcription path (Groq Whisper) ──
+    // ── Voice transcription path (Gemini audio) ──
     if (body.mode === "voice") {
-      if (!GROQ_API_KEY) {
-        return res.status(500).json({ error: "GROQ_API_KEY not configured" });
+      if (!GEMINI_API_KEY) {
+        return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
       }
       const { audioBase64, audioMimeType } = body;
       if (!audioBase64) {
@@ -212,45 +212,39 @@ export default async function handler(req, res) {
       }
 
       const effectiveMime = audioMimeType || "audio/webm";
-      const audioExt = effectiveMime.includes("mp4") || effectiveMime.includes("aac")
-        ? "m4a"
-        : effectiveMime.includes("ogg")
-        ? "ogg"
-        : effectiveMime.includes("mp3")
-        ? "mp3"
-        : "webm";
-      const audioBuffer = Buffer.from(audioBase64, "base64");
-      const audioBlob = new Blob([audioBuffer], { type: effectiveMime });
-      const audioFile = new File([audioBlob], `voice.${audioExt}`, { type: effectiveMime });
-
-      const groqForm = new FormData();
-      groqForm.append("file", audioFile, `voice.${audioExt}`);
-      groqForm.append("model", "whisper-large-v3-turbo");
-      groqForm.append("response_format", "json");
-      groqForm.append("language", "en");
-
-      const groqRes = await fetch(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
+      const geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-          body: groqForm,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: effectiveMime, data: audioBase64 } },
+                { text: "Transcribe this audio recording. Return only the spoken words, nothing else." },
+              ],
+            }],
+            generationConfig: { maxOutputTokens: 1024 },
+          }),
         }
       );
 
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        console.error("Groq Whisper error:", groqRes.status, errText);
-        return res.status(groqRes.status).json({ error: "Transcription failed", details: errText });
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        console.error("Gemini transcription error:", geminiRes.status, errText);
+        return res.status(geminiRes.status).json({ error: "Transcription failed", details: errText });
       }
 
-      const whisperResult = await groqRes.json();
-      return res.status(200).json({ text: whisperResult.text || "" });
+      const geminiResult = await geminiRes.json();
+      const parts = geminiResult?.candidates?.[0]?.content?.parts || [];
+      const text = parts.map((p) => p.text || "").join("").trim();
+      return res.status(200).json({ text });
     }
 
-    // ── Chat completion path (Groq) ──
-    if (!GROQ_API_KEY) {
-      return res.status(500).json({ error: "GROQ_API_KEY not configured" });
+    // ── Chat completion path (Gemini) ──
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
     }
 
     const {
@@ -297,8 +291,8 @@ export default async function handler(req, res) {
       const llmStartedAt = Date.now();
       // tool_fallback only needs a short clarifying question — use FAST_MODEL directly
       // (bypasses conversational routing which would select CONVERSATIONAL_MODEL).
-      const fallbackResult = await callGroq(
-        GROQ_API_KEY,
+      const fallbackResult = await callGemini(
+        GEMINI_API_KEY,
         FAST_MODEL,
         `${systemPrompt || ""}\n\nWhen tool execution fails, ask a targeted clarification question.`,
         followupMessages,
@@ -392,7 +386,7 @@ export default async function handler(req, res) {
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context
-    // so the static policy stays identical across all requests (Groq can cache it).
+    // so the static policy stays identical across all requests.
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
     stageTimings.prompt_build_ms = Date.now() - promptBuildStartedAt;
 
@@ -404,7 +398,7 @@ export default async function handler(req, res) {
     };
 
     // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
+    // not regex-gated detection. Gemini handles chat + tool calling in one pass.
     const llmStartedAt = Date.now();
 
     // Streaming path: only for conversational (non-content-gen, non-image) requests.
@@ -416,8 +410,8 @@ export default async function handler(req, res) {
       res.setHeader("Connection", "keep-alive");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.flushHeaders(); // send headers immediately so the client can start reading
-      const streamResult = await callGroqStream(
-        GROQ_API_KEY,
+      const streamResult = await callGeminiStream(
+        GEMINI_API_KEY,
         CONVERSATIONAL_MODEL,
         effectiveSystemPrompt,
         messages,
@@ -448,8 +442,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const result = await callGroq(
-      GROQ_API_KEY,
+    const result = await callGemini(
+      GEMINI_API_KEY,
       PRIMARY_MODEL,
       effectiveSystemPrompt,
       messages,

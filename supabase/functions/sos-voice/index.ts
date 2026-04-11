@@ -13,10 +13,10 @@ serve(async (req: Request) => {
   }
 
   try {
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    if (!GROQ_API_KEY) {
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "GROQ_API_KEY not configured" }),
+        JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -32,43 +32,51 @@ serve(async (req: Request) => {
       );
     }
 
-    // Forward to Groq Whisper API
-    const groqForm = new FormData();
-    groqForm.append("file", audioFile, audioFile.name || "audio.webm");
-    groqForm.append("model", "whisper-large-v3-turbo");
-    groqForm.append("response_format", "json");
-    groqForm.append("language", "en");
+    // Convert file to base64 for Gemini inlineData
+    const audioBytes = await audioFile.arrayBuffer();
+    const audioBase64 = btoa(String.fromCharCode(...new Uint8Array(audioBytes)));
+    const effectiveMime = audioFile.type || "audio/webm";
 
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/audio/transcriptions",
+    // Transcribe via Gemini audio understanding
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
-        body: groqForm,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: effectiveMime, data: audioBase64 } },
+              { text: "Transcribe this audio recording. Return only the spoken words, nothing else." },
+            ],
+          }],
+          generationConfig: { maxOutputTokens: 1024 },
+        }),
       }
     );
 
-    if (!groqResponse.ok) {
-      const errText = await groqResponse.text();
-      console.error("Groq Whisper error:", groqResponse.status, errText);
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error("Gemini transcription error:", geminiRes.status, errText);
       return new Response(
         JSON.stringify({ error: "Transcription failed", details: errText }),
-        { status: groqResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: geminiRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const result = await groqResponse.json();
+    const data = await geminiRes.json();
+    const parts: Array<{ text?: string }> = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.map((p) => p.text || "").join("").trim();
 
     return new Response(
-      JSON.stringify({ text: result.text || "" }),
+      JSON.stringify({ text }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("Voice transcription error:", err);
     return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
+      JSON.stringify({ error: (err as Error).message || "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
