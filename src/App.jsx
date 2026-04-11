@@ -563,6 +563,8 @@ async function migrateLocalStorage(userId) {
    ═══════════════════════════════════════════════ */
 const SYSTEM_PROMPT_VERSION = 'sos-policy-v2';
 const SYSTEM_PROMPT_CHAR_BUDGET = 7000;
+const CONVERSATIONAL_CONTEXT_TOKEN_MAX = 100;
+const CONVERSATIONAL_CONTEXT_CHAR_BUDGET = Math.floor(CONVERSATIONAL_CONTEXT_TOKEN_MAX * 3.8); // keep under ~100 tokens with buffer
 const CONTEXT_SECTION_BUDGETS = {
   tasks: 1800,
   events: 800,
@@ -704,7 +706,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const notesBudget = actionFocusedPrompt ? 700 : CONTEXT_SECTION_BUDGETS.notes;
   const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
 
-  const dynamicSections = [
+  const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
     '',
@@ -733,7 +735,18 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     '- intent_type: ' + intentType,
   ].filter(Boolean).join('\n');
 
-  const contextBlock = truncateWithEllipsis(dedupeRepeatedLines(dynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
+  const conversationalDynamicSections = [
+    'DYNAMIC CONTEXT:',
+    'TODAY: ' + todayStr,
+    'TASKS: ' + activeTasks.length + (overdueTasks.length > 0 ? ` active (${overdueTasks.length} overdue)` : ' active'),
+    'UPCOMING EVENTS: ' + upcomingEvents.length,
+    'WORKSPACE: ' + workspaceContext,
+    'MODE: tutor=' + (tutorMode ? 'ON' : 'OFF'),
+  ].join('\n');
+
+  const contextBlock = intentType === 'chat'
+    ? truncateWithEllipsis(dedupeRepeatedLines(conversationalDynamicSections), CONVERSATIONAL_CONTEXT_CHAR_BUDGET)
+    : truncateWithEllipsis(dedupeRepeatedLines(fullDynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
 
   const stablePolicyTier1 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 You are SOS, a supportive study sidekick. Keep replies casual, brief (2-3 sentences), and never condescending.
