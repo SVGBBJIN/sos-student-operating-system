@@ -413,7 +413,7 @@ export default async function handler(req, res) {
     const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context

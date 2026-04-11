@@ -268,7 +268,7 @@ serve(async (req: Request) => {
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
 
