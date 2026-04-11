@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
-import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, SEARCH_LESSON_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -561,14 +561,31 @@ async function migrateLocalStorage(userId) {
 /* ═══════════════════════════════════════════════
    SOS SYSTEM PROMPT BUILDER
    ═══════════════════════════════════════════════ */
-const SYSTEM_PROMPT_VERSION = 'sos-policy-v2';
-const SYSTEM_PROMPT_CHAR_BUDGET = 7000;
+const SYSTEM_PROMPT_VERSION = 'sos-policy-v3-modular';
+const SYSTEM_PROMPT_CHAR_BUDGET = 3200;
+const CONVERSATIONAL_CONTEXT_TOKEN_MAX = 100;
+const CONVERSATIONAL_CONTEXT_CHAR_BUDGET = Math.floor(CONVERSATIONAL_CONTEXT_TOKEN_MAX * 3.8); // keep under ~100 tokens with buffer
 const CONTEXT_SECTION_BUDGETS = {
-  tasks: 1800,
-  events: 800,
-  week: 1000,
-  notes: 2000,
+  tasks: 900,
+  events: 500,
+  week: 700,
+  notes: 900,
   schedule: 600,
+};
+
+const POLICY_MODULES = {
+  core: 'You are SOS — a concise, supportive study companion. No condescension.',
+  no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
+  workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
+  clarification: 'If required fields are missing, call ask_clarification before any action.',
+  clarification_style: 'Clarifications can be text-box-only (empty options). Keep wording natural and specific.',
+  action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
+  planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
+  corrections: '"actually / wait / I meant / oops" updates the latest related item.',
+  web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
+  content_gen: 'Content-gen requests must return canonical typed actions only.',
+  date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
+  vision: 'For image input, describe what is visible first, then extract actionable details.',
 };
 
 function estimateInputTokens(text = '') {
@@ -624,6 +641,8 @@ function dedupeRepeatedLines(blockText = '') {
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const tutorMode = !!options.tutorMode;
   const workspaceContext = options.workspaceContext || 'chat';
+  const intentType = options.intentType || 'chat';
+  const actionFocusedPrompt = intentType === 'action';
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
@@ -694,14 +713,15 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
     sorted.forEach(n => {
       const src = n.source === 'pdf' ? 'PDF' : n.source === 'google_docs' ? 'Google Doc' : 'study material';
-      const preview = truncateWithEllipsis((n.content || '').replace(/\s+/g, ' ').trim(), 500);
+      const preview = truncateWithEllipsis((n.content || '').replace(/\s+/g, ' ').trim(), actionFocusedPrompt ? 180 : 500);
       noteLines.push('- ' + n.name + ' (' + src + '): ' + preview);
     });
   }
 
+  const notesBudget = actionFocusedPrompt ? 700 : CONTEXT_SECTION_BUDGETS.notes;
   const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
 
-  const dynamicSections = [
+  const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
     '',
@@ -722,14 +742,26 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     '',
     'NOTES INDEX: ' + noteNames,
     'NOTES PREVIEWS (budgeted):',
-    capLines(noteLines, CONTEXT_SECTION_BUDGETS.notes, 'note previews') || '(none)',
+    capLines(noteLines, notesBudget, 'note previews') || '(none)',
     '',
     'MODE FLAGS:',
     '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
     '- workspace_context: ' + workspaceContext,
+    '- intent_type: ' + intentType,
   ].filter(Boolean).join('\n');
 
-  const contextBlock = truncateWithEllipsis(dedupeRepeatedLines(dynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
+  const conversationalDynamicSections = [
+    'DYNAMIC CONTEXT:',
+    'TODAY: ' + todayStr,
+    'TASKS: ' + activeTasks.length + (overdueTasks.length > 0 ? ` active (${overdueTasks.length} overdue)` : ' active'),
+    'UPCOMING EVENTS: ' + upcomingEvents.length,
+    'WORKSPACE: ' + workspaceContext,
+    'MODE: tutor=' + (tutorMode ? 'ON' : 'OFF'),
+  ].join('\n');
+
+  const contextBlock = intentType === 'chat'
+    ? truncateWithEllipsis(dedupeRepeatedLines(conversationalDynamicSections), CONVERSATIONAL_CONTEXT_CHAR_BUDGET)
+    : truncateWithEllipsis(dedupeRepeatedLines(fullDynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
 
   const stablePolicyTier1 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 You are SOS, a supportive study sidekick. Keep replies casual, brief (2-3 sentences), and never condescending.
@@ -750,17 +782,33 @@ NOTES: ${noteNames}`;
     return { prompt, promptVersion: SYSTEM_PROMPT_VERSION, contextChars: dynamicTier1.length, estimatedInputTokens: estimateInputTokens(prompt) };
   }
 
+  const baseModules = [
+    POLICY_MODULES.core,
+    POLICY_MODULES.no_hallucination,
+    POLICY_MODULES.workspace,
+    POLICY_MODULES.clarification,
+    POLICY_MODULES.clarification_style,
+  ];
+  const intentModules = intentType === 'chat'
+    ? [
+        POLICY_MODULES.web_refs,
+      ]
+    : intentType === 'content_gen'
+      ? [
+          POLICY_MODULES.action_tools,
+          POLICY_MODULES.content_gen,
+          POLICY_MODULES.date_resolution,
+        ]
+      : [
+          POLICY_MODULES.action_tools,
+          POLICY_MODULES.planning_guardrails,
+          POLICY_MODULES.corrections,
+          POLICY_MODULES.web_refs,
+          POLICY_MODULES.date_resolution,
+          POLICY_MODULES.vision,
+        ];
   const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
-You are SOS — a chill, concise study companion.
-Voice: supportive friend, 2-4 sentence default, no condescension, no hallucinated schedule data.
-Planning guardrails: protect sleep (no work past 10pm), suggest decomposition for large tasks, rebalance overloaded days, and handle overdue tasks without guilt.
-Tools: if user gives explicit actionable details, call the matching tool; if ANY key field (title/date/time/subject) is missing or unnamed — including vague requests like "add a task" or "create an event" with no specifics — call ask_clarification FIRST. The title must be a specific name the student actually said; generic labels like "New task", "Task title", or "Event" are treated as missing and are never acceptable.
-Corrections: "actually / wait / I meant / oops" should update the latest related item.
-Notes/docs: use them as references when relevant; cite note names naturally.
-Workspace: prioritize workspace_context when useful (notes vs schedule vs chat).
-Image input: describe what is visible first, then extract assignments/dates when legible.
-Content generation requests (flashcards/quizzes/plans/outlines/summaries/project breakdowns) must return canonical tool actions only (typed payloads in actions[]).
-Date resolution: when resolving weekday references (e.g. "due Monday", "due Friday"), if today IS that weekday use today's date. Never resolve a weekday to a past date — always use the current or next upcoming occurrence.`;
+${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 
   const prompt = dedupeRepeatedLines(stablePolicyTier2 + '\n\n' + contextBlock);
   return {
@@ -860,47 +908,9 @@ function classifyMessageRegex(text) {
 
 /* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
 async function classifyMessage(text) {
-  try {
-    const session = await sb.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const classifyPrompt = `You are a message classifier for a student planner app. Classify the user message into exactly one category and return ONLY a JSON object.
-
-Categories:
-- CONTENT_GEN: Requests to create study materials — flashcards, outlines, summaries, study plans, quizzes, project breakdowns, review sheets, cheat sheets
-- NOTES_REF: Questions about the student's own notes, reference docs, PDFs, or looking things up in saved documents
-- ACTION: Any scheduling, task, event, block, calendar, or organizational request. Includes mentions of dates, times, school subjects, activities, verbs like add/delete/schedule/cancel/move, and slang equivalents
-- CHAT: General conversation, greetings, questions, or anything with no scheduling or content generation intent
-
-Return ONLY: {"category":"CONTENT_GEN"} or {"category":"NOTES_REF"} or {"category":"ACTION"} or {"category":"CHAT"}`;
-
-    const response = await fetch(EDGE_FN_URL, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({
-        systemPrompt:classifyPrompt,
-        messages:[{role:'user',content:text}],
-        maxTokens:32,
-        model:'llama-3.1-8b-instant',
-        provider:'groq',
-        isContentGen:false
-      })
-    });
-    if (!response.ok) throw new Error('Classification request failed');
-    const data = await response.json();
-    const raw = (data?.content || '').trim();
-    const jsonStr = raw.replace(/^```json?\s*/i,'').replace(/\s*```$/,'');
-    const result = JSON.parse(jsonStr);
-    switch (result.category) {
-      case 'CONTENT_GEN': return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
-      case 'NOTES_REF':   return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:2048 };
-      case 'ACTION':      return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-      // CHAT and all other categories also use GPT-OSS so every capability stays available
-      default:            return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-    }
-  } catch (e) {
-    console.warn('LLM classification failed, using regex fallback:', e);
-    return classifyMessageRegex(text);
-  }
+  // Deprecated: keep this wrapper to avoid dead-call confusion.
+  // We now use direct intent heuristics in sendMessage and always build tier-2 prompt.
+  return classifyMessageRegex(text);
 }
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
@@ -4610,6 +4620,59 @@ function App() {
             ]));
           }
           break;
+        case 'web_search_reference': {
+          const query = String(action.query || '').trim();
+          if (!query) break;
+          (async () => {
+            try {
+              const session = await sb.auth.getSession();
+              const token = session?.data?.session?.access_token;
+              const res = await fetch(SEARCH_LESSON_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY),
+                },
+                body: JSON.stringify({
+                  mode: 'reference',
+                  query,
+                  quote_count: Math.max(1, Math.min(6, Number(action.quote_count) || 3)),
+                }),
+              });
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData?.error || 'Web reference search failed');
+              }
+              const data = await res.json();
+              const summary = typeof data?.summary === 'string' ? data.summary.trim() : '';
+              const quotes = Array.isArray(data?.quotes) ? data.quotes : [];
+              const sources = Array.isArray(data?.sources) ? data.sources : [];
+              const quoteText = quotes.slice(0, 6).map((q, i) => {
+                const sourceLabel = q?.source || q?.title || q?.url || 'source';
+                const quote = String(q?.quote || '').trim();
+                return quote ? `${i + 1}) "${quote}" — ${sourceLabel}` : null;
+              }).filter(Boolean).join('\n');
+              const sourceText = sources.slice(0, 6).map((s, i) => {
+                const title = s?.title || s?.url || `Source ${i + 1}`;
+                return `- ${title}${s?.url ? ` (${s.url})` : ''}`;
+              }).join('\n');
+              const content = [
+                summary || `Here’s what I found for "${query}".`,
+                quoteText ? `\nQuotes:\n${quoteText}` : '',
+                sourceText ? `\nSources:\n${sourceText}` : '',
+              ].filter(Boolean).join('\n');
+              if (content.trim()) {
+                const assistantMsg = { role:'assistant', content:content.trim(), timestamp:Date.now() };
+                setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+                if (user) dbInsertChatMsg('assistant', assistantMsg.content, user.id);
+              }
+            } catch (err) {
+              console.error('web_search_reference failed:', err);
+              setToastMsg('Couldn\'t fetch web references right now.');
+            }
+          })();
+          break;
+        }
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
@@ -5250,7 +5313,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, { tutorMode, workspaceContext: effectiveWorkspaceContext });
+      const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
+      const inferredIntentType = isContentGen ? 'content_gen' : (likelyActionIntent ? 'action' : 'chat');
+      const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
+        tutorMode,
+        workspaceContext: effectiveWorkspaceContext,
+        intentType: inferredIntentType,
+      });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
       const session = await sb.auth.getSession();
@@ -5286,6 +5355,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
+        prompt_flags: {
+          intent_type: inferredIntentType,
+          tutor_mode: Boolean(tutorMode),
+          workspace_context: effectiveWorkspaceContext,
+          use_streaming: useStreaming,
+          likely_action_intent: likelyActionIntent,
+        },
         ...(useStreaming ? { streaming: true } : {}),
       };
       if (photo) {
@@ -5394,7 +5470,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             ? [chatData.clarification_payload]
             : []));
 
-      const validClarifications = clarificationsArr.filter(c => c?.question && Array.isArray(c?.options) && c.options.length > 0);
+      // Accept clarification prompts even when the model provides no quick-pick options.
+      // Some valid asks come back as free-text-only follow-ups (question + reason, options=[]).
+      // Previously these were dropped, which could lead to the generic "no response" fallback.
+      const validClarifications = clarificationsArr
+        .filter(c => c?.question && typeof c.question === 'string' && c.question.trim().length > 0)
+        .map(c => ({
+          ...c,
+          options: Array.isArray(c?.options) ? c.options : [],
+        }));
 
       if (validClarifications.length > 0) {
         // Build assistant message summarizing all questions
@@ -5423,7 +5507,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
 
       const validationWarnings = Array.isArray(chatData?.validation_warnings) ? chatData.validation_warnings : [];
-      if (validationWarnings.length > 0) {
+      // Avoid "fan-out" extra AI calls when the model already asked a clarification.
+      // The parser can synthesize clarifications from validation errors; prefer those
+      // instead of issuing another tool_fallback request that may hit multiple models.
+      const shouldRunValidationFallback =
+        validationWarnings.length > 0 &&
+        validClarifications.length === 0 &&
+        actions.length === 0 &&
+        !(typeof chatData?.content === 'string' && chatData.content.trim().length > 0);
+      if (shouldRunValidationFallback) {
         try {
           const validationFailures = validationWarnings.map(w => ({
             action_type: w?.tool || 'unknown_action',
@@ -5472,11 +5564,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         complete_task: 'got it — I can mark that complete.',
         edit_note: 'got it — I can update that note.',
         delete_note: 'got it — I can delete that note.',
+        web_search_reference: 'got it — I can search the web and cite sources.',
       };
+      const hasClarificationPrompt = clarificationsArr.some(c => c?.question && String(c.question).trim().length > 0);
       const displayContent = rawContent
         ? rawContent
         : actions.length > 0
           ? (aiAutoApprove ? '' : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
+          : hasClarificationPrompt
+            ? "i need one quick detail before i can do that."
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
       // For streamed responses the message was already inserted + persisted above.

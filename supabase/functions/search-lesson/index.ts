@@ -40,6 +40,69 @@ Return ONLY a valid JSON object (no markdown fences, no prose outside JSON):
   ]
 }
 
+async function callGroqReferenceSearch(query: string, quoteCount = 3): Promise<{
+  content: string;
+  usedWebSearch: boolean;
+}> {
+  const requestedQuotes = Math.max(1, Math.min(6, Number(quoteCount) || 3));
+  const systemPrompt = `You are a research assistant with web browsing.
+Search the web for up-to-date sources about the user's query and return ONLY valid JSON:
+{
+  "summary": "A concise 4-8 sentence answer grounded in sources.",
+  "quotes": [
+    {
+      "quote": "Short direct quote (<= 180 chars)",
+      "title": "Source title",
+      "url": "https://...",
+      "source": "Publisher/site name"
+    }
+  ],
+  "sources": [
+    { "title": "Source title", "url": "https://..." }
+  ]
+}
+
+Rules:
+- Include exactly ${requestedQuotes} quotes when possible.
+- Quotes must be verbatim snippets from the source.
+- Prioritize reputable primary sources.
+- Do not include markdown fences or extra prose.`;
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: COMPOUND_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Search the web and answer: "${query}"` },
+      ],
+      max_tokens: 2200,
+      temperature: 0.2,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    if (res.status === 404 || res.status === 400) {
+      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI} for reference mode`);
+      return callGroqCompoundMini(`Search the web and answer: "${query}"`, systemPrompt);
+    }
+    throw new Error(`Groq reference search error ${res.status}: ${body}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
+  const executedTools = data?.choices?.[0]?.message?.executed_tools ?? [];
+  const usedWebSearch = executedTools.some(
+    (t: { type: string }) => t.type === "web_search" || t.type === "visit_website"
+  );
+  return { content, usedWebSearch };
+}
+
 Rules:
 - Start with 1-2 concept screens, then 1-2 examples, then at least 2 questions
 - Base content on what you find via web search
@@ -149,6 +212,42 @@ function parseLessonResponse(raw: string): { report: string; screens: unknown[] 
   };
 }
 
+function parseReferenceResponse(raw: string): {
+  summary: string;
+  quotes: Array<{ quote: string; title?: string; url?: string; source?: string }>;
+  sources: Array<{ title?: string; url?: string }>;
+} {
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  let parsed: {
+    summary?: string;
+    quotes?: Array<{ quote?: string; title?: string; url?: string; source?: string }>;
+    sources?: Array<{ title?: string; url?: string }>;
+  };
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error("Failed to parse reference JSON response");
+  }
+  const quotes = Array.isArray(parsed.quotes)
+    ? parsed.quotes
+        .filter((q) => typeof q?.quote === "string" && q.quote.trim().length > 0)
+        .map((q) => ({ quote: q.quote!.trim(), title: q.title, url: q.url, source: q.source }))
+    : [];
+  const sources = Array.isArray(parsed.sources)
+    ? parsed.sources
+        .filter((s) => typeof s?.url === "string" || typeof s?.title === "string")
+        .map((s) => ({ title: s.title, url: s.url }))
+    : [];
+  return {
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    quotes,
+    sources,
+  };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -156,9 +255,13 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { topic } = await req.json();
-    if (!topic?.trim()) {
-      return new Response(JSON.stringify({ error: "topic is required" }), {
+    const { topic, query, mode, quote_count } = await req.json();
+    const normalizedMode = typeof mode === "string" ? mode.trim().toLowerCase() : "lesson";
+    const effectiveQuery = (typeof query === "string" && query.trim())
+      ? query.trim()
+      : (typeof topic === "string" ? topic.trim() : "");
+    if (!effectiveQuery) {
+      return new Response(JSON.stringify({ error: "topic or query is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -171,16 +274,21 @@ serve(async (req: Request) => {
       });
     }
 
-    console.log(`[search-lesson] Generating web search lesson for: ${topic}`);
+    if (normalizedMode === "reference" || normalizedMode === "search") {
+      console.log(`[search-lesson] Generating web references for: ${effectiveQuery}`);
+      const { content, usedWebSearch } = await callGroqReferenceSearch(effectiveQuery, quote_count);
+      const { summary, quotes, sources } = parseReferenceResponse(content);
+      return new Response(JSON.stringify({ summary, quotes, sources, usedWebSearch, mode: "reference" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    const userContent = `Search the web and create an educational lesson about: "${topic}"`;
+    console.log(`[search-lesson] Generating web search lesson for: ${effectiveQuery}`);
+    const userContent = `Search the web and create an educational lesson about: "${effectiveQuery}"`;
     const { content, usedWebSearch } = await callGroqCompound(userContent);
-
     const { report, screens } = parseLessonResponse(content);
-
     console.log(`[search-lesson] Done. usedWebSearch=${usedWebSearch}, screens=${screens.length}`);
-
-    return new Response(JSON.stringify({ report, screens, usedWebSearch }), {
+    return new Response(JSON.stringify({ report, screens, usedWebSearch, mode: "lesson" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 

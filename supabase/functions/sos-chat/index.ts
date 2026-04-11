@@ -129,6 +129,7 @@ serve(async (req: Request) => {
     inputTokensEst: number | null;
     workspaceContext: string;
     isContentGen: boolean;
+    promptFlags?: Record<string, unknown> | null;
   } | null = null;
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -194,6 +195,7 @@ serve(async (req: Request) => {
       prompt_version,
       context_chars,
       input_tokens_est,
+      prompt_flags,
       streaming,
     } = body;
     const userId = extractUserId(req.headers.get("Authorization"));
@@ -204,6 +206,7 @@ serve(async (req: Request) => {
       inputTokensEst: Number.isFinite(Number(input_tokens_est)) ? Number(input_tokens_est) : null,
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "chat",
       isContentGen: Boolean(isContentGen),
+      promptFlags: (prompt_flags && typeof prompt_flags === "object") ? prompt_flags : null,
     };
 
     // Rate limiting for content generation
@@ -275,6 +278,21 @@ serve(async (req: Request) => {
             executed_actions: [],
             orchestration: { mode: "client_execution", executed_on: "client" },
           };
+          console.log("chat_request_prompt_snapshot", JSON.stringify({
+            request_id: requestId,
+            prompt: {
+              version: telemetry?.promptVersion || null,
+              flags: telemetry?.promptFlags || null,
+              workspace_context: telemetry?.workspaceContext || "chat",
+            },
+            clarification: {
+              asked: Boolean(
+                (Array.isArray(streamResult?.clarifications) && streamResult.clarifications.length > 0)
+                || (streamResult?.clarification && typeof streamResult.clarification === "object")
+              ),
+              count: Array.isArray(streamResult?.clarifications) ? streamResult.clarifications.length : 0,
+            },
+          }));
           controller.enqueue(encoder.encode(
             `data: ${JSON.stringify({ type: "done", ...donePayload })}\n\n`
           ));
@@ -314,6 +332,21 @@ serve(async (req: Request) => {
     if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
       throw new Error("Content generation must return typed actions[] payloads.");
     }
+    console.log("chat_request_prompt_snapshot", JSON.stringify({
+      request_id: requestId,
+      prompt: {
+        version: telemetry?.promptVersion || null,
+        flags: telemetry?.promptFlags || null,
+        workspace_context: telemetry?.workspaceContext || "chat",
+      },
+      clarification: {
+        asked: Boolean(
+          (Array.isArray(result?.clarifications) && result.clarifications.length > 0)
+          || (result?.clarification && typeof result.clarification === "object")
+        ),
+        count: Array.isArray(result?.clarifications) ? result.clarifications.length : 0,
+      },
+    }));
 
     await persistPromptTelemetry({
       userId: telemetry?.userId || null,
