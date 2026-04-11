@@ -86,12 +86,12 @@ Rules:
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI} for reference mode`);
+    const errText = await res.text();
+    if (res.status === 404 || (res.status === 400 && errText.includes("model"))) {
+      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable (${res.status}), trying ${COMPOUND_MINI} for reference mode`);
       return callGroqCompoundMini(`Search the web and answer: "${query}"`, systemPrompt);
     }
-    throw new Error(`Groq reference search error ${res.status}: ${body}`);
+    throw new Error(`Groq reference search error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
@@ -126,13 +126,13 @@ Rules:
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    // Fallback to mini if compound unavailable
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable, trying ${COMPOUND_MINI}`);
+    const errText = await res.text();
+    // Only fall back to compound-mini on model-availability errors, not bad-request errors.
+    if (res.status === 404 || (res.status === 400 && errText.includes("model"))) {
+      console.warn(`[search-lesson] ${COMPOUND_MODEL} unavailable (${res.status}), trying ${COMPOUND_MINI}`);
       return callGroqCompoundMini(userContent, systemPrompt);
     }
-    throw new Error(`Groq compound error ${res.status}: ${body}`);
+    throw new Error(`Groq compound error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();

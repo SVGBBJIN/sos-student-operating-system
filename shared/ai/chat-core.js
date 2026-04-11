@@ -4,9 +4,9 @@
 export const CORE_VERSION = "chat-core-v1-2026-03-27";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
-export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
-export const BACKUP_MODEL         = "openai/gpt-oss-20b";
+export const PRIMARY_MODEL        = "llama-3.3-70b-versatile";
+export const CONVERSATIONAL_MODEL = "llama-3.1-70b-versatile";
+export const BACKUP_MODEL         = "llama3-8b-8192";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
 
 const GROQ_CIRCUIT = {
@@ -831,6 +831,10 @@ function withNullableOptionals(tools) {
   });
 }
 
+// Pre-computed at module load — avoids per-request schema deep-cloning.
+const ACTION_TOOLS_NULLABLE = withNullableOptionals(ACTION_TOOLS);
+const CONTENT_ACTION_TOOLS_NULLABLE = withNullableOptionals(CONTENT_ACTION_TOOLS);
+
 /* ── Groq chat + function calling ── */
 export async function callGroq(
   apiKey,
@@ -927,7 +931,11 @@ export async function callGroq(
     };
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-    const effectiveTools = rawTools ? withNullableOptionals(rawTools) : null;
+    const effectiveTools = rawTools
+      ? (rawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
+        : rawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
+        : withNullableOptionals(rawTools))
+      : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
       body.tool_choice = toolChoiceOverride;
@@ -1133,7 +1141,11 @@ async function _callGroqStreamInner(
     if (text) groqMessages.push({ role: m.role, content: text });
   }
 
-  const effectiveTools = tools ? withNullableOptionals(tools) : null;
+  const effectiveTools = tools
+    ? (tools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
+      : tools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
+      : withNullableOptionals(tools))
+    : null;
   const body = {
     model,
     messages: groqMessages,
@@ -1145,14 +1157,28 @@ async function _callGroqStreamInner(
     body.tool_choice = toolChoice || "auto";
   }
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const streamTimeoutMs = 25000;
+  const streamController = new AbortController();
+  const streamTimeoutId = setTimeout(() => streamController.abort(), streamTimeoutMs);
+  let res;
+  try {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: streamController.signal,
+    });
+  } catch (err) {
+    clearTimeout(streamTimeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`Groq ${model} stream request timed out after ${streamTimeoutMs}ms`);
+    }
+    throw err;
+  }
+  clearTimeout(streamTimeoutId);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
