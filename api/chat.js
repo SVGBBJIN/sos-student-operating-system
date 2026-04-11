@@ -210,6 +210,7 @@ export default async function handler(req, res) {
   }
 
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -337,6 +338,7 @@ export default async function handler(req, res) {
         {
           isContentGen: false,
           routeType: "tool_heavy", // use FAST_MODEL directly as primary
+          geminiApiKey: GEMINI_API_KEY,
         }
       );
       stageTimings.llm_call_ms = Date.now() - llmStartedAt;
@@ -426,6 +428,7 @@ export default async function handler(req, res) {
       routeType,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
+      geminiApiKey: GEMINI_API_KEY,
     };
 
     // Route-aware tool selection: send only the tools needed for this request type.

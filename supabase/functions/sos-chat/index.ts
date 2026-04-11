@@ -166,6 +166,7 @@ serve(async (req: Request) => {
 
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || null;
 
     const body = await req.json();
 
@@ -277,6 +278,7 @@ serve(async (req: Request) => {
       routeType,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
+      geminiApiKey: GEMINI_API_KEY,
     };
 
     // Streaming path: conversational non-content-gen non-image requests only.
