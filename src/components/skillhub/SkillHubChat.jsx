@@ -149,23 +149,28 @@ export default function SkillHubChat({ activeMode, linkedTask, tasks, notes, use
     setIsLoading(true);
 
     const contextPrompt = buildContextPrompt(tasks, notes, linkedTask);
-    const systemPrompt = photo
-      ? PHOTO_SYSTEM_PROMPT
-      : `${modeConfig.systemPrompt}\n\n${contextPrompt ? 'STUDENT CONTEXT:\n' + contextPrompt : ''}`;
+    const staticSystemPrompt = photo ? PHOTO_SYSTEM_PROMPT : modeConfig.systemPrompt;
+    const dynamicContext = (!photo && contextPrompt) ? `STUDENT CONTEXT:\n${contextPrompt}` : undefined;
 
     const history = [...messages, userMsg]
       .slice(-12)
       .map(m => ({ role: m.role, content: m.content || '' }))
       .filter(m => m.content);
 
+    const inputLength = (staticSystemPrompt?.length || 0)
+      + (dynamicContext?.length || 0)
+      + history.map(m => m.content).join('').length;
+    const maxTokens = inputLength < 1000 ? 512 : inputLength < 3000 ? 1024 : 2048;
+
     try {
       const session = await sb.auth.getSession();
       const token   = session?.data?.session?.access_token;
 
       const body = {
-        systemPrompt,
+        staticSystemPrompt,
+        dynamicContext,
         messages:   history,
-        maxTokens:  2048,
+        maxTokens,
         isContentGen: false,
         streaming:  !photo,
         ...(photo ? { imageBase64: photo.base64, imageMimeType: photo.mimeType } : {}),

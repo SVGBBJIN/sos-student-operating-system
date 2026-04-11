@@ -14,6 +14,35 @@ import {
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+/**
+ * Returns the minimal tool subset for a given route, reducing prompt token cost.
+ * Conversational requests get only ask_clarification (~1 tool vs 25).
+ */
+function selectToolsForRoute(
+  routeType: "conversational" | "tool_heavy" | "content_gen",
+  workspaceContext: string,
+  isContentGen: boolean
+): typeof ACTION_TOOLS {
+  if (isContentGen) return CONTENT_ACTION_TOOLS;
+  if (routeType === "conversational") {
+    return ACTION_TOOLS.filter(t => t.function.name === "ask_clarification");
+  }
+  if (workspaceContext === "schedule") {
+    return ACTION_TOOLS.filter(t =>
+      ["add_event","delete_event","update_event","add_task","delete_task",
+       "complete_task","break_task","add_recurring_event","add_block",
+       "delete_block","convert_event_to_block","convert_block_to_event",
+       "ask_clarification","clear_all"].includes(t.function.name)
+    );
+  }
+  if (workspaceContext === "notes") {
+    return ACTION_TOOLS.filter(t =>
+      ["add_note","edit_note","delete_note","ask_clarification"].includes(t.function.name)
+    );
+  }
+  return ACTION_TOOLS;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -237,9 +266,9 @@ serve(async (req: Request) => {
       || normalizedWorkspaceContext === "notes";
     const routeType: "conversational" | "tool_heavy" | "content_gen" =
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
-    const toolsForRequest = isContentGen ? CONTENT_ACTION_TOOLS : null;
+    const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
 
@@ -264,7 +293,7 @@ serve(async (req: Request) => {
             effectiveSystemPrompt,
             messages,
             maxTokens,
-            ACTION_TOOLS, // pass full tools so model can handle borderline messages
+            toolsForRequest, // route-filtered tool subset
             "auto",
             (delta: string) => {
               controller.enqueue(encoder.encode(
@@ -313,8 +342,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
+    // Route-aware tool selection: send only the tools needed for this request type.
     const result = await callGroq(
       GROQ_API_KEY,
       PRIMARY_MODEL,
@@ -323,8 +351,8 @@ serve(async (req: Request) => {
       maxTokens,
       imageBase64,
       imageMimeType,
-      true,         // includeTools — always on; model decides when to call tools
-      toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
+      Boolean(toolsForRequest && toolsForRequest.length > 0), // includeTools
+      toolsForRequest, // toolsOverride — route-filtered subset
       toolChoice,
       BACKUP_MODEL,
       callOptions

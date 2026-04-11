@@ -12,6 +12,31 @@ import {
 } from "../shared/ai/chat-core.js";
 
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
+
+/**
+ * Returns the minimal tool subset for a given route, reducing prompt token cost.
+ * Conversational requests get only ask_clarification (~1 tool vs 25).
+ */
+function selectToolsForRoute(routeType, workspaceContext, isContentGen) {
+  if (isContentGen) return CONTENT_ACTION_TOOLS;
+  if (routeType === "conversational") {
+    return ACTION_TOOLS.filter(t => t.function.name === "ask_clarification");
+  }
+  if (workspaceContext === "schedule") {
+    return ACTION_TOOLS.filter(t =>
+      ["add_event","delete_event","update_event","add_task","delete_task",
+       "complete_task","break_task","add_recurring_event","add_block",
+       "delete_block","convert_event_to_block","convert_block_to_event",
+       "ask_clarification","clear_all"].includes(t.function.name)
+    );
+  }
+  if (workspaceContext === "notes") {
+    return ACTION_TOOLS.filter(t =>
+      ["add_note","edit_note","delete_note","ask_clarification"].includes(t.function.name)
+    );
+  }
+  return ACTION_TOOLS;
+}
 // Reads ANTHROPIC_API_KEY, GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
@@ -386,9 +411,9 @@ export default async function handler(req, res) {
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
-    const toolsForRequest = isContentGen ? CONTENT_ACTION_TOOLS : null;
+    const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context
@@ -403,8 +428,8 @@ export default async function handler(req, res) {
       dynamicContext: effectiveDynamic,
     };
 
-    // Always use full ACTION_TOOLS so the AI can call any tool based on actual message intent,
-    // not regex-gated detection. openai/gpt-oss-120b handles chat + tool calling in one pass.
+    // Route-aware tool selection: send only the tools needed for this request type.
+    // This reduces prompt token cost significantly for conversational and single-workspace requests.
     const llmStartedAt = Date.now();
 
     // Streaming path: only for conversational (non-content-gen, non-image) requests.
@@ -422,7 +447,7 @@ export default async function handler(req, res) {
         effectiveSystemPrompt,
         messages,
         maxTokens,
-        ACTION_TOOLS, // pass full tools so model can handle borderline messages
+        toolsForRequest, // route-filtered tool subset
         "auto",
         (delta) => {
           res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
@@ -456,8 +481,8 @@ export default async function handler(req, res) {
       maxTokens,
       imageBase64,
       imageMimeType,
-      true,         // includeTools — always on; model decides when to call tools
-      toolsForRequest, // toolsOverride — content-gen is constrained to typed content tools
+      Boolean(toolsForRequest && toolsForRequest.length > 0), // includeTools
+      toolsForRequest, // toolsOverride — route-filtered subset
       toolChoice,
       BACKUP_MODEL,
       callOptions
