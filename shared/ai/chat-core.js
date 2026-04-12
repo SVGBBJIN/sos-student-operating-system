@@ -680,6 +680,38 @@ const TOOL_SPEC_BY_NAME = new Map(
 );
 export const CONTENT_ACTION_TOOLS = ACTION_TOOLS.filter((tool) => _CONTENT_ACTION_TYPES.has(tool.function.name) || tool.function.name === "ask_clarification");
 
+// Lightweight meta-tool for the conversational model.
+// When the student signals intent to schedule/add something, the model calls this
+// instead of trying to execute the action itself (which it can't in conversational mode).
+// The frontend intercepts it and shows a "Do you want to X?" yes/no card.
+export const PROPOSE_ACTION_TOOL = {
+  type: "function",
+  function: {
+    name: "propose_action",
+    description: "Call this when you detect the student wants to schedule, add, or create something (event, task, study block, or note) but you're in a conversational context. Surfaces a quick 'Do you want to X?' confirmation card in the UI. Include any details the student already mentioned as prefilled data.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description: "Short, conversational description shown on the card — e.g. 'add your Chem midterm to the calendar' or 'create a task for your essay'",
+        },
+        action_type: {
+          type: "string",
+          enum: ["add_event", "add_task", "add_block", "add_note"],
+          description: "The action type to propose",
+        },
+        prefilled: {
+          type: "object",
+          description: "Any field values the student already mentioned — title, date, subject, time, etc.",
+          additionalProperties: true,
+        },
+      },
+      required: ["summary", "action_type"],
+    },
+  },
+};
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_MAX_STRING_LENGTH = 500;

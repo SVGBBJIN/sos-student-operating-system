@@ -9,6 +9,7 @@ import {
   CORE_VERSION,
   FAST_MODEL,
   PRIMARY_MODEL,
+  PROPOSE_ACTION_TOOL,
 } from "../../../shared/ai/chat-core.js";
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -25,7 +26,7 @@ function selectToolsForRoute(
 ): typeof ACTION_TOOLS {
   if (isContentGen) return CONTENT_ACTION_TOOLS;
   if (routeType === "conversational") {
-    return []; // No tools — model responds in plain text without triggering ask_clarification
+    return [PROPOSE_ACTION_TOOL]; // Only propose_action — lets conversational model signal scheduling intent
   }
   if (workspaceContext === "schedule") {
     return ACTION_TOOLS.filter(t =>
