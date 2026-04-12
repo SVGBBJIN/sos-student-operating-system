@@ -10,9 +10,10 @@ export const BACKUP_MODEL         = "llama3-8b-8192";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
 
 // Gemini (Google AI) — OpenAI-compatible endpoint, used as cross-provider fallback.
-// gemma-3-27b-it backs CONVERSATIONAL_MODEL; gemma-3-12b-it backs Llama 8B paths.
-export const GEMINI_CONVERSATIONAL_BACKUP = "gemma-3-27b-it";
-export const GEMINI_FAST_BACKUP           = "gemma-3-12b-it";
+// gemini-2.5-flash backs CONVERSATIONAL_MODEL; gemini-2.5-flash-lite backs Llama 8B paths.
+// NOTE: gemma-3-*-it are HuggingFace open-weight IDs and are NOT valid on this endpoint.
+export const GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash";
+export const GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 const GROQ_CIRCUIT = {
