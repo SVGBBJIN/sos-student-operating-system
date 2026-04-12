@@ -9,6 +9,7 @@ import {
   CORE_VERSION,
   FAST_MODEL,
   PRIMARY_MODEL,
+  PROPOSE_ACTION_TOOL,
 } from "../shared/ai/chat-core.js";
 
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
@@ -20,7 +21,7 @@ import {
 function selectToolsForRoute(routeType, workspaceContext, isContentGen) {
   if (isContentGen) return CONTENT_ACTION_TOOLS;
   if (routeType === "conversational") {
-    return ACTION_TOOLS.filter(t => t.function.name === "ask_clarification");
+    return [PROPOSE_ACTION_TOOL]; // Only propose_action — lets conversational model signal scheduling intent
   }
   if (workspaceContext === "schedule") {
     return ACTION_TOOLS.filter(t =>
@@ -210,6 +211,7 @@ export default async function handler(req, res) {
   }
 
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -337,6 +339,7 @@ export default async function handler(req, res) {
         {
           isContentGen: false,
           routeType: "tool_heavy", // use FAST_MODEL directly as primary
+          geminiApiKey: GEMINI_API_KEY,
         }
       );
       stageTimings.llm_call_ms = Date.now() - llmStartedAt;
@@ -407,13 +410,16 @@ export default async function handler(req, res) {
       .reverse()
       .find((m) => m?.role === "user" && typeof m?.content === "string");
     const latestUserText = (latestUserMessage?.content || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note)/i.test(latestUserText)
+    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s)/i.test(latestUserText)
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
+    const clarificationRule = routeType !== "conversational"
+      ? `\n\nCLARIFICATION RULE: Only call ask_clarification when the student is trying to add/edit/schedule something AND a truly required field is missing (title for tasks/notes; title + date for events). Do NOT ask for optional fields. Do NOT ask clarifying questions during general conversation. Never invent or assume missing values.`
+      : "";
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context
@@ -426,6 +432,7 @@ export default async function handler(req, res) {
       routeType,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
+      geminiApiKey: GEMINI_API_KEY,
     };
 
     // Route-aware tool selection: send only the tools needed for this request type.

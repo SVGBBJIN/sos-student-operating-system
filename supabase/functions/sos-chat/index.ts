@@ -9,6 +9,7 @@ import {
   CORE_VERSION,
   FAST_MODEL,
   PRIMARY_MODEL,
+  PROPOSE_ACTION_TOOL,
 } from "../../../shared/ai/chat-core.js";
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -25,7 +26,7 @@ function selectToolsForRoute(
 ): typeof ACTION_TOOLS {
   if (isContentGen) return CONTENT_ACTION_TOOLS;
   if (routeType === "conversational") {
-    return ACTION_TOOLS.filter(t => t.function.name === "ask_clarification");
+    return [PROPOSE_ACTION_TOOL]; // Only propose_action — lets conversational model signal scheduling intent
   }
   if (workspaceContext === "schedule") {
     return ACTION_TOOLS.filter(t =>
@@ -166,6 +167,7 @@ serve(async (req: Request) => {
 
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || null;
 
     const body = await req.json();
 
@@ -261,14 +263,17 @@ serve(async (req: Request) => {
       .reverse()
       .find((m) => m?.role === "user" && typeof m?.content === "string");
     const latestUserText = ((latestUserMessage?.content as string) || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note)/i.test(latestUserText)
+    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s)/i.test(latestUserText)
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType: "conversational" | "tool_heavy" | "content_gen" =
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If any required detail (title, date, time, subject, note name, activity name) is not explicitly present in the student's message, you MUST call ask_clarification before executing any action. Never invent, assume, or fill in missing values.`;
+    const clarificationRule = routeType !== "conversational"
+      ? `\n\nCLARIFICATION RULE: Only call ask_clarification when the student is trying to add/edit/schedule something AND a truly required field is missing (title for tasks/notes; title + date for events). Do NOT ask for optional fields. Do NOT ask clarifying questions during general conversation. Never invent or assume missing values.`
+      : "";
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
 
@@ -277,6 +282,7 @@ serve(async (req: Request) => {
       routeType,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
+      geminiApiKey: GEMINI_API_KEY,
     };
 
     // Streaming path: conversational non-content-gen non-image requests only.

@@ -9,10 +9,52 @@ export const CONVERSATIONAL_MODEL = "llama-3.1-70b-versatile";
 export const BACKUP_MODEL         = "llama3-8b-8192";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
 
+// Gemini (Google AI) — OpenAI-compatible endpoint, used as cross-provider fallback.
+// gemini-2.5-flash backs CONVERSATIONAL_MODEL; gemini-2.5-flash-lite backs Llama 8B paths.
+// NOTE: gemma-3-*-it are HuggingFace open-weight IDs and are NOT valid on this endpoint.
+export const GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash";
+export const GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite";
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+
 const GROQ_CIRCUIT = {
   openedUntilMs: 0,
   spikes: [],
 };
+
+// Tracks Groq's remaining tokens-per-minute, read from response headers after each call.
+// Enables proactive routing to Gemini before hitting a hard TPM 429.
+const GROQ_TPM = {
+  remaining: Infinity,  // x-ratelimit-remaining-tokens
+  limit: Infinity,      // x-ratelimit-limit-tokens
+  resetAtMs: 0,         // absolute ms when the TPM window resets
+};
+const TPM_SWITCH_THRESHOLD = 0.15; // switch providers when <15% of TPM remains
+
+function updateGroqTpm(headers) {
+  const remaining = parseInt(headers.get("x-ratelimit-remaining-tokens") || "", 10);
+  const limit     = parseInt(headers.get("x-ratelimit-limit-tokens")     || "", 10);
+  const resetStr  = headers.get("x-ratelimit-reset-tokens") || "";
+  if (!isNaN(remaining)) GROQ_TPM.remaining = remaining;
+  if (!isNaN(limit))     GROQ_TPM.limit     = limit;
+  // resetStr is like "1.23s" — convert to absolute timestamp
+  const sec = parseFloat(resetStr);
+  if (!isNaN(sec))       GROQ_TPM.resetAtMs = Date.now() + Math.ceil(sec * 1000);
+}
+
+function groqTpmNearLimit() {
+  if (GROQ_TPM.limit === Infinity) return false;        // no header data yet
+  if (Date.now() > GROQ_TPM.resetAtMs) return false;   // window already reset
+  return GROQ_TPM.remaining < GROQ_TPM.limit * TPM_SWITCH_THRESHOLD;
+}
+
+function isGeminiModel(mdl) {
+  return mdl === GEMINI_CONVERSATIONAL_BACKUP || mdl === GEMINI_FAST_BACKUP;
+}
+
+// Returns the Gemini backup appropriate for a given primary model.
+function geminiBackupFor(mdl) {
+  return mdl === CONVERSATIONAL_MODEL ? GEMINI_CONVERSATIONAL_BACKUP : GEMINI_FAST_BACKUP;
+}
 
 const _CONTENT_ACTION_TYPES = new Set([
   "create_flashcards",
@@ -551,7 +593,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student a focused follow-up question when required details are missing, the request is ambiguous, or multiple interpretations are possible. MANDATORY RULE: If any required field (title, date, time, subject, note name, activity name) is not explicitly stated in the student's message, you MUST call this tool before taking any action — never invent, guess, or assume a value. Also use for content generation requests that lack a topic or scope. IMPORTANT: If multiple independent details are missing, emit MULTIPLE ask_clarification tool calls in the same turn (one focused question per missing detail) so the UI can render dedicated input cards. You may use a free-text clarification with no options (text-box only). Keep wording natural and specific; avoid template phrasing like 'provide valid values'.",
+        "Ask the student a focused follow-up question ONLY when they are actively trying to add, edit, or schedule something (event, task, note, study block) AND a truly required field is missing — specifically: title for tasks/notes, or both title and date for events. Do NOT use for general conversation, casual questions, or greetings. Do NOT ask for optional fields (subject, time, description) when the student hasn't mentioned them. If the topic or scope of a content-generation request is genuinely unclear, you may ask once. Keep wording natural and specific; avoid template phrasing.",
       parameters: {
         type: "object",
         properties: {
@@ -638,6 +680,38 @@ const TOOL_SPEC_BY_NAME = new Map(
   ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
 );
 export const CONTENT_ACTION_TOOLS = ACTION_TOOLS.filter((tool) => _CONTENT_ACTION_TYPES.has(tool.function.name) || tool.function.name === "ask_clarification");
+
+// Lightweight meta-tool for the conversational model.
+// When the student signals intent to schedule/add something, the model calls this
+// instead of trying to execute the action itself (which it can't in conversational mode).
+// The frontend intercepts it and shows a "Do you want to X?" yes/no card.
+export const PROPOSE_ACTION_TOOL = {
+  type: "function",
+  function: {
+    name: "propose_action",
+    description: "Call this when you detect the student wants to schedule, add, or create something (event, task, study block, or note) but you're in a conversational context. Surfaces a quick 'Do you want to X?' confirmation card in the UI. Include any details the student already mentioned as prefilled data.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description: "Short, conversational description shown on the card — e.g. 'add your Chem midterm to the calendar' or 'create a task for your essay'",
+        },
+        action_type: {
+          type: "string",
+          enum: ["add_event", "add_task", "add_block", "add_note"],
+          description: "The action type to propose",
+        },
+        prefilled: {
+          type: "object",
+          description: "Any field values the student already mentioned — title, date, subject, time, etc.",
+          additionalProperties: true,
+        },
+      },
+      required: ["summary", "action_type"],
+    },
+  },
+};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -889,9 +963,13 @@ export async function callGroq(
     // the static policy becomes a single unchanging system message (Groq can cache it
     // alongside the tool definitions). The dynamic per-user context is sent as a second
     // system message so it doesn't pollute the cached prefix.
+    // Exception: Gemini/Gemma only supports a single system message — merge both parts
+    // into one to prevent the dynamic context from being echoed in the response.
     const staticPrompt = options?.staticSystemPrompt;
     const dynamicContext = options?.dynamicContext;
-    const groqMessages = staticPrompt
+    const groqMessages = (staticPrompt && isGeminiModel(mdl))
+      ? [{ role: "system", content: `${staticPrompt}\n\n${dynamicContext || ""}` }]
+      : staticPrompt
       ? [
           { role: "system", content: staticPrompt },
           { role: "system", content: dynamicContext || "" },
@@ -931,10 +1009,18 @@ export async function callGroq(
     };
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-    const effectiveTools = rawTools
-      ? (rawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
-        : rawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
-        : withNullableOptionals(rawTools))
+    // propose_action requires structured JSON tool-calling — 8B fallback models
+    // can't reliably produce it and error with tool_use_failed.
+    // Strip it (and any other conversational-only tools) when on FAST_MODEL.
+    const safeRawTools = (mdl === FAST_MODEL && Array.isArray(rawTools))
+      ? (rawTools.filter(t => t?.function?.name !== "propose_action").length > 0
+          ? rawTools.filter(t => t?.function?.name !== "propose_action")
+          : null)
+      : rawTools;
+    const effectiveTools = safeRawTools
+      ? (safeRawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
+        : safeRawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
+        : withNullableOptionals(safeRawTools))
       : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
@@ -951,7 +1037,7 @@ export async function callGroq(
       }
       const remaining = remainingBudgetMs();
       if (remaining <= MIN_REMAINING_FOR_RETRY_MS) {
-        throw new Error(`Groq ${mdl} budget exhausted (${budgetMs}ms)`);
+        throw new Error(`${isGeminiModel(mdl) ? "Gemini" : "Groq"} ${mdl} budget exhausted (${budgetMs}ms)`);
       }
       metrics.attempt_count += 1;
       const controller = new AbortController();
@@ -959,11 +1045,17 @@ export async function callGroq(
         () => controller.abort(),
         Math.max(700, Math.min(remaining - 250, 8000))
       );
+      // Route to Gemini (OpenAI-compatible) or Groq based on model name.
+      const usingGemini = isGeminiModel(effectiveModel);
+      const providerUrl = usingGemini
+        ? `${GEMINI_BASE_URL}/chat/completions`
+        : "https://api.groq.com/openai/v1/chat/completions";
+      const providerKey = usingGemini ? (options?.geminiApiKey || "") : apiKey;
       try {
-        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        res = await fetch(providerUrl, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${providerKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -972,15 +1064,20 @@ export async function callGroq(
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === "AbortError") {
-          noteSpike(503);
-          throw new Error(`Groq ${mdl} request timed out within budget (${budgetMs}ms)`);
+          if (!usingGemini) noteSpike(503);
+          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} request timed out within budget (${budgetMs}ms)`);
         }
         throw err;
       }
       clearTimeout(timeoutId);
 
+      // Update Groq TPM state from response headers (Gemini doesn't provide these).
+      if (!usingGemini && res.ok) {
+        updateGroqTpm(res.headers);
+      }
+
       if ((res.status === 429 || res.status >= 500) && i < MAX_RETRIES) {
-        noteSpike(res.status);
+        if (!usingGemini) noteSpike(res.status);
       }
 
       if (res.status === 429 && i < MAX_RETRIES) {
@@ -989,10 +1086,10 @@ export async function callGroq(
         const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 8) : Math.min((2 ** i) * 0.8, 8);
         const waitMs = Math.floor(waitSec * 1000);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
-          throw new Error(`Groq ${mdl} rate limited with insufficient budget to retry`);
+          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} rate limited with insufficient budget to retry`);
         }
         metrics.retry_wait_ms_total += waitMs;
-        console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
+        console.warn(`${usingGemini ? "Gemini" : "Groq"} 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
@@ -1001,7 +1098,7 @@ export async function callGroq(
         const waitMs = Math.min(300 * (2 ** i), 2500);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
           const errText = await res.text().catch(() => "");
-          throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
         }
         metrics.retry_wait_ms_total += waitMs;
         await new Promise((r) => setTimeout(r, waitMs));
@@ -1025,14 +1122,14 @@ export async function callGroq(
             return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
           }
         }
-        throw new Error(`Groq ${mdl} error 400: ${errText.slice(0, 200)}`);
+        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error 400: ${errText.slice(0, 200)}`);
       }
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
+        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
       }
-      resetCircuit();
+      if (!usingGemini) resetCircuit();
       break;
     }
 
@@ -1043,44 +1140,60 @@ export async function callGroq(
     };
   }
 
-  // Try primary model; fall back to backupModel on hard errors OR empty responses.
-  // Universal final safety-net: FAST_MODEL (llama-3.1-8b-instant).
+  // Proactive TPM preemption: if Groq is near its token-per-minute limit and we have
+  // a Gemini key, skip Groq entirely and go straight to the Gemini backup model.
+  if (groqTpmNearLimit() && options?.geminiApiKey) {
+    const geminiModel = geminiBackupFor(selectedPrimary);
+    console.warn(`[callGroq] Groq TPM near limit (${GROQ_TPM.remaining}/${GROQ_TPM.limit} tokens remaining) — routing directly to Gemini ${geminiModel}`);
+    metrics.fallback_used = true;
+    return { ...await attempt(geminiModel), ...metrics };
+  }
+
+  // Try primary model; fall back through: Gemini backup → selectedBackup → FAST_MODEL.
+  // Gemini (cross-provider) is tried before the Groq FAST_MODEL to preserve quality.
+  const geminiBackup = options?.geminiApiKey ? geminiBackupFor(selectedPrimary) : null;
   const canUseFastFallback = FAST_MODEL && FAST_MODEL !== selectedPrimary && FAST_MODEL !== selectedBackup;
+
+  // Attempt a model, then try the next in the chain on empty response.
+  async function tryChain(primary, chain) {
+    let result = await attempt(primary);
+    for (const next of chain) {
+      if (!result.content && result.actions.length === 0 && next && next !== primary && remainingBudgetMs() > 900) {
+        metrics.fallback_used = true;
+        console.warn(`[callGroq] ${primary} returned empty — retrying with ${next}`);
+        result = await attempt(next);
+        primary = next;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
   try {
-    let result = await attempt(selectedPrimary);
-    if (!result.content && result.actions.length === 0 && selectedBackup && selectedBackup !== selectedPrimary) {
-      metrics.fallback_used = true;
-      console.warn(`[callGroq] Primary model (${selectedPrimary}) returned empty response — retrying with backup ${selectedBackup}`);
-      result = await attempt(selectedBackup);
-    }
-    if (!result.content && result.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
-      metrics.fallback_used = true;
-      console.warn(`[callGroq] Backup path returned empty response — retrying with universal fallback ${FAST_MODEL}`);
-      result = await attempt(FAST_MODEL);
-    }
+    // Build the fallback chain: [Gemini backup, groq selectedBackup, FAST_MODEL]
+    // deduplicated and filtered to avoid looping back to the primary.
+    const chain = [geminiBackup, selectedBackup, canUseFastFallback ? FAST_MODEL : null]
+      .filter((m) => m && m !== selectedPrimary);
+    const result = await tryChain(selectedPrimary, chain);
     return { ...result, ...metrics };
   } catch (primaryErr) {
     let fallbackErr = primaryErr;
-    if (selectedBackup && selectedBackup !== selectedPrimary && remainingBudgetMs() > 900) {
+    // On hard error from primary, walk the same chain.
+    const fallbackChain = [geminiBackup, selectedBackup, canUseFastFallback ? FAST_MODEL : null]
+      .filter((m) => m && m !== selectedPrimary);
+    for (const next of fallbackChain) {
+      if (!next || remainingBudgetMs() <= 900) break;
       metrics.fallback_used = true;
-      console.warn(`[callGroq] Primary model (${selectedPrimary}) failed: ${primaryErr.message} — retrying with backup ${selectedBackup}`);
+      console.warn(`[callGroq] ${fallbackErr.message} — retrying with ${next}`);
       try {
-        const fallbackResult = await attempt(selectedBackup);
-        if (!fallbackResult.content && fallbackResult.actions.length === 0 && canUseFastFallback && remainingBudgetMs() > 900) {
-          console.warn(`[callGroq] Backup model (${selectedBackup}) returned empty response — retrying with universal fallback ${FAST_MODEL}`);
-          const fastResult = await attempt(FAST_MODEL);
-          return { ...fastResult, ...metrics };
-        }
+        const fallbackResult = await tryChain(next,
+          fallbackChain.slice(fallbackChain.indexOf(next) + 1)
+        );
         return { ...fallbackResult, ...metrics };
-      } catch (backupErr) {
-        fallbackErr = backupErr;
+      } catch (nextErr) {
+        fallbackErr = nextErr;
       }
-    }
-    if (canUseFastFallback && remainingBudgetMs() > 900) {
-      metrics.fallback_used = true;
-      console.warn(`[callGroq] Fallback chain failed (${fallbackErr.message}) — retrying with universal fallback ${FAST_MODEL}`);
-      const fastResult = await attempt(FAST_MODEL);
-      return { ...fastResult, ...metrics };
     }
     throw fallbackErr;
   }

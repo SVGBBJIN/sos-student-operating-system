@@ -574,7 +574,7 @@ const CONTEXT_SECTION_BUDGETS = {
 };
 
 const POLICY_MODULES = {
-  core: 'You are SOS — a concise, supportive study companion. No condescension.',
+  core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
   clarification: 'If required fields are missing, call ask_clarification before any action.',
@@ -583,6 +583,7 @@ const POLICY_MODULES = {
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
+  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   content_gen: 'Content-gen requests must return canonical typed actions only.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
@@ -764,10 +765,10 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     : truncateWithEllipsis(dedupeRepeatedLines(fullDynamicSections), SYSTEM_PROMPT_CHAR_BUDGET);
 
   const stablePolicyTier1 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
-You are SOS, a supportive study sidekick. Keep replies casual, brief (2-3 sentences), and never condescending.
+You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class. You're not a professor — you're the friend who actually gets it. Match the student's tone: brief when they're brief, casual when they're casual, calm when they're stressed. No hollow openers — just respond like a person. Keep replies short (2-3 sentences max).
 Never invent tasks/events/deadlines that are not present in dynamic context.
-If schedule/tasks are clear, say so directly and upbeat.
-If student asks about note content, reference only available notes and ask focused follow-ups when details are missing.`;
+If schedule/tasks are clear, say so directly.
+If student asks about note content, reference only available notes and ask a focused follow-up when details are missing.`;
 
   if (tier === 1) {
     const allClear = activeTasks.length === 0 && overdueTasks.length === 0 && upcomingEvents.length === 0;
@@ -792,6 +793,7 @@ NOTES: ${noteNames}`;
   const intentModules = intentType === 'chat'
     ? [
         POLICY_MODULES.web_refs,
+        POLICY_MODULES.conversational_capabilities,
       ]
     : intentType === 'content_gen'
       ? [
@@ -1678,6 +1680,69 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
           onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.07)'; e.currentTarget.style.color='var(--text-dim)'; }}
         >
           Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   PROPOSAL CARD
+   Quick yes/no card surfaced when the conversational model calls propose_action.
+   ═══════════════════════════════════════════════ */
+function ProposalCard({ proposal, onApprove, onDismiss }) {
+  const actionIcons = { add_event: '📅', add_task: '✅', add_block: '⏳', add_note: '📝' };
+  const icon = actionIcons[proposal.action_type] || '✨';
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderLeft: '3px solid var(--accent)',
+      borderRadius: 10,
+      padding: '14px 16px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: '1.1rem' }}>{icon}</span>
+        <span style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.4 }}>
+          Want me to <strong style={{ color: 'var(--accent)' }}>{proposal.summary}</strong>?
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={onApprove}
+          style={{
+            background: 'var(--accent)',
+            color: '#000',
+            border: 'none',
+            borderRadius: 6,
+            padding: '6px 14px',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            letterSpacing: '0.02em',
+          }}
+        >
+          Yes, do it
+        </button>
+        <button
+          onClick={onDismiss}
+          style={{
+            background: 'rgba(255,255,255,0.07)',
+            color: 'var(--text-dim)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 6,
+            padding: '6px 14px',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = 'var(--text)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = 'var(--text-dim)'; }}
+        >
+          Nah
         </button>
       </div>
     </div>
@@ -3924,6 +3989,7 @@ function App() {
   const [pendingClarification, setPendingClarification] = useState(null);
   const [pendingClarificationAnswers, setPendingClarificationAnswers] = useState(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
+  const [pendingProposal, setPendingProposal] = useState(null); // { summary, action_type, prefilled }
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
@@ -5236,7 +5302,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setPendingPhoto(null);
 
     if ((!text?.trim() && !photo) || isLoading) return;
-    if (!fromClarification) autoConfirmPending();
+    if (!fromClarification) { autoConfirmPending(); setPendingProposal(null); }
     setChatError(null);
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
@@ -5460,6 +5526,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // ── End streaming path ────────────────────────────────────────────────────────
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
+
+      // ── Intercept propose_action meta-tool calls from the conversational model ──
+      // These are never passed to the main action pipeline — they surface a yes/no card.
+      const proposalAction = actions.find(a => a.type === 'propose_action');
+      if (proposalAction) {
+        actions = actions.filter(a => a.type !== 'propose_action');
+        setPendingProposal({
+          summary: proposalAction.summary || '',
+          action_type: proposalAction.action_type || 'add_event',
+          prefilled: proposalAction.prefilled || {},
+        });
+      }
 
       // Support multiple clarifications (array) or single (object)
       const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
@@ -5819,6 +5897,37 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setPendingClarification(null);
     setPendingClarificationAnswers(null);
     sendMessage(readableResponse, { fromClarification: true });
+  }
+
+  // Required fields per propose_action action_type
+  const PROPOSAL_REQUIRED = { add_event: ['title', 'date'], add_task: ['title'], add_block: ['activity', 'date', 'start', 'end'], add_note: ['name'] };
+
+  function handleProposalApprove() {
+    if (!pendingProposal) return;
+    const { summary, action_type, prefilled = {} } = pendingProposal;
+    const required = PROPOSAL_REQUIRED[action_type] || [];
+    const hasAllRequired = required.every(f => prefilled[f] !== undefined && prefilled[f] !== null && prefilled[f] !== '');
+    setPendingProposal(null);
+    if (hasAllRequired) {
+      const action = { type: action_type, ...prefilled };
+      if (aiAutoApprove) {
+        const editingActionTypes = ['update_event', 'convert_event_to_block', 'convert_block_to_event', 'edit_note'];
+        const isEditing = editingActionTypes.includes(action_type);
+        setAutoApproveStatus({ state: 'running', count: 1, label: isEditing ? 'editing notes / schedule' : 'auto-approve mode' });
+        executeAction(action);
+        setTimeout(() => setAutoApproveStatus({ state: 'done', count: 1, label: isEditing ? 'edits applied' : 'all set' }), 450);
+        setTimeout(() => setAutoApproveStatus(null), 2200);
+      } else {
+        setPendingActions(prev => [...prev, { action, timestamp: Date.now() }]);
+      }
+    } else {
+      // Missing required fields — route back through tool-heavy model to fill them in
+      sendMessage('yes, ' + summary);
+    }
+  }
+
+  function handleProposalDismiss() {
+    setPendingProposal(null);
   }
 
   function incrementGuestCount() {
@@ -6610,6 +6719,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               onCustomPlan={handleCustomPlan}
               onDismiss={handleDismissTemplateSelector}
             />
+          </div>
+        )}
+        {pendingProposal && (
+          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <ProposalCard proposal={pendingProposal} onApprove={handleProposalApprove} onDismiss={handleProposalDismiss} />
           </div>
         )}
         {pendingClarification && (
