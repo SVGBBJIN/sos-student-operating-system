@@ -930,9 +930,13 @@ export async function callGroq(
     // the static policy becomes a single unchanging system message (Groq can cache it
     // alongside the tool definitions). The dynamic per-user context is sent as a second
     // system message so it doesn't pollute the cached prefix.
+    // Exception: Gemini/Gemma only supports a single system message — merge both parts
+    // into one to prevent the dynamic context from being echoed in the response.
     const staticPrompt = options?.staticSystemPrompt;
     const dynamicContext = options?.dynamicContext;
-    const groqMessages = staticPrompt
+    const groqMessages = (staticPrompt && isGeminiModel(mdl))
+      ? [{ role: "system", content: `${staticPrompt}\n\n${dynamicContext || ""}` }]
+      : staticPrompt
       ? [
           { role: "system", content: staticPrompt },
           { role: "system", content: dynamicContext || "" },
