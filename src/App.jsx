@@ -583,6 +583,7 @@ const POLICY_MODULES = {
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
+  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   content_gen: 'Content-gen requests must return canonical typed actions only.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
@@ -792,6 +793,7 @@ NOTES: ${noteNames}`;
   const intentModules = intentType === 'chat'
     ? [
         POLICY_MODULES.web_refs,
+        POLICY_MODULES.conversational_capabilities,
       ]
     : intentType === 'content_gen'
       ? [

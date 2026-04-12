@@ -262,7 +262,7 @@ serve(async (req: Request) => {
       .reverse()
       .find((m) => m?.role === "user" && typeof m?.content === "string");
     const latestUserText = ((latestUserMessage?.content as string) || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note)/i.test(latestUserText)
+    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s)/i.test(latestUserText)
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType: "conversational" | "tool_heavy" | "content_gen" =
