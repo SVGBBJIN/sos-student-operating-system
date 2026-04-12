@@ -1008,10 +1008,18 @@ export async function callGroq(
     };
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-    const effectiveTools = rawTools
-      ? (rawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
-        : rawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
-        : withNullableOptionals(rawTools))
+    // propose_action requires structured JSON tool-calling — 8B fallback models
+    // can't reliably produce it and error with tool_use_failed.
+    // Strip it (and any other conversational-only tools) when on FAST_MODEL.
+    const safeRawTools = (mdl === FAST_MODEL && Array.isArray(rawTools))
+      ? (rawTools.filter(t => t?.function?.name !== "propose_action").length > 0
+          ? rawTools.filter(t => t?.function?.name !== "propose_action")
+          : null)
+      : rawTools;
+    const effectiveTools = safeRawTools
+      ? (safeRawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
+        : safeRawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
+        : withNullableOptionals(safeRawTools))
       : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
