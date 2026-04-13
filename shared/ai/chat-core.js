@@ -610,7 +610,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student a focused follow-up question ONLY when they are actively trying to add, edit, or schedule something (event, task, note, study block) AND a truly required field is missing — specifically: title for tasks/notes, or both title and date for events. Do NOT use for general conversation, casual questions, or greetings. Do NOT ask for optional fields (subject, time, description) when the student hasn't mentioned them. If the topic or scope of a content-generation request is genuinely unclear, you may ask once. Keep wording natural and specific; avoid template phrasing.",
+        "Ask the student a focused follow-up question when you genuinely need more information to proceed. IMPORTANT: Always use this tool — never ask clarifying questions in plain text. Appropriate cases: (1) A required field is missing for an action (title for tasks/notes; title + date for events). (2) The request is genuinely ambiguous and you cannot produce a correct result without more information. (3) Content generation topic or scope is too vague to write useful output. Do NOT use for optional fields the student hasn't mentioned. Do NOT interrupt clearly-stated requests — when possible make a reasonable attempt and offer to adjust. Keep questions specific and concise; avoid template phrasing.",
       parameters: {
         type: "object",
         properties: {

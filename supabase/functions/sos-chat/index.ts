@@ -37,7 +37,8 @@ function selectToolsForRoute(
 ): typeof ACTION_TOOLS {
   if (isContentGen) return CONTENT_ACTION_TOOLS;
   if (routeType === "conversational") {
-    return [PROPOSE_ACTION_TOOL]; // Only propose_action — lets conversational model signal scheduling intent
+    const clarificationTool = ACTION_TOOLS.find(t => t.function.name === "ask_clarification");
+    return [PROPOSE_ACTION_TOOL, clarificationTool].filter(Boolean) as typeof ACTION_TOOLS;
   }
   if (workspaceContext === "schedule") {
     return ACTION_TOOLS.filter(t =>
@@ -282,9 +283,7 @@ serve(async (req: Request) => {
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const clarificationRule = routeType !== "conversational"
-      ? `\n\nCLARIFICATION RULE: Only call ask_clarification when the student is trying to add/edit/schedule something AND a truly required field is missing (title for tasks/notes; title + date for events). Do NOT ask for optional fields. Do NOT ask clarifying questions during general conversation. Never invent or assume missing values.`
-      : "";
+    const clarificationRule = `\n\nCLARIFICATION RULE: When you need to ask the student any follow-up question, ALWAYS call ask_clarification — never ask in plain text. Use it for: (1) missing required fields in add/edit/schedule actions; (2) genuinely ambiguous requests you cannot fulfill correctly without more information; (3) content generation topics too vague to produce useful output. Do NOT ask for optional fields the student hasn't mentioned. Do NOT interrupt clearly-stated requests. One clarification at a time. Never invent or assume missing values.`;
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
