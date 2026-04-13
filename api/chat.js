@@ -429,7 +429,7 @@ export default async function handler(req, res) {
     const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice = isContentGen ? "required" : "auto";
-    const clarificationRule = `\n\nCLARIFICATION RULE: Default to attempting the task. Only ask for clarification when you truly cannot proceed — and when you do, call ask_clarification instead of writing a question in plain text. Call it for: missing required fields in add/edit/schedule actions; requests so ambiguous any attempt would be wrong; content topics too vague to write anything useful. Do NOT call it for optional fields, do NOT call it when the request is clear enough to act on. One clarification at a time. Never invent or assume missing values.`;
+    const clarificationRule = `\n\nCLARIFICATION RULE: Never write a question to the student as plain text. If you need to ask something — missing required field, ambiguous request, vague content topic — call ask_clarification. If you have all required information, act immediately without asking.`;
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const promptBuildStartedAt = Date.now();
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;

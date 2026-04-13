@@ -610,7 +610,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Use this tool as a substitute for asking a clarifying question in plain text — only when you genuinely cannot proceed without more information and would otherwise have to ask the student a question in your response. Default behavior is to attempt the task and offer to adjust; only call this tool when a question is unavoidable. Appropriate cases: (1) A required field is missing for an action (title for tasks/notes; title + date for events). (2) The request is so ambiguous that any attempt would likely be wrong. (3) Content generation topic is too vague to produce anything useful. Do NOT call this speculatively or for optional details. Do NOT call it when you can make a reasonable attempt. Keep the question specific and concise.",
+        "Call this tool whenever you would otherwise need to ask the student a follow-up question in your text response. Do NOT write questions as plain text — use this tool instead. When to call it: (1) a required field is missing for an action tool (title for tasks/notes; title + date for events); (2) the request is too ambiguous to attempt without guessing; (3) a content generation topic is too vague to produce useful output. Do NOT call it for optional fields. Do NOT call it when you have enough information to act. Keep the question specific and concise.",
       parameters: {
         type: "object",
         properties: {
