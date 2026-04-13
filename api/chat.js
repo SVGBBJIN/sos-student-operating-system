@@ -10,7 +10,18 @@ import {
   FAST_MODEL,
   PRIMARY_MODEL,
   PROPOSE_ACTION_TOOL,
+  selectModel,
 } from "../shared/ai/chat-core.js";
+
+/* ── Known Groq model IDs — only these may be passed as preferredModel ── */
+const KNOWN_GROQ_MODELS = new Set([PRIMARY_MODEL, CONVERSATIONAL_MODEL, BACKUP_MODEL, FAST_MODEL]);
+
+function resolveModel(preferredModel) {
+  if (typeof preferredModel === "string" && KNOWN_GROQ_MODELS.has(preferredModel)) {
+    return preferredModel;
+  }
+  return PRIMARY_MODEL;
+}
 
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
 
@@ -297,6 +308,7 @@ export default async function handler(req, res) {
       prompt_flags,
       tool_failures,
       streaming,
+      preferredModel,
     } = body;
     const userId = extractUserId(req.headers.authorization);
     telemetry = {
@@ -482,7 +494,7 @@ export default async function handler(req, res) {
 
     const result = await callGroq(
       GROQ_API_KEY,
-      PRIMARY_MODEL,
+      resolveModel(preferredModel),
       effectiveSystemPrompt,
       messages,
       maxTokens,

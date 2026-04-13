@@ -10,7 +10,18 @@ import {
   FAST_MODEL,
   PRIMARY_MODEL,
   PROPOSE_ACTION_TOOL,
+  selectModel,
 } from "../../../shared/ai/chat-core.js";
+
+/* ── Known Groq model IDs — only these may be passed as preferredModel ── */
+const KNOWN_GROQ_MODELS = new Set([PRIMARY_MODEL, CONVERSATIONAL_MODEL, BACKUP_MODEL, FAST_MODEL]);
+
+function resolveModel(preferredModel: string | undefined): string {
+  if (typeof preferredModel === "string" && KNOWN_GROQ_MODELS.has(preferredModel)) {
+    return preferredModel;
+  }
+  return PRIMARY_MODEL;
+}
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -228,6 +239,7 @@ serve(async (req: Request) => {
       input_tokens_est,
       prompt_flags,
       streaming,
+      preferredModel,
     } = body;
     const userId = extractUserId(req.headers.get("Authorization"));
     telemetry = {
@@ -351,7 +363,7 @@ serve(async (req: Request) => {
     // Route-aware tool selection: send only the tools needed for this request type.
     const result = await callGroq(
       GROQ_API_KEY,
-      PRIMARY_MODEL,
+      resolveModel(preferredModel),
       effectiveSystemPrompt,
       messages,
       maxTokens,

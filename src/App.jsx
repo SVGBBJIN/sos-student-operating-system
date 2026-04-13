@@ -19,6 +19,9 @@ import ModePillSwitcher from './components/skillhub/ModePillSwitcher';
 import SkillHubLessons from './components/skillhub/SkillHubLessons';
 import { evaluateTriggers } from './lib/skillHubUtils';
 import { getModeConfig } from './lib/tutorModeConfig';
+import RateLimitBanner from './components/RateLimitBanner';
+import GooglePermissionSummary from './components/GooglePermissionSummary';
+import { useAgenticMode } from './hooks/useSettings';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -3952,6 +3955,7 @@ function SlashPalette({ query, onSelect, onClose }) {
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
+  const { agenticMode, setAgenticMode } = useAgenticMode();
   const [user, setUser] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -4084,6 +4088,7 @@ function App() {
   const [googleExpiry, setGoogleExpiry] = useState(() => Number(sessionStorage.getItem('sos_google_expiry') || 0));
   const [googleUser, setGoogleUser] = useState(null);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [showGooglePermSummary, setShowGooglePermSummary] = useState(false);
   const googleClientRef = useRef(null);
   // Calendar auto-sync state (persisted to localStorage)
   const [calSyncEnabled, setCalSyncEnabled] = useState(() => localStorage.getItem('sos_cal_sync') === 'true');
@@ -4244,6 +4249,8 @@ function App() {
                 setGoogleUser({ email: info.email, name: info.name });
               }).catch(() => {});
               setToastMsg('Connected to Google ✓');
+              // Show permission summary once on first connection
+              setShowGooglePermSummary(true);
             }
           },
           error_callback: (e) => { console.error('Google auth error:', e); },
@@ -6609,6 +6616,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 </div>
                 <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
               </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Agentic Mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into steps</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
+              </div>
               <div className="settings-row" style={{borderTop:'1px solid var(--border)',paddingTop:10,marginTop:4}}>
                 <div>
                   <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Notifications</div>
@@ -7073,6 +7087,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <PresenceDetector />
       <IdleLockScreen />
       {layoutMode !== 'lofi' && <SfxToggle />}
+      <GooglePermissionSummary show={showGooglePermSummary} onDismiss={()=>setShowGooglePermSummary(false)} />
+      <RateLimitBanner />
 
       {lightboxUrl&&(
         <div onClick={()=>setLightboxUrl(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',animation:'overlayIn .2s ease'}}>

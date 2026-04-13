@@ -1,13 +1,30 @@
 // Shared chat orchestration core used by both Vercel (Node) and Supabase Edge (Deno).
 // Keep this file runtime-agnostic (Web APIs only).
 
-export const CORE_VERSION = "chat-core-v1-2026-03-27";
+export const CORE_VERSION = "chat-core-v2-2026-04-12";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
 export const PRIMARY_MODEL        = "llama-3.3-70b-versatile";
 export const CONVERSATIONAL_MODEL = "llama-3.1-70b-versatile";
 export const BACKUP_MODEL         = "llama3-8b-8192";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
+
+// LITE_MODEL is an alias for FAST_MODEL — used for short/simple turns and classification tasks.
+export const LITE_MODEL = FAST_MODEL;
+
+/**
+ * Selects the appropriate Groq model based on the characteristics of the input.
+ * Intended to be called once per session; lock the result in sessionStorage.sos_active_model.
+ *
+ * @param {{ text?: string, toolCount?: number, agentStep?: boolean }} input
+ * @returns {string} Groq model ID
+ */
+export function selectModel(input = {}) {
+  if (input.agentStep) return PRIMARY_MODEL;
+  if ((input.toolCount ?? 0) > 0) return PRIMARY_MODEL;
+  if ((input.text?.length ?? 0) < 80 && !(input.toolCount)) return FAST_MODEL;
+  return PRIMARY_MODEL;
+}
 
 // Gemini (Google AI) — OpenAI-compatible endpoint, used as cross-provider fallback.
 // gemini-2.5-flash backs CONVERSATIONAL_MODEL; gemini-2.5-flash-lite backs Llama 8B paths.
