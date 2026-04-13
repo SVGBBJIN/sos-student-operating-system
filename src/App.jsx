@@ -4373,7 +4373,7 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const rawDue = action.due || today();
+          const rawDue = action.due_date || action.due || today();
           const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
           // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
           const todayVal = today();
@@ -4386,7 +4386,7 @@ function App() {
             corrected.setDate(corrected.getDate() + daysAhead);
             finalDue = toDateStr(corrected);
           }
-          const task = { id:uid(), title:action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const task = { id:uid(), title:action.task_name||action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -4493,7 +4493,7 @@ function App() {
           break;
         }
         case 'add_note': {
-          const tabName = action.tab_name||'SOS Note'; const content = action.content||'';
+          const tabName = action.title||action.tab_name||'SOS Note'; const content = action.content||'';
           setNotes(prev => {
             const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {

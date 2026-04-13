@@ -4,8 +4,8 @@
 export const CORE_VERSION = "chat-core-v2-2026-04-12";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL        = "llama-3.3-70b-versatile";
-export const CONVERSATIONAL_MODEL = "llama-3.1-70b-versatile";
+export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
+export const CONVERSATIONAL_MODEL = "openai/gpt-oss-120b";
 export const BACKUP_MODEL         = "llama3-8b-8192";
 export const FAST_MODEL           = "llama-3.1-8b-instant";
 
@@ -150,19 +150,14 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a homework assignment or task to the student's to-do list. IMPORTANT: Only call this when the student has explicitly stated what the task is. If the title or key details are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
+        "You add a task if you lack any of the required fields called the ask clarification.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Task title" },
-          subject: { type: "string", description: "School subject" },
-          due: { type: "string", description: "Due date in YYYY-MM-DD format" },
-          estimated_minutes: {
-            type: "number",
-            description: "Estimated time to complete in minutes",
-          },
+          task_name: { type: "string", description: "The name or title of the task." },
+          due_date: { type: "string", description: "The due date of the task in ISO format (YYYY-MM-DD)." },
         },
-        required: ["title", "due"],
+        required: ["task_name", "due_date"],
       },
     },
   },
@@ -324,14 +319,14 @@ export const ACTION_TOOLS = [
     type: "function",
     function: {
       name: "add_note",
-      description: "Save a note or important information to the student's notes.",
+      description: "Store a note, if you lack any of the contents, you call the ask clarification tool.",
       parameters: {
         type: "object",
         properties: {
-          tab_name: { type: "string", description: "Name for the note tab" },
-          content: { type: "string", description: "Content to save" },
+          content: { type: "string", description: "The note content." },
+          title: { type: "string", description: "Optional title for the note." },
         },
-        required: ["tab_name", "content"],
+        required: ["content"],
       },
     },
   },
@@ -610,38 +605,31 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Call this tool whenever you would otherwise need to ask the student a follow-up question in your text response. Do NOT write questions as plain text — use this tool instead. When to call it: (1) a required field is missing for an action tool (title for tasks/notes; title + date for events); (2) the request is too ambiguous to attempt without guessing; (3) a content generation topic is too vague to produce useful output. Do NOT call it for optional fields. Do NOT call it when you have enough information to act. Keep the question specific and concise.",
+        "This is the function that asks questions when the AI is unsure of certain fields. This is to avoid hallucination.",
       parameters: {
         type: "object",
         properties: {
-          reason: {
-            type: "string",
-            description: "Brief explanation of WHY you need clarification (shown to the student, e.g. 'I want to make sure I create the right study plan for you')",
-          },
           question: {
             type: "string",
-            description: "Direct clarification question for the student",
+            description: "The question to ask the user.",
           },
-          options: {
-            type: "array",
-            description: "Suggested answer options the student can tap/select",
-            items: { type: "string" },
-          },
-          multi_select: {
-            type: "boolean",
-            description: "Whether the student may choose multiple options",
-          },
-          context_action: {
+          type: {
             type: "string",
-            description: "Optional action this clarification is about (for example add_event)",
+            enum: ["multiple_choice", "text"],
+            description: "Type of clarification question.",
+          },
+          choices: {
+            type: "array",
+            description: "List of choices (required if type is multiple_choice).",
+            items: { type: "string" },
           },
           missing_fields: {
             type: "array",
-            description: "Optional list of required fields that are currently missing",
+            description: "Fields that are missing and need to be collected.",
             items: { type: "string" },
           },
         },
-        required: ["reason", "question"],
+        required: ["question", "type", "missing_fields"],
       },
     },
   },
@@ -864,6 +852,8 @@ function toValidationClarification(toolName, missingFields, issues) {
       subject: "subject",
       activity: "activity name",
       tab_name: "note name",
+      task_name: "task name",
+      due_date: "due date (YYYY-MM-DD)",
     };
     return map[field] || field.replace(/_/g, " ");
   };
@@ -1022,7 +1012,10 @@ export async function callGroq(
     const body = {
       model: effectiveModel,
       messages: groqMessages,
-      max_tokens: maxTokens,
+      max_completion_tokens: 1000,
+      temperature: 1,
+      top_p: 1,
+      reasoning_effort: "high",
     };
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
@@ -1040,7 +1033,7 @@ export async function callGroq(
         : withNullableOptionals(safeRawTools))
       : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
-      body.tools = effectiveTools;
+      body.tools = [...effectiveTools, { type: "browser_search" }];
       body.tool_choice = toolChoiceOverride;
     }
 
@@ -1279,11 +1272,14 @@ async function _callGroqStreamInner(
   const body = {
     model,
     messages: groqMessages,
-    max_tokens: maxTokens,
+    max_completion_tokens: 1000,
+    temperature: 1,
+    top_p: 1,
+    reasoning_effort: "high",
     stream: true,
   };
   if (effectiveTools && effectiveTools.length > 0) {
-    body.tools = effectiveTools;
+    body.tools = [...effectiveTools, { type: "browser_search" }];
     body.tool_choice = toolChoice || "auto";
   }
 
@@ -1405,11 +1401,10 @@ export function parseLlmResponse(data) {
     if (tc.function.name === "ask_clarification") {
       validatedToolCalls.push(toolName);
       clarifications.push({
-        reason: parsedArgs.reason || "",
+        reason: "",
         question: parsedArgs.question || "",
-        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
-        multi_select: Boolean(parsedArgs.multi_select),
-        ...(parsedArgs.context_action ? { context_action: parsedArgs.context_action } : {}),
+        options: Array.isArray(parsedArgs.choices) ? parsedArgs.choices : [],
+        multi_select: false,
         ...(Array.isArray(parsedArgs.missing_fields)
           ? { missing_fields: parsedArgs.missing_fields }
           : {}),
