@@ -198,13 +198,7 @@ export default function Landing() {
   }, []);
 
   function handleEnterStudio() {
-    sb.auth.getSession().then(({ data }) => {
-      if (data?.session?.user) {
-        navigate('/studio');
-      } else {
-        navigate('/studio'); // App.jsx handles auth modal
-      }
-    });
+    navigate('/studio');
   }
 
   const features = [

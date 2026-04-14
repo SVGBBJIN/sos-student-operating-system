@@ -57,10 +57,10 @@ export default function AppRouter() {
           element={user ? <Navigate to="/studio" replace /> : <Landing />}
         />
 
-        {/* Protected — studio (existing App.jsx experience) */}
+        {/* Studio — App.jsx handles its own auth modal internally */}
         <Route
           path="/studio/*"
-          element={user ? <App /> : <Navigate to="/" replace />}
+          element={<App />}
         />
 
         {/* Protected — calendar */}
