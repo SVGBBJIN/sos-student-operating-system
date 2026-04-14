@@ -1033,7 +1033,7 @@ export async function callGroq(
         : withNullableOptionals(safeRawTools))
       : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
-      body.tools = [...effectiveTools, { type: "browser_search" }];
+      body.tools = effectiveTools;
       body.tool_choice = toolChoiceOverride;
     }
 
@@ -1279,7 +1279,7 @@ async function _callGroqStreamInner(
     stream: true,
   };
   if (effectiveTools && effectiveTools.length > 0) {
-    body.tools = [...effectiveTools, { type: "browser_search" }];
+    body.tools = effectiveTools;
     body.tool_choice = toolChoice || "auto";
   }
 
