@@ -10,7 +10,18 @@ import {
   FAST_MODEL,
   PRIMARY_MODEL,
   PROPOSE_ACTION_TOOL,
+  selectModel,
 } from "../../../shared/ai/chat-core.js";
+
+/* ── Known Groq model IDs — only these may be passed as preferredModel ── */
+const KNOWN_GROQ_MODELS = new Set([PRIMARY_MODEL, CONVERSATIONAL_MODEL, BACKUP_MODEL, FAST_MODEL]);
+
+function resolveModel(preferredModel: string | undefined): string {
+  if (typeof preferredModel === "string" && KNOWN_GROQ_MODELS.has(preferredModel)) {
+    return preferredModel;
+  }
+  return PRIMARY_MODEL;
+}
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -26,7 +37,8 @@ function selectToolsForRoute(
 ): typeof ACTION_TOOLS {
   if (isContentGen) return CONTENT_ACTION_TOOLS;
   if (routeType === "conversational") {
-    return [PROPOSE_ACTION_TOOL]; // Only propose_action — lets conversational model signal scheduling intent
+    const clarificationTool = ACTION_TOOLS.find(t => t.function.name === "ask_clarification");
+    return [PROPOSE_ACTION_TOOL, clarificationTool].filter(Boolean) as typeof ACTION_TOOLS;
   }
   if (workspaceContext === "schedule") {
     return ACTION_TOOLS.filter(t =>
@@ -228,6 +240,7 @@ serve(async (req: Request) => {
       input_tokens_est,
       prompt_flags,
       streaming,
+      preferredModel,
     } = body;
     const userId = extractUserId(req.headers.get("Authorization"));
     telemetry = {
@@ -263,16 +276,14 @@ serve(async (req: Request) => {
       .reverse()
       .find((m) => m?.role === "user" && typeof m?.content === "string");
     const latestUserText = ((latestUserMessage?.content as string) || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s)/i.test(latestUserText)
+    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s|event|remind|meeting|appointment|recurring)/i.test(latestUserText)
       || normalizedWorkspaceContext === "schedule"
       || normalizedWorkspaceContext === "notes";
     const routeType: "conversational" | "tool_heavy" | "content_gen" =
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const clarificationRule = routeType !== "conversational"
-      ? `\n\nCLARIFICATION RULE: Only call ask_clarification when the student is trying to add/edit/schedule something AND a truly required field is missing (title for tasks/notes; title + date for events). Do NOT ask for optional fields. Do NOT ask clarifying questions during general conversation. Never invent or assume missing values.`
-      : "";
+    const clarificationRule = `\n\nCLARIFICATION RULE: Never write a question to the student as plain text. If you need to ask something — missing required field, ambiguous request, vague content topic — call ask_clarification. If you have all required information, act immediately without asking.`;
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
@@ -351,7 +362,7 @@ serve(async (req: Request) => {
     // Route-aware tool selection: send only the tools needed for this request type.
     const result = await callGroq(
       GROQ_API_KEY,
-      PRIMARY_MODEL,
+      resolveModel(preferredModel),
       effectiveSystemPrompt,
       messages,
       maxTokens,
