@@ -6,8 +6,8 @@ export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
 export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
 export const CONVERSATIONAL_MODEL = "openai/gpt-oss-120b";
-export const BACKUP_MODEL         = "llama3-8b-8192";
-export const FAST_MODEL           = "llama-3.1-8b-instant";
+export const BACKUP_MODEL         = "openai/gpt-oss-20b";
+export const FAST_MODEL           = "openai/gpt-oss-20b";
 
 // LITE_MODEL is an alias for FAST_MODEL — used for short/simple turns and classification tasks.
 export const LITE_MODEL = FAST_MODEL;
@@ -27,7 +27,7 @@ export function selectModel(input = {}) {
 }
 
 // Gemini (Google AI) — OpenAI-compatible endpoint, used as cross-provider fallback.
-// gemini-2.5-flash backs CONVERSATIONAL_MODEL; gemini-2.5-flash-lite backs Llama 8B paths.
+// gemini-2.5-flash backs PRIMARY/CONVERSATIONAL; gemini-2.5-flash-lite backs FAST/BACKUP paths.
 // NOTE: gemma-3-*-it are HuggingFace open-weight IDs and are NOT valid on this endpoint.
 export const GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash";
 export const GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite";
@@ -1008,15 +1008,18 @@ export async function callGroq(
     }
 
     // Vision requests always use the vision-capable model regardless of mdl
-    const effectiveModel = imageBase64 ? "meta-llama/llama-4-scout-17b-16e-instruct" : mdl;
+    const effectiveModel = imageBase64 ? GEMINI_CONVERSATIONAL_BACKUP : mdl;
     const body = {
       model: effectiveModel,
       messages: groqMessages,
       max_completion_tokens: 1000,
       temperature: 1,
       top_p: 1,
-      reasoning_effort: "high",
     };
+    // reasoning_effort is only supported on openai/gpt-oss models, not Gemini fallbacks.
+    if (!isGeminiModel(effectiveModel)) {
+      body.reasoning_effort = "high";
+    }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
     // propose_action requires structured JSON tool-calling — 8B fallback models
