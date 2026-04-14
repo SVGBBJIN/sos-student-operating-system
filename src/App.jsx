@@ -22,6 +22,7 @@ import { getModeConfig } from './lib/tutorModeConfig';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
+import AppearanceSettings from './components/AppearanceSettings';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -4194,6 +4195,16 @@ function App() {
     setDataLoaded(true);
   }
 
+  // ── Restore accent color from localStorage before first paint ──
+  useEffect(() => {
+    const savedAccent = localStorage.getItem('sos_accent');
+    if (savedAccent && /^#[0-9A-Fa-f]{6}$/.test(savedAccent)) {
+      document.documentElement.style.setProperty('--primary', savedAccent);
+      document.documentElement.style.setProperty('--accent-new', savedAccent);
+      document.documentElement.style.setProperty('--primary-glow', savedAccent + '26');
+    }
+  }, []);
+
   // ── Check for existing session on mount ──
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
@@ -6379,7 +6390,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <button className="sos-side-btn" onClick={()=>{ sfx.nav(); toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }} title="Back to chat">
                 {Icon.chevronLeft(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Back to chat</span>
               </button>
-              {[{id:'home',label:'Home',icon:'🏠'},{id:'chat',label:'Chat',icon:'💬'},{id:'lessons',label:'Lessons',icon:'📖'}].map(tab => (
+              {[{id:'home',label:'Home',icon:'🏠'},{id:'chat',label:'Chat',icon:'💬'},{id:'lessons',label:'Studio',icon:'🎓'}].map(tab => (
                 <button
                   key={tab.id}
                   className={'sos-side-btn' + (skillHubTab === tab.id ? ' active' : '')}
@@ -6665,6 +6676,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open</button>
               </div>
             </div>
+            {/* ── Appearance / Accent Color ── */}
+            <AppearanceSettings user={user} />
             {/* P4.3: Privacy/Terms links */}
             <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
               <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { sb, EDGE_FN_URL, SEARCH_LESSON_URL, SUPABASE_ANON_KEY } from '../../lib/supabase.js';
 import { getModeConfig, detectModeFromText } from '../../lib/tutorModeConfig.js';
 import { getSubjectIcon } from '../../lib/skillHubUtils.js';
 import LessonPlayer from './LessonPlayer.jsx';
+import PodcastPlayer, { parsePodcastScript } from '../PodcastPlayer.jsx';
 
+/* ─── Lesson generation prompt (unchanged) ──────────────────────── */
 const LESSON_GEN_PROMPT = `Generate a focused micro-lesson for a student on the topic below.
 Return ONLY a valid JSON array of 5-7 lesson screens. No prose outside the JSON.
 
@@ -33,13 +35,386 @@ Each screen in "screens" must have:
 
 Base the content strictly on the provided search results. No prose outside the JSON.`;
 
+/* ─── New system prompts for Generate bar ───────────────────────── */
+const REPORT_SYSTEM_PROMPT =
+  'Generate a structured study report from this lesson content. Use exactly these ' +
+  'sections with markdown headings: ## Summary, ## Key Concepts (bullet list, ' +
+  '5-8 bullets), ## Important Terms (definition format: **term** — definition), ' +
+  '## Review Questions (numbered list of 5 questions). Be concise and student-friendly.';
+
+const PODCAST_SYSTEM_PROMPT =
+  'Generate a podcast-style educational dialogue about the following lesson content. ' +
+  'Format the ENTIRE response as alternating lines using ONLY these two patterns:\n' +
+  '[ALEX]: <Alex\'s line>\n' +
+  '[SAM]: <Sam\'s line>\n' +
+  'Alex is curious and asks questions. Sam is knowledgeable and explains clearly. ' +
+  'Keep it under 800 words. Educational, conversational, no intro/outro cues. ' +
+  'Begin immediately with [ALEX]:';
+
+const FLASHCARD_SYSTEM_PROMPT =
+  'Generate a set of 8-12 flashcards from this lesson content. ' +
+  'Return ONLY a valid JSON array. Each element: { "q": "question", "a": "answer" }. ' +
+  'No prose, no markdown fences, just the JSON array.';
+
+/* ─── Helper: extract readable text from lesson screens ─────────── */
+function lessonToText(lesson) {
+  const screens = lesson?.screens || [];
+  const parts   = screens.map(s => {
+    if (s.type === 'concept')  return s.content || '';
+    if (s.type === 'example')  return `${s.content || ''} ${s.annotation || ''}`.trim();
+    if (s.type === 'question') return `Q: ${s.question || ''} (Answer: ${s.correct || ''})`;
+    return '';
+  });
+  return `Topic: ${lesson?.topic || ''}\n\n${parts.filter(Boolean).join('\n\n')}`;
+}
+
+/* ─── Simple markdown → HTML renderer (headings, bold, lists) ────── */
+function renderMarkdown(md) {
+  return md
+    .replace(/## (.+)/g, '<h2 style="font-size:15px;font-weight:700;color:var(--foreground);margin:14px 0 6px">$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--foreground)">$1</strong>')
+    .replace(/^[-*] (.+)/gm, '<li style="margin-left:16px;margin-bottom:4px">$1</li>')
+    .replace(/^\d+\. (.+)/gm, '<li style="margin-left:16px;margin-bottom:4px">$1</li>')
+    .replace(/\n/g, '<br>');
+}
+
+/* ─── Spinning dot loading indicator ───────────────────────────── */
+function SpinDot() {
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: 10,
+      height: 10,
+      borderRadius: 'var(--radius-full)',
+      border: '2px solid var(--primary)',
+      borderTopColor: 'transparent',
+      animation: 'spinDot 0.8s linear infinite',
+      marginRight: 6,
+      verticalAlign: 'middle',
+    }} />
+  );
+}
+
+/* ─── Toast notification ─────────────────────────────────────────── */
+function FlashcardToast({ onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 80,
+      right: 24,
+      zIndex: 2000,
+      background: 'var(--popup)',
+      borderLeft: '3px solid var(--primary)',
+      borderRadius: 'var(--radius-md)',
+      padding: 'var(--spacing-4)',
+      boxShadow: 'var(--shadow-lg)',
+      minWidth: 240,
+      animation: 'fadeUp 0.25s ease-out both',
+      fontFamily: 'var(--font-ui)',
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 2 }}>
+        ⚡ Flashcard deck created
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+        Open in Library →
+      </div>
+    </div>
+  );
+}
+
+/* ─── Report slide-in panel ─────────────────────────────────────── */
+function ReportPanel({ content, onClose }) {
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0,
+          zIndex: 1500,
+          background: 'hsla(220,25%,5%,0.3)',
+        }}
+      />
+      {/* Panel */}
+      <div style={{
+        position: 'fixed',
+        top: 0, right: 0,
+        width: 480,
+        height: '100vh',
+        zIndex: 1501,
+        background: 'var(--sidebar)',
+        borderLeft: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-lg)',
+        display: 'flex',
+        flexDirection: 'column',
+        animation: 'slideInPanel 0.4s ease-out',
+        fontFamily: 'var(--font-ui)',
+      }}>
+        {/* Panel header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 'var(--spacing-4) var(--spacing-6)',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 16, color: 'var(--foreground)' }}>
+            Study Report
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--muted-foreground)',
+              fontSize: 18,
+              cursor: 'pointer',
+              padding: 'var(--spacing-1)',
+              borderRadius: 'var(--radius-sm)',
+              lineHeight: 1,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--foreground)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--muted-foreground)'; }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: 'var(--spacing-6)',
+            color: 'var(--muted-foreground)',
+            fontSize: 13,
+            lineHeight: 1.7,
+          }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+        />
+
+        {/* Export PDF */}
+        <div style={{
+          padding: 'var(--spacing-4) var(--spacing-6)',
+          borderTop: '1px solid var(--border)',
+          flexShrink: 0,
+        }}>
+          <button
+            onClick={() => window.print()}
+            style={{
+              width: '100%',
+              background: 'var(--primary)',
+              color: 'var(--primary-foreground)',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              fontFamily: 'var(--font-ui)',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: 'var(--spacing-3)',
+              cursor: 'pointer',
+            }}
+          >
+            Export PDF
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ─── Generate action bar ────────────────────────────────────────── */
+function GenerateBar({ lesson, user, onFlashcardDone, onReportDone, onPodcastDone }) {
+  const [fcLoading,      setFcLoading]      = useState(false);
+  const [reportLoading,  setReportLoading]  = useState(false);
+  const [podcastLoading, setPodcastLoading] = useState(false);
+
+  async function getToken() {
+    const s = await sb.auth.getSession();
+    return s?.data?.session?.access_token || SUPABASE_ANON_KEY;
+  }
+
+  async function handleFlashcards() {
+    if (!lesson || fcLoading) return;
+    setFcLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({
+          systemPrompt: FLASHCARD_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content }],
+          maxTokens: 1500,
+          isContentGen: true,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      await res.json(); // response consumed; cards stored in lesson's flashcards table by edge fn
+      onFlashcardDone();
+    } catch { /* silent — toast still shown */ onFlashcardDone(); }
+    finally { setFcLoading(false); }
+  }
+
+  async function handleReport() {
+    if (!lesson || reportLoading) return;
+    setReportLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({
+          systemPrompt: REPORT_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content }],
+          maxTokens: 1000,
+          isContentGen: true,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      const text = data.content || data.message || '';
+      onReportDone(text);
+    } catch (err) {
+      onReportDone('⚠ Could not generate report. Please try again.');
+    } finally { setReportLoading(false); }
+  }
+
+  async function handlePodcast() {
+    if (!lesson || podcastLoading) return;
+    setPodcastLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({
+          systemPrompt: PODCAST_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content }],
+          maxTokens: 1500,
+          isContentGen: true,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      const data  = await res.json();
+      const lines = parsePodcastScript(data.content || data.message || '');
+      onPodcastDone(lines, lesson.topic);
+    } catch { onPodcastDone([], lesson?.topic || ''); }
+    finally { setPodcastLoading(false); }
+  }
+
+  const pillBase = {
+    background: 'var(--muted)',
+    borderRadius: 'var(--radius-full)',
+    fontFamily: 'var(--font-ui)',
+    fontSize: 13,
+    color: 'var(--foreground)',
+    padding: 'var(--spacing-2) var(--spacing-4)',
+    border: '1px solid var(--border)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    transition: `border-color var(--duration-fast) ease-out,
+                 color var(--duration-fast) ease-out,
+                 background var(--duration-fast) ease-out`,
+    whiteSpace: 'nowrap',
+  };
+
+  const disabledStyle = { opacity: 0.6, cursor: 'not-allowed', pointerEvents: 'none' };
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      borderBottom: '1px solid var(--border)',
+      padding: 'var(--spacing-3) var(--spacing-6)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 'var(--spacing-3)',
+      flexShrink: 0,
+      flexWrap: 'wrap',
+    }}>
+      <span style={{
+        fontFamily: 'var(--font-ui)',
+        fontSize: 12,
+        color: 'var(--muted-foreground)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.1em',
+        flexShrink: 0,
+      }}>
+        Quick Generate
+      </span>
+
+      <button
+        onClick={handleFlashcards}
+        disabled={!lesson || fcLoading}
+        style={{ ...pillBase, ...(fcLoading ? disabledStyle : {}) }}
+        onMouseEnter={e => { if (!fcLoading && lesson) { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.background = 'var(--muted)'; }}
+      >
+        {fcLoading ? <><SpinDot />Generating...</> : '⚡  Flashcards'}
+      </button>
+
+      <button
+        onClick={handleReport}
+        disabled={!lesson || reportLoading}
+        style={{ ...pillBase, ...(reportLoading ? disabledStyle : {}) }}
+        onMouseEnter={e => { if (!reportLoading && lesson) { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.background = 'var(--muted)'; }}
+      >
+        {reportLoading ? <><SpinDot />Generating...</> : '📄  Report'}
+      </button>
+
+      <button
+        onClick={handlePodcast}
+        disabled={!lesson || podcastLoading}
+        style={{ ...pillBase, ...(podcastLoading ? disabledStyle : {}) }}
+        onMouseEnter={e => { if (!podcastLoading && lesson) { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--foreground)'; e.currentTarget.style.background = 'var(--muted)'; }}
+      >
+        {podcastLoading ? <><SpinDot />Generating...</> : '🎙  Podcast'}
+      </button>
+
+      {!lesson && (
+        <span style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: 'var(--muted-foreground)' }}>
+          — select a lesson to generate
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ─── Main component ─────────────────────────────────────────────── */
 export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpdate, compact }) {
-  const [activeLesson, setActiveLesson]   = useState(null);
-  const [generating, setGenerating]       = useState(false);
-  const [generateTopic, setGenerateTopic] = useState('');
-  const [showInput, setShowInput]         = useState(false);
-  const [webSearch, setWebSearch]         = useState(false);
-  const [error, setError]                 = useState(null);
+  const [activeLesson,    setActiveLesson]    = useState(null);
+  const [generating,      setGenerating]      = useState(false);
+  const [generateTopic,   setGenerateTopic]   = useState('');
+  const [showInput,       setShowInput]       = useState(false);
+  const [webSearch,       setWebSearch]       = useState(false);
+  const [error,           setError]           = useState(null);
+
+  // Generate bar output states
+  const [showToast,       setShowToast]       = useState(false);
+  const [reportContent,   setReportContent]   = useState(null);
+  const [podcastLines,    setPodcastLines]    = useState([]);
+  const [podcastTitle,    setPodcastTitle]    = useState('');
+  // Which lesson is selected for generate-bar actions
+  const [selectedLesson,  setSelectedLesson]  = useState(null);
+
+  // Auto-select first lesson as the "active" one for the generate bar
+  useEffect(() => {
+    if (!selectedLesson && lessons && lessons.length > 0) {
+      setSelectedLesson(lessons[0]);
+    }
+  }, [lessons, selectedLesson]);
 
   // ── Standard lesson generation ─────────────────────────────────────────────
   async function generateLesson(topic) {
@@ -88,7 +463,6 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
       const session = await sb.auth.getSession();
       const token   = session?.data?.session?.access_token;
 
-      // Call the search-lesson edge function
       const res = await fetch(SEARCH_LESSON_URL, {
         method: 'POST',
         headers: {
@@ -103,7 +477,7 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
         throw new Error(errData.error || 'Web search lesson generation failed');
       }
 
-      const data = await res.json();
+      const data    = await res.json();
       const screens = data.screens;
       const report  = data.report || null;
       const mode    = detectModeFromText(topic) || activeMode;
@@ -158,11 +532,13 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
       if (!dbErr && saved) {
         onLessonUpdate?.([...(lessons || []), saved]);
         setActiveLesson(saved);
+        setSelectedLesson(saved);
       }
     } else {
       const localLesson = { ...lessonRecord, id: 'local-' + Date.now() };
       onLessonUpdate?.([...(lessons || []), localLesson]);
       setActiveLesson(localLesson);
+      setSelectedLesson(localLesson);
     }
 
     setShowInput(false);
@@ -195,6 +571,7 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
       onLessonUpdate?.(updated);
     }
     setActiveLesson(lesson);
+    setSelectedLesson(lesson);
   }
 
   const sortedLessons = [...(lessons || [])].sort((a, b) => {
@@ -216,7 +593,7 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
           />
         )}
         <div className="sh-lessons-compact-header">
-          <span className="sh-lessons-compact-title">📖 Lessons</span>
+          <span className="sh-lessons-compact-title">🎓 Studio</span>
           <button
             className="sh-generate-btn"
             style={{ fontSize: '0.72rem', padding: '4px 10px' }}
@@ -303,7 +680,7 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
 
   // ── Full lessons tab ───────────────────────────────────────────────────────
   return (
-    <div className="sh-tab-panel">
+    <div className="sh-tab-panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {activeLesson && (
         <LessonPlayer
           lesson={activeLesson}
@@ -313,9 +690,37 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
         />
       )}
 
+      {/* Toast */}
+      {showToast && <FlashcardToast onDismiss={() => setShowToast(false)} />}
+
+      {/* Report panel */}
+      {reportContent && (
+        <ReportPanel
+          content={reportContent}
+          onClose={() => setReportContent(null)}
+        />
+      )}
+
+      {/* ── QUICK GENERATE bar ── */}
+      <GenerateBar
+        lesson={selectedLesson}
+        user={user}
+        onFlashcardDone={() => setShowToast(true)}
+        onReportDone={text => setReportContent(text)}
+        onPodcastDone={(lines, title) => { setPodcastLines(lines); setPodcastTitle(title); }}
+      />
+
+      {/* Podcast player (shown below generate bar) */}
+      {podcastLines.length > 0 && (
+        <div style={{ padding: 'var(--spacing-4) var(--spacing-6)', borderBottom: '1px solid var(--border)', overflowY: 'auto', maxHeight: '45vh' }}>
+          <PodcastPlayer lines={podcastLines} title={podcastTitle} />
+        </div>
+      )}
+
+      {/* Lessons header */}
       <div className="sh-lessons-header">
         <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--sh-text)' }}>
-          📖 Lessons
+          🎓 Studio
         </h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
@@ -383,30 +788,39 @@ export default function SkillHubLessons({ lessons, activeMode, user, onLessonUpd
         </div>
       )}
 
-      {sortedLessons.length === 0 ? (
-        <div className="sh-empty-state">
-          <div className="sh-empty-state-icon">📖</div>
-          <div>No lessons yet.</div>
-          <div style={{ marginTop: 6, fontSize: '0.8rem' }}>
-            Generate your first lesson or struggle with a problem — it'll auto-suggest one.
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {sortedLessons.length === 0 ? (
+          <div className="sh-empty-state">
+            <div className="sh-empty-state-icon">🎓</div>
+            <div>No lessons yet.</div>
+            <div style={{ marginTop: 6, fontSize: '0.8rem' }}>
+              Generate your first lesson or struggle with a problem — it'll auto-suggest one.
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="sh-lessons-grid">
-          {sortedLessons.map(lesson => (
-            <LessonCard
-              key={lesson.id}
-              lesson={lesson}
-              onClick={() => handleLessonOpen(lesson)}
-            />
-          ))}
-        </div>
-      )}
+        ) : (
+          <div className="sh-lessons-grid">
+            {sortedLessons.map(lesson => (
+              <LessonCard
+                key={lesson.id}
+                lesson={lesson}
+                isSelected={selectedLesson?.id === lesson.id}
+                onClick={() => handleLessonOpen(lesson)}
+                onSelect={() => setSelectedLesson(lesson)}
+                user={user}
+                onFlashcardDone={() => setShowToast(true)}
+                onReportDone={text => setReportContent(text)}
+                onPodcastDone={(lines, title) => { setPodcastLines(lines); setPodcastTitle(title); }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function LessonCard({ lesson, onClick }) {
+/* ─── Lesson Card with mini-buttons ─────────────────────────────── */
+function LessonCard({ lesson, isSelected, onClick, onSelect, user, onFlashcardDone, onReportDone, onPodcastDone }) {
   const screens = lesson.screens || [];
   const done    = lesson.current_screen || 0;
   const total   = screens.length;
@@ -414,11 +828,90 @@ function LessonCard({ lesson, onClick }) {
   const icon    = getSubjectIcon(lesson.topic + ' ' + (lesson.subject || ''));
   const cfg     = getModeConfig(lesson.mode);
 
+  const [fcLoading,      setFcLoading]      = useState(false);
+  const [reportLoading,  setReportLoading]  = useState(false);
+  const [podcastLoading, setPodcastLoading] = useState(false);
+
+  async function getToken() {
+    const s = await sb.auth.getSession();
+    return s?.data?.session?.access_token || SUPABASE_ANON_KEY;
+  }
+
+  async function miniFlashcards(e) {
+    e.stopPropagation();
+    if (fcLoading) return;
+    setFcLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ systemPrompt: FLASHCARD_SYSTEM_PROMPT, messages: [{ role: 'user', content }], maxTokens: 1500, isContentGen: true }),
+      });
+      await res.json();
+      onFlashcardDone();
+    } catch { onFlashcardDone(); } finally { setFcLoading(false); }
+  }
+
+  async function miniReport(e) {
+    e.stopPropagation();
+    if (reportLoading) return;
+    setReportLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ systemPrompt: REPORT_SYSTEM_PROMPT, messages: [{ role: 'user', content }], maxTokens: 1000, isContentGen: true }),
+      });
+      const data = await res.json();
+      onReportDone(data.content || data.message || '');
+    } catch { onReportDone('⚠ Could not generate report.'); } finally { setReportLoading(false); }
+  }
+
+  async function miniPodcast(e) {
+    e.stopPropagation();
+    if (podcastLoading) return;
+    setPodcastLoading(true);
+    try {
+      const token   = await getToken();
+      const content = lessonToText(lesson);
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ systemPrompt: PODCAST_SYSTEM_PROMPT, messages: [{ role: 'user', content }], maxTokens: 1500, isContentGen: true }),
+      });
+      const data  = await res.json();
+      const lines = parsePodcastScript(data.content || data.message || '');
+      onPodcastDone(lines, lesson.topic);
+    } catch { onPodcastDone([], lesson.topic); } finally { setPodcastLoading(false); }
+  }
+
+  const miniBtnStyle = {
+    width: 24, height: 24,
+    borderRadius: 'var(--radius-full)',
+    background: 'var(--muted)',
+    border: '1px solid var(--border)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 11,
+    transition: `background var(--duration-fast) ease-out, border-color var(--duration-fast) ease-out`,
+    flexShrink: 0,
+  };
+
   return (
-    <div className="sh-lesson-card" onClick={onClick}>
+    <div
+      className="sh-lesson-card"
+      onClick={() => { onSelect(); onClick(); }}
+      style={{ outline: isSelected ? '2px solid var(--primary)' : 'none', outlineOffset: 2 }}
+    >
       <div className="sh-lesson-card-header">
         <span className="sh-lesson-card-icon">{icon}</span>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="sh-lesson-card-title">{lesson.topic}</div>
           {lesson.source === 'web_search' && (
             <span className="sh-lesson-card-badge upcoming">🔍 From web search</span>
@@ -433,7 +926,42 @@ function LessonCard({ lesson, onClick }) {
             <span className="sh-lesson-card-badge complete">✓ Complete</span>
           )}
         </div>
+
+        {/* Mini generate buttons */}
+        <div style={{ display: 'flex', gap: 4, marginLeft: 8, alignItems: 'center' }}>
+          <button
+            title="Generate Flashcards"
+            onClick={miniFlashcards}
+            disabled={fcLoading}
+            style={{ ...miniBtnStyle, opacity: fcLoading ? 0.5 : 1 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--muted)'; }}
+          >
+            {fcLoading ? <SpinDot /> : '⚡'}
+          </button>
+          <button
+            title="Generate Report"
+            onClick={miniReport}
+            disabled={reportLoading}
+            style={{ ...miniBtnStyle, opacity: reportLoading ? 0.5 : 1 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--muted)'; }}
+          >
+            {reportLoading ? <SpinDot /> : '📄'}
+          </button>
+          <button
+            title="Generate Podcast"
+            onClick={miniPodcast}
+            disabled={podcastLoading}
+            style={{ ...miniBtnStyle, opacity: podcastLoading ? 0.5 : 1 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--card)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--muted)'; }}
+          >
+            {podcastLoading ? <SpinDot /> : '🎙'}
+          </button>
+        </div>
       </div>
+
       <div className="sh-progress-bar">
         <div className="sh-progress-fill" style={{ width: pct + '%' }} />
       </div>

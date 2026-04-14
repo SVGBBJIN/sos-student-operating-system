@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import { BrowserRouter } from 'react-router-dom';
+import AppRouter from './AppRouter';
 import './styles/index.css';
 import './styles/neon-lofi.css';   // override layer — cascades on top of index.css
 import './styles/lofi-layout.css'; // lofi 3-column grid layout
@@ -21,7 +22,9 @@ try {
     <>
       <SkyBackground />
       <PresenceProvider>
-        <App />
+        <BrowserRouter>
+          <AppRouter />
+        </BrowserRouter>
       </PresenceProvider>
     </>
   );
