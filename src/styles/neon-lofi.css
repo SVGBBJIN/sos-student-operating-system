@@ -1,1154 +1,486 @@
 /* ═══════════════════════════════════════════════════════════════════
-   NEON LOFI URBANIST — Design System Override Layer
-   Loaded after index.css via main.jsx — cascades on top.
-   Legacy CSS variables are repointed here so existing App.jsx
-   components automatically inherit the new palette.
+   STUDIO DESIGN SYSTEM OVERRIDE LAYER
+   Aligns the Studio with the landing page visual identity.
+   Replaces the previous neon-lofi theming.
+   Loaded after index.css — cascades on top.
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ─── Google Fonts ─────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300;1,400&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@300;400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* ─── Design Tokens ────────────────────────────────────────────────── */
-:root {
-  /* Core backgrounds */
-  --bg-deep:    #080a12;
-  --bg-surface: rgba(22, 26, 36, 0.72);
-  --bg-panel:   rgba(18, 22, 32, 0.85);
+/* ─── Remove Old Atmosphere Effects ────────────────────────────────── */
+#root::before  { display: none !important; }  /* film grain */
+#root::after   { display: none !important; }  /* scanlines */
+.sky-layer     { display: none !important; }  /* sky canvas */
+.corner-bracket { display: none !important; } /* neon brackets */
 
-  /* Neon palette */
-  --neon-cyan:   #00E5CC;
-  --neon-violet: #9B5DE5;
-  --neon-amber:  #FFB830;
-  --neon-cta:    var(--neon-cyan);
-
-  /* Text */
-  --text-primary:   #E8EAF0;
-  --text-secondary: #9097A8;
-  --text-ghost:     rgba(232, 234, 240, 0.35);
-
-  /* Fonts */
-  --font-display: 'Syne', sans-serif;
-  --font-body:    'DM Sans', sans-serif;
-  --font-mono:    'JetBrains Mono', monospace;
-  --font-jp:      'Noto Sans JP', sans-serif;
-
-  /* Neon glows — box-shadow only, never background fills */
-  --glow-cyan:   0 0 8px rgba(0, 229, 204, 0.4),  0 0 24px rgba(0, 229, 204, 0.15);
-  --glow-violet: 0 0 8px rgba(155, 93, 229, 0.4), 0 0 24px rgba(155, 93, 229, 0.15);
-  --glow-amber:  0 0 8px rgba(255, 184, 48, 0.4), 0 0 24px rgba(255, 184, 48, 0.15);
-
-  /* Motion — no spring, no bounce */
-  --ease-neon: cubic-bezier(0.4, 0, 0.2, 1);
-  --t-fast:    150ms;
-  --t-mid:     200ms;
-
-  /* Sky window colors (overridden per data-sky state) */
-  --win-lit:  var(--neon-cyan);
-  --win-dark: rgba(0, 0, 0, 0.6);
-
-  /* Japanese text overlay opacity (overridden per data-sky state) */
-  --jp-opacity: 0.05;
-
-  /* ── Repoint legacy index.css variables → new palette ──────────────
-     Every existing component using var(--accent), var(--text), etc.
-     automatically inherits the new Neon Lofi values. No App.jsx changes
-     needed for color propagation.
-  ──────────────────────────────────────────────────────────────────── */
-  --bg:          var(--bg-deep);
-  --bg2:         var(--bg-panel);
-  --card:        var(--bg-surface);
-  --accent:      var(--neon-cyan);
-  --accent-dim:  rgba(0, 229, 204, 0.4);
-  --accent-glow: var(--glow-cyan);
-  --text:        var(--text-primary);
-  --text-dim:    var(--text-secondary);
-  --teal:        var(--neon-cyan);
-  --violet:      var(--neon-violet);
-  --radius:      2px;        /* was 10px — sharp rectangular components */
-  --shadow:      var(--glow-cyan);
-}
-
-/* ─── Sky State Overrides ──────────────────────────────────────────── */
-/* Applied via data-sky attribute on <html> by SkyBackground.jsx       */
-/* SkyBackground canvas hidden until weather theme is re-enabled       */
-.sky-layer { opacity: 0 !important; }
-
-[data-sky="sunrise"] {
-  --neon-cyan:   rgba(0, 229, 204, 0.4);
-  --neon-violet: rgba(155, 93, 229, 0.4);
-  --neon-amber:  rgba(255, 184, 48, 0.7);
-  --neon-cta:    var(--neon-amber);
-  --win-lit:     rgba(255, 180, 80, 0.5);
-  --win-dark:    rgba(0, 0, 0, 0.6);
-  --jp-opacity:  0.03;
-  --accent:      rgba(0, 229, 204, 0.4);
-}
-[data-sky="midday"] {
-  --neon-cyan:   rgba(0, 229, 204, 0.25);
-  --neon-violet: rgba(155, 93, 229, 0.20);
-  --neon-amber:  rgba(255, 184, 48, 0.25);
-  --neon-cta:    #00B8D4;
-  --bg-surface:  rgba(20, 26, 40, 0.88);
-  --win-lit:     rgba(140, 180, 220, 0.2);
-  --win-dark:    rgba(0, 0, 0, 0.5);
-  --jp-opacity:  0.02;
-  --accent:      rgba(0, 229, 204, 0.25);
-}
-[data-sky="night"] {
-  --neon-cyan:   #00E5CC;
-  --neon-violet: #9B5DE5;
-  --neon-amber:  #FFB830;
-  --neon-cta:    var(--neon-cyan);
-  --win-lit:     var(--neon-cyan);
-  --jp-opacity:  0.05;
-  --accent:      #00E5CC;
-}
-
-/* ─── Presence / Activity State Overrides ─────────────────────────── */
-/* Applied via data-presence on <html> by PresenceDetector.jsx         */
-/* City dims progressively as student becomes idle                      */
-
-.sky-layer,
-.neon-primary {
-  transition: opacity 800ms var(--ease-neon), filter 1200ms var(--ease-neon);
-}
-[data-presence="glanced_away"] .sky-layer {
-  opacity: 0.6;
-  transition: opacity 300ms ease;
-}
-[data-presence="glanced_away"] .neon-primary {
-  opacity: 0.6;
-  transition: opacity 300ms ease;
-}
-[data-presence="away"] .sky-layer {
-  filter: saturate(0.6);
-  opacity: 0.3;
-  transition: filter 500ms ease, opacity 500ms ease;
-}
-[data-presence="away"] .neon-primary {
-  opacity: 0.3;
-  transition: opacity 500ms ease;
-}
-[data-presence="absent"] .sky-layer {
-  filter: saturate(0.2);
-  opacity: 0.15;
-  animation: city-sleep 4s ease-in-out infinite;
-}
-[data-presence="absent"] .neon-primary {
-  opacity: 0.15;
-}
-
-
-/* ─── Keyframe Animations ──────────────────────────────────────────── */
-
-/* Neon tube re-strike — used on app load and presence RETURN          */
-@keyframes neon-strike {
-  0%   { opacity: 1; }
-  15%  { opacity: 0.6; }
-  20%  { opacity: 1; }
-  35%  { opacity: 0.75; }
-  40%  { opacity: 1; }
-}
-/* Applied by PresenceDetector on RETURN event */
-.neon-striking {
-  animation: neon-strike 220ms ease forwards;
-}
-
-/* Sleeping city pulse — ambient glow breathe when fully absent        */
-@keyframes city-sleep {
-  0%,  100% { filter: saturate(0.2); opacity: 0.15; }
-  50%        { filter: saturate(0.2); opacity: 0.08; }
-}
-
-/* Loading scan line — sweeps top to bottom                            */
-@keyframes scan-sweep {
-  0%   { transform: translateY(-2px); }
-  100% { transform: translateY(100vh); }
-}
-
-/* Blink for status pill cursor                                         */
-@keyframes blink-cursor {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0; }
-}
-
-/* ─── Atmosphere (always-on) ──────────────────────────────────────── */
-
-/* Film grain — SVG feTurbulence noise, 2% opacity overlay             */
-#root::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.022;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23grain)' opacity='1'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px 200px;
-}
-
-/* Scanlines — CRT feel, every 2px                                     */
-#root::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9998;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 1px,
-    rgba(0, 0, 0, 0.015) 1px,
-    rgba(0, 0, 0, 0.015) 2px
-  );
-}
-
-/* City grid overlay — overhead map feel                               */
-.sos-app::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background-image:
-    repeating-linear-gradient(0deg,   rgba(255,255,255,0.018) 0, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 40px),
-    repeating-linear-gradient(90deg,  rgba(255,255,255,0.018) 0, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 40px);
-}
-
-/* Corner L-bracket targeting reticles                                 */
-.corner-bracket {
-  position: fixed;
-  width: 10px;
-  height: 10px;
-  border-color: rgba(0, 229, 204, 0.22);
-  border-style: solid;
-  pointer-events: none;
-  z-index: 9997;
-}
-.corner-bracket-tl { top: 12px;    left: 12px;    border-width: 1px 0 0 1px; }
-.corner-bracket-tr { top: 12px;    right: 12px;   border-width: 1px 1px 0 0; }
-.corner-bracket-bl { bottom: 12px; left: 12px;    border-width: 0 0 1px 1px; }
-.corner-bracket-br { bottom: 12px; right: 12px;   border-width: 0 1px 1px 0; }
-
-/* ─── Base Overrides ──────────────────────────────────────────────── */
+/* ─── Base ─────────────────────────────────────────────────────────── */
 
 html, body {
-  background: var(--bg-deep);
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  font-family: var(--font-ui) !important;
 }
-body {
-  background: var(--bg-deep) !important;
-  color: var(--text-primary);
-  font-family: var(--font-body);
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0, 229, 204, 0.22); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 229, 204, 0.42); }
-
-/* ─── Layout Shells ───────────────────────────────────────────────── */
 
 #root {
-  position: relative;
-  z-index: 3;
-  background: transparent;
+  background: transparent !important;
 }
 
+/* ─── Studio App Shell ─────────────────────────────────────────────── */
+
 .sos-app {
-  background: transparent !important;
-  position: relative;
-  z-index: 3;
+  background: linear-gradient(160deg, hsl(220,25%,10%) 0%, hsl(222,26%,8%) 100%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-top: 2px solid transparent !important;
+  border-image: linear-gradient(90deg, hsl(35,70%,50%), hsl(30,70%,55%)) 1 !important;
 }
-/* Override ambient gradient blob in .sos-sidebar::before only */
-.sos-sidebar::before {
+
+/* Remove all pseudo-element ambient effects */
+.sos-app::before,
+.sos-app::after,
+.sos-main::before,
+.sos-main::after {
   display: none !important;
 }
 
-/* ─── Ambient breathing glow on main chat area ──────────────────── */
-@keyframes neonBreathe {
-  0%, 100% { opacity: 0.9; }
-  50%       { opacity: 0.45; }
-}
-
-.sos-main::before {
-  content: '' !important;
-  display: block !important;
-  position: absolute !important;
-  inset: -20% -10% !important;
-  background: radial-gradient(ellipse at 65% 20%, rgba(0, 229, 204, 0.10), transparent 50%),
-              radial-gradient(ellipse at 30% 80%, rgba(107, 70, 255, 0.08), transparent 45%),
-              radial-gradient(ellipse at 85% 75%, rgba(245, 158, 11, 0.06), transparent 40%) !important;
-  filter: blur(20px) !important;
-  pointer-events: none !important;
-  z-index: 0 !important;
-  animation: neonBreathe 8s ease-in-out infinite !important;
-}
-
-/* Cityscape silhouette at base of main chat */
-.sos-main::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  background: url('/city-bg.svg') center bottom / cover no-repeat;
-  opacity: 0.05;
-  pointer-events: none;
-  z-index: 0;
-}
+/* ─── Sidebar ──────────────────────────────────────────────────────── */
 
 .sos-sidebar {
-  background: rgba(6, 8, 16, 0.88) !important;
-  backdrop-filter: blur(14px) saturate(1.4);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+  background: linear-gradient(180deg, hsl(220,22%,13%) 0%, hsl(220,24%,11%) 100%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-right: 1px solid var(--border) !important;
 }
 .sos-sidebar.collapsed {
-  background: rgba(6, 8, 16, 0.88) !important;
+  background: linear-gradient(180deg, hsl(220,22%,13%) 0%, hsl(220,24%,11%) 100%) !important;
 }
+.sos-sidebar::before {
+  display: none !important;
+}
+.sos-sidebar-head {
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* ─── Top Nav Bar ──────────────────────────────────────────────────── */
 
 .sos-header {
-  background: rgba(6, 8, 16, 0.88) !important;
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  border-bottom: 1px solid rgba(0, 229, 204, 0.07) !important;
+  background: var(--sidebar) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-bottom: 1px solid var(--border) !important;
 }
 
-.sos-input-area {
-  background: rgba(6, 8, 16, 0.92) !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
-
-.sos-chat-companion {
-  background: rgba(6, 8, 16, 0.88) !important;
-  border-left: 1px solid rgba(0, 229, 204, 0.07) !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-/* ─── Navigation ──────────────────────────────────────────────────── */
-
-.sos-sidebar-head {
-  border-bottom: 1px solid rgba(0, 229, 204, 0.07) !important;
-}
+/* ─── Sidebar Navigation Buttons ──────────────────────────────────── */
 
 .sos-side-btn {
   background: transparent !important;
-  border: 1px solid rgba(0, 229, 204, 0.16) !important;
-  border-radius: 0 !important;
-  color: var(--text-secondary) !important;
-  font-family: var(--font-body);
-  font-weight: 500;
-  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-  transition: background var(--t-fast) var(--ease-neon),
-              border-color var(--t-fast) var(--ease-neon),
-              color var(--t-fast) var(--ease-neon),
-              box-shadow var(--t-fast) var(--ease-neon);
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--muted-foreground) !important;
+  font-family: var(--font-ui) !important;
+  font-weight: 500 !important;
+  clip-path: none !important;
+  box-shadow: none !important;
+  transition: background var(--duration-fast) ease-out,
+              border-color var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out !important;
 }
 .sos-side-btn:hover {
-  background: rgba(0, 229, 204, 0.06) !important;
-  border-color: rgba(0, 229, 204, 0.36) !important;
-  color: var(--text-primary) !important;
+  background: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
   box-shadow: none !important;
   transform: none !important;
 }
 .sos-side-btn.active {
-  background: rgba(0, 229, 204, 0.08) !important;
-  border-color: var(--neon-cyan) !important;
-  border-left: 3px solid var(--neon-cyan) !important;
-  color: var(--neon-cyan) !important;
-  box-shadow: var(--glow-cyan) !important;
+  background: var(--muted) !important;
+  border-color: transparent !important;
+  border-left: 3px solid var(--primary) !important;
+  color: var(--primary) !important;
+  box-shadow: none !important;
+}
+/* Remove module color coding */
+.sos-side-btn[data-module] {
+  border-left: 1px solid var(--border) !important;
+}
+.sos-side-btn[data-module].active {
+  border-left: 3px solid var(--primary) !important;
+}
+.sos-side-btn[data-module]:hover {
+  border-left-color: var(--border) !important;
+  color: var(--foreground) !important;
 }
 
-/* ─── Module colour coding — left-border identity strips ─────────── */
-/* Tasks  → amber    Schedule → sky     Notes → lavender
-   Study  → sage     Import   → rose                                 */
-.sos-side-btn[data-module="schedule"] {
-  border-left: 3px solid rgba(125, 211, 252, 0.55) !important;
-}
-.sos-side-btn[data-module="schedule"]:hover {
-  border-left-color: #7dd3fc !important;
-  color: #7dd3fc !important;
-}
-.sos-side-btn[data-module="notes"] {
-  border-left: 3px solid rgba(196, 181, 253, 0.55) !important;
-}
-.sos-side-btn[data-module="notes"]:hover {
-  border-left-color: #c4b5fd !important;
-  color: #c4b5fd !important;
-}
-.sos-side-btn[data-module="study"] {
-  border-left: 3px solid rgba(134, 239, 172, 0.55) !important;
-}
-.sos-side-btn[data-module="study"]:hover {
-  border-left-color: #86efac !important;
-  color: #86efac !important;
-}
-.sos-side-btn[data-module="tasks"] {
-  border-left: 3px solid rgba(245, 200, 66, 0.55) !important;
-}
-.sos-side-btn[data-module="tasks"]:hover {
-  border-left-color: #f5c842 !important;
-  color: #f5c842 !important;
-}
-.sos-side-btn[data-module="import"] {
-  border-left: 3px solid rgba(253, 164, 175, 0.55) !important;
-}
-.sos-side-btn[data-module="import"]:hover {
-  border-left-color: #fda4af !important;
-  color: #fda4af !important;
-}
-
-/* ─── Confirm-card module accent borders ─────────────────────────── */
-.sos-confirm-card[data-action="add_task"] {
-  border-left: 3px solid #f5c842 !important;
-}
-.sos-confirm-card[data-action="create_flashcards"] {
-  border-left: 3px solid #fda4af !important;
-}
-.sos-confirm-card[data-action="create_quiz"] {
-  border-left: 3px solid #7dd3fc !important;
-}
-.sos-confirm-card[data-action="add_event"] {
-  border-left: 3px solid #7dd3fc !important;
-}
-.sos-confirm-card[data-action="create_note"] {
-  border-left: 3px solid #c4b5fd !important;
-}
-
+/* Collapse / topbar icon buttons */
 .sos-collapse-btn,
 .topbar-sidebar-btn {
   background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 0 !important;
-  color: var(--text-secondary) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--muted-foreground) !important;
+  clip-path: none !important;
+  transition: background var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out !important;
 }
 .sos-collapse-btn:hover,
 .topbar-sidebar-btn:hover {
-  background: rgba(0, 229, 204, 0.06) !important;
-  border-color: rgba(0, 229, 204, 0.3) !important;
+  background: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
   transform: none !important;
 }
 
+/* Companion panel toggle */
 .sos-companion-toggle {
-  background: rgba(0, 229, 204, 0.06) !important;
-  border: 1px solid rgba(0, 229, 204, 0.18) !important;
-  border-radius: 14px !important;
-  color: var(--text-secondary) !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--muted-foreground) !important;
+  font-family: var(--font-ui) !important;
 }
 .sos-companion-toggle:hover {
-  background: rgba(0, 229, 204, 0.10) !important;
-  border-color: rgba(0, 229, 204, 0.36) !important;
-  color: var(--text-primary) !important;
+  background: var(--muted) !important;
+  border-color: hsla(170,50%,50%,0.25) !important;
+  color: var(--foreground) !important;
 }
 
-/* ─── Chat Messages ───────────────────────────────────────────────── */
+/* ─── Chat Companion Panel ─────────────────────────────────────────── */
+
+.sos-chat-companion {
+  background: var(--surface) !important;
+  border-left: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ─── Chat Input Area ──────────────────────────────────────────────── */
+
+.sos-input-area {
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.sos-input-wrap {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+}
+.sos-input-wrap:focus-within {
+  border-color: var(--primary) !important;
+  box-shadow: var(--shadow-focus) !important;
+}
+
+/* ─── Message Bubbles ──────────────────────────────────────────────── */
 
 .sos-bubble {
-  border-radius: 18px !important;
+  border-radius: var(--radius-md) !important;
+  font-family: var(--font-ui) !important;
 }
 .sos-bubble-user {
-  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-violet)) !important;
-  color: #fff !important;
-  border-bottom-right-radius: 14px !important;
-  clip-path: none !important;
+  background: hsla(155, 25%, 55%, 0.20) !important;
+  border: 1px solid hsla(155, 25%, 55%, 0.30) !important;
+  color: var(--foreground) !important;
+  border-bottom-right-radius: var(--radius-sm) !important;
   box-shadow: none !important;
   animation: none !important;
+  background-image: none !important;
 }
 .sos-bubble-ai {
-  background: rgba(12, 15, 26, 0.88) !important;
-  border: 1px solid rgba(255, 255, 255, 0.05) !important;
-  border-top: 1px solid rgba(0, 229, 204, 0.2) !important;
-  border-bottom-left-radius: 14px !important;
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+  border-bottom-left-radius: var(--radius-sm) !important;
+  backdrop-filter: none !important;
   animation: none !important;
+  background-image: none !important;
+  box-shadow: var(--shadow) !important;
 }
 
+/* ─── Suggestion Chips ─────────────────────────────────────────────── */
+
 .sos-chip {
-  background: transparent !important;
-  border: 1px solid rgba(0, 229, 204, 0.28) !important;
-  color: var(--neon-cyan) !important;
-  border-radius: 16px !important;
+  background: var(--muted) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--muted-foreground) !important;
+  border-radius: var(--radius-full) !important;
+  font-family: var(--font-ui) !important;
+  transition: border-color var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out !important;
 }
+.sos-chip::after { display: none !important; }
 .sos-chip:hover {
-  background: rgba(0, 229, 204, 0.08) !important;
-  border-color: var(--neon-cyan) !important;
-  box-shadow: var(--glow-cyan) !important;
+  background: var(--muted) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+  box-shadow: none !important;
   transform: none !important;
 }
 
-/* ─── Cards & Panels ──────────────────────────────────────────────── */
+/* ─── Cards & Panels ───────────────────────────────────────────────── */
 
 .settings-card,
+.daily-brief-card {
+  background: var(--surface) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border) !important;
+  border-top: 1px solid var(--border) !important;
+  box-shadow: var(--shadow) !important;
+}
+
 .confirm-card,
 .content-card,
-.plan-card,
-.daily-brief-card,
+.plan-card {
+  background: var(--popup) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border) !important;
+  border-top: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
 .notes-panel,
 .peek-panel {
-  background: rgba(12, 15, 26, 0.88) !important;
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  border-radius: 2px !important;
-  border-color: rgba(255, 255, 255, 0.05) !important;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5) !important;
-}
-.settings-card:focus-within,
-.confirm-card,
-.content-card {
-  border-top: 1px solid rgba(0, 229, 204, 0.15) !important;
+  background: var(--surface) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
 .settings-view {
-  background: transparent;
+  background: transparent !important;
 }
 
-/* Chat history sidebar */
+/* Confirm card action-specific borders */
+.sos-confirm-card[data-action] {
+  border-left: 3px solid var(--primary) !important;
+}
+
+/* ─── Chat History Sidebar ─────────────────────────────────────────── */
+
+.chat-sidebar {
+  background: var(--sidebar) !important;
+  border-right: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+}
 .chat-sidebar-item {
-  border-radius: 0 !important;
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.04) !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  clip-path: none !important;
+  transition: background var(--duration-fast) ease-out,
+              border-color var(--duration-fast) ease-out !important;
 }
 .chat-sidebar-item:hover {
-  background: rgba(0, 229, 204, 0.04) !important;
-  border-color: rgba(0, 229, 204, 0.15) !important;
+  background: var(--card) !important;
+  border-color: hsla(170,50%,50%,0.25) !important;
+  transform: none !important;
 }
 .chat-sidebar-item.active {
-  background: rgba(0, 229, 204, 0.07) !important;
-  border-left: 2px solid var(--neon-cyan) !important;
+  background: var(--card) !important;
+  border-left: 3px solid var(--primary) !important;
 }
 
-/* ─── Inputs & Forms ──────────────────────────────────────────────── */
+/* ─── Inputs & Forms ───────────────────────────────────────────────── */
 
 input, textarea, select {
-  border-radius: 12px !important;
-  background: rgba(0, 0, 0, 0.35) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  color: var(--text-primary) !important;
-  font-family: var(--font-body);
-  caret-color: var(--neon-cyan);
+  border-radius: var(--radius) !important;
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+  font-family: var(--font-ui) !important;
+  caret-color: var(--primary) !important;
 }
 input:focus, textarea:focus, select:focus {
-  border-color: rgba(0, 229, 204, 0.55) !important;
-  box-shadow: 0 0 0 1px rgba(0, 229, 204, 0.25) !important;
-  outline: none;
+  border-color: var(--primary) !important;
+  box-shadow: var(--shadow-focus) !important;
+  outline: none !important;
 }
 input::placeholder, textarea::placeholder {
-  color: var(--text-ghost) !important;
+  color: var(--muted-foreground) !important;
+  opacity: 1 !important;
 }
 select option {
-  background: #0d1020;
-  color: var(--text-primary);
+  background: var(--surface) !important;
+  color: var(--foreground) !important;
 }
 
-/* Chat input wrapper */
-.sos-input-wrap {
-  border: 1px solid rgba(0, 229, 204, 0.14) !important;
-  border-radius: 0 !important;
-  background: rgba(0, 0, 0, 0.3) !important;
-}
-.sos-input-wrap:focus-within {
-  border-color: rgba(0, 229, 204, 0.4) !important;
-  box-shadow: 0 0 0 1px rgba(0, 229, 204, 0.15) !important;
-}
-
-
+/* ─── Buttons — global shape reset ────────────────────────────────── */
 
 button {
-  border-radius: 14px !important;
+  border-radius: var(--radius-md) !important;
   clip-path: none !important;
 }
 
-.sos-app :is(button,input,textarea,select,.sos-bubble,.sos-chip,.sos-side-btn,.settings-toggle,.settings-card,.chat-sidebar-item,.notes-item,.g-btn,.g-input,.g-event-row,.g-picker-btn,.g-picked-file,.voice-bar,.voice-bar-send,.voice-bar-cancel,.confirm-card,.content-card,.auth-form,.g-modal,.peek-panel,.notes-panel,.split-workspace,.sos-companion-toggle) {
-  border-radius: 18px !important;
+/* Override the old large border-radius sweep */
+.sos-app :is(
+  button, input, textarea, select,
+  .sos-bubble, .sos-chip, .sos-side-btn,
+  .settings-toggle, .settings-card,
+  .chat-sidebar-item, .notes-item,
+  .g-btn, .g-input, .g-event-row,
+  .g-picker-btn, .g-picked-file,
+  .voice-bar, .voice-bar-send, .voice-bar-cancel,
+  .confirm-card, .content-card, .auth-form,
+  .g-modal, .peek-panel, .notes-panel,
+  .split-workspace, .sos-companion-toggle
+) {
   clip-path: none !important;
 }
 
-/* ─── Buttons ─────────────────────────────────────────────────────── */
-
-/* Generic action buttons */
+/* Action buttons */
 .confirm-btn,
 .g-hdr-btn,
 .settings-toggle {
   background: transparent !important;
-  border: 1px solid rgba(0, 229, 204, 0.22) !important;
-  border-radius: 0 !important;
-  color: var(--neon-cyan) !important;
-  font-family: var(--font-display);
-  font-weight: 600;
-  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-  transition: background var(--t-fast) var(--ease-neon),
-              box-shadow var(--t-fast) var(--ease-neon);
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--muted-foreground) !important;
+  font-family: var(--font-ui) !important;
+  font-weight: 600 !important;
+  clip-path: none !important;
+  transition: background var(--duration-fast) ease-out,
+              border-color var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out !important;
 }
 .confirm-btn:hover,
 .g-hdr-btn:hover,
 .settings-toggle:hover {
-  background: rgba(0, 229, 204, 0.10) !important;
-  box-shadow: var(--glow-cyan) !important;
-  border-color: var(--neon-cyan) !important;
+  background: var(--muted) !important;
+  box-shadow: none !important;
+  border-color: hsla(170,50%,50%,0.25) !important;
+  color: var(--foreground) !important;
   transform: none !important;
 }
 .confirm-btn:active,
 .g-hdr-btn:active,
 .settings-toggle:active {
-  background: rgba(0, 229, 204, 0.18) !important;
-  transform: translateY(1px) !important;
+  transform: scale(0.97) !important;
 }
 
-/* Danger / secondary buttons */
-.confirm-btn.danger,
-.confirm-btn[data-variant="danger"] {
-  border-color: rgba(155, 93, 229, 0.35) !important;
-  color: var(--neon-violet) !important;
-  clip-path: none;
-  border-radius: 2px !important;
+/* Primary action buttons */
+.confirm-btn-yes,
+.notes-new-btn,
+.notes-save-btn,
+.auth-btn-primary,
+.content-card-save {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  background-image: none !important;
 }
-.confirm-btn.danger:hover,
-.confirm-btn[data-variant="danger"]:hover {
-  background: rgba(155, 93, 229, 0.08) !important;
-  box-shadow: var(--glow-violet) !important;
-  border-color: var(--neon-violet) !important;
+.confirm-btn-yes:hover,
+.notes-new-btn:hover,
+.notes-save-btn:hover,
+.auth-btn-primary:hover,
+.content-card-save:hover {
+  filter: brightness(1.1) !important;
+  transform: none !important;
 }
 
 /* Send button */
 .sos-send-btn {
-  background: transparent !important;
-  border: 1px solid rgba(0, 229, 204, 0.3) !important;
-  border-radius: 0 !important;
-  color: var(--neon-cyan) !important;
-  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-  transition: background var(--t-fast) var(--ease-neon), box-shadow var(--t-fast) var(--ease-neon);
+  background: var(--primary) !important;
+  border: none !important;
+  border-radius: var(--radius-full) !important;
+  color: var(--primary-foreground) !important;
+  clip-path: none !important;
+  transition: filter var(--duration-fast) ease-out !important;
 }
 .sos-send-btn:hover {
-  background: rgba(0, 229, 204, 0.12) !important;
-  box-shadow: var(--glow-cyan) !important;
+  filter: brightness(1.1) !important;
+  box-shadow: none !important;
 }
 .sos-send-btn:disabled {
-  opacity: 0.3 !important;
+  opacity: 0.4 !important;
   box-shadow: none !important;
-}
-
-/* ─── Loading State ───────────────────────────────────────────────── */
-
-/* Horizontal scan line — sweeps top to bottom while loading           */
-.sos-loading-scan {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--neon-cyan);
-  opacity: 0.45;
-  z-index: 9999;
-  pointer-events: none;
-  animation: scan-sweep 2s var(--ease-neon) infinite;
-}
-
-/* Thinking/loading dots */
-.sos-thinking-dot,
-.dot-pulse {
-  background: var(--neon-cyan) !important;
-}
-
-/* ─── Sync Status ─────────────────────────────────────────────────── */
-
-.sync-dot {
-  background: var(--neon-amber) !important;
-}
-.sync-dot.sync-saved {
-  background: var(--neon-cyan) !important;
-}
-.sync-dot.sync-error {
-  background: var(--neon-amber) !important;
-}
-
-/* ─── Modals & Overlays ───────────────────────────────────────────── */
-
-.g-modal,
-.auth-form,
-.auth-modal-inner {
-  background: rgba(8, 10, 18, 0.96) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 229, 204, 0.12) !important;
-  border-radius: 2px !important;
-  border-top: 1px solid rgba(0, 229, 204, 0.25) !important;
-}
-.g-modal-overlay,
-.auth-modal-overlay {
-  background: rgba(0, 0, 0, 0.75) !important;
-  backdrop-filter: blur(4px);
-}
-
-/* ─── Notes & Schedule Panels ────────────────────────────────────── */
-
-.notes-item {
-  background: rgba(12, 15, 26, 0.7) !important;
-  border-radius: 0 !important;
-  border: 1px solid rgba(255, 255, 255, 0.04) !important;
-}
-.notes-item:hover,
-.notes-item.active {
-  border-color: rgba(0, 229, 204, 0.18) !important;
-  background: rgba(0, 229, 204, 0.04) !important;
-}
-.notes-search {
-  border-radius: 0 !important;
-}
-
-/* Calendar / schedule cells */
-.cal-cell,
-.cal-day-cell,
-.sched-block {
-  border-radius: 0 !important;
-}
-.cal-cell.today,
-.cal-day-cell.today {
-  border: 1px solid var(--neon-cyan) !important;
-  box-shadow: var(--glow-cyan) !important;
-}
-
-/* ─── Flashcards & Quizzes ───────────────────────────────────────── */
-
-.fc-card,
-.quiz-choice {
-  border-radius: 0 !important;
-  background: rgba(12, 15, 26, 0.88) !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
-}
-.quiz-choice:hover,
-.quiz-choice.selected {
-  border-color: var(--neon-cyan) !important;
-  background: rgba(0, 229, 204, 0.06) !important;
-  box-shadow: var(--glow-cyan) !important;
-}
-.quiz-choice.correct {
-  border-color: var(--neon-cyan) !important;
-  box-shadow: var(--glow-cyan) !important;
-}
-.quiz-choice.incorrect {
-  border-color: var(--neon-violet) !important;
-  box-shadow: var(--glow-violet) !important;
-}
-
-/* ─── Google Import / Tabs ───────────────────────────────────────── */
-
-.g-tab {
-  border-radius: 0 !important;
-  border-bottom: 1px solid transparent;
-}
-.g-tab.active {
-  border-bottom: 2px solid var(--neon-cyan) !important;
-  color: var(--neon-cyan) !important;
-}
-
-/* ─── Toast Notifications ────────────────────────────────────────── */
-
-.sos-toast {
-  background: rgba(8, 10, 18, 0.95) !important;
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(0, 229, 204, 0.16) !important;
-  border-radius: 2px !important;
-  border-top: 1px solid var(--neon-cyan) !important;
-  color: var(--text-primary) !important;
-}
-
-/* ─── Brand Logo ──────────────────────────────────────────────────── */
-
-.sos-brand-logo {
-  filter: drop-shadow(0 0 6px rgba(0, 229, 204, 0.35)) !important;
-}
-
-/* ─── Welcome / Empty States ─────────────────────────────────────── */
-
-.chat-sidebar-empty {
-  color: var(--text-ghost) !important;
-  font-family: var(--font-body);
-}
-
-/* ─── Tutor Mode ──────────────────────────────────────────────────── */
-
-.tutor-indicator,
-.tutor-badge {
-  border: 1px solid rgba(155, 93, 229, 0.4) !important;
-  background: rgba(155, 93, 229, 0.08) !important;
-  color: var(--neon-violet) !important;
-  border-radius: 2px !important;
-}
-
-/* ─── Performance Tier Overrides ─────────────────────────────────── */
-/* Low-perf devices: strip expensive effects                           */
-
-[data-perf="low"] .sky-layer,
-[data-perf="low"] .sky-background,
-[data-perf="low"] .sky-rain,
-[data-perf="low"] .sky-jp-text,
-[data-perf="low"] .sky-stars {
-  display: none !important;
-}
-[data-perf="low"] #root::before,
-[data-perf="low"] #root::after,
-[data-perf="low"] .sos-app::before {
-  display: none !important;
-}
-[data-perf="low"] .sos-sidebar,
-[data-perf="low"] .sos-header,
-[data-perf="low"] .sos-input-area,
-[data-perf="low"] .sos-chat-companion,
-[data-perf="low"] .settings-card,
-[data-perf="low"] .confirm-card,
-[data-perf="low"] .content-card {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background: #0a0c18 !important;
-}
-[data-perf="low"] .sos-loading-scan {
-  animation-duration: 0ms !important;
-}
-[data-perf="low"] * {
-  transition-duration: 0ms !important;
-  animation-duration: 0ms !important;
-}
-
-/* ─── Idle Lock Screen ────────────────────────────────────────────── */
-
-/* City breathing drift while locked                                   */
-@keyframes city-drift {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-6px); }
-}
-
-/* App UI progressively blurs as user goes deeper idle                 */
-[data-presence="absent"] .sos-sidebar,
-[data-presence="absent"] .sos-main,
-[data-presence="absent"] .sos-header {
-  filter: blur(1px);
-  transition: filter 2s ease;
-}
-[data-presence="locked"] .sos-sidebar,
-[data-presence="locked"] .sos-main,
-[data-presence="locked"] .sos-header {
-  filter: blur(4px);
-  opacity: 0.4;
-  transition: filter 1.2s ease, opacity 1.2s ease;
-  pointer-events: none;
-}
-/* City drifts gently when locked, overrides city-sleep pulse          */
-[data-presence="locked"] .sky-layer {
-  animation: city-drift 8s ease-in-out infinite !important;
-}
-[data-presence="locked"] .sky-layer.sky-gradient {
-  filter: saturate(0.3);
-  opacity: 0.25;
-}
-
-/* Lock screen overlay                                                  */
-.idle-lock-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10001;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  backdrop-filter: blur(22px) saturate(1.1);
-  -webkit-backdrop-filter: blur(22px) saturate(1.1);
-  background: rgba(5, 8, 16, 0.72);
-  animation: idle-lock-enter 1000ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.idle-lock-overlay.exiting {
-  animation: idle-lock-exit 600ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes idle-lock-enter {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes idle-lock-exit {
-  from { opacity: 1; transform: translateY(0);   }
-  to   { opacity: 0; transform: translateY(40px); }
-}
-
-/* Scanning accent line sweeping across lock screen                    */
-.idle-lock-overlay::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--neon-cyan) 50%, transparent 100%);
-  opacity: 0.2;
-  animation: scan-sweep 5s ease-in-out infinite;
-  pointer-events: none;
-}
-
-/* Wordmark "SOS"                                                       */
-.idle-lock-wordmark {
-  font-family: var(--font-display);
-  font-size: clamp(5rem, 14vw, 10rem);
-  font-weight: 800;
-  color: var(--neon-cyan);
-  letter-spacing: -0.03em;
-  line-height: 1;
-  text-shadow: 0 0 40px rgba(0, 229, 204, 0.35), 0 0 80px rgba(0, 229, 204, 0.12);
-  animation: neon-strike 220ms ease 900ms both;
-  user-select: none;
-}
-
-/* Subtitle                                                             */
-.idle-lock-sub {
-  font-family: var(--font-body);
-  font-size: 0.85rem;
-  font-weight: 300;
-  color: var(--text-secondary);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  margin-top: -4px;
-  margin-bottom: 16px;
-  user-select: none;
-}
-
-/* CTA button                                                           */
-.idle-lock-cta {
-  font-family: var(--font-display);
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--neon-cyan);
-  background: transparent;
-  border: 1px solid rgba(0, 229, 204, 0.32);
-  padding: 11px 36px;
-  cursor: pointer;
-  letter-spacing: 0.08em;
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
-  transition: background 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
-}
-.idle-lock-cta:hover {
-  background: rgba(0, 229, 204, 0.09);
-  border-color: var(--neon-cyan);
-  box-shadow: var(--glow-cyan);
-}
-.idle-lock-cta:active {
-  background: rgba(0, 229, 204, 0.16);
-  transform: translateY(1px);
-}
-
-/* ─── Mid/Low perf — strip heavy blur from lock screen ───────────── */
-[data-perf="low"] .idle-lock-overlay,
-[data-perf="mid"] .idle-lock-overlay {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background: rgba(5, 8, 16, 0.96) !important;
-}
-[data-perf="low"] [data-presence="locked"] .sky-layer {
-  animation: none !important;
-}
-
-/* Mid-perf: keep layout, strip blur (already handled by index.css)   */
-[data-perf="mid"] .sky-rain,
-[data-perf="mid"] #root::before {
-  display: none !important;
-}
-
-/* ── SFX Toggle ──────────────────────────────────────────────────────── */
-.sfx-toggle {
-  position: fixed;
-  bottom: 18px;
-  right: 56px; /* sits left of the presence dot (which is at right: 16px) */
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: rgba(14, 18, 28, 0.72);
-  border: 1px solid rgba(144, 151, 168, 0.18);
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 2px;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
-  backdrop-filter: blur(8px);
-}
-.sfx-toggle:hover {
-  color: var(--neon-cyan);
-  border-color: rgba(0, 229, 204, 0.35);
-  background: rgba(0, 229, 204, 0.07);
-}
-.sfx-toggle[aria-pressed="false"] {
-  color: var(--text-ghost);
-  border-color: rgba(144, 151, 168, 0.1);
-}
-
-
-/* Glassmorphism pass for shell surfaces */
-.sos-sidebar,
-.sos-chat-companion,
-.sos-input-area,
-.sos-header {
-  background: linear-gradient(180deg, rgba(11, 16, 30, 0.58), rgba(11, 16, 30, 0.42)) !important;
-  backdrop-filter: blur(18px) saturate(135%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(135%) !important;
-  border-color: rgba(0, 229, 204, 0.2) !important;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   Minimal Dark Refresh
-   - Removes grid/high-tech chrome
-   - Keeps dark mode with softer neutral styling
-   - Creates isolated ChatGPT-like input shell
-   ═══════════════════════════════════════════════════════════════════ */
-
-:root {
-  --bg-deep: #0f1115;
-  --bg-panel: #151821;
-  --bg-surface: rgba(21, 24, 33, 0.92);
-  --accent: #8fa8ff;
-  --text-primary: #f0f2f6;
-  --text-secondary: #9aa3b8;
-}
-
-/* Remove tech overlays / scanlines / grid */
-#root::before,
-#root::after,
-.sos-app::before,
-.corner-bracket,
-.sos-loading-scan,
-.sos-main::after {
-  display: none !important;
-}
-
-.sos-main::before {
-  animation: none !important;
   filter: none !important;
-  background: radial-gradient(ellipse at 50% 0%, rgba(143, 168, 255, 0.08), transparent 55%) !important;
-  inset: -5% -5% 30% !important;
 }
 
-/* Tone down futuristic shapes/glows */
-.sos-side-btn,
-.confirm-btn,
-.g-hdr-btn,
-.settings-toggle,
-.sos-send-btn {
-  clip-path: none !important;
-  box-shadow: none !important;
+/* ─── Auth Form ────────────────────────────────────────────────────── */
+
+.auth-form {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  backdrop-filter: none !important;
 }
 
-.sos-app :is(button,input,textarea,select,.sos-bubble,.sos-chip,.sos-side-btn,.settings-toggle,.settings-card,.chat-sidebar-item,.notes-item,.g-btn,.g-input,.g-event-row,.g-picker-btn,.g-picked-file,.voice-bar,.voice-bar-send,.voice-bar-cancel,.confirm-card,.content-card,.auth-form,.g-modal,.peek-panel,.notes-panel,.split-workspace,.sos-companion-toggle) {
-  border-radius: 14px !important;
+/* ─── Modals ───────────────────────────────────────────────────────── */
+
+.g-modal {
+  background: var(--popup) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  backdrop-filter: none !important;
 }
 
-.sos-sidebar,
-.sos-chat-companion,
-.sos-header,
-.sos-input-area {
-  background: rgba(15, 17, 24, 0.9) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
+/* ─── Split Workspace ──────────────────────────────────────────────── */
+
+.split-workspace {
+  background: var(--background) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.split-workspace-head {
+  background: var(--sidebar) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.peek-panel.embedded {
+  border-right: 1px solid var(--border) !important;
 }
 
-.sos-side-btn {
-  border-color: rgba(255, 255, 255, 0.12) !important;
-  color: var(--text-secondary) !important;
-}
-.sos-side-btn.active {
-  background: rgba(143, 168, 255, 0.14) !important;
-  color: var(--text-primary) !important;
-  border-color: rgba(143, 168, 255, 0.45) !important;
-  border-left: 1px solid rgba(143, 168, 255, 0.45) !important;
+/* ─── Loading State ────────────────────────────────────────────────── */
+
+.sos-loading-scan {
+  background: var(--primary) !important;
+  opacity: 0.6 !important;
 }
 
-/* Isolated input bar */
-.sos-input-area {
-  border-top: none !important;
-  background: transparent !important;
-  padding: 10px 16px 14px !important;
+/* ─── Tutor mode sidebar accent → primary ──────────────────────────── */
+.sos-app[data-tutor-mode] .sos-side-btn.active {
+  color: var(--primary) !important;
+  background: hsla(155, 25%, 55%, 0.10) !important;
+  border-left: 3px solid var(--primary) !important;
+}
+.sos-app[data-tutor-mode] .sos-side-btn:hover {
+  background: var(--muted) !important;
 }
 
-.sos-chat-form {
-  width: min(880px, 100%);
-  margin: 0 auto;
-  background: #1a1f2b;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
-  padding: 8px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+/* ─── Idle lock screen ─────────────────────────────────────────────── */
+.idle-lock-overlay {
+  background: var(--background) !important;
+  backdrop-filter: none !important;
 }
 
-.sos-chat-input {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding-left: 12px !important;
-  padding-right: 12px !important;
+/* ─── Scrollbars ───────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
 }
-.sos-chat-input::placeholder {
-  color: rgba(240, 242, 246, 0.5) !important;
-}
+::-webkit-scrollbar        { width: 4px !important; }
+::-webkit-scrollbar-track  { background: transparent !important; }
+::-webkit-scrollbar-thumb  { background: var(--muted) !important; border-radius: var(--radius-full) !important; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground) !important; }
 
-.sos-input-icon-btn {
-  border-color: rgba(255, 255, 255, 0.14) !important;
-  background: rgba(255, 255, 255, 0.02) !important;
+/* ─── Font inheritance ─────────────────────────────────────────────── */
+.sos-app * {
+  font-family: var(--font-ui);
 }
-
-.sos-send-btn {
-  background: rgba(143, 168, 255, 0.22) !important;
-  border-color: rgba(143, 168, 255, 0.5) !important;
-  color: #e7edff !important;
-}
-
-/* Auto-approve feedback (replaces token-heavy ack text in auto mode) */
-@keyframes autoApproveSweep {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(0%); }
-}
-.auto-approve-indicator {
-  min-width: 280px;
-  max-width: 520px;
-  width: fit-content;
-  background: rgba(18, 22, 32, 0.95);
-  border: 1px solid rgba(143, 168, 255, 0.28);
-  border-radius: 14px;
-  padding: 10px 12px;
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.auto-approve-track {
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-.auto-approve-fill {
-  height: 100%;
-  width: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgba(143, 168, 255, 0.35), rgba(143, 168, 255, 0.92));
-  transform: translateX(-100%);
-  animation: autoApproveSweep 900ms ease forwards;
-}
-.auto-approve-indicator.done {
-  border-color: rgba(134, 239, 172, 0.45);
-}
-.auto-approve-indicator.done .auto-approve-fill {
-  transform: translateX(0);
-  animation: none;
-  background: linear-gradient(90deg, rgba(134, 239, 172, 0.55), rgba(134, 239, 172, 0.95));
-}
-
-/* Secondary animation for note/schedule edit actions */
-@keyframes editFlowGlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 168, 255, 0); }
-  50% { box-shadow: 0 0 0 4px rgba(143, 168, 255, 0.16); }
-}
-.confirm-card-edit-flow {
-  animation: cardPop .25s ease, editFlowGlow 2s ease-in-out infinite;
-  border-color: rgba(143, 168, 255, 0.3) !important;
+.sos-app h1,
+.sos-app h2,
+.sos-app h3,
+.sos-sidebar-brand,
+.sos-topbar-logo {
+  font-family: var(--font-heading);
 }
