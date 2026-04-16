@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, SEARCH_LESSON_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
@@ -24,26 +24,26 @@ import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import './styles/skillhub.css';
 
-// Configure pdfjs worker
+// ── Routing context ──────────────────────────────────────────────────────────
+import { RouteProvider, buildRouteValue } from './contexts/RouteContext';
+
+// ── Shared utility libs (replaces inline definitions below) ─────────────────
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime } from './lib/dateUtils';
+import { CAT_COLORS, catColor, weatherEmoji, getNudge, getPriority } from './lib/uiUtils';
+
+// ── Extracted UI components (imported here; inline definitions below will be
+//    removed in a follow-up pass once all call sites are verified) ────────────
+// NOTE: components are still defined inline in this file — import statements
+// will be activated after the inline definitions are deleted.
+
+// Configure pdfjs worker (still needed for the inline definition in this file)
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 
 
-/* ─── Date helpers ─── */
-function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
-function fmtFull(d) { return new Date(d).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
-function toDateStr(d) {
-  const dt = new Date(d);
-  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-}
-function today() { return toDateStr(new Date()); }
-function daysUntil(dateStr) {
-  const now = new Date(); now.setHours(0,0,0,0);
-  const target = new Date(dateStr + 'T00:00:00');
-  return Math.round((target - now) / 86400000);
-}
+/* ─── Date helpers ─ now imported from ./lib/dateUtils ─── */
 
 /* ── Notification scheduling helper ──────────────────────────── */
 function buildNotifications(tasks, events, prefs) {
@@ -87,11 +87,7 @@ async function scheduleNotificationsToSW(notifications) {
   } catch(_) {}
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function fmtTime(h, m) {
-  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
-}
+// fmtTime now imported from ./lib/dateUtils
 
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
@@ -123,43 +119,7 @@ function mapGoogleCalItems(items) {
   }));
 }
 
-/* ─── Nudge Engine ─── */
-function getNudge(task) {
-  if (task.status === 'done') return { emoji:'done', text:'Done! Nice work.' };
-  const d = daysUntil(task.dueDate);
-  if (d < 0) return { emoji:'overdue', text:'Overdue by ' + Math.abs(d) + ' day' + (Math.abs(d)>1?'s':'') };
-  if (d === 0) return { emoji:'today', text:'Due today' };
-  if (d === 1) return { emoji:'tomorrow', text:'Due tomorrow' };
-  if (d <= 3) return { emoji:'soon', text:d + ' days left' };
-  if (d <= 7) return { emoji:'week', text:d + ' days left' };
-  return { emoji:'chill', text:d + ' days left' };
-}
-
-function getPriority(task) {
-  if (task.status === 'done') return 999;
-  const d = daysUntil(task.dueDate);
-  let score = d;
-  if (task.status === 'not_started') score -= 2;
-  if (task.status === 'in_progress') score -= 1;
-  return score;
-}
-
-/* ─── Category Colors ─── */
-const CAT_COLORS = {
-  school:'var(--accent)', swim:'var(--teal)', debate:'var(--orange)',
-  'free time':'var(--green)', sleep:'var(--blue)', other:'var(--pink)',
-  homework:'var(--accent)', test:'var(--danger)', practice:'var(--teal)',
-  event:'var(--orange)'
-};
-function catColor(cat) { return CAT_COLORS[cat?.toLowerCase()] || 'var(--accent)'; }
-
-/* ─── Weather Icons ─── */
-function weatherEmoji(code) {
-  if (code <= 1) return Icon.sun(18); if (code <= 3) return Icon.cloud(18);
-  if (code <= 48) return Icon.cloudFog(18); if (code <= 67) return Icon.cloudRain(18);
-  if (code <= 77) return Icon.cloudSnow(18); if (code <= 82) return Icon.cloudDrizzle(18);
-  return Icon.cloudLightning(18);
-}
+/* ─── Nudge Engine, Category Colors, Weather Icons ─ now imported from ./lib/uiUtils ─── */
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 10;
@@ -6309,12 +6269,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
-  useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
-  useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
-  useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
+  // Consolidated layout persistence (was 6 separate effects)
+  useEffect(() => {
+    localStorage.setItem('sos_layout_mode', layoutMode);
+    localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed));
+    localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel);
+    localStorage.setItem('sos_companion_collapsed', String(companionCollapsed));
+    localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion));
+    localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle));
+  }, [layoutMode, sidebarCollapsed, sidebarCompanionPanel, companionCollapsed, autoCollapseSidebarCompanion, compactCompanionToggle]);
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
@@ -6338,7 +6301,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     );
   }
 
+  const routeValue = buildRouteValue(
+    { activePanel, layoutMode, skillHubTab, skillHubMode,
+      sidebarCollapsed, sidebarCompanionPanel, companionCollapsed,
+      autoCollapseSidebarCompanion, showPeek, showNotes, tutorMode, user },
+    { setActivePanel, setLayoutMode, setSkillHubTab, setSkillHubMode,
+      setSidebarCollapsed, setSidebarCompanionPanel, setCompanionCollapsed,
+      setShowPeek, setShowNotes, toggleTutorMode, sfx,
+      openCompanionPanel, switchSkillHubMode }
+  );
+
   return (
+  <RouteProvider value={routeValue}>
     <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined} data-tutor-mode={activePanel === 'tutor' ? skillHubMode : undefined}>
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       {layoutMode !== 'lofi' && <>
@@ -7096,6 +7070,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
     </div>
+  </RouteProvider>
   );
 }
 
