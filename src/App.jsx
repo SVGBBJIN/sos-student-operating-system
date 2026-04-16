@@ -6360,17 +6360,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </>}
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
-      {layoutMode === 'lofi' && <StudyTopBar
-        user={user}
-        syncStatus={syncStatus}
-        tutorMode={tutorMode}
-        onNewChat={() => { sfx.nav(); startNewChat(); }}
-        onTutorMode={() => { sfx.nav(); enterTutorMode(); }}
-        onImport={() => { sfx.nav(); setShowGoogleModal(true); }}
-        onSettings={() => { sfx.nav(); setActivePanel('settings'); }}
-        onSwitchLayout={() => setLayoutMode('sidebar')}
-        onAuthAction={() => user ? handleLogout() : setShowAuthModal(true)}
-      />}
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
@@ -6473,16 +6462,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </aside>}
 
       {layoutMode === 'lofi' && <LofiLeftPanel
-        tasks={tasks}
-        onToggleTask={(task) => {
-          if (task.status === 'done') {
-            updateTask(task.id, { status: 'not_started', completedAt: null });
-          } else {
-            updateTask(task.id, { status: 'done', completedAt: new Date().toISOString() });
-            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(task.id); return n; });
-            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(task.id); return n; }), 900);
-          }
-        }}
+        events={events}
+        notes={notes}
+        onCreateNote={handleCreateNote}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'topbar' && <div className="sos-header">

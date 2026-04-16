@@ -31,7 +31,7 @@
   height: 100vh;
   display: grid;
   grid-template-columns: 240px 1fr 220px;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 1fr;
   gap: 10px;
   padding: 14px;
   overflow: hidden;
@@ -74,7 +74,7 @@
 
 .study-left {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -82,7 +82,7 @@
 
 .study-center {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -90,7 +90,7 @@
 
 .study-right {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -386,6 +386,145 @@
   text-align: center;
   padding: 16px 8px;
   font-family: var(--lofi-font-mono);
+}
+
+/* ── Left panel: week schedule ──────────────────────────────────── */
+.study-week-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.study-week-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.study-week-col.today {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.study-week-day {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--lofi-text-dim);
+  font-family: var(--lofi-font-mono);
+}
+
+.study-week-num {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lofi-text-muted);
+  font-family: var(--lofi-font-mono);
+  line-height: 1;
+}
+
+.study-week-col.today .study-week-day,
+.study-week-col.today .study-week-num {
+  color: var(--lofi-amber);
+}
+
+.study-week-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 20px;
+}
+
+.study-week-event {
+  font-size: 8px;
+  line-height: 1.2;
+  color: var(--lofi-text-dim);
+  background: rgba(255,255,255,0.04);
+  border-left: 1px solid var(--lofi-amber);
+  padding: 1px 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* ── Left panel: notes list ─────────────────────────────────────── */
+.study-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+
+.study-note-item {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--lofi-border);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.study-note-item:hover {
+  border-color: var(--lofi-amber);
+}
+
+.study-note-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lofi-text-muted);
+  font-family: var(--lofi-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-note-snippet {
+  font-size: 10px;
+  color: var(--lofi-text-dim);
+  font-family: var(--lofi-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.study-notes-add-btn {
+  background: transparent;
+  border: 1px dashed var(--lofi-border);
+  color: var(--lofi-text-dim);
+  font-size: 9px;
+  font-family: var(--lofi-font-mono);
+  border-radius: 6px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.study-notes-add-btn:hover {
+  border-color: var(--lofi-amber);
+  color: var(--lofi-amber);
+}
+
+/* ── Right panel placeholder ────────────────────────────────────── */
+.study-right-placeholder {
+  flex: 1;
+  min-height: 40px;
+  border: 1px dashed var(--lofi-border);
+  border-radius: 10px;
+  opacity: 0.3;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -713,14 +852,9 @@
 @media (max-width: 768px) {
   .study-app {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 64px 1fr auto;
+    grid-template-rows: 64px 1fr;
     padding: 6px;
     gap: 4px;
-  }
-
-  .study-topbar {
-    grid-column: 1;
-    grid-row: 1;
   }
 
   /* Compact horizontal strip — left + right panels side by side */
@@ -739,53 +873,39 @@
   /* Strip: left takes 60%, right takes 40% */
   .study-left {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1;
     flex: 3;
     min-height: unset;
   }
 
   .study-right {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1;
     flex: 2;
     min-height: unset;
     overflow-y: visible;
   }
 
-  /* Row 2 becomes a flex row containing both panels */
-  .study-app {
-    grid-template-rows: auto auto 1fr auto;
-  }
-
-  /* Use a wrapper trick: put left+right in a flex row at row 2 */
+  /* Use a wrapper trick: put left+right in a flex row at row 1 */
   .study-left { order: 0; }
   .study-right { order: 1; }
 
   /* Hide verbose content in strip mode */
-  .study-task-list,
-  .study-subject-list,
+  .study-week-grid,
+  .study-notes-list,
   .study-left-empty,
   .study-section-label {
     display: none !important;
   }
 
-  /* Show only a task count label */
-  .study-left::before {
-    content: 'Tasks';
-    font-size: 10px;
-    color: var(--lofi-text-muted);
-    font-family: var(--lofi-font-mono);
-    white-space: nowrap;
-  }
-
   .study-center {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 2;
   }
 
   .study-bottombar {
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 3;
   }
 
   /* Compact cat */
