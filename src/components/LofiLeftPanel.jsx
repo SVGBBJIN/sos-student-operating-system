@@ -1,144 +1,110 @@
-import React, { useMemo, useState, useEffect } from 'react';
-
-const SUBJECT_COLORS = {
-  math:     { fill: 'var(--lofi-lavender)', tag: 'study-tag-math',    label: 'MTH' },
-  english:  { fill: 'var(--lofi-rose)',     tag: 'study-tag-english', label: 'ENG' },
-  cs:       { fill: 'var(--lofi-sage)',     tag: 'study-tag-cs',      label: 'CS'  },
-  science:  { fill: 'var(--lofi-sky)',      tag: 'study-tag-science', label: 'SCI' },
-};
-
-function getSubjectKey(subject) {
-  if (!subject) return 'other';
-  const s = subject.toLowerCase();
-  if (s.includes('math') || s.includes('calc') || s.includes('algebra') || s.includes('geometry')) return 'math';
-  if (s.includes('eng') || s.includes('lit') || s.includes('write') || s.includes('read')) return 'english';
-  if (s.includes('cs') || s.includes('comp') || s.includes('prog') || s.includes('code') || s.includes('data')) return 'cs';
-  if (s.includes('sci') || s.includes('bio') || s.includes('chem') || s.includes('phys')) return 'science';
-  return 'other';
-}
-
-function getTagClass(subject) {
-  const key = getSubjectKey(subject);
-  return SUBJECT_COLORS[key]?.tag || 'study-tag-other';
-}
-
-function getTagLabel(subject) {
-  if (!subject) return '—';
-  const key = getSubjectKey(subject);
-  if (key === 'other') return subject.slice(0, 4).toUpperCase();
-  return SUBJECT_COLORS[key].label;
-}
+import React, { useMemo } from 'react';
 
 function getTodayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function useSrsDueCount() {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    try {
-      const schedule = JSON.parse(localStorage.getItem('sos-fc-schedule') || '{}');
-      const today = getTodayStr();
-      const due = Object.values(schedule).filter(v => !v.nextReview || v.nextReview <= today).length;
-      setCount(due);
-    } catch(_) {}
-  }, []);
-  return count;
+function getCurrentWeekDays() {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + mondayOffset);
+
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  return DAYS.map((abbr, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return {
+      abbr,
+      num: d.getDate(),
+      dateStr: d.toISOString().slice(0, 10),
+    };
+  });
 }
 
-export default function LofiLeftPanel({ tasks, onToggleTask }) {
+export default function LofiLeftPanel({ events, notes, onCreateNote }) {
   const today = getTodayStr();
-  const srsDue = useSrsDueCount();
+  const weekDays = useMemo(() => getCurrentWeekDays(), []);
 
-  // show tasks due today or not yet completed, up to 10
-  const visibleTasks = useMemo(() => {
-    if (!tasks || tasks.length === 0) return [];
-    const active = tasks.filter(t => {
-      if (t.status === 'done') {
-        // show done tasks only if completed today
-        return t.completed_at && t.completed_at.slice(0, 10) === today;
+  const eventsByDay = useMemo(() => {
+    const map = {};
+    (events || []).forEach(e => {
+      const day = e.event_date?.slice(0, 10) || e.start_date?.slice(0, 10);
+      if (day) {
+        if (!map[day]) map[day] = [];
+        map[day].push(e);
       }
-      return true;
     });
-    return active.slice(0, 10);
-  }, [tasks, today]);
+    return map;
+  }, [events]);
 
-  // compute subject progress
-  const subjectProgress = useMemo(() => {
-    if (!tasks || tasks.length === 0) return [];
-    const groups = {};
-    tasks.forEach(t => {
-      const key = getSubjectKey(t.subject);
-      if (key === 'other') return;
-      if (!groups[key]) groups[key] = { done: 0, total: 0 };
-      groups[key].total++;
-      if (t.status === 'done') groups[key].done++;
-    });
-    return Object.entries(groups).map(([key, { done, total }]) => ({
-      key,
-      label: SUBJECT_COLORS[key]?.label || key,
-      fill: SUBJECT_COLORS[key]?.fill || 'var(--lofi-text-muted)',
-      pct: Math.round((done / total) * 100),
-    })).sort((a, b) => b.pct - a.pct);
-  }, [tasks]);
+  const recentNotes = useMemo(() => {
+    return (notes || [])
+      .slice()
+      .sort((a, b) =>
+        (b.updated_at || b.created_at || '') > (a.updated_at || a.created_at || '') ? 1 : -1
+      )
+      .slice(0, 5);
+  }, [notes]);
 
   return (
     <div className="study-left study-glass">
-      <div className="study-section-label">Today</div>
-
-      {visibleTasks.length === 0 ? (
-        <div className="study-left-empty">Nothing on your plate yet —<br/>what's coming up?</div>
-      ) : (
-        <div className="study-task-list">
-          {visibleTasks.map(task => {
-            const isDone = task.status === 'done';
+      {/* ── Schedule section ── */}
+      <div className="study-left-section">
+        <div className="study-section-label">Schedule</div>
+        <div className="study-week-grid">
+          {weekDays.map(({ abbr, num, dateStr }) => {
+            const dayEvents = (eventsByDay[dateStr] || []).slice(0, 2);
+            const isToday = dateStr === today;
             return (
-              <div
-                key={task.id}
-                className={'study-task-item' + (isDone ? ' done' : '')}
-                onClick={() => onToggleTask && onToggleTask(task)}
-              >
-                <div className="study-task-check" aria-label={isDone ? 'Mark incomplete' : 'Mark done'}>
-                  {isDone ? '✓' : ''}
+              <div key={dateStr} className={'study-week-col' + (isToday ? ' today' : '')}>
+                <div className="study-week-day">{abbr}</div>
+                <div className="study-week-num">{num}</div>
+                <div className="study-week-events">
+                  {dayEvents.map(e => (
+                    <div key={e.id} className="study-week-event" title={e.title}>
+                      {e.title}
+                    </div>
+                  ))}
                 </div>
-                <span className="study-task-label" title={task.title}>{task.title}</span>
-                {task.subject && (
-                  <span className={'study-task-tag ' + getTagClass(task.subject)}>
-                    {getTagLabel(task.subject)}
-                  </span>
-                )}
               </div>
             );
           })}
         </div>
-      )}
+      </div>
 
-      {srsDue > 0 && (
-        <div className="study-section-label" style={{marginTop:4,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span>Due for review</span>
-          <span style={{background:'rgba(253,164,175,0.2)',color:'#fda4af',borderRadius:999,padding:'1px 7px',fontSize:'0.7rem',fontWeight:700}}>{srsDue}</span>
+      <div className="study-left-divider" />
+
+      {/* ── Notes section ── */}
+      <div className="study-left-section">
+        <div className="study-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Notes</span>
+          {onCreateNote && (
+            <button
+              className="study-notes-add-btn"
+              onClick={() => onCreateNote('Quick note', '')}
+            >
+              Add Note
+            </button>
+          )}
         </div>
-      )}
 
-      {subjectProgress.length > 0 && (
-        <>
-          <div className="study-section-label" style={{ marginTop: 4 }}>Subjects</div>
-          <div className="study-subject-list">
-            {subjectProgress.map(({ key, label, fill, pct }) => (
-              <div key={key} className="study-subject-row">
-                <span className="study-subject-name">{label}</span>
-                <div className="study-progress-track">
-                  <div
-                    className="study-progress-fill"
-                    style={{ width: pct + '%', background: fill }}
-                  />
+        <div className="study-notes-list">
+          {recentNotes.length === 0 ? (
+            <div className="study-left-empty">No notes yet</div>
+          ) : (
+            recentNotes.map(note => (
+              <div key={note.id} className="study-note-item">
+                <div className="study-note-title">{note.name || 'Untitled'}</div>
+                <div className="study-note-snippet">
+                  {(note.content || '').replace(/<[^>]+>/g, '').slice(0, 60)}
                 </div>
-                <span className="study-progress-pct">{pct}%</span>
               </div>
-            ))}
-          </div>
-        </>
-      )}
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

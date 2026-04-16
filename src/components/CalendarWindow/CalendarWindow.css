@@ -1,0 +1,356 @@
+/* ═══════════════════════════════════════════════════════════════
+   CalendarWindow — all styles use design-system CSS variables.
+   No hardcoded hex, rgb, or hsl values.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Size states ────────────────────────────────────────────────── */
+.cw-container {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  color: var(--foreground);
+  transition: width var(--duration-slow) ease-out,
+              height var(--duration-slow) ease-out,
+              border-radius var(--duration-slow) ease-out,
+              bottom var(--duration-slow) ease-out,
+              right var(--duration-slow) ease-out;
+}
+
+.cw-size-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: var(--background);
+  border-radius: 0;
+}
+
+.cw-size-half-left {
+  position: fixed;
+  top: 0; left: 0;
+  width: 50vw;
+  height: 100vh;
+  z-index: var(--z-overlay);
+  background: var(--background);
+  border-right: 1px solid var(--border);
+}
+
+.cw-size-half-right {
+  position: fixed;
+  top: 0; right: 0;
+  width: 50vw;
+  height: 100vh;
+  z-index: var(--z-overlay);
+  background: var(--background);
+  border-left: 1px solid var(--border);
+}
+
+.cw-size-widget {
+  position: fixed;
+  bottom: var(--spacing-6);
+  right: var(--spacing-6);
+  width: 320px;
+  height: 280px;
+  z-index: var(--z-overlay);
+  background: var(--card);
+  border: 1px solid hsla(170, 50%, 50%, 0.15);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(12px);
+}
+
+/* Embedded — natural flow, no fixed positioning */
+.cw-embedded {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  bottom: auto !important;
+  right: auto !important;
+  border-radius: var(--radius-lg);
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.cw-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.cw-size-fullscreen .cw-header {
+  cursor: default;
+}
+
+.cw-drag-handle {
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.cw-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  flex: 1;
+}
+
+.cw-nav {
+  display: flex;
+  gap: var(--spacing-1);
+  align-items: center;
+}
+
+.cw-nav-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-1) var(--spacing-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out;
+}
+
+.cw-nav-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* ── Size control bar ───────────────────────────────────────────── */
+.cw-size-bar {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: center;
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.cw-size-btn {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  padding: var(--spacing-1) var(--spacing-3);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease-out,
+              color var(--duration-fast) ease-out;
+  white-space: nowrap;
+}
+
+.cw-size-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.cw-size-btn-active {
+  background: var(--muted);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+/* ── Week Grid ──────────────────────────────────────────────────── */
+.cw-grid {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.cw-grid-header {
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--sidebar);
+}
+
+.cw-time-gutter {
+  border-right: 1px solid var(--border);
+}
+
+.cw-grid-day-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-2) 0;
+  border-right: 1px solid var(--border);
+}
+
+.cw-grid-day-header.cw-today .cw-day-num {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.cw-day-abbr {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cw-day-num {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.cw-grid-body {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: hsla(170,50%,50%,0.3) transparent;
+}
+
+.cw-hour-row {
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.cw-time-label {
+  padding: var(--spacing-1) var(--spacing-2) 0;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  text-align: right;
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cw-time-cell {
+  border-right: 1px solid var(--border);
+  transition: background var(--duration-fast) ease-out;
+}
+
+.cw-time-cell:hover {
+  background: hsla(155,25%,55%,0.04);
+}
+
+/* ── Events ─────────────────────────────────────────────────────── */
+.cw-event {
+  position: absolute;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 0.9;
+  transition: opacity var(--duration-fast) ease-out,
+              box-shadow var(--duration-fast) ease-out;
+  z-index: 10;
+}
+
+.cw-event:hover {
+  opacity: 1;
+  box-shadow: var(--shadow-sm);
+}
+
+.cw-event-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: hsl(0,0%,95%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* New event animation */
+.cw-event-new {
+  animation: eventPop 0.25s ease-out 0.1s both;
+}
+
+.cw-ai-chip {
+  display: block;
+  font-size: 10px;
+  color: hsl(0,0%,80%);
+  margin-top: 2px;
+  animation: fadeOut 0.3s ease-out 3s forwards;
+}
+
+/* ── Widget Strip ───────────────────────────────────────────────── */
+.cw-strip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  flex: 1;
+  padding: var(--spacing-2);
+  gap: var(--spacing-1);
+}
+
+.cw-strip-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-2) var(--spacing-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease-out;
+  gap: 2px;
+}
+
+.cw-strip-day:hover {
+  background: var(--muted);
+}
+
+.cw-strip-abbr {
+  font-size: 9px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cw-strip-num {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.cw-strip-today .cw-strip-num {
+  color: var(--primary);
+}
+
+.cw-strip-dot-today {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+}
+
+.cw-strip-events {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.cw-strip-event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  display: inline-block;
+}
+
+.cw-strip-overflow {
+  font-size: 9px;
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+}

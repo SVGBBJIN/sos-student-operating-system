@@ -1,6 +1,4 @@
-import React, { useState } from 'react';
-import { Icon } from '../lib/icons';
-import ErrorBoundary from './ErrorBoundary';
+import React from 'react';
 
 // Wave bar heights (20 bars, varied peaks)
 const WAVE_PEAKS = [6, 10, 14, 8, 12, 16, 7, 13, 9, 15, 11, 8, 14, 6, 12, 10, 16, 7, 11, 9];
@@ -29,18 +27,8 @@ function getWeatherDesc(weatherData) {
   return weatherData?.city || null;
 }
 
-export default function LofiRightPanel({
-  weatherData,
-  tasks,
-  blocks,
-  events,
-  notes,
-  onDeleteNote,
-  onUpdateNote,
-  onCreateNote,
-}) {
-  const [musicPlaying, setMusicPlaying] = useState(false);
-  const [rightTab, setRightTab] = useState('schedule');
+export default function LofiRightPanel({ weatherData }) {
+  const [musicPlaying, setMusicPlaying] = React.useState(false);
 
   const weatherEmoji = getWeatherEmoji(weatherData);
   const weatherTemp  = getWeatherTemp(weatherData);
@@ -135,96 +123,9 @@ export default function LofiRightPanel({
         </div>
       </div>
 
-      {/* Schedule / Notes tabs */}
-      <div className="study-right-tabs">
-        <button
-          className={'study-right-tab' + (rightTab === 'schedule' ? ' active' : '')}
-          onClick={() => setRightTab('schedule')}
-        >
-          Schedule
-        </button>
-        <button
-          className={'study-right-tab' + (rightTab === 'notes' ? ' active' : '')}
-          onClick={() => setRightTab('notes')}
-        >
-          Notes
-        </button>
-      </div>
-
-      {/* Sub-panel */}
-      <div className="study-right-subpanel">
-        <ErrorBoundary>
-          {rightTab === 'schedule' && (
-            <RightSchedule tasks={tasks} events={events} />
-          )}
-          {rightTab === 'notes' && (
-            <RightNotes notes={notes} onCreateNote={onCreateNote} />
-          )}
-        </ErrorBoundary>
-      </div>
+      {/* Placeholder — future panel */}
+      <div className="study-right-placeholder" />
     </div>
   );
 }
 
-function RightSchedule({ tasks, events }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const todayEvents  = (events || []).filter(e => e.event_date && e.event_date.slice(0, 10) === today).slice(0, 4);
-  const activeTasks  = (tasks  || []).filter(t => t.status !== 'done').slice(0, 5);
-
-  return (
-    <div style={{ padding: '10px', overflow: 'auto', maxHeight: '100%', fontSize: 11, color: 'var(--lofi-text-muted)', fontFamily: 'var(--lofi-font-mono)' }}>
-      {todayEvents.length > 0 && (
-        <>
-          <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--lofi-text-dim)', marginBottom: 4 }}>Events today</div>
-          {todayEvents.map(e => (
-            <div key={e.id} style={{ padding: '4px 6px', borderRadius: 6, marginBottom: 2, background: 'rgba(255,255,255,0.03)', borderLeft: '2px solid var(--lofi-amber)' }}>
-              {e.title}
-            </div>
-          ))}
-        </>
-      )}
-      {activeTasks.length > 0 && (
-        <>
-          <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--lofi-text-dim)', marginBottom: 4, marginTop: todayEvents.length ? 8 : 0 }}>Tasks</div>
-          {activeTasks.map(t => (
-            <div key={t.id} style={{ padding: '4px 6px', borderRadius: 6, marginBottom: 2, background: 'rgba(255,255,255,0.03)' }}>
-              {t.title}
-            </div>
-          ))}
-        </>
-      )}
-      {todayEvents.length === 0 && activeTasks.length === 0 && (
-        <div style={{ textAlign: 'center', paddingTop: 12, color: 'var(--lofi-text-dim)' }}>Nothing scheduled</div>
-      )}
-    </div>
-  );
-}
-
-function RightNotes({ notes, onCreateNote }) {
-  const sorted = (notes || []).slice().sort((a, b) =>
-    (b.updated_at || b.created_at || '') > (a.updated_at || a.created_at || '') ? 1 : -1
-  ).slice(0, 6);
-
-  return (
-    <div style={{ padding: '10px', overflow: 'auto', maxHeight: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {sorted.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 12, fontSize: 11, color: 'var(--lofi-text-dim)', fontFamily: 'var(--lofi-font-mono)' }}>No notes yet</div>
-      ) : sorted.map(note => (
-        <div key={note.id} style={{ padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--lofi-border)', fontSize: 11, color: 'var(--lofi-text-muted)', fontFamily: 'var(--lofi-font-mono)' }}>
-          <div style={{ fontWeight: 600, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note.name || 'Untitled'}</div>
-          <div style={{ fontSize: 10, color: 'var(--lofi-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {(note.content || '').replace(/<[^>]+>/g, '').slice(0, 60)}
-          </div>
-        </div>
-      ))}
-      {onCreateNote && (
-        <button
-          onClick={() => onCreateNote('Quick note', '')}
-          style={{ marginTop: 4, padding: '5px', borderRadius: 8, border: '1px dashed var(--lofi-border)', background: 'transparent', color: 'var(--lofi-text-dim)', fontSize: 10, cursor: 'pointer', fontFamily: 'var(--lofi-font-mono)' }}
-        >
-          + New note
-        </button>
-      )}
-    </div>
-  );
-}
