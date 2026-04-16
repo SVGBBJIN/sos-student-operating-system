@@ -6675,24 +6675,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-        {messages.length===0&&!isLoading&&(()=>{
-          // Default welcome screen
-          const wv = welcomeVariants[welcomeIdx];
-          return (
-          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',padding:'48px 24px',textAlign:'center'}}>
-            <div style={{position:'absolute',top:'28%',width:240,height:240,background:'radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(234,88,12,0.08) 40%, transparent 70%)',borderRadius:'50%',filter:'blur(50px)',pointerEvents:'none',animation:'breathe 4s ease-in-out infinite, orbFloat 8s ease-in-out infinite'}}/>
-            <div style={{fontSize:'3.2rem',marginBottom:16,color:'transparent',background:'linear-gradient(135deg, #4de7f5 0%, #38d8e8 55%, #58b8ff 100%)',backgroundSize:'200% 200%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',fontWeight:900,letterSpacing:'-1px',position:'relative',animation:'gradientShift 4s ease infinite, floatUp 0.6s cubic-bezier(0.16,1,0.3,1) both'}}>SOS</div>
-            <div style={{fontSize:'1.35rem',color:'var(--text)',fontWeight:600,marginBottom:8,position:'relative',animation:'textReveal 0.5s ease 0.15s both',fontFamily:"'Crimson Text', Georgia, serif",letterSpacing:'-0.01em'}}>{wv.greeting}</div>
-            <div style={{fontSize:'0.88rem',color:'var(--text-dim)',maxWidth:400,lineHeight:1.65,marginBottom:32,position:'relative',animation:'textReveal 0.5s ease 0.3s both'}}>{wv.desc}</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',maxWidth:440,position:'relative'}}>
-              {wv.chips.map((s,i)=>(
-                <button key={s} className="sos-chip" style={{animation:`floatUp 0.4s cubic-bezier(0.16,1,0.3,1) ${0.4+i*0.08}s both`}} onClick={()=>sendChip(s)}>{s}</button>
-              ))}
-            </div>
-          </div>
-          );
-        })()}
-        {messages.map((msg,i)=>(
+          {messages.map((msg,i)=>(
           <React.Fragment key={i}>
             {/* P1.4: "Earlier in conversation" separator */}
             {i === 0 && dbMessageCount > 0 && messages.length > dbMessageCount && (
@@ -6810,8 +6793,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </div>
 
       </ErrorBoundary>
-      {/* ── Guest Demo Banner ── */}
-      {!user && (
+      {/* ── Guest Demo Banner — only when ≤5 messages remain ── */}
+      {!user && (GUEST_DEMO_LIMIT - guestMsgCount) <= 5 && (
         <div style={{padding:'6px 16px 0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,fontSize:'0.8rem',color:'var(--text-dim)',animation:'fadeIn .3s ease'}}>
           <span>
             {guestMsgCount < GUEST_DEMO_LIMIT
@@ -6827,11 +6810,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         {contextTrimInfo&&(
           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
             showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context
-          </div>
-        )}
-        {messages.length>0&&(
-          <div style={{display:'flex',gap:8,marginBottom:8,overflowX:'auto',paddingBottom:2}}>
-            <button className="sos-chip" onClick={()=>setShowChatSidebar(true)} style={{background:'rgba(108,99,255,0.06)',borderColor:'rgba(108,99,255,0.15)',color:'var(--accent)'}}>History</button>
           </div>
         )}
         {pendingPhoto&&(
@@ -6898,12 +6876,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               )}
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
-              {workspaceModeLabel && (
-                <span title={workspaceContext === 'notes' ? 'Your notes are in context — SOS will reference them in answers.' : 'Your schedule is in context — SOS will reference it in answers.'} style={{padding:'4px 9px',borderRadius:999,fontSize:'0.72rem',fontWeight:600,color:'var(--accent)',background:'rgba(108,99,255,0.1)',border:'1px solid rgba(108,99,255,0.24)',whiteSpace:'nowrap',cursor:'default'}}>{workspaceModeLabel}</span>
-              )}
               <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
-                {Icon.link(18)}
+                {Icon.plus(18)}
               </button>
               <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
