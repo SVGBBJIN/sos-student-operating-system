@@ -1,11 +1,10 @@
 import React from 'react';
+import Icon from '../lib/icons';
 
-// Wave bar heights (20 bars, varied peaks)
 const WAVE_PEAKS = [6, 10, 14, 8, 12, 16, 7, 13, 9, 15, 11, 8, 14, 6, 12, 10, 16, 7, 11, 9];
 const WAVE_SPEEDS = [0.7, 0.9, 0.6, 1.1, 0.8, 0.65, 1.0, 0.75, 0.85, 0.6, 0.95, 0.7, 0.8, 1.0, 0.7, 0.9, 0.65, 1.1, 0.8, 0.75];
 const WAVE_DELAYS = [0, 0.1, 0.2, 0.05, 0.15, 0.25, 0.08, 0.18, 0.03, 0.12, 0.22, 0.07, 0.17, 0.27, 0.04, 0.14, 0.24, 0.09, 0.19, 0.01];
 
-// Open-Meteo WMO weathercode → emoji
 function getWeatherEmoji(weatherData) {
   const code = weatherData?.current?.weather_code ?? weatherData?.current?.weathercode;
   if (code == null) return '🌙';
@@ -27,105 +26,176 @@ function getWeatherDesc(weatherData) {
   return weatherData?.city || null;
 }
 
-export default function LofiRightPanel({ weatherData }) {
+function formatSeconds(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = String(seconds % 60).padStart(2, '0');
+  return `${mins}:${secs}`;
+}
+
+export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats = [], onOpenSavedChat }) {
   const [musicPlaying, setMusicPlaying] = React.useState(false);
+  const [timerSeconds, setTimerSeconds] = React.useState(0);
+  const [timerRunning, setTimerRunning] = React.useState(false);
+  const [smashCount, setSmashCount] = React.useState(0);
+  const [widgetOrder, setWidgetOrder] = React.useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sos_right_widget_order') || '[]');
+      const defaults = ['weather', 'saved', 'radio', 'timer'];
+      if (Array.isArray(saved) && saved.length) {
+        const merged = [...saved.filter(w => defaults.includes(w)), ...defaults.filter(w => !saved.includes(w))];
+        return merged;
+      }
+      return defaults;
+    } catch (_) {
+      return ['weather', 'saved', 'radio', 'timer'];
+    }
+  });
+
+  const dragWidgetRef = React.useRef(null);
 
   const weatherEmoji = getWeatherEmoji(weatherData);
-  const weatherTemp  = getWeatherTemp(weatherData);
-  const weatherDesc  = getWeatherDesc(weatherData);
+  const weatherTemp = getWeatherTemp(weatherData);
+  const weatherDesc = getWeatherDesc(weatherData);
+  const timerDone = timerSeconds === 0;
+
+  React.useEffect(() => {
+    localStorage.setItem('sos_right_widget_order', JSON.stringify(widgetOrder));
+  }, [widgetOrder]);
+
+  React.useEffect(() => {
+    if (!timerRunning || timerSeconds <= 0) return undefined;
+    const tick = setInterval(() => {
+      setTimerSeconds(prev => {
+        if (prev <= 1) {
+          setTimerRunning(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [timerRunning, timerSeconds]);
+
+  function reorderByDrag(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    setWidgetOrder(prev => {
+      const fromIdx = prev.indexOf(fromId);
+      const toIdx = prev.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const next = [...prev];
+      const [item] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, item);
+      return next;
+    });
+  }
+
+  function addTimer(seconds) {
+    setTimerSeconds(prev => prev + seconds);
+  }
+
+  function WidgetFrame({ id, title, children }) {
+    return (
+      <div
+        className="study-widget-card"
+        data-widget={id}
+        draggable
+        onDragStart={() => { dragWidgetRef.current = id; }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => reorderByDrag(dragWidgetRef.current, id)}
+      >
+        <div className="study-widget-head">
+          <span>{title}</span>
+          <span style={{ opacity: 0.65, cursor: 'grab' }}>⋮⋮</span>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  const widgets = {
+    weather: (
+      <WidgetFrame id="weather" title="Weather">
+        <div className="study-weather">
+          <span className="study-weather-icon">{weatherEmoji}</span>
+          <div className="study-weather-info">
+            <div className="study-weather-temp">{weatherTemp || '—'}</div>
+            <div className="study-weather-desc">{weatherDesc || 'No weather data'}</div>
+          </div>
+        </div>
+      </WidgetFrame>
+    ),
+    saved: (
+      <WidgetFrame id="saved" title="Saved Chats">
+        <div className="study-widget-actions">
+          {savedChats.length === 0 ? (
+            <div style={{ fontSize: '0.76rem', color: 'var(--lofi-text-dim)' }}>No saved chats yet.</div>
+          ) : savedChats.slice(0, 6).map(chat => (
+            <button
+              key={chat.id}
+              className="study-widget-btn"
+              style={{ justifyContent: 'space-between' }}
+              onClick={() => onOpenSavedChat?.(chat.id)}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{chat.title || 'Saved chat'}</span>
+              <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>{chat.savedAt ? new Date(chat.savedAt).toLocaleDateString() : ''}</span>
+            </button>
+          ))}
+        </div>
+      </WidgetFrame>
+    ),
+    radio: (
+      <WidgetFrame id="radio" title="Radio">
+        <div className="study-music-player">
+          <div className="study-now-playing-label">Now Playing</div>
+          <div className="study-track-name">lofi hip hop radio</div>
+          <div className="study-track-artist">beats to study / relax to</div>
+          <div className="study-waveform">
+            {WAVE_PEAKS.map((peak, i) => (
+              <div
+                key={i}
+                className={'study-wave-bar' + (!musicPlaying ? ' paused' : '')}
+                style={{ '--wpeak': peak + 'px', '--wspd': WAVE_SPEEDS[i] + 's', '--wdelay': WAVE_DELAYS[i] + 's', height: musicPlaying ? undefined : '3px' }}
+              />
+            ))}
+          </div>
+          <div className="study-music-controls">
+            <button className="study-music-btn" title="Previous" aria-label="Previous">⏮</button>
+            <button className="study-music-btn play" onClick={() => setMusicPlaying(p => !p)} title={musicPlaying ? 'Pause' : 'Play'} aria-label={musicPlaying ? 'Pause' : 'Play'}>
+              {musicPlaying ? '⏸' : '▶'}
+            </button>
+            <button className="study-music-btn" title="Next" aria-label="Next">⏭</button>
+          </div>
+        </div>
+      </WidgetFrame>
+    ),
+    timer: (
+      <WidgetFrame id="timer" title="Timer">
+        <div className="study-widget-actions" style={{ alignItems: 'stretch' }}>
+          <div style={{ fontFamily: 'var(--lofi-font-mono)', fontSize: '1.25rem', color: 'var(--lofi-text)', textAlign: 'center' }}>{formatSeconds(timerSeconds)}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+            <button className="study-widget-btn" onClick={() => addTimer(60)}>+1m</button>
+            <button className="study-widget-btn" onClick={() => addTimer(900)}>+15m</button>
+            <button className="study-widget-btn" onClick={() => addTimer(3600)}>+1h</button>
+          </div>
+          {!timerDone ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="study-widget-btn" onClick={() => setTimerRunning(r => !r)}>{timerRunning ? 'Pause' : 'Start'}</button>
+              <button className="study-widget-btn" onClick={() => { setTimerRunning(false); setTimerSeconds(0); }}>Reset</button>
+            </div>
+          ) : (
+            <button className="study-smash-btn" onClick={() => setSmashCount(c => c + 1)}>Smash It ({smashCount})</button>
+          )}
+        </div>
+      </WidgetFrame>
+    ),
+  };
 
   return (
     <div className="study-right study-glass">
-
-      {/* ── Cat widget — exact copy from lofi-study-ui.html ── */}
-      <div className="study-cat-scene">
-        <div className="window-frame" />
-        <div className="cat-wrap">
-          <svg className="cat-svg" viewBox="0 0 80 70" xmlns="http://www.w3.org/2000/svg">
-            {/* tail */}
-            <g className="tail">
-              <path d="M38 58 Q20 65 18 55 Q16 45 28 48" stroke="#c4b5fd" strokeWidth="5" fill="none" strokeLinecap="round"/>
-            </g>
-            {/* body */}
-            <ellipse cx="40" cy="50" rx="20" ry="16" fill="#1e1b2e"/>
-            {/* head */}
-            <circle cx="40" cy="28" r="16" fill="#1e1b2e"/>
-            {/* ears */}
-            <polygon points="24,16 20,4 30,14" fill="#1e1b2e"/>
-            <polygon points="56,16 60,4 50,14" fill="#1e1b2e"/>
-            <polygon points="25,14 22,7 30,13" fill="#c4b5fd" opacity="0.6"/>
-            <polygon points="55,14 58,7 50,13" fill="#c4b5fd" opacity="0.6"/>
-            {/* eyes */}
-            <g className="eye-l" style={{transformOrigin: '33px 28px'}}>
-              <ellipse cx="33" cy="28" rx="4" ry="5" fill="#7c3aed"/>
-              <ellipse cx="33" cy="28" rx="2" ry="4" fill="#0a0a12"/>
-              <circle cx="34" cy="26" r="1" fill="rgba(255,255,255,0.6)"/>
-            </g>
-            <g className="eye-r" style={{transformOrigin: '47px 28px'}}>
-              <ellipse cx="47" cy="28" rx="4" ry="5" fill="#7c3aed"/>
-              <ellipse cx="47" cy="28" rx="2" ry="4" fill="#0a0a12"/>
-              <circle cx="48" cy="26" r="1" fill="rgba(255,255,255,0.6)"/>
-            </g>
-            {/* nose & mouth */}
-            <ellipse cx="40" cy="33" rx="1.5" ry="1" fill="#fda4af"/>
-            <path d="M38 34.5 Q40 37 42 34.5" stroke="#c4b5fd" strokeWidth="1" fill="none" opacity="0.7"/>
-            {/* whiskers */}
-            <line x1="20" y1="32" x2="34" y2="34" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
-            <line x1="20" y1="35" x2="34" y2="35" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
-            <line x1="46" y1="34" x2="60" y2="32" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
-            <line x1="46" y1="35" x2="60" y2="35" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
-            {/* paws */}
-            <ellipse cx="28" cy="62" rx="7" ry="4" fill="#1a172a"/>
-            <ellipse cx="52" cy="62" rx="7" ry="4" fill="#1a172a"/>
-          </svg>
-        </div>
+      <div className="study-right-controls">
+        <button className="study-widget-btn" onClick={onOpenSettings}>{Icon.gear(14)} Settings</button>
       </div>
-
-      {/* Music player */}
-      <div className="study-music-player">
-        <div className="study-now-playing-label">Now Playing</div>
-        <div className="study-track-name">lofi hip hop radio</div>
-        <div className="study-track-artist">beats to study / relax to</div>
-        <div className="study-waveform">
-          {WAVE_PEAKS.map((peak, i) => (
-            <div
-              key={i}
-              className={'study-wave-bar' + (!musicPlaying ? ' paused' : '')}
-              style={{
-                '--wpeak': peak + 'px',
-                '--wspd': WAVE_SPEEDS[i] + 's',
-                '--wdelay': WAVE_DELAYS[i] + 's',
-                height: musicPlaying ? undefined : '3px',
-              }}
-            />
-          ))}
-        </div>
-        <div className="study-music-controls">
-          <button className="study-music-btn" title="Previous" aria-label="Previous">⏮</button>
-          <button
-            className="study-music-btn play"
-            onClick={() => setMusicPlaying(p => !p)}
-            title={musicPlaying ? 'Pause' : 'Play'}
-            aria-label={musicPlaying ? 'Pause' : 'Play'}
-          >
-            {musicPlaying ? '⏸' : '▶'}
-          </button>
-          <button className="study-music-btn" title="Next" aria-label="Next">⏭</button>
-        </div>
-      </div>
-
-      {/* Weather widget */}
-      <div className="study-weather">
-        <span className="study-weather-icon">{weatherEmoji}</span>
-        <div className="study-weather-info">
-          <div className="study-weather-temp">{weatherTemp || '—'}</div>
-          <div className="study-weather-desc">{weatherDesc || 'No weather data'}</div>
-        </div>
-      </div>
-
-      {/* Placeholder — future panel */}
-      <div className="study-right-placeholder" />
+      {widgetOrder.map(id => <React.Fragment key={id}>{widgets[id]}</React.Fragment>)}
     </div>
   );
 }
-

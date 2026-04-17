@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { sb } from '../lib/supabase.js';
 
 const SWATCHES = [
@@ -10,10 +10,49 @@ const SWATCHES = [
   { name: 'Lavender', hex: '#7C3AED' },
 ];
 
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  const bigint = parseInt(h, 16);
+  return {
+    r: (bigint >> 16) & 255,
+    g: (bigint >> 8) & 255,
+    b: bigint & 255,
+  };
+}
+
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function mix(hex, ratio, toward = 255) {
+  const { r, g, b } = hexToRgb(hex);
+  const rr = Math.round(r + (toward - r) * ratio);
+  const gg = Math.round(g + (toward - g) * ratio);
+  const bb = Math.round(b + (toward - b) * ratio);
+  return `rgb(${rr}, ${gg}, ${bb})`;
+}
+
 function applyAccent(hex) {
+  const light = mix(hex, 0.35, 255);
+  const highlight = mix(hex, 0.55, 255);
+  const dark = mix(hex, 0.35, 0);
+  const muted = mix(hex, 0.65, 40);
+  const { r, g, b } = hexToRgb(hex);
+
   document.documentElement.style.setProperty('--primary', hex);
+  document.documentElement.style.setProperty('--accent', hex);
+  document.documentElement.style.setProperty('--teal', hex);
   document.documentElement.style.setProperty('--accent-new', hex);
-  document.documentElement.style.setProperty('--primary-glow', hex + '26');
+  document.documentElement.style.setProperty('--accent-light', light);
+  document.documentElement.style.setProperty('--accent-highlight', highlight);
+  document.documentElement.style.setProperty('--accent-dark', dark);
+  document.documentElement.style.setProperty('--accent-muted', muted);
+  document.documentElement.style.setProperty('--accent-dim', `rgba(${r}, ${g}, ${b}, 0.34)`);
+  document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.28)`);
+  document.documentElement.style.setProperty('--primary-glow', `rgba(${r}, ${g}, ${b}, 0.2)`);
+  document.documentElement.style.setProperty('--soft-blue', `rgba(${clamp(r + 35, 0, 255)}, ${clamp(g + 20, 0, 255)}, ${clamp(b + 60, 0, 255)}, 0.2)`);
+  document.documentElement.style.setProperty('--border', `rgba(${r}, ${g}, ${b}, 0.26)`);
+  document.documentElement.style.setProperty('--border-mid', `rgba(${r}, ${g}, ${b}, 0.4)`);
 }
 
 export default function AppearanceSettings({ user }) {
@@ -24,6 +63,10 @@ export default function AppearanceSettings({ user }) {
     () => localStorage.getItem('sos_accent') || '#5fa882'
   );
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    applyAccent(activeHex);
+  }, [activeHex]);
 
   const persistAccent = useCallback((hex, userId) => {
     localStorage.setItem('sos_accent', hex);

@@ -405,6 +405,41 @@ export default function Landing() {
         </div>
       </section>
 
+      <section style={{
+        maxWidth: 960,
+        margin: '0 auto',
+        padding: '0 var(--spacing-8) var(--spacing-12)',
+      }}>
+        <div style={{
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-md)',
+          background: 'var(--surface)',
+          padding: 'var(--spacing-6)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 'var(--spacing-4)',
+          flexWrap: 'wrap',
+        }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, color: 'var(--foreground)', marginBottom: 4 }}>Privacy & data usage</div>
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--muted-foreground)' }}>Read how SOS handles account, calendar, and study data.</div>
+          </div>
+          <a href="/privacy.html" style={{
+            textDecoration: 'none',
+            background: 'var(--primary)',
+            color: 'var(--primary-foreground)',
+            padding: '10px 14px',
+            borderRadius: 'var(--radius)',
+            fontFamily: 'var(--font-ui)',
+            fontSize: 13,
+            fontWeight: 600,
+          }}>
+            View Privacy Policy
+          </a>
+        </div>
+      </section>
+
       {/* ── FOOTER ───────────────────────────────────────────── */}
       <footer style={{
         background: 'var(--sidebar)',
