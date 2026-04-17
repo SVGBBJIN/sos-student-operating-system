@@ -23,6 +23,7 @@ import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
+import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -581,8 +582,8 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If required fields are missing, call ask_clarification before any action.',
-  clarification_style: 'Clarifications can be text-box-only (empty options). Keep wording natural and specific.',
+  clarification: 'If required fields are missing, ask only the single most blocking clarification before any action. Never ask optional follow-ups.',
+  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Ask clarification only when missing data would materially change the result.',
   action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
@@ -1076,7 +1077,7 @@ function AuthModal({ onAuth, onClose, initialMode = 'login' }) {
     try {
       const { error: err } = await sb.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: window.location.origin + window.location.pathname }
+        options: { redirectTo: buildOAuthRedirectUrl(window.location.href) }
       });
       if (err) throw err;
     } catch (err) {
@@ -1447,6 +1448,12 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   function setOtherText(qIdx, text) {
     updateAnswer(qIdx, cur => ({ ...cur, otherText: text }));
   }
+  function setDateValue(qIdx, dateValue) {
+    updateAnswer(qIdx, cur => ({ ...cur, dateValue }));
+  }
+  function setSubjectValue(qIdx, subjectValue) {
+    updateAnswer(qIdx, cur => ({ ...cur, subjectValue, otherText: subjectValue === 'other' ? cur.otherText : '' }));
+  }
 
   function buildPayloads(answersArr) {
     return clarifications.map((c, i) => {
@@ -1454,7 +1461,9 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
       return {
         selected: answersArr[i].selected,
         options: opts,
-        otherText: answersArr[i].otherText,
+        otherText: answersArr[i].subjectValue === 'other'
+          ? answersArr[i].otherText
+          : (answersArr[i].subjectValue || answersArr[i].dateValue || answersArr[i].otherText),
         question: c?.question || '',
       };
     });
@@ -1513,11 +1522,15 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const c = clarifications[currentQIdx] || {};
   const options = Array.isArray(c?.options) ? c.options : [];
   const multiSelect = !!c?.multiSelect || !!c?.multi_select;
+  const inputType = (c?.inputType || c?.input_type || '').toLowerCase();
+  const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
+  const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
+  const subjectOptions = ['Math', 'English', 'Science', 'History', 'Language', 'Computer Science', 'Other'];
   const normalizedOptions = options.map(normalizeOption).filter(
     opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
   );
-  const answer = answers[currentQIdx] || { selected: [], otherText: '' };
-  const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim();
+  const answer = answers[currentQIdx] || { selected: [], otherText: '', dateValue: '', subjectValue: '' };
+  const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim() || !!answer.dateValue || !!answer.subjectValue;
 
   return (
     <div style={{
@@ -1649,22 +1662,66 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
         </div>
-        <input
-          type="text"
-          value={answer.otherText}
-          onChange={(e) => setOtherText(currentQIdx, e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && currentAnswered) advance(); }}
-          placeholder={c?.otherPlaceholder || 'Something else…'}
-          style={{
-            flex:1,
-            background:'transparent',
-            border:'none',
-            color:'var(--text-dim)',
-            fontSize:'0.84rem',
-            outline:'none',
-            padding:'4px 0',
-          }}
-        />
+        {isSubjectInput ? (
+          <>
+            <select
+              value={answer.subjectValue || ''}
+              onChange={(e) => setSubjectValue(currentQIdx, e.target.value)}
+              style={{
+                flex: 1,
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 8,
+                color: 'var(--text)',
+                fontSize: '0.82rem',
+                padding: '6px 8px',
+                outline: 'none',
+              }}
+            >
+              <option value="">Choose a subject…</option>
+              {subjectOptions.map((subject) => (
+                <option key={subject} value={subject.toLowerCase() === 'other' ? 'other' : subject}>{subject}</option>
+              ))}
+            </select>
+            {(answer.subjectValue === 'other') && (
+              <input
+                type="text"
+                value={answer.otherText}
+                onChange={(e) => setOtherText(currentQIdx, e.target.value)}
+                placeholder="Other subject"
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '0.84rem',
+                  outline: 'none',
+                  padding: '4px 0',
+                }}
+              />
+            )}
+          </>
+        ) : (
+          <input
+            type={isDateInput ? 'date' : 'text'}
+            value={isDateInput ? (answer.dateValue || '') : answer.otherText}
+            onChange={(e) => {
+              if (isDateInput) setDateValue(currentQIdx, e.target.value);
+              else setOtherText(currentQIdx, e.target.value);
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && currentAnswered) advance(); }}
+            placeholder={isDateInput ? 'Select a date' : (c?.otherPlaceholder || 'Something else…')}
+            style={{
+              flex:1,
+              background:'transparent',
+              border:'none',
+              color:'var(--text-dim)',
+              fontSize:'0.84rem',
+              outline:'none',
+              padding:'4px 0',
+            }}
+          />
+        )}
         {/* Skip button */}
         <button
           onClick={handleSkipQuestion}
@@ -3539,7 +3596,9 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
   }
 
   function saveNewNote() {
-    const title = newNoteName.trim() || 'Untitled Note';
+    const plainText = (editorRef.current?.innerText || '').trim();
+    const fallbackTitle = plainText ? plainText.split(/\s+/).slice(0, 6).join(' ') : `Note ${new Date().toLocaleDateString()}`;
+    const title = newNoteName.trim() || fallbackTitle;
     const content = editorRef.current?.innerHTML || '';
     onCreateNote({ name: title, content, source: 'manual' });
     setIsCreatingNew(false);
@@ -3908,51 +3967,6 @@ function FirstRunModal({ onClose, onConnectGoogle, onSwitchLofi }) {
 }
 
 /* ═══════════════════════════════════════════════
-   SLASH COMMAND PALETTE
-   ═══════════════════════════════════════════════ */
-const SLASH_COMMANDS = [
-  { cmd: '/task',      hint: '/task [description]',      desc: 'Add a task or assignment',           fill: '/task ' },
-  { cmd: '/flashcard', hint: '/flashcard [topic]',        desc: 'Generate flashcards on a topic',     fill: '/flashcard ' },
-  { cmd: '/quiz',      hint: '/quiz [topic]',             desc: 'Create a practice quiz',             fill: '/quiz ' },
-  { cmd: '/timer',     hint: '/timer [minutes]',          desc: 'Start a focus timer',                fill: '/timer ' },
-  { cmd: '/remind',    hint: '/remind [time] [what]',     desc: 'Set a reminder',                     fill: '/remind ' },
-  { cmd: '/calendar',  hint: '/calendar',                 desc: 'Open schedule + chat',               fill: '/calendar' },
-  { cmd: '/notes',     hint: '/notes',                    desc: 'Open notes + chat',                  fill: '/notes' },
-  { cmd: '/study',     hint: '/study',                    desc: 'Switch to Study Mode',               fill: '/study' },
-  { cmd: '/upload',    hint: '/upload',                   desc: 'Upload a PDF to make study materials', fill: '/upload' },
-];
-
-function SlashPalette({ query, onSelect, onClose }) {
-  const filtered = SLASH_COMMANDS.filter(c =>
-    !query || c.cmd.slice(1).startsWith(query.toLowerCase())
-  );
-  if (filtered.length === 0) return null;
-  return (
-    <div style={{
-      position:'absolute',bottom:'100%',left:0,right:0,marginBottom:6,
-      background:'rgba(10,12,24,0.97)',border:'1px solid rgba(0,229,204,0.2)',
-      borderRadius:14,overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,0.5)',
-      backdropFilter:'blur(16px)',zIndex:50,animation:'fadeIn .12s ease',
-    }}>
-      <div style={{padding:'6px 12px',fontSize:'0.68rem',color:'var(--text-dim)',borderBottom:'1px solid rgba(255,255,255,0.05)',letterSpacing:'0.05em',textTransform:'uppercase',fontWeight:600}}>
-        Commands
-      </div>
-      {filtered.map(c=>(
-        <button key={c.cmd} onMouseDown={e=>{e.preventDefault();onSelect(c.fill);}}
-          style={{display:'flex',alignItems:'center',gap:12,width:'100%',background:'transparent',border:'none',
-            padding:'9px 14px',cursor:'pointer',textAlign:'left',transition:'background .1s'}}
-          onMouseEnter={e=>e.currentTarget.style.background='rgba(0,229,204,0.07)'}
-          onMouseLeave={e=>e.currentTarget.style.background='transparent'}
-        >
-          <span style={{fontFamily:'var(--font-mono)',fontSize:'0.80rem',color:'var(--neon-cyan)',width:90,flexShrink:0}}>{c.hint}</span>
-          <span style={{fontSize:'0.77rem',color:'var(--text-dim)'}}>{c.desc}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
@@ -3979,8 +3993,6 @@ function App() {
 
   // ── UI state ──
   const [input, setInput] = useState('');
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashQuery, setSlashQuery] = useState('');
   const [pasteStudyPrompt, setPasteStudyPrompt] = useState(null); // holds pasted text when >500 chars
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
@@ -4019,8 +4031,7 @@ function App() {
   const [skillHubLessons, setSkillHubLessons] = useState([]);
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
-  const showSideBySide = showPeek && showNotes;
-  const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel !== 'none';
+  const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel === 'notes';
   const getWorkspaceContext = useCallback((overridePanel = null) => {
     const effectivePanel = overridePanel || sidebarCompanionPanel;
     if (layoutMode === 'sidebar' && activePanel === 'chat' && !companionCollapsed) {
@@ -4052,7 +4063,6 @@ function App() {
     const msg = (text || '').toLowerCase();
     if (!msg) return null;
     if (/\b(notes?|document|docs?|pdf|reference|summarize my notes|in my notes)\b/.test(msg)) return 'notes';
-    if (/\b(calendar|schedule|planner|plan my day|today\'s plan|timetable|due date)\b/.test(msg)) return 'schedule';
     return null;
   }, []);
   const [toastMsg, setToastMsg] = useState(null);
@@ -4773,9 +4783,7 @@ function App() {
     const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
     if (calendarActionTypes.includes(action.type)) {
       if (layoutMode === 'sidebar') {
-        openCompanionPanel('schedule');
-      } else if (!showSideBySide) {
-        setShowPeek(true);
+        openCompanionPanel('notes');
       }
     }
   }
@@ -5928,7 +5936,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setPendingProposal(null);
     if (hasAllRequired) {
       const action = { type: action_type, ...prefilled };
-      if (aiAutoApprove) {
+      const instantApprove = aiAutoApprove || action_type === 'add_task';
+      if (instantApprove) {
         const editingActionTypes = ['update_event', 'convert_event_to_block', 'convert_block_to_event', 'edit_note'];
         const isEditing = editingActionTypes.includes(action_type);
         setAutoApproveStatus({ state: 'running', count: 1, label: isEditing ? 'editing notes / schedule' : 'auto-approve mode' });
@@ -6248,13 +6257,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){
         e.preventDefault();
-        if (layoutMode === 'topbar') {
-          setShowPeek(p=>!p);
-        } else if (activePanel === 'chat') {
-          openCompanionPanel('schedule');
-        } else {
-          setShowPeek(p=>!p);
-        }
+        setActivePanel(prev => prev === 'settings' ? 'chat' : 'settings');
       }
       else if(key==='n'){
         e.preventDefault();
@@ -6397,7 +6400,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           ) : (
             <>
               <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-              <button className="sos-side-btn" data-module="schedule" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='schedule'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('schedule');} }} title="Schedule + chat">{Icon.clipboard(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Schedule + chat</span></button>
               <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
               <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
               <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
@@ -6479,7 +6481,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>{ openCompanionPanel('schedule'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.clipboard(14)} <span>Schedule + chat</span></button>
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Skill Hub</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
@@ -6544,11 +6545,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar split panel</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Choose whether chat is paired with notes or schedule in sidebar mode.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar companion panel</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Pair chat with notes, or turn the companion panel off.</div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('schedule')}>Schedule</button>
                   <button className="settings-toggle" onClick={()=>openSidebarCompanion('notes')}>Notes</button>
                   <button className="settings-toggle" onClick={closeSidebarCompanion}>Off</button>
                 </div>
@@ -6756,8 +6756,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   setToastMsg('Added '+toExec.length+' items');
                   const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
                   if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('schedule');}
-                    else if(!showSideBySide){setShowPeek(true);}
+                    if(layoutMode==='sidebar'){openCompanionPanel('notes');}
                   }
                 }
               }}
@@ -6866,14 +6865,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
             )}
             <div style={{position:'relative'}}>
-              {slashMenuOpen && (
-                <SlashPalette query={slashQuery} onSelect={cmd=>{
-                  setInput(cmd);
-                  setSlashMenuOpen(false);
-                  setSlashQuery('');
-                  setTimeout(()=>inputRef.current?.focus(),0);
-                }} onClose={()=>setSlashMenuOpen(false)} />
-              )}
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
               <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
@@ -6892,31 +6883,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   }
                 }}
                 onChange={e=>{
-                  const v = e.target.value;
-                  setInput(v);
-                  if (v.startsWith('/')) {
-                    setSlashMenuOpen(true);
-                    setSlashQuery(v.slice(1));
-                  } else {
-                    setSlashMenuOpen(false);
-                    setSlashQuery('');
-                  }
+                  setInput(e.target.value);
                 }}
-                placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"Ask anything · / for commands"}
+                placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"Ask anything"}
                 disabled={isLoading}
                 style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
                 onKeyDown={e=>{
-                  if(e.key==='Escape'){setSlashMenuOpen(false);setSlashQuery('');}
-                  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();setSlashMenuOpen(false);handleSubmit();}
+                  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit();}
                 }}
-                onBlur={()=>setTimeout(()=>setSlashMenuOpen(false),150)}
               />
-              <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'rgba(255,255,255,0.08)',backdropFilter:'blur(12px)',color:'var(--neon-cyan)',border:'1px solid rgba(0,229,204,0.3)',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
+              <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1,boxShadow:'0 2px 12px rgba(245,158,11,0.3)'}}>{Icon.send(18)}</button>
             </form>
             </div>
           </>
         )}
-        <div style={{display:'flex',justifyContent:'center',marginTop:8,fontSize:'0.68rem'}}><a href="privacy.html" style={{color:'var(--text-dim)',textDecoration:'none',opacity:0.6,transition:'opacity .15s'}} onMouseEnter={e=>e.target.style.opacity=1} onMouseLeave={e=>e.target.style.opacity=0.6}>Privacy Policy</a></div>
+        <div style={{marginTop:8,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:10,background:'rgba(255,255,255,0.03)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+          <span style={{fontSize:'0.74rem',color:'var(--text-dim)'}}>Your data controls and policy details are always available.</span>
+          <a href="privacy.html" style={{fontSize:'0.74rem',color:'var(--accent)',fontWeight:600,textDecoration:'none'}}>Privacy Policy</a>
+        </div>
       </div>
       </div>
       {showSidebarCompanion && (
@@ -6930,26 +6914,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <span>{Icon.panel(14)}</span>
             {!compactCompanionToggle && <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>}
           </button>
-          {!companionCollapsed && (sidebarCompanionPanel === 'schedule' || sidebarCompanionPanel === 'notes') && (
+          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
             <div style={{padding:'6px 10px 0'}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
                 <div style={{fontSize:'0.76rem',fontWeight:700,color:'var(--text-dim)',letterSpacing:'0.02em',textTransform:'uppercase'}}>
-                  {sidebarCompanionPanel === 'schedule' ? 'Schedule workflows' : 'Notes workflows'}
+                  Notes workflows
                 </div>
                 <button className="settings-toggle" onClick={closeSidebarCompanion} style={{padding:'4px 8px',fontSize:'0.68rem'}}>Close panel</button>
               </div>
               <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
-                {sidebarCompanionPanel === 'schedule' && ['Plan today','Find free block','Due soon'].map((chip) => (
-                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
-                ))}
-                {sidebarCompanionPanel === 'notes' && ['Summarize note','Make flashcards','Quiz me'].map((chip) => (
+                {['Summarize note','Make flashcards','Quiz me'].map((chip) => (
                   <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
                 ))}
               </div>
             </div>
-          )}
-          {!companionCollapsed && sidebarCompanionPanel === 'schedule' && (
-            <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} embedded/></ErrorBoundary>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
             <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
@@ -6963,31 +6941,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiRightPanel
         weatherData={weatherData}
-        tasks={tasks}
-        blocks={blocks}
-        events={events}
-        notes={notes}
-        onDeleteNote={handleDeleteNote}
-        onUpdateNote={handleUpdateNote}
-        onCreateNote={handleCreateNote}
+        onOpenSettings={() => setActivePanel('settings')}
+        onNewChat={startNewChat}
       />}
-      {showSideBySide && (
-        <>
-          <div className="peek-overlay" onClick={() => { setShowPeek(false); setShowNotes(false); }}/>
-          <div className="split-workspace">
-            <div className="split-workspace-head">
-              <div style={{display:'flex',alignItems:'center',gap:8,fontWeight:700}}>{Icon.panel(16)} Notes + Schedule</div>
-              <button className="g-modal-close" onClick={() => { setShowPeek(false); setShowNotes(false); }}>{Icon.x(16)}</button>
-            </div>
-            <div className="split-workspace-grid">
-              <ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} embedded/></ErrorBoundary>
-              <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
-            </div>
-          </div>
-        </>
-      )}
-      {!showSideBySide && showPeek&&<ErrorBoundary><SchedulePeek tasks={tasks} blocks={blocks} events={events} weatherData={weatherData} recentlyCompleted={recentlyCompleted} onClose={()=>setShowPeek(false)}/></ErrorBoundary>}
-      {!showSideBySide && showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
       {authNudge&&(
         <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
           <span>Sign in to save notes across sessions →</span>
