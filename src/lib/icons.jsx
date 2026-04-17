@@ -56,6 +56,7 @@ const Icon = {
   panel:(s=18)=>I([{tag:'rect',x:'3',y:'3',width:'18',height:'18',rx:'5',ry:'5'},'M10 3v18'],s),
   headphones:(s=18)=>I(['M3 18v-6a9 9 0 0 1 18 0v6',{tag:'rect',x:'1',y:'16',width:'5',height:'6',rx:'1'},{tag:'rect',x:'18',y:'16',width:'5',height:'6',rx:'1'}],s),
   video:(s=18)=>I([{tag:'rect',x:'2',y:'5',width:'15',height:'14',rx:'2',ry:'2'},'M23 7l-7 5 7 5V7z'],s),
+  gear:(s=18)=>I(['M12 2v2','M12 20v2','M4.93 4.93l1.41 1.41','M17.66 17.66l1.41 1.41','M2 12h2','M20 12h2','M4.93 19.07l1.41-1.41','M17.66 6.34l1.41-1.41',{tag:'circle',cx:'12',cy:'12',r:'3.5'}],s),
 };
 
 export { Icon, I };

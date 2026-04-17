@@ -3754,6 +3754,21 @@ function Toast({message,onDone}){
   return(<div style={{position:'fixed',top:20,left:'50%',transform:'translateX(-50%)',zIndex:9999,padding:'10px 20px',borderRadius:14,background:'linear-gradient(135deg,var(--success),#1db954)',color:'#fff',fontWeight:600,fontSize:'0.88rem',boxShadow:'0 4px 24px rgba(46,213,115,0.4),0 0 40px rgba(46,213,115,0.1)',animation:'toastIn .3s cubic-bezier(0.16,1,0.3,1), toastOut .3s ease 2.1s forwards',backdropFilter:'blur(8px)'}}>{message}</div>);
 }
 
+function AppleSwitch({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onChange}
+      className={'apple-toggle' + (checked ? ' on' : '')}
+    >
+      <span className="apple-toggle-knob" />
+    </button>
+  );
+}
+
 /* ─── Typing Dots (loading indicator) ─── */
 function escapeHtml(text) {
   return String(text || '')
@@ -6403,7 +6418,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
               <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
               <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
+              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
             </>
           )}
         </div>
@@ -6484,7 +6499,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Skill Hub</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.edit(14)} <span>Settings</span></button>
+          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
 
@@ -6506,11 +6521,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           />
         </div>
       ) : activePanel === 'settings' ? (
-        <div className="sos-chat-area" style={{animation:'fadeIn .25s ease'}}>
-          <div className="settings-view" style={{animation:'slideUp .28s ease'}}>
-            <div className="settings-card">
-              <div className="settings-title">Settings</div>
-              <div className="settings-sub">Customize your workspace layout and keep the controls for topbar/sidebar behavior in one place.</div>
+        <div className="settings-fullscreen">
+          <div className="settings-fullscreen-inner">
+            <div className="settings-fullscreen-header">
+              <div>
+                <div className="settings-title">Settings</div>
+                <div className="settings-sub">Customize layout, notifications, and appearance with a cleaner full-screen controls panel.</div>
+              </div>
+              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
+            </div>
+            <div className="settings-card settings-fullscreen-card">
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
@@ -6531,8 +6551,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar in notes/schedule mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat or Schedule + chat, collapse the left sidebar automatically.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar companion</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat, collapse the left sidebar automatically.</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button>
               </div>
@@ -6627,21 +6647,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Task due-date reminders</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Alert 1 day before and day-of when a task is due.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>updateNotifPref('tasks',!notifPrefs.tasks)}>{notifPrefs.tasks ? 'On' : 'Off'}</button>
+                <AppleSwitch checked={!!notifPrefs.tasks} onChange={()=>updateNotifPref('tasks',!notifPrefs.tasks)} label="Task reminders" />
               </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Exam countdown alerts</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>3 days before and day-before reminders for exams/tests.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>updateNotifPref('exams',!notifPrefs.exams)}>{notifPrefs.exams ? 'On' : 'Off'}</button>
+                <AppleSwitch checked={!!notifPrefs.exams} onChange={()=>updateNotifPref('exams',!notifPrefs.exams)} label="Exam alerts" />
               </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily plan reminder (8am)</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Morning nudge with your active task count.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>updateNotifPref('daily',!notifPrefs.daily)}>{notifPrefs.daily ? 'On' : 'Off'}</button>
+                <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
               </div>
               <div className="settings-row">
                 <div>
@@ -6658,9 +6678,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open</button>
               </div>
             </div>
-            {/* ── Appearance / Accent Color ── */}
             <AppearanceSettings user={user} />
-            {/* P4.3: Privacy/Terms links */}
             <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
               <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>
               <span style={{color:'var(--border)'}}>|</span>
@@ -6675,6 +6693,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
+          <button
+            type="button"
+            className="sos-chat-watermark"
+            onClick={() => setToastMsg('SOS quick access')}
+            title="SOS quick access"
+            aria-label="SOS quick access"
+          >
+            <img src="/brain-logo.svg" alt="SOS" />
+          </button>
           {messages.map((msg,i)=>(
           <React.Fragment key={i}>
             {/* P1.4: "Earlier in conversation" separator */}
@@ -6942,7 +6969,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {layoutMode === 'lofi' && <LofiRightPanel
         weatherData={weatherData}
         onOpenSettings={() => setActivePanel('settings')}
-        onNewChat={startNewChat}
+        savedChats={savedChats}
+        onOpenSavedChat={loadSavedChat}
       />}
       {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
       {authNudge&&(

@@ -32,24 +32,27 @@ function formatSeconds(seconds) {
   return `${mins}:${secs}`;
 }
 
-export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat }) {
+export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats = [], onOpenSavedChat }) {
   const [musicPlaying, setMusicPlaying] = React.useState(false);
-  const [timerSeconds, setTimerSeconds] = React.useState(25 * 60);
+  const [timerSeconds, setTimerSeconds] = React.useState(0);
   const [timerRunning, setTimerRunning] = React.useState(false);
   const [smashCount, setSmashCount] = React.useState(0);
   const [widgetOrder, setWidgetOrder] = React.useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('sos_right_widget_order') || '[]');
-      const defaults = ['weather', 'chat', 'radio', 'timer'];
+      const defaults = ['weather', 'saved', 'radio', 'timer'];
       if (Array.isArray(saved) && saved.length) {
         const merged = [...saved.filter(w => defaults.includes(w)), ...defaults.filter(w => !saved.includes(w))];
         return merged;
       }
       return defaults;
     } catch (_) {
-      return ['weather', 'chat', 'radio', 'timer'];
+      return ['weather', 'saved', 'radio', 'timer'];
     }
   });
+
+  const dragStartRef = React.useRef(null);
+  const dragWidgetRef = React.useRef(null);
 
   const weatherEmoji = getWeatherEmoji(weatherData);
   const weatherTemp = getWeatherTemp(weatherData);
@@ -74,28 +77,54 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat 
     return () => clearInterval(tick);
   }, [timerRunning, timerSeconds]);
 
-  function moveWidget(id, dir) {
+  function reorderByDrag(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
     setWidgetOrder(prev => {
-      const idx = prev.indexOf(id);
-      if (idx < 0) return prev;
-      const nextIdx = idx + dir;
-      if (nextIdx < 0 || nextIdx >= prev.length) return prev;
+      const fromIdx = prev.indexOf(fromId);
+      const toIdx = prev.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
       const next = [...prev];
-      [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+      const [item] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, item);
       return next;
     });
   }
 
+  function beginTimerDrag(e) {
+    dragStartRef.current = { y: e.clientY, start: timerSeconds };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function continueTimerDrag(e) {
+    if (!dragStartRef.current) return;
+    const deltaY = dragStartRef.current.y - e.clientY;
+    const step = 15;
+    const next = Math.max(0, dragStartRef.current.start + Math.round(deltaY * step));
+    setTimerSeconds(next);
+  }
+
+  function endTimerDrag(e) {
+    dragStartRef.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+
+  function addTimer(seconds) {
+    setTimerSeconds(prev => prev + seconds);
+  }
+
   function WidgetFrame({ id, title, children }) {
-    const idx = widgetOrder.indexOf(id);
     return (
-      <div className="study-widget-card" data-widget={id}>
+      <div
+        className="study-widget-card"
+        data-widget={id}
+        draggable
+        onDragStart={() => { dragWidgetRef.current = id; }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => reorderByDrag(dragWidgetRef.current, id)}
+      >
         <div className="study-widget-head">
           <span>{title}</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button className="study-widget-move" onClick={() => moveWidget(id, -1)} disabled={idx === 0}>↑</button>
-            <button className="study-widget-move" onClick={() => moveWidget(id, 1)} disabled={idx === widgetOrder.length - 1}>↓</button>
-          </div>
+          <span style={{ opacity: 0.65, cursor: 'grab' }}>⋮⋮</span>
         </div>
         {children}
       </div>
@@ -114,10 +143,22 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat 
         </div>
       </WidgetFrame>
     ),
-    chat: (
-      <WidgetFrame id="chat" title="Chat">
+    saved: (
+      <WidgetFrame id="saved" title="Saved Chats">
         <div className="study-widget-actions">
-          <button className="study-widget-btn" onClick={onNewChat}>{Icon.edit(14)} New chat</button>
+          {savedChats.length === 0 ? (
+            <div style={{ fontSize: '0.76rem', color: 'var(--lofi-text-dim)' }}>No saved chats yet.</div>
+          ) : savedChats.slice(0, 6).map(chat => (
+            <button
+              key={chat.id}
+              className="study-widget-btn"
+              style={{ justifyContent: 'space-between' }}
+              onClick={() => onOpenSavedChat?.(chat.id)}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{chat.title || 'Saved chat'}</span>
+              <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>{chat.savedAt ? new Date(chat.savedAt).toLocaleDateString() : ''}</span>
+            </button>
+          ))}
         </div>
       </WidgetFrame>
     ),
@@ -132,23 +173,13 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat 
               <div
                 key={i}
                 className={'study-wave-bar' + (!musicPlaying ? ' paused' : '')}
-                style={{
-                  '--wpeak': peak + 'px',
-                  '--wspd': WAVE_SPEEDS[i] + 's',
-                  '--wdelay': WAVE_DELAYS[i] + 's',
-                  height: musicPlaying ? undefined : '3px',
-                }}
+                style={{ '--wpeak': peak + 'px', '--wspd': WAVE_SPEEDS[i] + 's', '--wdelay': WAVE_DELAYS[i] + 's', height: musicPlaying ? undefined : '3px' }}
               />
             ))}
           </div>
           <div className="study-music-controls">
             <button className="study-music-btn" title="Previous" aria-label="Previous">⏮</button>
-            <button
-              className="study-music-btn play"
-              onClick={() => setMusicPlaying(p => !p)}
-              title={musicPlaying ? 'Pause' : 'Play'}
-              aria-label={musicPlaying ? 'Pause' : 'Play'}
-            >
+            <button className="study-music-btn play" onClick={() => setMusicPlaying(p => !p)} title={musicPlaying ? 'Pause' : 'Play'} aria-label={musicPlaying ? 'Pause' : 'Play'}>
               {musicPlaying ? '⏸' : '▶'}
             </button>
             <button className="study-music-btn" title="Next" aria-label="Next">⏭</button>
@@ -158,12 +189,26 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat 
     ),
     timer: (
       <WidgetFrame id="timer" title="Timer">
-        <div className="study-widget-actions" style={{ alignItems: 'center' }}>
-          <div style={{ fontFamily: 'var(--lofi-font-mono)', fontSize: '1.2rem', color: 'var(--lofi-text)' }}>{formatSeconds(timerSeconds)}</div>
+        <div className="study-widget-actions" style={{ alignItems: 'stretch' }}>
+          <div style={{ fontFamily: 'var(--lofi-font-mono)', fontSize: '1.25rem', color: 'var(--lofi-text)', textAlign: 'center' }}>{formatSeconds(timerSeconds)}</div>
+          <div
+            className="study-timer-drag"
+            onPointerDown={beginTimerDrag}
+            onPointerMove={continueTimerDrag}
+            onPointerUp={endTimerDrag}
+            onPointerCancel={endTimerDrag}
+          >
+            Drag up/down to add time
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+            <button className="study-widget-btn" onClick={() => addTimer(60)}>+1m</button>
+            <button className="study-widget-btn" onClick={() => addTimer(900)}>+15m</button>
+            <button className="study-widget-btn" onClick={() => addTimer(3600)}>+1h</button>
+          </div>
           {!timerDone ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="study-widget-btn" onClick={() => setTimerRunning(r => !r)}>{timerRunning ? 'Pause' : 'Start'}</button>
-              <button className="study-widget-btn" onClick={() => { setTimerRunning(false); setTimerSeconds(25 * 60); }}>Reset</button>
+              <button className="study-widget-btn" onClick={() => { setTimerRunning(false); setTimerSeconds(0); }}>Reset</button>
             </div>
           ) : (
             <button className="study-smash-btn" onClick={() => setSmashCount(c => c + 1)}>Smash It ({smashCount})</button>
@@ -176,8 +221,7 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, onNewChat 
   return (
     <div className="study-right study-glass">
       <div className="study-right-controls">
-        <button className="study-widget-btn" onClick={onOpenSettings}>{Icon.edit(14)} Settings</button>
-        <button className="study-widget-btn" onClick={onNewChat}>{Icon.edit(14)} New chat</button>
+        <button className="study-widget-btn" onClick={onOpenSettings}>{Icon.gear(14)} Settings</button>
       </div>
       {widgetOrder.map(id => <React.Fragment key={id}>{widgets[id]}</React.Fragment>)}
     </div>

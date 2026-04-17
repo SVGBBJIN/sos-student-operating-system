@@ -148,6 +148,18 @@
   gap: 8px;
 }
 
+.study-timer-drag {
+  border: 1px dashed var(--lofi-border);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  color: var(--lofi-text-dim);
+  font-size: 11px;
+  user-select: none;
+  cursor: ns-resize;
+  background: rgba(255,255,255,0.02);
+}
+
 .study-smash-btn {
   width: 100%;
   border: none;

@@ -515,6 +515,16 @@ select option{background:#fffbeb;color:var(--text)}
 
 /* ── settings-toggle active state ── */
 .settings-toggle-active{border-color:var(--accent)!important;background:rgba(245,158,11,0.22)!important;color:var(--text)!important}
+.settings-fullscreen{position:fixed;inset:0;z-index:120;background:linear-gradient(180deg,rgba(5,9,23,0.96),rgba(5,8,18,0.98));padding:28px;overflow:auto}
+.settings-fullscreen-inner{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.settings-fullscreen-header{display:flex;justify-content:space-between;align-items:center;gap:12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);padding:18px;border-radius:22px;box-shadow:0 10px 32px rgba(0,0,0,0.35)}
+.settings-fullscreen-card{border-radius:24px!important;box-shadow:0 18px 44px rgba(0,0,0,0.35);border:1px solid var(--border-mid)!important}
+.apple-toggle{width:52px;height:30px;border:none;border-radius:999px;background:rgba(255,255,255,0.18);padding:3px;cursor:pointer;position:relative;transition:background .2s ease,box-shadow .2s ease}
+.apple-toggle.on{background:linear-gradient(135deg,var(--accent),var(--accent-highlight));box-shadow:0 0 0 3px rgba(255,255,255,0.08)}
+.apple-toggle-knob{display:block;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.22);transform:translateX(0);transition:transform .2s ease}
+.apple-toggle.on .apple-toggle-knob{transform:translateX(22px)}
+.sos-chat-watermark{position:sticky;top:8px;float:right;width:32px;height:32px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;z-index:3;backdrop-filter:blur(8px)}
+.sos-chat-watermark img{width:18px;height:18px;display:block}
 
 /* ── Card accent borders (spec) ── */
 .card-accent-blue{border-left:2px solid #5B8DFF!important}
