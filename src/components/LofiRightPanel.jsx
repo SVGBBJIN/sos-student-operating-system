@@ -51,7 +51,6 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats
     }
   });
 
-  const dragStartRef = React.useRef(null);
   const dragWidgetRef = React.useRef(null);
 
   const weatherEmoji = getWeatherEmoji(weatherData);
@@ -88,24 +87,6 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats
       next.splice(toIdx, 0, item);
       return next;
     });
-  }
-
-  function beginTimerDrag(e) {
-    dragStartRef.current = { y: e.clientY, start: timerSeconds };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function continueTimerDrag(e) {
-    if (!dragStartRef.current) return;
-    const deltaY = dragStartRef.current.y - e.clientY;
-    const step = 15;
-    const next = Math.max(0, dragStartRef.current.start + Math.round(deltaY * step));
-    setTimerSeconds(next);
-  }
-
-  function endTimerDrag(e) {
-    dragStartRef.current = null;
-    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
   }
 
   function addTimer(seconds) {
@@ -191,15 +172,6 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats
       <WidgetFrame id="timer" title="Timer">
         <div className="study-widget-actions" style={{ alignItems: 'stretch' }}>
           <div style={{ fontFamily: 'var(--lofi-font-mono)', fontSize: '1.25rem', color: 'var(--lofi-text)', textAlign: 'center' }}>{formatSeconds(timerSeconds)}</div>
-          <div
-            className="study-timer-drag"
-            onPointerDown={beginTimerDrag}
-            onPointerMove={continueTimerDrag}
-            onPointerUp={endTimerDrag}
-            onPointerCancel={endTimerDrag}
-          >
-            Drag up/down to add time
-          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
             <button className="study-widget-btn" onClick={() => addTimer(60)}>+1m</button>
             <button className="study-widget-btn" onClick={() => addTimer(900)}>+15m</button>

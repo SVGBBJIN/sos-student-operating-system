@@ -6544,41 +6544,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar collapsed</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Applies when sidebar mode is active.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setSidebarCollapsed(prev=>!prev)}>{sidebarCollapsed?'Expand':'Collapse'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-collapse sidebar companion</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When opening Notes + chat, collapse the left sidebar automatically.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setAutoCollapseSidebarCompanion(prev=>!prev)}>{autoCollapseSidebarCompanion ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sidebar companion panel</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Pair chat with notes, or turn the companion panel off.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>openSidebarCompanion('notes')}>Notes</button>
-                  <button className="settings-toggle" onClick={closeSidebarCompanion}>Off</button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Companion toggle style</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between the old horizontal bar and the compact icon-only toggle.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setCompactCompanionToggle(prev=>!prev)}>{compactCompanionToggle ? 'Compact' : 'Classic'}</button>
               </div>
               <div className="settings-row">
                 <div>
@@ -6600,34 +6569,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>toggleTutorMode(!tutorMode)}>{tutorMode ? 'On' : 'Off'}</button>
                   <button className="settings-toggle" onClick={enterTutorMode}>Enter mode</button>
                 </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — sidebar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the sidebar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorSidebar; setShowTutorIndicatorSidebar(n); localStorage.setItem('sos_tutor_indicator_sidebar',n?'true':'false'); }}>{showTutorIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor indicator — topbar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the tutor mode indicator in the topbar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showTutorIndicatorTopbar; setShowTutorIndicatorTopbar(n); localStorage.setItem('sos_tutor_indicator_topbar',n?'true':'false'); }}>{showTutorIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — sidebar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the sidebar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorSidebar; setShowPerfIndicatorSidebar(n); localStorage.setItem('sos_perf_indicator_sidebar',n?'true':'false'); }}>{showPerfIndicatorSidebar ? 'Visible' : 'Hidden'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance indicator — topbar</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show or hide the performance mode pill in the topbar.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ const n=!showPerfIndicatorTopbar; setShowPerfIndicatorTopbar(n); localStorage.setItem('sos_perf_indicator_topbar',n?'true':'false'); }}>{showPerfIndicatorTopbar ? 'Visible' : 'Hidden'}</button>
               </div>
               <div className="settings-row">
                 <div>
