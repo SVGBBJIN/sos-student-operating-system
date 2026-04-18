@@ -6499,6 +6499,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Skill Hub</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
+          <button onClick={startNewChat} className="g-hdr-btn">{Icon.plus(14)} <span>New chat</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
