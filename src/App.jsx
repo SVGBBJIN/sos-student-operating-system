@@ -727,6 +727,9 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const notesBudget = actionFocusedPrompt ? 700 : CONTEXT_SECTION_BUDGETS.notes;
   const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
 
+  const recentActionsLines = (options.recentlyExecutedActions || [])
+    .map(a => '- ' + a.type.replace(/_/g, ' ') + ': ' + a.summary);
+
   const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
@@ -737,6 +740,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'ACTIVE TASKS (budgeted):',
     taskCapInfo.text || '(none)',
     (overdueTasks.length > 0 ? ('OVERDUE: ' + overdueTasks.map(t => truncateWithEllipsis(t.title, 80) + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ')) : ''),
+    ...(recentActionsLines.length > 0 ? ['', 'RECENTLY COMPLETED ACTIONS (do not re-ask about these):', recentActionsLines.join('\n')] : []),
     '',
     'THIS WEEK (budgeted):',
     capLines(weekSummary, CONTEXT_SECTION_BUDGETS.week, 'weekly entries') || '(no scheduled activities)',
@@ -4095,6 +4099,26 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
+  const [pendingQueue, setPendingQueue] = useState([]); // [{ id, action, addedAt }]
+  const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
+  const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+
+  // Drain the pending action queue when RPM frees up
+  useEffect(() => {
+    if (!pendingQueue.length) return;
+    const interval = setInterval(() => {
+      const r = rpmStateRef.current;
+      const clear = r.remaining === Infinity || Date.now() > r.resetAtMs || r.remaining >= 5;
+      if (clear && pendingQueue.length > 0) {
+        const [next, ...rest] = pendingQueue;
+        setPendingQueue(rest);
+        executeAction(next.action);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // executeAction is stable (defined inside component); pendingQueue drives re-registration
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQueue]);
 
   // Skill Hub nudge — evaluate on tasks load
   useEffect(() => {
@@ -4406,6 +4430,13 @@ function App() {
 
   // ── Action executor (writes to Supabase) ──
   function executeAction(action) {
+    function recordExecution(type, summary) {
+      const entry = { type, summary, executedAt: Date.now() };
+      recentlyExecutedActionsRef.current = [
+        ...recentlyExecutedActionsRef.current.filter(e => Date.now() - e.executedAt < 120000),
+        entry,
+      ].slice(-10);
+    }
     try {
       switch (action.type) {
         case 'add_task': {
@@ -4450,14 +4481,15 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertTask(task, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_task' });
+          recordExecution('add_task', `"${task.title}" due ${task.dueDate}`);
           break;
         }
         case 'complete_task':
           if (action.task_id) {
             updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
-            // Brief delight animation — add to set, clear after animation duration
             setRecentlyCompleted(prev => { const n = new Set(prev); n.add(action.task_id); return n; });
             setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(action.task_id); return n; }), 900);
+            recordExecution('complete_task', `task id ${action.task_id}`);
           }
           break;
         case 'update_task':
@@ -4518,6 +4550,7 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
+          recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -4541,6 +4574,7 @@ function App() {
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
             return [...prev, newNote];
           });
+          recordExecution('add_note', `note "${tabName}"`);
           break;
         }
         case 'edit_note': {
@@ -5426,6 +5460,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
+        recentlyExecutedActions: recentlyExecutedActionsRef.current,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
@@ -5565,6 +5600,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         chatData = await chatResponse.json();
       }
       // ── End streaming path ────────────────────────────────────────────────────────
+
+      if (chatData?.rpm) rpmStateRef.current = chatData.rpm;
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
@@ -5870,7 +5907,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
         const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
-        autoExec.forEach(executeAction);
+        autoExec.forEach(queueOrExecute);
         if (contentActions.length > 0 && !blockExecution) setPendingContent(prev => [...prev, ...contentActions]);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
@@ -5882,7 +5919,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               count: needsConfirm.length,
               label: hasEditingAction ? 'editing notes / schedule' : 'auto-approve mode'
             });
-            needsConfirm.forEach(executeAction);
+            needsConfirm.forEach(queueOrExecute);
             setTimeout(() => {
               setAutoApproveStatus({
                 state: 'done',
@@ -6238,6 +6275,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) dbClearChat(user.id);
   }
 
+  function isRpmNearLimit() {
+    const r = rpmStateRef.current;
+    if (r.remaining === Infinity) return false;
+    if (Date.now() > r.resetAtMs) return false;
+    return r.remaining < 5;
+  }
+
+  function queueOrExecute(action) {
+    if (isRpmNearLimit()) {
+      const qid = Math.random().toString(36).slice(2);
+      setPendingQueue(prev => [...prev, { id: qid, action, addedAt: Date.now() }]);
+      const label = action.type?.replace(/_/g, ' ') || 'request';
+      const queueMsg = { role: 'assistant', content: `creating your ${label} — one moment while the request queue clears.`, timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, queueMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+    } else {
+      executeAction(action);
+    }
+  }
+
   function startNewChat() {
     autoSaveCurrentChat();
     setActivePanel('chat');
@@ -6480,10 +6536,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
+        tasks={tasks}
         notes={notes}
         onCreateNote={handleCreateNote}
+        onSendChatMessage={(msg) => sendMessage(msg)}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
+      {layoutMode === 'lofi' && (
+        <StudyTopBar
+          user={user}
+          syncStatus={syncStatus}
+          tutorMode={tutorMode}
+          onNewChat={startNewChat}
+          onTutorMode={enterTutorMode}
+          onImport={() => setShowGoogleModal(true)}
+          onSettings={() => setActivePanel('settings')}
+          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+          onSwitchLayout={() => setLayoutMode('sidebar')}
+          queueCount={pendingQueue ? pendingQueue.length : 0}
+        />
+      )}
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>

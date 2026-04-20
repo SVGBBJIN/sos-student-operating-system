@@ -8,6 +8,7 @@ import {
   CORE_CHECKSUM,
   CORE_VERSION,
   FAST_MODEL,
+  getGroqRpmStatus,
   PRIMARY_MODEL,
   PROPOSE_ACTION_TOOL,
   selectModel,
@@ -578,6 +579,7 @@ export default async function handler(req, res) {
       ...result,
       executed_actions: [],
       orchestration: { mode: "client_execution", executed_on: "client" },
+      rpm: getGroqRpmStatus(),
     });
   } catch (err) {
     emitRequestEvent({

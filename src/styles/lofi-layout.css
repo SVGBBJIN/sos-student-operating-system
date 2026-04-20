@@ -295,6 +295,22 @@
   background: var(--lofi-amber-dim);
 }
 
+.study-new-chat-btn {
+  width: auto;
+  padding: 0 10px;
+  gap: 5px;
+  font-size: 11px;
+  font-family: var(--lofi-font-mono, 'DM Mono', monospace);
+  letter-spacing: 0.04em;
+}
+
+.study-queue-badge {
+  font-size: 10px;
+  color: var(--lofi-amber);
+  font-family: var(--lofi-font-mono, 'DM Mono', monospace);
+  opacity: 0.85;
+}
+
 /* ══════════════════════════════════════════════════════════════════
    LEFT PANEL — task list + subject progress
    ══════════════════════════════════════════════════════════════════ */
@@ -524,6 +540,20 @@
   color: var(--lofi-text-dim);
   background: rgba(255,255,255,0.04);
   border-left: 1px solid var(--lofi-amber);
+  padding: 1px 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.study-week-task {
+  font-size: 8px;
+  line-height: 1.2;
+  color: var(--lofi-text-dim);
+  background: rgba(255,255,255,0.04);
+  border-left: 1px solid #c4b5fd;
   padding: 1px 3px;
   border-radius: 2px;
   overflow: hidden;

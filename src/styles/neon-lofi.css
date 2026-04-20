@@ -286,19 +286,6 @@ body {
   animation: neonBreathe 8s ease-in-out infinite !important;
 }
 
-/* Cityscape silhouette at base of main chat */
-.sos-main::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  background: url('/city-bg.svg') center bottom / cover no-repeat;
-  opacity: 0.05;
-  pointer-events: none;
-  z-index: 0;
-}
 
 .sos-sidebar {
   background: rgba(6, 8, 16, 0.88) !important;

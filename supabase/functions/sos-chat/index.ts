@@ -8,6 +8,7 @@ import {
   CORE_CHECKSUM,
   CORE_VERSION,
   FAST_MODEL,
+  getGroqRpmStatus,
   PRIMARY_MODEL,
   PROPOSE_ACTION_TOOL,
   selectModel,
@@ -404,7 +405,7 @@ serve(async (req: Request) => {
       latencyMs: Date.now() - startedAt,
       ok: true,
     });
-    return new Response(JSON.stringify(result), {
+    return new Response(JSON.stringify({ ...result, rpm: getGroqRpmStatus() }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

@@ -23,7 +23,7 @@ function getCurrentWeekDays() {
   });
 }
 
-export default function LofiLeftPanel({ events, notes, onCreateNote }) {
+export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSendChatMessage }) {
   const today = getTodayStr();
   const weekDays = useMemo(() => getCurrentWeekDays(), []);
 
@@ -38,6 +38,18 @@ export default function LofiLeftPanel({ events, notes, onCreateNote }) {
     });
     return map;
   }, [events]);
+
+  const tasksByDay = useMemo(() => {
+    const map = {};
+    (tasks || []).filter(t => t.status !== 'done').forEach(t => {
+      const day = t.dueDate?.slice(0, 10);
+      if (day) {
+        if (!map[day]) map[day] = [];
+        map[day].push(t);
+      }
+    });
+    return map;
+  }, [tasks]);
 
   const recentNotes = useMemo(() => {
     return (notes || [])
@@ -56,15 +68,26 @@ export default function LofiLeftPanel({ events, notes, onCreateNote }) {
         <div className="study-week-grid">
           {weekDays.map(({ abbr, num, dateStr }) => {
             const dayEvents = (eventsByDay[dateStr] || []).slice(0, 2);
+            const dayTasks = (tasksByDay[dateStr] || []).slice(0, Math.max(0, 2 - dayEvents.length));
             const isToday = dateStr === today;
             return (
-              <div key={dateStr} className={'study-week-col' + (isToday ? ' today' : '')}>
+              <div
+                key={dateStr}
+                className={'study-week-col' + (isToday ? ' today' : '')}
+                onClick={() => onSendChatMessage?.(`What's on my schedule for ${abbr} ${num}?`)}
+                style={{ cursor: onSendChatMessage ? 'pointer' : 'default' }}
+              >
                 <div className="study-week-day">{abbr}</div>
                 <div className="study-week-num">{num}</div>
                 <div className="study-week-events">
                   {dayEvents.map(e => (
                     <div key={e.id} className="study-week-event" title={e.title}>
                       {e.title}
+                    </div>
+                  ))}
+                  {dayTasks.map(t => (
+                    <div key={t.id} className="study-week-task" title={t.title}>
+                      {t.title}
                     </div>
                   ))}
                 </div>
@@ -80,10 +103,16 @@ export default function LofiLeftPanel({ events, notes, onCreateNote }) {
       <div className="study-left-section">
         <div className="study-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Notes</span>
-          {onCreateNote && (
+          {(onSendChatMessage || onCreateNote) && (
             <button
               className="study-notes-add-btn"
-              onClick={() => onCreateNote('Quick note', '')}
+              onClick={() => {
+                if (onSendChatMessage) {
+                  onSendChatMessage('Create a new note');
+                } else {
+                  onCreateNote('Quick note', '');
+                }
+              }}
             >
               Add Note
             </button>
