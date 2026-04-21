@@ -1726,6 +1726,22 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
             }}
           />
         )}
+        {isDateInput && answer.dateValue && (
+          <button
+            onClick={() => advance()}
+            style={{
+              background:'var(--accent)',
+              border:'1px solid var(--accent)',
+              borderRadius:8,
+              padding:'6px 14px',
+              color:'#fff',
+              fontSize:'0.82rem',
+              fontWeight:600,
+              cursor:'pointer',
+              flexShrink:0,
+            }}
+          >Done</button>
+        )}
         {/* Skip button */}
         <button
           onClick={handleSkipQuestion}
@@ -4028,6 +4044,11 @@ function App() {
   const [pendingProposal, setPendingProposal] = useState(null); // { summary, action_type, prefilled }
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
+  const [lofiTutorTabActive, setLofiTutorTabActive] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
+  const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
+  const [currentModel, setCurrentModel] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
@@ -4138,6 +4159,7 @@ function App() {
   const [googleExpiry, setGoogleExpiry] = useState(() => Number(sessionStorage.getItem('sos_google_expiry') || 0));
   const [googleUser, setGoogleUser] = useState(null);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showGooglePermSummary, setShowGooglePermSummary] = useState(false);
   const googleClientRef = useRef(null);
   // Calendar auto-sync state (persisted to localStorage)
@@ -4751,6 +4773,8 @@ function App() {
           }
           break;
         }
+        case 'view_schedule':
+          break;
         case 'clear_all':
           setTasks([]);
           setEvents([]);
@@ -5399,8 +5423,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       return;
     }
     const requestedCompanion = detectCompanionIntent(msgContent);
-    if (requestedCompanion) {
-      if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+    if (requestedCompanion && layoutMode === 'sidebar') {
       openCompanionPanel(requestedCompanion);
     }
     const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
@@ -5601,7 +5624,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
       // ── End streaming path ────────────────────────────────────────────────────────
 
-      if (chatData?.rpm) rpmStateRef.current = chatData.rpm;
+      if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
+      if (chatData?.model_used) setCurrentModel(chatData.model_used);
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
@@ -6353,8 +6377,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function enterTutorMode() {
     toggleTutorMode(true);
-    setActivePanel('tutor');
-    setSkillHubTab('home');
+    if (layoutMode === 'lofi') {
+      setLofiTutorTabActive(true);
+      const msg = { role: 'assistant', content: '✨ Tutor Mode Activated — I\'ll guide you step by step. Ask me anything!', timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, msg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+    } else {
+      setActivePanel('tutor');
+      setSkillHubTab('home');
+    }
   }
 
   function switchSkillHubMode(newMode) {
@@ -6540,6 +6570,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         notes={notes}
         onCreateNote={handleCreateNote}
         onSendChatMessage={(msg) => sendMessage(msg)}
+        onNoteClick={() => setLofiNoteOpen(true)}
+        tutorMode={tutorMode}
+        lofiTutorTabActive={lofiTutorTabActive}
+        onCloseTutorTab={() => { setLofiTutorTabActive(false); toggleTutorMode(false); }}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
@@ -6554,6 +6588,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onSwitchLayout={() => setLayoutMode('sidebar')}
           queueCount={pendingQueue ? pendingQueue.length : 0}
+          analyticsInfo={showAnalytics && rpmSnapshot.remaining !== Infinity
+            ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM${currentModel ? ' · ' + currentModel.split('/').pop() : ''}`
+            : null}
         />
       )}
       {layoutMode === 'topbar' && <div className="sos-header">
@@ -6649,6 +6686,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into steps</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>User Analytics</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show RPM usage and active AI model in the top bar.</div>
+                </div>
+                <AppleSwitch checked={showAnalytics} onChange={() => { const n = !showAnalytics; setShowAnalytics(n); localStorage.setItem('sos_show_analytics', n ? 'true' : 'false'); }} label="User Analytics" />
               </div>
               <div className="settings-row" style={{borderTop:'1px solid var(--border)',paddingTop:10,marginTop:4}}>
                 <div>
@@ -6908,10 +6952,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <div style={{position:'relative'}}>
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
-              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
-                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+              <button type="button" className="sos-input-icon-btn" onClick={()=>setShowAttachMenu(p=>!p)} disabled={isLoading} title="Attach or import"
+                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto||showAttachMenu?'var(--accent)':'var(--border)'),color:pendingPhoto||showAttachMenu?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.plus(18)}
               </button>
+              {showAttachMenu && (
+                <>
+                  <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAttachMenu(false)}/>
+                  <div style={{position:'absolute',bottom:52,left:0,zIndex:200,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'6px',display:'flex',flexDirection:'column',gap:4,minWidth:140,boxShadow:'0 4px 20px rgba(0,0,0,0.4)',animation:'fadeIn .1s ease'}}>
+                    <button type="button" onClick={()=>{photoInputRef.current?.click();setShowAttachMenu(false);}}
+                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >📎 File</button>
+                    <button type="button" onClick={()=>{setShowGoogleModal(true);setShowAttachMenu(false);}}
+                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >🔗 Google</button>
+                  </div>
+                </>
+              )}
               <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
@@ -6982,11 +7043,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiRightPanel
         weatherData={weatherData}
-        onOpenSettings={() => setActivePanel('settings')}
         savedChats={savedChats}
         onOpenSavedChat={loadSavedChat}
       />}
-      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {authNudge&&(
         <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
           <span>Sign in to save notes across sessions →</span>

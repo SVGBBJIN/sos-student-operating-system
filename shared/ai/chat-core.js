@@ -695,6 +695,21 @@ export const ACTION_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "view_schedule",
+      description:
+        "View the student's schedule for a specific date — use this instead of add_task when asked what is on the calendar or schedule for a day.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date to view in YYYY-MM-DD format" },
+        },
+        required: ["date"],
+      },
+    },
+  },
 ];
 
 /* ── Parse Groq's malformed tool calls from failed_generation ── */

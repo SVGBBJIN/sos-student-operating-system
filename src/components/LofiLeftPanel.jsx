@@ -23,7 +23,7 @@ function getCurrentWeekDays() {
   });
 }
 
-export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSendChatMessage }) {
+export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSendChatMessage, onNoteClick, tutorMode, lofiTutorTabActive, onCloseTutorTab }) {
   const today = getTodayStr();
   const weekDays = useMemo(() => getCurrentWeekDays(), []);
 
@@ -74,7 +74,7 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
               <div
                 key={dateStr}
                 className={'study-week-col' + (isToday ? ' today' : '')}
-                onClick={() => onSendChatMessage?.(`What's on my schedule for ${abbr} ${num}?`)}
+                onClick={() => onSendChatMessage?.(`What's on my schedule for ${abbr} ${num}? (date: ${dateStr})`)}
                 style={{ cursor: onSendChatMessage ? 'pointer' : 'default' }}
               >
                 <div className="study-week-day">{abbr}</div>
@@ -99,11 +99,11 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
 
       <div className="study-left-divider" />
 
-      {/* ── Notes section ── */}
+      {/* ── Notes / Studio section ── */}
       <div className="study-left-section">
         <div className="study-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Notes</span>
-          {(onSendChatMessage || onCreateNote) && (
+          <span>{lofiTutorTabActive ? 'Studio' : 'Notes'}</span>
+          {!lofiTutorTabActive && (onSendChatMessage || onCreateNote) && (
             <button
               className="study-notes-add-btn"
               onClick={() => {
@@ -119,20 +119,44 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
           )}
         </div>
 
-        <div className="study-notes-list">
-          {recentNotes.length === 0 ? (
-            <div className="study-left-empty">No notes yet</div>
-          ) : (
-            recentNotes.map(note => (
-              <div key={note.id} className="study-note-item">
-                <div className="study-note-title">{note.name || 'Untitled'}</div>
-                <div className="study-note-snippet">
-                  {(note.content || '').replace(/<[^>]+>/g, '').slice(0, 60)}
+        {lofiTutorTabActive ? (
+          <div className="study-notes-list lofi-tutor-panel">
+            <div style={{ fontSize: '10px', color: 'var(--lofi-amber)', fontFamily: 'var(--lofi-font-mono)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Skill Hub</div>
+            {['Ask a question', 'Show flashcards', 'Quiz me', 'Explain this topic'].map(action => (
+              <button
+                key={action}
+                className="study-widget-btn"
+                style={{ width: '100%', justifyContent: 'flex-start' }}
+                onClick={() => onSendChatMessage?.(action)}
+              >
+                {action}
+              </button>
+            ))}
+            <button className="study-notes-add-btn" style={{ marginTop: 4 }} onClick={onCloseTutorTab}>
+              Exit tutor
+            </button>
+          </div>
+        ) : (
+          <div className="study-notes-list">
+            {recentNotes.length === 0 ? (
+              <div className="study-left-empty">No notes yet</div>
+            ) : (
+              recentNotes.map(note => (
+                <div
+                  key={note.id}
+                  className="study-note-item"
+                  onClick={() => onNoteClick?.(note)}
+                  style={{ cursor: onNoteClick ? 'pointer' : 'default' }}
+                >
+                  <div className="study-note-title">{note.name || 'Untitled'}</div>
+                  <div className="study-note-snippet">
+                    {(note.content || '').replace(/<[^>]+>/g, '').slice(0, 60)}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ export default function StudyTopBar({
   onAuthAction,
   onSwitchLayout,
   queueCount = 0,
+  analyticsInfo = null,
 }) {
   const [time, setTime] = useState('');
 
@@ -52,6 +53,10 @@ export default function StudyTopBar({
 
         {queueCount > 0 && (
           <span className="study-queue-badge">{queueCount} queued</span>
+        )}
+
+        {analyticsInfo && (
+          <span className="study-queue-badge" style={{color:'rgba(100,220,255,0.85)'}}>{analyticsInfo}</span>
         )}
 
         <span className="study-topbar-clock">{time}</span>
