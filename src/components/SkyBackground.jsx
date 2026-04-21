@@ -95,25 +95,6 @@ export default function SkyBackground() {
 
   return (
     <>
-      {/* ── Layer 0: Placeholder city image ──────────────────────── */}
-      <img
-        src="/city-bg.svg"
-        className="sky-layer sky-city-img"
-        aria-hidden="true"
-        alt=""
-        style={{
-          position: 'fixed',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          objectPosition: 'bottom center',
-          opacity: 0.35,
-          zIndex: 0,
-          pointerEvents: 'none',
-        }}
-      />
-
       {/* ── Layer 0: Sky gradient ────────────────────────────────── */}
       <div
         className="sky-layer sky-gradient"

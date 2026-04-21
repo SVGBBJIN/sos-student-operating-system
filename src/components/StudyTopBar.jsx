@@ -11,6 +11,8 @@ export default function StudyTopBar({
   onSettings,
   onAuthAction,
   onSwitchLayout,
+  queueCount = 0,
+  analyticsInfo = null,
 }) {
   const [time, setTime] = useState('');
 
@@ -49,16 +51,15 @@ export default function StudyTopBar({
           </div>
         )}
 
-        <span className="study-topbar-clock">{time}</span>
+        {queueCount > 0 && (
+          <span className="study-queue-badge">{queueCount} queued</span>
+        )}
 
-        <button
-          className="study-icon-btn"
-          onClick={onNewChat}
-          title="New chat"
-          aria-label="New chat"
-        >
-          {Icon.plus(14)}
-        </button>
+        {analyticsInfo && (
+          <span className="study-queue-badge" style={{color:'rgba(100,220,255,0.85)'}}>{analyticsInfo}</span>
+        )}
+
+        <span className="study-topbar-clock">{time}</span>
 
         <button
           className={'study-icon-btn' + (tutorMode ? ' active' : '')}
@@ -85,6 +86,16 @@ export default function StudyTopBar({
           aria-label="Settings"
         >
           {Icon.edit(14)}
+        </button>
+
+        <button
+          className="study-icon-btn study-new-chat-btn"
+          onClick={onNewChat}
+          title="Start new chat"
+          aria-label="Start new chat"
+        >
+          {Icon.plus(12)}
+          <span>New chat</span>
         </button>
 
         <button

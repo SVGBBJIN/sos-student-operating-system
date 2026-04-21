@@ -727,6 +727,9 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const notesBudget = actionFocusedPrompt ? 700 : CONTEXT_SECTION_BUDGETS.notes;
   const taskCapInfo = capLinesInfo(taskLines, CONTEXT_SECTION_BUDGETS.tasks, 'tasks');
 
+  const recentActionsLines = (options.recentlyExecutedActions || [])
+    .map(a => '- ' + a.type.replace(/_/g, ' ') + ': ' + a.summary);
+
   const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
@@ -737,6 +740,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'ACTIVE TASKS (budgeted):',
     taskCapInfo.text || '(none)',
     (overdueTasks.length > 0 ? ('OVERDUE: ' + overdueTasks.map(t => truncateWithEllipsis(t.title, 80) + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ')) : ''),
+    ...(recentActionsLines.length > 0 ? ['', 'RECENTLY COMPLETED ACTIONS (do not re-ask about these):', recentActionsLines.join('\n')] : []),
     '',
     'THIS WEEK (budgeted):',
     capLines(weekSummary, CONTEXT_SECTION_BUDGETS.week, 'weekly entries') || '(no scheduled activities)',
@@ -1721,6 +1725,22 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
               padding:'4px 0',
             }}
           />
+        )}
+        {isDateInput && answer.dateValue && (
+          <button
+            onClick={() => advance()}
+            style={{
+              background:'var(--accent)',
+              border:'1px solid var(--accent)',
+              borderRadius:8,
+              padding:'6px 14px',
+              color:'#fff',
+              fontSize:'0.82rem',
+              fontWeight:600,
+              cursor:'pointer',
+              flexShrink:0,
+            }}
+          >Done</button>
         )}
         {/* Skip button */}
         <button
@@ -4024,6 +4044,11 @@ function App() {
   const [pendingProposal, setPendingProposal] = useState(null); // { summary, action_type, prefilled }
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
+  const [lofiTutorTabActive, setLofiTutorTabActive] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
+  const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
+  const [currentModel, setCurrentModel] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
@@ -4095,6 +4120,26 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
+  const [pendingQueue, setPendingQueue] = useState([]); // [{ id, action, addedAt }]
+  const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
+  const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+
+  // Drain the pending action queue when RPM frees up
+  useEffect(() => {
+    if (!pendingQueue.length) return;
+    const interval = setInterval(() => {
+      const r = rpmStateRef.current;
+      const clear = r.remaining === Infinity || Date.now() > r.resetAtMs || r.remaining >= 5;
+      if (clear && pendingQueue.length > 0) {
+        const [next, ...rest] = pendingQueue;
+        setPendingQueue(rest);
+        executeAction(next.action);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  // executeAction is stable (defined inside component); pendingQueue drives re-registration
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQueue]);
 
   // Skill Hub nudge — evaluate on tasks load
   useEffect(() => {
@@ -4114,6 +4159,7 @@ function App() {
   const [googleExpiry, setGoogleExpiry] = useState(() => Number(sessionStorage.getItem('sos_google_expiry') || 0));
   const [googleUser, setGoogleUser] = useState(null);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showGooglePermSummary, setShowGooglePermSummary] = useState(false);
   const googleClientRef = useRef(null);
   // Calendar auto-sync state (persisted to localStorage)
@@ -4406,6 +4452,13 @@ function App() {
 
   // ── Action executor (writes to Supabase) ──
   function executeAction(action) {
+    function recordExecution(type, summary) {
+      const entry = { type, summary, executedAt: Date.now() };
+      recentlyExecutedActionsRef.current = [
+        ...recentlyExecutedActionsRef.current.filter(e => Date.now() - e.executedAt < 120000),
+        entry,
+      ].slice(-10);
+    }
     try {
       switch (action.type) {
         case 'add_task': {
@@ -4450,14 +4503,15 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertTask(task, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_task' });
+          recordExecution('add_task', `"${task.title}" due ${task.dueDate}`);
           break;
         }
         case 'complete_task':
           if (action.task_id) {
             updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
-            // Brief delight animation — add to set, clear after animation duration
             setRecentlyCompleted(prev => { const n = new Set(prev); n.add(action.task_id); return n; });
             setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(action.task_id); return n; }), 900);
+            recordExecution('complete_task', `task id ${action.task_id}`);
           }
           break;
         case 'update_task':
@@ -4518,6 +4572,7 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
+          recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -4541,6 +4596,7 @@ function App() {
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
             return [...prev, newNote];
           });
+          recordExecution('add_note', `note "${tabName}"`);
           break;
         }
         case 'edit_note': {
@@ -4717,6 +4773,8 @@ function App() {
           }
           break;
         }
+        case 'view_schedule':
+          break;
         case 'clear_all':
           setTasks([]);
           setEvents([]);
@@ -5365,8 +5423,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       return;
     }
     const requestedCompanion = detectCompanionIntent(msgContent);
-    if (requestedCompanion) {
-      if (layoutMode !== 'sidebar') setLayoutMode('sidebar');
+    if (requestedCompanion && layoutMode === 'sidebar') {
       openCompanionPanel(requestedCompanion);
     }
     const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
@@ -5426,6 +5483,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
+        recentlyExecutedActions: recentlyExecutedActionsRef.current,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
@@ -5565,6 +5623,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         chatData = await chatResponse.json();
       }
       // ── End streaming path ────────────────────────────────────────────────────────
+
+      if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
+      if (chatData?.model_used) setCurrentModel(chatData.model_used);
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
@@ -5870,7 +5931,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
         const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
-        autoExec.forEach(executeAction);
+        autoExec.forEach(queueOrExecute);
         if (contentActions.length > 0 && !blockExecution) setPendingContent(prev => [...prev, ...contentActions]);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
@@ -5882,7 +5943,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               count: needsConfirm.length,
               label: hasEditingAction ? 'editing notes / schedule' : 'auto-approve mode'
             });
-            needsConfirm.forEach(executeAction);
+            needsConfirm.forEach(queueOrExecute);
             setTimeout(() => {
               setAutoApproveStatus({
                 state: 'done',
@@ -6238,6 +6299,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) dbClearChat(user.id);
   }
 
+  function isRpmNearLimit() {
+    const r = rpmStateRef.current;
+    if (r.remaining === Infinity) return false;
+    if (Date.now() > r.resetAtMs) return false;
+    return r.remaining < 5;
+  }
+
+  function queueOrExecute(action) {
+    if (isRpmNearLimit()) {
+      const qid = Math.random().toString(36).slice(2);
+      setPendingQueue(prev => [...prev, { id: qid, action, addedAt: Date.now() }]);
+      const label = action.type?.replace(/_/g, ' ') || 'request';
+      const queueMsg = { role: 'assistant', content: `creating your ${label} — one moment while the request queue clears.`, timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, queueMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+    } else {
+      executeAction(action);
+    }
+  }
+
   function startNewChat() {
     autoSaveCurrentChat();
     setActivePanel('chat');
@@ -6297,8 +6377,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function enterTutorMode() {
     toggleTutorMode(true);
-    setActivePanel('tutor');
-    setSkillHubTab('home');
+    if (layoutMode === 'lofi') {
+      setLofiTutorTabActive(true);
+      const msg = { role: 'assistant', content: '✨ Tutor Mode Activated — I\'ll guide you step by step. Ask me anything!', timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, msg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+    } else {
+      setActivePanel('tutor');
+      setSkillHubTab('home');
+    }
   }
 
   function switchSkillHubMode(newMode) {
@@ -6480,10 +6566,33 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
+        tasks={tasks}
         notes={notes}
         onCreateNote={handleCreateNote}
+        onSendChatMessage={(msg) => sendMessage(msg)}
+        onNoteClick={() => setLofiNoteOpen(true)}
+        tutorMode={tutorMode}
+        lofiTutorTabActive={lofiTutorTabActive}
+        onCloseTutorTab={() => { setLofiTutorTabActive(false); toggleTutorMode(false); }}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
+      {layoutMode === 'lofi' && (
+        <StudyTopBar
+          user={user}
+          syncStatus={syncStatus}
+          tutorMode={tutorMode}
+          onNewChat={startNewChat}
+          onTutorMode={enterTutorMode}
+          onImport={() => setShowGoogleModal(true)}
+          onSettings={() => setActivePanel('settings')}
+          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+          onSwitchLayout={() => setLayoutMode('sidebar')}
+          queueCount={pendingQueue ? pendingQueue.length : 0}
+          analyticsInfo={showAnalytics && rpmSnapshot.remaining !== Infinity
+            ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM${currentModel ? ' · ' + currentModel.split('/').pop() : ''}`
+            : null}
+        />
+      )}
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
@@ -6577,6 +6686,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into steps</div>
                 </div>
                 <button className="settings-toggle" onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>User Analytics</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show RPM usage and active AI model in the top bar.</div>
+                </div>
+                <AppleSwitch checked={showAnalytics} onChange={() => { const n = !showAnalytics; setShowAnalytics(n); localStorage.setItem('sos_show_analytics', n ? 'true' : 'false'); }} label="User Analytics" />
               </div>
               <div className="settings-row" style={{borderTop:'1px solid var(--border)',paddingTop:10,marginTop:4}}>
                 <div>
@@ -6836,10 +6952,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <div style={{position:'relative'}}>
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
-              <button type="button" className="sos-input-icon-btn" onClick={()=>photoInputRef.current?.click()} disabled={isLoading} title="Attach photo, PDF, or text"
-                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto?'var(--accent)':'var(--border)'),color:pendingPhoto?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
+              <button type="button" className="sos-input-icon-btn" onClick={()=>setShowAttachMenu(p=>!p)} disabled={isLoading} title="Attach or import"
+                style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto||showAttachMenu?'var(--accent)':'var(--border)'),color:pendingPhoto||showAttachMenu?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.plus(18)}
               </button>
+              {showAttachMenu && (
+                <>
+                  <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAttachMenu(false)}/>
+                  <div style={{position:'absolute',bottom:52,left:0,zIndex:200,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'6px',display:'flex',flexDirection:'column',gap:4,minWidth:140,boxShadow:'0 4px 20px rgba(0,0,0,0.4)',animation:'fadeIn .1s ease'}}>
+                    <button type="button" onClick={()=>{photoInputRef.current?.click();setShowAttachMenu(false);}}
+                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >📎 File</button>
+                    <button type="button" onClick={()=>{setShowGoogleModal(true);setShowAttachMenu(false);}}
+                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >🔗 Google</button>
+                  </div>
+                </>
+              )}
               <button type="button" className="sos-input-icon-btn" onClick={startRecording} disabled={isLoading}
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
@@ -6910,11 +7043,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiRightPanel
         weatherData={weatherData}
-        onOpenSettings={() => setActivePanel('settings')}
         savedChats={savedChats}
         onOpenSavedChat={loadSavedChat}
       />}
-      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>} 
+      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {authNudge&&(
         <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
           <span>Sign in to save notes across sessions →</span>

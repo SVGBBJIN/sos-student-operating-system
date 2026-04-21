@@ -32,7 +32,7 @@ function formatSeconds(seconds) {
   return `${mins}:${secs}`;
 }
 
-export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats = [], onOpenSavedChat }) {
+export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSavedChat }) {
   const [musicPlaying, setMusicPlaying] = React.useState(false);
   const [timerSeconds, setTimerSeconds] = React.useState(0);
   const [timerRunning, setTimerRunning] = React.useState(false);
@@ -182,8 +182,16 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats
               <button className="study-widget-btn" onClick={() => setTimerRunning(r => !r)}>{timerRunning ? 'Pause' : 'Start'}</button>
               <button className="study-widget-btn" onClick={() => { setTimerRunning(false); setTimerSeconds(0); }}>Reset</button>
             </div>
+          ) : smashCount >= 3 ? (
+            <button className="study-smash-btn study-smash-shattered" disabled>💥 CRUSHED IT!</button>
           ) : (
-            <button className="study-smash-btn" onClick={() => setSmashCount(c => c + 1)}>Smash It ({smashCount})</button>
+            <button className="study-smash-btn" onClick={() => {
+              const next = smashCount + 1;
+              setSmashCount(next);
+              if (next >= 3) {
+                setTimeout(() => { setTimerSeconds(0); setTimerRunning(false); setSmashCount(0); }, 1500);
+              }
+            }}>Smash It ({smashCount})</button>
           )}
         </div>
       </WidgetFrame>
@@ -192,9 +200,6 @@ export default function LofiRightPanel({ weatherData, onOpenSettings, savedChats
 
   return (
     <div className="study-right study-glass">
-      <div className="study-right-controls">
-        <button className="study-widget-btn" onClick={onOpenSettings}>{Icon.gear(14)} Settings</button>
-      </div>
       {widgetOrder.map(id => <React.Fragment key={id}>{widgets[id]}</React.Fragment>)}
     </div>
   );

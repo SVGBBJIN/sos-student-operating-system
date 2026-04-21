@@ -64,6 +64,40 @@ function groqTpmNearLimit() {
   return GROQ_TPM.remaining < GROQ_TPM.limit * TPM_SWITCH_THRESHOLD;
 }
 
+// Tracks Groq's remaining requests-per-minute from response headers.
+const GROQ_RPM = {
+  remaining: Infinity,  // x-ratelimit-remaining-requests
+  limit: Infinity,      // x-ratelimit-limit-requests
+  resetAtMs: 0,         // absolute ms when the RPM window resets
+  requests: [],         // sliding-window timestamps for local counting
+};
+const RPM_NEAR_LIMIT_THRESHOLD = 0.15;
+
+function updateGroqRpm(headers) {
+  const remaining = parseInt(headers.get("x-ratelimit-remaining-requests") || "", 10);
+  const limit     = parseInt(headers.get("x-ratelimit-limit-requests")     || "", 10);
+  const resetStr  = headers.get("x-ratelimit-reset-requests") || "";
+  const now = Date.now();
+  if (!isNaN(remaining)) GROQ_RPM.remaining = remaining;
+  if (!isNaN(limit))     GROQ_RPM.limit     = limit;
+  const sec = parseFloat(resetStr);
+  if (!isNaN(sec))       GROQ_RPM.resetAtMs = now + Math.ceil(sec * 1000);
+  GROQ_RPM.requests = GROQ_RPM.requests.filter(t => now - t <= 60000);
+  GROQ_RPM.requests.push(now);
+}
+
+export function getGroqRpmStatus() {
+  const now = Date.now();
+  return {
+    remaining: GROQ_RPM.remaining,
+    limit: GROQ_RPM.limit,
+    resetAtMs: GROQ_RPM.resetAtMs,
+    count: GROQ_RPM.requests.filter(t => now - t <= 60000).length,
+    nearLimit: GROQ_RPM.remaining !== Infinity && Date.now() < GROQ_RPM.resetAtMs
+      && GROQ_RPM.remaining < GROQ_RPM.limit * RPM_NEAR_LIMIT_THRESHOLD,
+  };
+}
+
 function isGeminiModel(mdl) {
   return mdl === GEMINI_CONVERSATIONAL_BACKUP || mdl === GEMINI_FAST_BACKUP;
 }
@@ -661,6 +695,21 @@ export const ACTION_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "view_schedule",
+      description:
+        "View the student's schedule for a specific date — use this instead of add_task when asked what is on the calendar or schedule for a day.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date to view in YYYY-MM-DD format" },
+        },
+        required: ["date"],
+      },
+    },
+  },
 ];
 
 /* ── Parse Groq's malformed tool calls from failed_generation ── */
@@ -1084,9 +1133,10 @@ export async function callGroq(
       }
       clearTimeout(timeoutId);
 
-      // Update Groq TPM state from response headers (Gemini doesn't provide these).
+      // Update Groq TPM/RPM state from response headers (Gemini doesn't provide these).
       if (!usingGemini && res.ok) {
         updateGroqTpm(res.headers);
+        updateGroqRpm(res.headers);
       }
 
       if ((res.status === 429 || res.status >= 500) && i < MAX_RETRIES) {
