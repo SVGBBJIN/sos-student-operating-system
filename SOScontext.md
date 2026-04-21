@@ -53,6 +53,7 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 
 ```
 PRIMARY_MODEL        = "openai/gpt-oss-120b"    // tool-heavy + agentic
+CONVERSATIONAL_MODEL = "openai/gpt-oss-20b"     // conversational turns
 BACKUP_MODEL         = "openai/gpt-oss-20b"     // groq fallback
 FAST_MODEL           = "openai/gpt-oss-20b"     // short/simple turns
 GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash"
