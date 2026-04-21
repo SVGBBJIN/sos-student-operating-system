@@ -1083,7 +1083,7 @@ export async function callGroq(
     };
     // reasoning_effort is only supported on openai/gpt-oss models, not Gemini fallbacks.
     if (!isGeminiModel(effectiveModel)) {
-      body.reasoning_effort = "high";
+      body.reasoning_effort = routeType === "conversational" ? "medium" : "high";
     }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
