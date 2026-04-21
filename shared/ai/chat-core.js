@@ -639,13 +639,13 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "This is the function that asks questions when the AI is unsure of certain fields. This is to avoid hallucination.",
+        "ONLY call this when you are about to execute an action tool (add_event, add_task, add_block, add_note, etc.) and one or more REQUIRED fields are missing from the student's message. Do NOT call this for casual greetings, general chat, or non-action conversations — respond naturally in those cases. This tool exists solely to collect missing required fields before executing a tool action.",
       parameters: {
         type: "object",
         properties: {
           question: {
             type: "string",
-            description: "The question to ask the user.",
+            description: "A single, focused question asking only for the most critical missing field.",
           },
           type: {
             type: "string",
@@ -659,7 +659,7 @@ export const ACTION_TOOLS = [
           },
           missing_fields: {
             type: "array",
-            description: "Fields that are missing and need to be collected.",
+            description: "The required fields that are missing (e.g. ['date', 'title']).",
             items: { type: "string" },
           },
         },
@@ -707,6 +707,22 @@ export const ACTION_TOOLS = [
           date: { type: "string", description: "Date to view in YYYY-MM-DD format" },
         },
         required: ["date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_calendar",
+      description:
+        "Read-only view of the student's calendar events and tasks for a date range. Call this when the student asks what's on their calendar, what's coming up, or what's scheduled — WITHOUT intending to add or edit anything. Returns events and tasks for the specified range without making any changes.",
+      parameters: {
+        type: "object",
+        properties: {
+          start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
+          end_date: { type: "string", description: "End date in YYYY-MM-DD format (defaults to start_date if omitted)" },
+        },
+        required: ["start_date"],
       },
     },
   },

@@ -933,6 +933,15 @@
   flex-shrink: 0;
 }
 
+.study-analytics-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--lofi-font-mono);
+  color: rgba(100, 220, 255, 0.75);
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+}
+
 /* status dot colors (reuse existing sync-dot vars or define here) */
 .study-sync-dot {
   width: 6px;

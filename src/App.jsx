@@ -11,6 +11,7 @@ import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
+import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
 import SkillHub from './components/skillhub/SkillHub';
@@ -582,8 +583,8 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If required fields are missing, ask only the single most blocking clarification before any action. Never ask optional follow-ups.',
-  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Ask clarification only when missing data would materially change the result.',
+  clarification: 'ask_clarification is ONLY for missing required fields when you are about to call an action tool. For greetings, small talk, or non-action messages, respond naturally — never call ask_clarification.',
+  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Ask clarification only when a missing required field would cause the action to fail or produce wrong output.',
   action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
@@ -4049,6 +4050,7 @@ function App() {
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
+  const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
@@ -4775,6 +4777,30 @@ function App() {
         }
         case 'view_schedule':
           break;
+        case 'read_calendar': {
+          const startD = action.start_date || today();
+          const endD = action.end_date || startD;
+          const rangeEvents = events.filter(e => e.date >= startD && e.date <= endD);
+          const rangeTasks = tasks.filter(t => t.dueDate >= startD && t.dueDate <= endD && t.status !== 'done');
+          const lines = [];
+          if (rangeEvents.length === 0 && rangeTasks.length === 0) {
+            lines.push(`Nothing scheduled from ${fmt(startD)}${endD !== startD ? ` to ${fmt(endD)}` : ''}.`);
+          } else {
+            if (rangeEvents.length > 0) {
+              lines.push('**Events:**');
+              rangeEvents.forEach(e => lines.push(`- ${e.title} on ${fmt(e.date)}${e.start_time ? ' at ' + e.start_time : ''}`));
+            }
+            if (rangeTasks.length > 0) {
+              lines.push('**Tasks due:**');
+              rangeTasks.forEach(t => lines.push(`- ${t.title} (due ${fmt(t.dueDate)})`));
+            }
+          }
+          const calContent = lines.join('\n');
+          const calMsg = { role: 'assistant', content: calContent, timestamp: Date.now() };
+          setMessages(prev => { const n = [...prev, calMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', calContent, user.id);
+          break;
+        }
         case 'clear_all':
           setTasks([]);
           setEvents([]);
@@ -5625,7 +5651,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // ── End streaming path ────────────────────────────────────────────────────────
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
-      if (chatData?.model_used) setCurrentModel(chatData.model_used);
+      if (chatData?.model_used) {
+        setCurrentModel(prev => {
+          if (prev && prev !== chatData.model_used) {
+            // model switched mid-session — flag it
+            setModelFallbackUsed(true);
+          }
+          return chatData.model_used;
+        });
+      }
+      if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
@@ -6588,9 +6623,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onSwitchLayout={() => setLayoutMode('sidebar')}
           queueCount={pendingQueue ? pendingQueue.length : 0}
-          analyticsInfo={showAnalytics && rpmSnapshot.remaining !== Infinity
-            ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM${currentModel ? ' · ' + currentModel.split('/').pop() : ''}`
-            : null}
         />
       )}
       {layoutMode === 'topbar' && <div className="sos-header">
@@ -7038,6 +7070,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       </div>
       </>
+      )}
+      {layoutMode === 'lofi' && (
+        <StudyBottomBar
+          tasks={tasks}
+          recentlyCompleted={tasks.filter(t => t.status === 'done')}
+          analyticsInfo={showAnalytics && (rpmSnapshot.remaining !== Infinity || currentModel)
+            ? `${rpmSnapshot.remaining !== Infinity ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM · ` : ''}${currentModel ? currentModel.split('/').pop() : ''}${modelFallbackUsed ? ' ↩' : ''}`
+            : null}
+        />
       )}
       </div>
 
