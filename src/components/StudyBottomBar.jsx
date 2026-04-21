@@ -44,7 +44,7 @@ function calcStreak(recentlyCompleted) {
   return streak;
 }
 
-export default function StudyBottomBar({ tasks, recentlyCompleted }) {
+export default function StudyBottomBar({ tasks, recentlyCompleted, analyticsInfo = null }) {
   const [time, setTime] = useState('');
 
   useEffect(() => {
@@ -78,6 +78,10 @@ export default function StudyBottomBar({ tasks, recentlyCompleted }) {
         <span className="study-focus-time">
           {formatFocusTime(focusMins)} focus today
         </span>
+      )}
+
+      {analyticsInfo && (
+        <span className="study-analytics-badge">{analyticsInfo}</span>
       )}
     </div>
   );

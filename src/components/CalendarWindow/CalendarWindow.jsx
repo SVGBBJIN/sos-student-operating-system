@@ -110,7 +110,7 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
           const startMin = sh * 60 + sm;
           const endMin   = eh * 60 + em;
           const topPct   = (startMin / (24 * 60)) * 100;
-          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 2);
+          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 4.17); // min ~1 hour tall
 
           const isNew = ev.id === newEventId;
 

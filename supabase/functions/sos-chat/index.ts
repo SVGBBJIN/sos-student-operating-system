@@ -46,7 +46,7 @@ function selectToolsForRoute(
       ["add_event","delete_event","update_event","add_task","delete_task",
        "complete_task","break_task","add_recurring_event","add_block",
        "delete_block","convert_event_to_block","convert_block_to_event",
-       "ask_clarification","clear_all"].includes(t.function.name)
+       "ask_clarification","clear_all","view_schedule","read_calendar"].includes(t.function.name)
     );
   }
   if (workspaceContext === "notes") {
@@ -284,7 +284,7 @@ serve(async (req: Request) => {
       isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
     const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
     const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const clarificationRule = `\n\nCLARIFICATION RULE: Never write a question to the student as plain text. If you need to ask something — missing required field, ambiguous request, vague content topic — call ask_clarification. If you have all required information, act immediately without asking.`;
+    const clarificationRule = `\n\nCLARIFICATION RULE: For casual greetings, small talk, or messages that do not involve scheduling or creating something — respond naturally as a person without calling any tool. Reserve ask_clarification STRICTLY for moments when you are about to call an action tool (add_event, add_task, add_block, add_note, etc.) and one or more required fields are missing from the student's message. Never call ask_clarification for general chat, vague requests with no clear action intent, or to suggest features. If you have all required information for an action, execute it immediately without asking.`;
     const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;

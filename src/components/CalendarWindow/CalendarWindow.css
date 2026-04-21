@@ -248,7 +248,8 @@
 .cw-event {
   position: absolute;
   border-radius: var(--radius-sm);
-  padding: 2px 4px;
+  padding: 3px 6px;
+  min-height: 24px;
   overflow: hidden;
   cursor: pointer;
   opacity: 0.9;
@@ -264,12 +265,13 @@
 
 .cw-event-title {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: hsl(0,0%,95%);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
 /* New event animation */
