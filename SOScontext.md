@@ -1,355 +1,256 @@
-Student Operating System, a chat-first AI companion that replaces manual forms with a sleek conversational interface where all events and tasks are created through natural language (e.g., "Help me with a science project due Thursday") and intelligently parsed into structured scheduling data with brief confirmation summaries and easy correction prompts to ensure reliability; keep the current calendar infrastructure and integrations intact but move them behind the scenes so the traditional grid becomes invisible to users, and redesign the AI to adopt a chill, supportive friend personality focused on optimizing schedules, reducing stress, protecting sleep, predicting recurring events, breaking large tasks into manageable sessions, and automatically reallocating missed or overloaded work in a calm, collaborative way — positioning SOS not as a planner, but as a student-focused operating layer that manages time intelligently and adaptively through conversation.
+# SOS — Student Operating System · AI Context Directory
 
-
----
-
-## Architecture Overview (Current)
-
-**High-level shape**
-
-- **Frontend**: React 18 SPA built with **Vite**, living under `src/`, deployed as a static app on **Vercel**.
-- **APIs**:
-  - Vercel serverless function at `/api/chat` (`api/chat.js`).
-  - Supabase Edge Functions at `/functions/v1/sos-chat` and `/functions/v1/sos-voice` (`supabase/functions/sos-chat/index.ts`, `supabase/functions/sos-voice/index.ts`).
-- **Shared module**: `shared/ai/chat-core.js` — shared chat orchestration logic used by both backends (Node + Deno compatible).
-- **Backend services**:
-  - **Supabase** for Postgres, auth, and edge functions.
-  - **Groq** for LLM chat (tool-calling) and Whisper transcription.
-
-The product is effectively a **monolithic SPA with a thin serverless/edge backend**. Almost all orchestration (state, UI, action execution, DB sync) happens on the client; serverless functions provide a stable AI and rate-limiting gateway plus voice transcription. A **server-side fallback loop** in `api/chat.js` handles unresolved tool actions when client-side resolution fails, surfacing targeted clarification questions back to the user.
-
-### Frontend
-
-- **Entry points**
-  - `src/main.jsx`: Bootstraps React and mounts `App` into `#root`.
-  - `src/App.jsx`: Core application component; owns:
-    - Global state for tasks, events, blocks, notes, and chat.
-    - The conversational UI and scheduler views.
-    - The "action execution" layer that takes structured actions from the backend and mutates client state + Supabase.
-
-- **Libraries / helpers**
-  - `src/lib/supabase.js`
-    - Creates a **Supabase client** with the public anon key.
-    - Exposes `EDGE_FN_URL` that chooses between:
-      - `"/api/chat"` when running on a Vercel host (Vercel serverless backend).
-      - Supabase Edge Function URL (`<SUPABASE_URL>/functions/v1/sos-chat`) otherwise.
-  - `src/lib/analytics.js`
-    - Records events into a Supabase `analytics_events` table.
-  - `src/components/ErrorBoundary.jsx`
-    - Error boundary for catching and rendering UI errors.
-  - `src/lib/icons.jsx`, `src/styles/index.css`
-    - Icons and global styling.
-
-### Shared module
-
-- **`shared/ai/chat-core.js`** — single source of truth for chat orchestration logic, shared between the Vercel (Node) and Supabase Edge (Deno) backends:
-  - `callGroq(apiKey, model, systemPrompt, messages, maxTokens, ...)` — calls Groq with retries, a circuit breaker, budget-aware routing, routing metadata tagging, and automatic fallback to `BACKUP_MODEL` on failures.
-  - `parseLlmResponse(data)` — parses Groq's response, runs per-tool validators via `validateToolArguments`, and converts validation failures into clarification prompts instead of passing invalid actions through.
-  - `ACTION_TOOLS` — complete JSON schema for all domain actions (single authoritative copy; imported by both backends).
-  - `CONTENT_ACTION_TOOLS` — filtered subset of `ACTION_TOOLS` used when `isContentGen` is true (content types + `ask_clarification`).
-  - `CONTENT_ACTION_TYPES` — Set of content generation action names.
-  - `CORE_VERSION` / `CORE_CHECKSUM` — version identifiers for telemetry.
-  - Exported model constants:
-    - `PRIMARY_MODEL`: `"openai/gpt-oss-120b"`
-    - `BACKUP_MODEL`: `"llama-3.3-70b-versatile"`
-    - `FAST_MODEL`: `"llama-3.1-8b-instant"`
-
-### Backend / API layer
-
-- **Vercel function: `api/chat.js`**
-  - Node-style HTTP handler deployed as `/api/chat`.
-  - Imports `callGroq`, `CONTENT_ACTION_TOOLS`, `PRIMARY_MODEL`, `BACKUP_MODEL` from `shared/ai/chat-core.js`.
-  - Responsibilities:
-    - Accept chat requests from the frontend (including optional voice mode with base64 audio).
-    - Build a Groq **chat completion** payload with system prompt (policy + budgeted context) and message history.
-    - Call Groq via `callGroq()` with the appropriate model and tool schema.
-    - Parse and validate tool calls via `parseLlmResponse()`.
-    - Enforce **content generation rate limits** using Supabase (via service role REST).
-    - Handle `mode: "tool_fallback"` requests: build a failure report via `buildToolFallbackPrompt()` and call Groq to produce clarification questions for the user.
-    - For voice mode, call Groq **Whisper** on `audioBase64` and then feed the transcription into the normal pipeline.
-
-- **Supabase Edge Function: `supabase/functions/sos-chat/index.ts`**
-  - Deno HTTP function deployed at `/functions/v1/sos-chat`.
-  - Imports from `shared/ai/chat-core.js` (Deno-compatible import path).
-  - Mirrors `api/chat.js` behavior but:
-    - Uses `createClient` from `@supabase/supabase-js` for DB access.
-    - Reads `user_id` from the Supabase JWT to scope queries and rate limits.
-  - Returns the same JSON shape as the Vercel function so the frontend does not care which backend served the request.
-
-- **Supabase Edge Function: `supabase/functions/sos-voice/index.ts`**
-  - Dedicated Whisper proxy:
-    - Accepts `multipart/form-data` audio uploads.
-    - Sends audio to Groq's Whisper API.
-    - Returns transcription text.
-  - Used when the frontend wants a separate "voice → text" step before sending text through chat.
-
-### Data / storage
-
-- **Supabase project**: `evqylqgkzlbbrvogxsjn` (East US)
-  **URL**: `https://evqylqgkzlbbrvogxsjn.supabase.co`
-
-- **Core tables (RLS on `auth.uid() = user_id`)**
-  - `profiles`
-  - `tasks`
-  - `events`
-  - `recurring_blocks`
-  - `date_blocks`
-  - `notes`
-  - `chat_messages`
-  - `analytics_events`
-  - `content_generations` (for content-gen rate limits)
-
-- **Data shape conversions (frontend ↔ DB)**
-  - `dueDate` ↔ `due_date`
-  - `estTime` ↔ `est_time`
-  - `focusMinutes` ↔ `focus_minutes`
-  - `completedAt` ↔ `completed_at`
-  - `date` (event) ↔ `event_date`
-  - `type` (event) ↔ `event_type`
-  - Blocks are split:
-    - Recurring-week template → `recurring_blocks`.
-    - Per-date overrides/instances → `date_blocks`.
-
+> **For AI bots**: This file is a lookup directory, not a tutorial. Use it to find the right file and line range, then Read only what you need. Do not re-read this whole file on every turn.
 
 ---
 
-## Data & Control Flow
+## What this app is
 
-### 1. Frontend → backend request
-
-1. User interacts with the chat box or voice UI in `App.jsx`.
-2. The app builds a payload that includes:
-   - The current conversation history.
-   - Summarized state (tasks, events, blocks, notes, etc.) as needed.
-   - Flags like `isContentGen` (content generation vs. regular planning).
-3. Request is sent to `EDGE_FN_URL` (either `/api/chat` on Vercel or the Supabase Edge URL).
-
-### 2. Backend → Groq (LLM and tools)
-
-1. Backend uses **Groq as the sole LLM provider** with **multi-model routing** via `callGroq()`:
-   - **`PRIMARY_MODEL`** (`openai/gpt-oss-120b`) is used by default.
-   - Falls back to **`BACKUP_MODEL`** (`llama-3.3-70b-versatile`) on primary failures.
-   - **`FAST_MODEL`** (`llama-3.1-8b-instant`) is available for lightweight/conversational turns.
-   - A **circuit breaker** backs off on repeated API failures.
-   - Each request is tagged with routing metadata (`conversational`, `tool_heavy`, `content_gen`) for intelligent model selection.
-2. It constructs a Groq chat completion call with:
-   - A **system prompt** split into a policy section (static behavior rules) and a budgeted context section (dynamic summaries of current tasks/events/blocks). Token budgets are tracked and telemetry is emitted per request.
-   - The message list from the client.
-   - The `ACTION_TOOLS` schema (or `CONTENT_ACTION_TOOLS` when `isContentGen` is true).
-3. Groq returns:
-   - Assistant text (`content`).
-   - Zero or more **tool calls** (actions) in `tool_calls`.
-
-### 3. Backend post-processing
-
-- **Parse and validate tool calls** via `parseLlmResponse()`:
-  - Converts raw Groq tool calls into canonical internal form: `[{ name, arguments, id }]`.
-  - Runs **per-tool validators** (`validateToolArguments`) on every action:
-    - Checks required fields, types, string lengths, date/time formats, and enum values.
-    - If validation fails, the action is replaced with a **clarification prompt** rather than passed to the client silently.
-  - Recovers malformed tool calls via `parseFailedGeneration` (regex fallback for `tool_use_failed` errors).
-- Extract any clarifying questions vs. concrete changes.
-- Enforce **content generation quotas**:
-  - Use `content_generations` table to check per-user daily counts.
-  - Reject or downgrade requests when limits are hit.
-- Normalize into a response:
-  - `content`: string for chat bubbles.
-  - `actions`: structured list of domain actions.
-  - `clarification` / `clarifications`: messages prompting the user to confirm or supply missing information.
-
-### 4. Frontend action execution + persistence
-
-1. The client receives `{ content, actions, clarification(s) }`.
-2. It:
-   - Renders `content` into the chat timeline.
-   - For each action:
-     - **Resolves references** (e.g., fuzzy-match "math test" to an actual event).
-     - Determines whether the action:
-       - Can be auto-applied, or
-       - Needs explicit confirmation in the UI.
-     - Applies the change to **local React state**.
-     - **Syncs to Supabase** via the `supabase` client, updating the appropriate table(s).
-3. If client-side resolution fails (no confident match), the client can re-submit with `mode: "tool_fallback"` and a `tool_failures` array. The server calls `buildToolFallbackPrompt()` and runs Groq to produce targeted clarification questions (e.g., "Which 'math test' did you mean?"). The server does not execute actions directly — orchestration still lives on the client.
-4. Analytics events may also be written via `lib/analytics.js`.
-
-### 5. Voice flow
-
-- **Combined flow (through `/api/chat`)**
-  - Client sends base64 audio to `api/chat`.
-  - Function calls Whisper, obtains text, then runs the normal chat/action pipeline.
-
-- **Two-step flow (through `sos-voice`)**
-  - Client sends audio file to `/functions/v1/sos-voice`.
-  - Receives transcription text and then calls chat as if the text were typed.
-
+Chat-first AI student planner. All tasks, events, and notes are created through natural language. The AI parses intent into structured actions; the client executes them against Supabase. Three UI modes: **lofi** (default), **sidebar**, **topbar**.
 
 ---
 
-## The Action System (Current)
+## Quick lookup — "where is X?"
 
-The AI uses **tool-calling** with a JSON schema (`ACTION_TOOLS`) defined in `shared/ai/chat-core.js` and imported by both backends. The schema is the single authoritative source; do not add tool definitions in `api/chat.js` or `sos-chat/index.ts` directly.
-
-### Core action tools (high level)
-
-> For exact schemas, see `ACTION_TOOLS` in `shared/ai/chat-core.js`.
-
-- **Scheduling & calendar**
-  - `add_event`
-  - `update_event`
-  - `delete_event`
-  - `add_block`
-  - `delete_block`
-  - `convert_event_to_block`
-  - `convert_block_to_event`
-
-- **Tasks**
-  - `add_task`
-  - `update_task`
-  - `delete_task`
-  - `complete_task`
-  - `break_task`
-
-- **Notes**
-  - `add_note`
-  - `edit_note`
-  - `delete_note`
-
-- **Content generation** (used when `isContentGen` is true; enforced with typed response schemas)
-  - `create_flashcards`
-  - `create_quiz`
-  - `create_outline`
-  - `create_summary`
-  - `create_study_plan`
-  - `create_project_breakdown`
-  - `make_plan`
-  - `ask_clarification` (always available; also included in `CONTENT_ACTION_TOOLS`)
-
-  When `isContentGen` is true, the backend constrains available tools to `CONTENT_ACTION_TOOLS` only. The server enforces structured output shapes for all content generation responses; there are no client-side parsing fallbacks.
-
-### Resolution pipeline (conceptual)
-
-Because the model only sees titles/dates, not DB IDs, the client:
-
-1. For any action that targets an existing entity (event/task/block), tries:
-   - Exact ID match if provided.
-   - Otherwise, fuzzy title match over current in-memory state.
-2. If a confident match is found:
-   - Enriches the action with the specific `id` and canonical title.
-3. If no match:
-   - Marks the action as failed-to-resolve.
-   - Optionally triggers the server-side fallback loop (see §4 above) for clarification.
-
-This keeps the LLM prompt simpler (no raw IDs exposed) while ensuring reliable updates/deletes on the actual records.
-
+| Need | Go to |
+|------|-------|
+| Add/change an AI tool | `shared/ai/chat-core.js` → `ACTION_TOOLS` (~line 150) |
+| AI model selection logic | `shared/ai/chat-core.js` lines 1–30, `selectModel()` line 22 |
+| System prompt construction | `src/App.jsx` `buildSystemPrompt()` line 647 |
+| Action execution (client-side) | `src/App.jsx` `executeAction()` line 4454 |
+| Send message / streaming | `src/App.jsx` `sendMessage()` line 5397 |
+| RPM tracking + queue drain | `src/App.jsx` lines 4123–4142, `queueOrExecute()` line 6309 |
+| Layout switching | `src/App.jsx` `layoutMode` state line 4052; render branch line 6457 |
+| Lofi left panel (schedule+notes) | `src/components/LofiLeftPanel.jsx` |
+| Lofi right panel (widgets) | `src/components/LofiRightPanel.jsx` |
+| Lofi top bar | `src/components/StudyTopBar.jsx` |
+| Tutor / SkillHub entry | `src/App.jsx` `enterTutorMode()` line 6378 |
+| Settings UI (all toggles) | `src/App.jsx` ~line 6620–6980 (inside `activePanel === 'settings'` block) |
+| Supabase client + constants | `src/lib/supabase.js` |
+| Notes panel (overlay/embedded) | `src/App.jsx` `NotesPanel` component line 3503 |
+| Clarification card | `src/App.jsx` `ClarificationCard` component (~line 1700) |
+| DB field name mappings | `src/App.jsx` load functions ~line 4200–4400 |
+| CSS: lofi layout | `src/styles/lofi-layout.css` |
+| CSS: global / topbar / sidebar | `src/styles/index.css` |
+| CSS: neon/lofi theme tokens | `src/styles/neon-lofi.css` |
+| Vercel API handler | `api/chat.js` |
+| Supabase edge function | `supabase/functions/sos-chat/index.ts` |
+| Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` |
 
 ---
 
-## Evaluation & Observability
+## Architecture (one-liner per layer)
 
-- **`eval/fixtures/conversations.json`** — test conversation fixtures used by the harness.
-- **`eval/fixtures/sample-runs.jsonl`** — model run results in JSONL format.
-- **`scripts/eval-harness.mjs`** — metrics computation script; run with `npm run eval:harness`.
-  - Computes per-model-revision statistics:
-    - Tool call **precision / recall** (which actions the model correctly predicts).
-    - **Clarification appropriateness** (whether the model correctly decides to ask vs. act).
-    - **Hallucinated field rate** (invalid or unexpected fields generated).
-    - **Latency percentiles** (p50, p95) by model revision.
-  - Outputs a JSON report with aggregate and per-revision stats.
-- **Request telemetry** is emitted from the backend on every chat request: prompt version (`CORE_VERSION`), context sizes, token budgets, model used, and latency. Useful for tracking prompt evolution and model performance over time.
-
+- **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` (~7000 lines) owns all state, chat, and action execution.
+- **Serverless** — Vercel `/api/chat` (Node) or Supabase Edge `sos-chat` (Deno); both import from `shared/ai/chat-core.js`.
+- **AI** — Groq as primary LLM provider; Gemini as cross-provider fallback. Tool-calling via `ACTION_TOOLS` schema.
+- **Storage** — Supabase Postgres + Auth. Client writes directly via `sb` client after action execution.
+- **Shared core** — `shared/ai/chat-core.js` is the single source of truth for models, tools, and `callGroq()`.
 
 ---
 
-## How to Implement New Features Safely
+## Models (current)
 
-This section is optimized for **future development**. Use it as a checklist when you add capabilities.
+```
+PRIMARY_MODEL        = "openai/gpt-oss-120b"    // tool-heavy + agentic
+BACKUP_MODEL         = "openai/gpt-oss-20b"     // groq fallback
+FAST_MODEL           = "openai/gpt-oss-20b"     // short/simple turns
+GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash"
+GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite"
+```
 
-### 1. Adding a new domain entity or field
-
-- **Design the data model**
-  - Decide whether it is:
-    - A new table (e.g., `study_sessions`), or
-    - A field on an existing table (e.g., `difficulty` on `tasks`).
-  - Add or migrate schema in Supabase (SQL migrations or UI).
-
-- **Update the frontend model**
-  - Extend React state in `App.jsx` with the new entity/field.
-  - Add load logic into the initial **load-from-Supabase** path.
-  - Update Supabase read/write functions to:
-    - Map between JS naming and DB naming (`camelCase` ↔ `snake_case`).
-
-- **UI surfaces**
-  - Decide:
-    - Where the data is visible (scheduler, task list, notes, separate panel).
-    - How the user can edit it manually (forms/controls).
-
-### 2. Adding a new AI action tool
-
-Use this when the model should be able to directly manipulate the new entity or field.
-
-1. **Schema** — edit `shared/ai/chat-core.js` only (not both backends separately):
-   - Add a new entry to `ACTION_TOOLS` with the correct parameter names and required fields.
-   - Add a per-tool validator in `validateToolArguments` for the new tool name.
-2. **Backend wiring**
-   - No additional backend handler is usually needed; the backend passes tools through to Groq and returns validated tool calls to the client.
-   - If the new tool implies new rate-limit categories or safety checks, add them in `api/chat.js` and `sos-chat/index.ts`.
-3. **Client execution**
-   - In `App.jsx`, extend the action execution switch/handler to:
-     - Recognize the new `tool.name`.
-     - Run the proper state updates and Supabase mutations.
-   - Integrate with the resolution pipeline if it targets existing entities (follow the event/task patterns).
-4. **Prompting**
-   - Update the system prompt (policy section in the backend) to:
-     - Describe when the new tool should be used.
-     - Provide 1–2 short examples of correct usage.
-
-### 3. Adding new content-generation features
-
-Examples: new types of study materials, explanations, or structured views.
-
-1. **Output format**
-   - Decide whether the model should call a dedicated tool (e.g., `create_mindmap`).
-   - All content-generation tools must have enforced typed response schemas — do not rely on free-form text parsing.
-2. **Backend**
-   - Add the tool to `ACTION_TOOLS` and `CONTENT_ACTION_TYPES` in `shared/ai/chat-core.js`.
-   - Ensure content-generation rate limiting (`content_generations`) reflects any new high-cost flows.
-3. **Frontend**
-   - Add a renderer component for the new content type.
-   - Extend the action execution to route that tool to the renderer and/or notes.
-
-### 4. Changing models or providers
-
-Currently everything routes through **Groq** via `callGroq()` in `shared/ai/chat-core.js`. If you ever reintroduce multiple providers:
-
-- Keep **one place** (`shared/ai/chat-core.js`) where provider/model selection logic lives.
-- Always normalize the response shape to `{ content, actions, clarification(s) }` so the client remains provider-agnostic.
-- Confirm tool-calling behavior is consistent across providers (argument encoding, naming, error shapes).
-- Update `CORE_VERSION` to reflect the routing change so telemetry can track the transition.
-
+`selectModel()` in `chat-core.js:22` — picks model per request. Fallback chain: Groq primary → Gemini backup → Groq backup → FAST_MODEL.
 
 ---
 
-## Operational Notes & Deployment
+## Action tools (`ACTION_TOOLS` in `shared/ai/chat-core.js`)
 
-- **Vercel**
-  - Builds the Vite app using `npm run build`.
-  - Serves:
-    - Static frontend (`dist/`).
-    - `/api/chat` serverless function (`api/chat.js`).
-  - `vercel.json` adds CORS headers on `/api/*` so other origins or tools can call the API.
+**Scheduling**
+- `add_event` · `update_event` · `delete_event` — calendar events
+- `add_block` · `delete_block` — time blocks (recurring or date-specific)
+- `convert_event_to_block` · `convert_block_to_event`
+- `add_recurring_event`
+- `view_schedule` — no-op; redirects AI away from `add_task` when user asks what's on calendar
 
-- **Supabase**
-  - Edge functions:
-    - `sos-chat`: main chat/action gateway.
-    - `sos-voice`: Whisper transcription gateway.
-  - Required secrets (set via `supabase secrets set` or project dashboard):
-    - `SUPABASE_URL`
-    - `SUPABASE_ANON_KEY` (for clients; already baked into `lib/supabase.js`).
-    - `SUPABASE_SERVICE_ROLE_KEY` (used server-side only where needed).
-    - `GROQ_API_KEY` (for chat + Whisper).
+**Tasks**
+- `add_task` · `update_task` · `delete_task` · `complete_task` · `break_task`
 
-- **Rate limiting**
-  - Content generation (study materials, long-form outputs) is capped per user per day.
-  - Implementation lives in the backend functions and uses `content_generations` in Supabase.
+**Notes**
+- `add_note` · `edit_note` · `delete_note`
 
-When implementing future features, aim to **preserve this architecture**: keep the SPA as the main orchestrator, use edge/serverless functions as a thin AI and policy layer, let Supabase own durable storage and auth, and keep `shared/ai/chat-core.js` as the single source of truth for AI orchestration logic. This keeps changes localized and makes it easy to reason about data and behavior.
+**Content generation** (only available when `isContentGen: true`)
+- `create_flashcards` · `create_quiz` · `create_outline` · `create_summary`
+- `create_study_plan` · `create_project_breakdown` · `make_plan`
+
+**Meta**
+- `ask_clarification` — always available; triggers `ClarificationCard` on client
+- `propose_action` — surfaces yes/no confirmation card; stripped on FAST_MODEL
+
+To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx:4454`).
+
+---
+
+## Key state in `App.jsx`
+
+| State | Line | Purpose |
+|-------|------|---------|
+| `tasks` | 4020 | array of task objects |
+| `blocks` | 4021 | `{ recurring: [], dates: {} }` |
+| `notes` | 4022 | array of note objects |
+| `events` | 4023 | array of event objects |
+| `messages` | 4024 | chat history (capped at `CHAT_MAX_MESSAGES` = 60) |
+| `user` | 4009 | Supabase auth user or null |
+| `syncStatus` | 4120 | `'saving'|'saved'|'error'` |
+| `layoutMode` | 4052 | `'lofi'|'sidebar'|'topbar'` (localStorage `sos_layout_mode`) |
+| `activePanel` | 4058 | `'chat'|'tutor'|'settings'|…` |
+| `tutorMode` | 4062 | boolean; toggles guided-learning AI persona |
+| `isLoading` | 4032 | true while awaiting AI response |
+| `pendingQueue` | 4123 | `[{id, action, addedAt}]` — actions queued when RPM near limit |
+| `rpmSnapshot` | 4050 | `{remaining, limit, resetAtMs}` — reactive copy of RPM state |
+| `currentModel` | 4051 | last model string reported by backend |
+| `showAnalytics` | 4049 | show RPM+model badge in topbar (localStorage `sos_show_analytics`) |
+| `lofiNoteOpen` | 4047 | opens NotesPanel overlay in lofi mode |
+| `lofiTutorTabActive` | 4048 | flips left panel to Studio tab in lofi mode |
+| `agenticMode` | 4008 | via `useAgenticMode()` hook |
+| `pendingClarification` | 4041 | current clarification payload → renders `ClarificationCard` |
+| `pendingProposal` | 4044 | `{summary, action_type, prefilled}` → renders yes/no card |
+| `showAttachMenu` | 4162 | + button dropdown (File / Google) |
+| `showGoogleModal` | 4161 | Google import modal |
+| `savedChats` | 4174 | array for saved chat sidebar |
+
+**Refs** (not state, don't trigger renders):
+- `rpmStateRef` (4124) — raw RPM data, updated from response headers
+- `recentlyExecutedActionsRef` (4125) — last 10 actions, injected into system prompt as "RECENTLY COMPLETED ACTIONS" to prevent AI re-asking
+
+---
+
+## Layout modes
+
+```
+layoutMode === 'lofi'    → <div className="study-app">  3-column grid
+layoutMode === 'sidebar' → <div className="sos-app">    left sidebar + main
+layoutMode === 'topbar'  → <div className="sos-app">    topbar + main
+```
+
+**Lofi render tree** (all inside `layoutMode === 'lofi'` branches):
+```
+StudyTopBar          ← src/components/StudyTopBar.jsx
+LofiLeftPanel        ← src/components/LofiLeftPanel.jsx   (schedule + notes/studio)
+<div.study-center>   ← chat + settings (center column)
+LofiRightPanel       ← src/components/LofiRightPanel.jsx  (weather, saved, radio, timer)
+```
+
+`StudyTopBar` props: `user, syncStatus, tutorMode, onNewChat, onTutorMode, onImport, onSettings, onAuthAction, onSwitchLayout, queueCount, analyticsInfo`
+
+`LofiLeftPanel` props: `events, tasks, notes, onCreateNote, onSendChatMessage, onNoteClick, tutorMode, lofiTutorTabActive, onCloseTutorTab`
+
+`LofiRightPanel` props: `weatherData, savedChats, onOpenSavedChat`
+
+---
+
+## RPM / queue system
+
+```
+rpmStateRef          ← ref, updated from response headers each request (chat-core.js getGroqRpmStatus())
+rpmSnapshot state    ← reactive copy for UI rendering (set alongside rpmStateRef update)
+pendingQueue state   ← actions deferred when RPM near limit
+queueOrExecute()     ← App.jsx:6309 — wraps executeAction(); queues if RPM low
+queue drain effect   ← App.jsx:4129–4142 — fires when pendingQueue changes
+RPM_NEAR_LIMIT_THRESHOLD ← defined in chat-core.js (~10% of limit)
+```
+
+Backend response shape includes `rpm: getGroqRpmStatus()`. Client reads `chatData.rpm` at `App.jsx:5622`.
+
+---
+
+## Chat pipeline (brief)
+
+1. `sendMessage()` (App.jsx:5397) — builds payload with `buildSystemPrompt()`, sends to `EDGE_FN_URL`
+2. Backend streams SSE or returns JSON: `{content, actions, clarifications, rpm, model_used}`
+3. Client applies streaming text → `messages` state
+4. On `done` event: sets `rpmSnapshot`, `currentModel`, dispatches `actions` through `executeAction()`
+5. `executeAction()` (App.jsx:4454) — switch on `action.type`, mutates local state + writes Supabase
+
+**Clarification flow**: `ask_clarification` action → `pendingClarification` state → `ClarificationCard` (~App.jsx:1700) → user answers → `sendMessage()` called with answers
+
+**Proposal flow**: `propose_action` → `pendingProposal` state → yes/no card → confirm calls `executeAction()`
+
+---
+
+## Supabase
+
+```
+URL:     https://evqylqgkzlbbrvogxsjn.supabase.co
+Client:  src/lib/supabase.js  →  sb
+CHAT_MAX_MESSAGES = 60  (also in lib/supabase.js)
+```
+
+**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`
+
+**Field mapping** (JS ↔ DB):
+- `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`
+- `completedAt` ↔ `completed_at`, `event_date` ↔ `date`, `event_type` ↔ `type`
+- Blocks: recurring templates → `recurring_blocks`; per-date overrides → `date_blocks`
+
+---
+
+## Components reference
+
+| Component | File | Notes |
+|-----------|------|-------|
+| `NotesPanel` | App.jsx:3503 | `embedded` prop = sidebar inline; no prop = `position:fixed` overlay |
+| `ClarificationCard` | App.jsx:~1700 | date inputs get a "Done" submit button |
+| `StudyTopBar` | components/StudyTopBar.jsx | Lofi topbar; shows clock, queue badge, analytics badge |
+| `LofiLeftPanel` | components/LofiLeftPanel.jsx | Schedule week grid + notes list; notes section flips to Studio tab when `lofiTutorTabActive` |
+| `LofiRightPanel` | components/LofiRightPanel.jsx | Draggable widgets: weather, saved chats, radio, timer+smash |
+| `SkyBackground` | components/SkyBackground.jsx | Animated sky (no city SVG) |
+| `PomodoroTimer` | components/PomodoroTimer.jsx | Standalone timer |
+| `ErrorBoundary` | components/ErrorBoundary.jsx | Top-level error catch |
+
+---
+
+## Key functions
+
+| Function | Location | Does |
+|----------|----------|------|
+| `buildSystemPrompt()` | App.jsx:647 | Constructs system prompt with tiered context budgets; injects RECENTLY COMPLETED ACTIONS |
+| `executeAction()` | App.jsx:4454 | Switch dispatch for all tool actions; records to `recentlyExecutedActionsRef` |
+| `sendMessage()` | App.jsx:5397 | Full chat send + streaming; sets RPM/model state on response |
+| `queueOrExecute()` | App.jsx:6309 | Wraps executeAction; defers to pendingQueue if RPM near limit |
+| `enterTutorMode()` | App.jsx:6378 | Lofi: activates studio tab + posts activation message; other modes: `setActivePanel('tutor')` |
+| `toggleTutorMode()` | App.jsx:6373 | Sets tutorMode state + localStorage |
+| `detectCompanionIntent()` | App.jsx:4102 | Detects if message implies companion panel; only acts if `layoutMode === 'sidebar'` |
+| `handleCreateNote()` | App.jsx:5353 | Optimistic state + Supabase insert |
+| `handleUpdateNote()` | App.jsx:5347 | Optimistic state + Supabase update |
+| `handleDeleteNote()` | App.jsx:5341 | Optimistic state + Supabase delete |
+| `startNewChat()` | App.jsx:6321 | Clears messages, resets pending state |
+| `callGroq()` | chat-core.js | LLM call with retries, circuit breaker, Gemini fallback chain |
+| `parseLlmResponse()` | chat-core.js | Parses tool calls, runs validators, converts failures to clarifications |
+| `getGroqRpmStatus()` | chat-core.js:89 | Returns current RPM snapshot from module-level GROQ_RPM object |
+
+---
+
+## localStorage keys
+
+| Key | Controls |
+|-----|----------|
+| `sos_layout_mode` | `'lofi'|'sidebar'|'topbar'` |
+| `sos_show_analytics` | RPM+model badge in topbar |
+| `sos_ai_auto_approve` | skip confirmation for actions |
+| `sos_tutor_mode` | tutor mode persistence |
+| `sos_right_widget_order` | draggable widget order in LofiRightPanel |
+| `sos_sidebar_companion_panel` | `'notes'|'schedule'` |
+| `sos_companion_collapsed` | companion panel collapse state |
+| `sos_skill_hub_mode` | SkillHub learning mode |
+| `sos-notif-prefs` | notification preferences JSON |
+
+---
+
+## Conventions
+
+- **No new tool definitions in `api/chat.js` or `sos-chat/index.ts`** — all tools live in `chat-core.js ACTION_TOOLS` only.
+- **Field name conflicts**: AI sees camelCase; Supabase gets snake_case. Conversion happens in load/save functions in App.jsx ~4200–4400.
+- **Lofi note actions**: always route through `onSendChatMessage` → `sendMessage()` → AI → `executeAction()`. Don't call `handleCreateNote` directly from lofi UI (except the Add Note shortcut which sends the message "Create a new note").
+- **Layout guard**: `detectCompanionIntent()` only switches layout if already in sidebar mode. Never force-switch to sidebar from lofi.
+- **Content generation**: set `isContentGen: true` in the chat payload to constrain available tools to `CONTENT_ACTION_TOOLS` and enforce rate limits via `content_generations` table.
+- **Streaming**: backend sends SSE `data: {...}` lines; client accumulates in `streamedText`; final `data: [DONE]` line carries `chatData` with actions/clarifications.
