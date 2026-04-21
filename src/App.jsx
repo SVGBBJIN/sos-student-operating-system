@@ -1727,22 +1727,25 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
             }}
           />
         )}
-        {isDateInput && answer.dateValue && (
-          <button
-            onClick={() => advance()}
-            style={{
-              background:'var(--accent)',
-              border:'1px solid var(--accent)',
-              borderRadius:8,
-              padding:'6px 14px',
-              color:'#fff',
-              fontSize:'0.82rem',
-              fontWeight:600,
-              cursor:'pointer',
-              flexShrink:0,
-            }}
-          >Done</button>
-        )}
+        {/* Submit / Next button */}
+        <button
+          onClick={() => advance()}
+          disabled={!currentAnswered}
+          style={{
+            background: currentAnswered ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+            border: currentAnswered ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+            borderRadius:8,
+            padding:'6px 14px',
+            color: currentAnswered ? '#fff' : 'rgba(255,255,255,0.25)',
+            fontSize:'0.82rem',
+            fontWeight:600,
+            cursor: currentAnswered ? 'pointer' : 'default',
+            flexShrink:0,
+            transition:'all .12s',
+          }}
+        >
+          {currentQIdx < questionCount - 1 ? 'Next →' : 'Submit'}
+        </button>
         {/* Skip button */}
         <button
           onClick={handleSkipQuestion}
