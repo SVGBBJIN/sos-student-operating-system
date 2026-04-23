@@ -179,14 +179,13 @@ function extractUserId(authHeader) {
 
 /* ── Rate limiting for content generation (via Supabase REST API) ── */
 async function checkContentRateLimit(userId, supabaseUrl, serviceKey) {
-  const now = new Date();
-  const estNow = new Date(now.getTime() + -5 * 60 * 60 * 1000);
-  const todayEST =
-    estNow.getFullYear() +
-    "-" +
-    String(estNow.getMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(estNow.getDate()).padStart(2, "0");
+  const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const todayEST = dateFormatter.format(new Date());
 
   const headers = {
     Authorization: `Bearer ${serviceKey}`,
