@@ -46,7 +46,7 @@ function selectToolsForRoute(
       ["add_event","delete_event","update_event","add_task","delete_task",
        "complete_task","break_task","add_recurring_event","add_block",
        "delete_block","convert_event_to_block","convert_block_to_event",
-       "ask_clarification","clear_all","view_schedule","read_calendar"].includes(t.function.name)
+       "ask_clarification","clear_all","read_calendar"].includes(t.function.name)
     );
   }
   if (workspaceContext === "notes") {

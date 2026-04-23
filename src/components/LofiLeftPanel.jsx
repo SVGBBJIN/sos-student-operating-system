@@ -11,7 +11,9 @@ function getCurrentWeekDays() {
   const monday = new Date(today);
   monday.setDate(today.getDate() + mondayOffset);
 
-  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  // Full Mon–Sun week so students with weekend classes, sports, or tutoring
+  // actually see them on the schedule instead of silently missing days.
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   return DAYS.map((abbr, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -19,6 +21,7 @@ function getCurrentWeekDays() {
       abbr,
       num: d.getDate(),
       dateStr: d.toISOString().slice(0, 10),
+      isWeekend: i >= 5,
     };
   });
 }
@@ -30,7 +33,9 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
   const eventsByDay = useMemo(() => {
     const map = {};
     (events || []).forEach(e => {
-      const day = e.event_date?.slice(0, 10) || e.start_date?.slice(0, 10);
+      // Events come in multiple shapes depending on source (Supabase, Google, AI).
+      // Check all the places the day can be stored so none slip through.
+      const day = (e.event_date || e.start_date || e.date || '')?.slice(0, 10);
       if (day) {
         if (!map[day]) map[day] = [];
         map[day].push(e);
@@ -39,9 +44,14 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
     return map;
   }, [events]);
 
+  const openTasks = useMemo(
+    () => (tasks || []).filter(t => t.status !== 'done'),
+    [tasks]
+  );
+
   const tasksByDay = useMemo(() => {
     const map = {};
-    (tasks || []).filter(t => t.status !== 'done').forEach(t => {
+    openTasks.forEach(t => {
       const day = t.dueDate?.slice(0, 10);
       if (day) {
         if (!map[day]) map[day] = [];
@@ -49,7 +59,14 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
       }
     });
     return map;
-  }, [tasks]);
+  }, [openTasks]);
+
+  // Tasks that have no due date (or a blank/invalid one) — otherwise they would
+  // be invisible to the student since the week grid only renders dated items.
+  const undatedTasks = useMemo(
+    () => openTasks.filter(t => !t.dueDate || !/^\d{4}-\d{2}-\d{2}/.test(t.dueDate)),
+    [openTasks]
+  );
 
   const recentNotes = useMemo(() => {
     return (notes || [])
@@ -65,15 +82,15 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
       {/* ── Schedule section ── */}
       <div className="study-left-section">
         <div className="study-section-label">Schedule</div>
-        <div className="study-week-grid">
-          {weekDays.map(({ abbr, num, dateStr }) => {
+        <div className="study-week-grid study-week-grid-7">
+          {weekDays.map(({ abbr, num, dateStr, isWeekend }) => {
             const dayEvents = (eventsByDay[dateStr] || []).slice(0, 2);
             const dayTasks = (tasksByDay[dateStr] || []).slice(0, Math.max(0, 2 - dayEvents.length));
             const isToday = dateStr === today;
             return (
               <div
                 key={dateStr}
-                className={'study-week-col' + (isToday ? ' today' : '')}
+                className={'study-week-col' + (isToday ? ' today' : '') + (isWeekend ? ' weekend' : '')}
                 onClick={() => onSendChatMessage?.(`What's on my schedule for ${abbr} ${num}? (date: ${dateStr})`)}
                 style={{ cursor: onSendChatMessage ? 'pointer' : 'default' }}
               >
@@ -95,6 +112,35 @@ export default function LofiLeftPanel({ events, tasks, notes, onCreateNote, onSe
             );
           })}
         </div>
+        {undatedTasks.length > 0 && (
+          <div className="study-undated-tasks">
+            <div className="study-undated-tasks-label">
+              No due date <span className="study-undated-count">({undatedTasks.length})</span>
+            </div>
+            <div className="study-undated-tasks-list">
+              {undatedTasks.slice(0, 4).map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="study-week-task study-undated-task"
+                  title={t.title}
+                  onClick={() => onSendChatMessage?.(`Set a due date for "${t.title}"`)}
+                >
+                  {t.title}
+                </button>
+              ))}
+              {undatedTasks.length > 4 && (
+                <button
+                  type="button"
+                  className="study-undated-more"
+                  onClick={() => onSendChatMessage?.(`Show all my tasks without a due date`)}
+                >
+                  +{undatedTasks.length - 4} more
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="study-left-divider" />

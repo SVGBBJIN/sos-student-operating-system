@@ -184,12 +184,12 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "You add a task if you lack any of the required fields called the ask clarification.",
+        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). You MUST know the task_name before calling this; if it is unclear, call ask_clarification FIRST. due_date is required: if the student said 'due X', 'by X', 'for X' use that; otherwise ask_clarification rather than guessing. Never invent values.",
       parameters: {
         type: "object",
         properties: {
-          task_name: { type: "string", description: "The name or title of the task." },
-          due_date: { type: "string", description: "The due date of the task in ISO format (YYYY-MM-DD)." },
+          task_name: { type: "string", description: "The name or title of the task, phrased as the student said it." },
+          due_date: { type: "string", description: "Due date in ISO format (YYYY-MM-DD). If the student did not specify a date, call ask_clarification instead of guessing." },
         },
         required: ["task_name", "due_date"],
       },
@@ -688,25 +688,16 @@ export const ACTION_TOOLS = [
     function: {
       name: "clear_all",
       description:
-        "Wipe ALL tasks, events, and blocks. Only use when the student explicitly asks to clear or reset everything.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "view_schedule",
-      description:
-        "View the student's schedule for a specific date — use this instead of add_task when asked what is on the calendar or schedule for a day.",
+        "DESTRUCTIVE: wipe ALL tasks, events, blocks, and notes. Call this ONLY when the student has explicitly and unambiguously said to clear, reset, wipe, or delete everything. NEVER call it in response to 'clear the chat' or 'start over' (those are not destructive). You MUST set confirm=true; if you are not certain, call ask_clarification instead.",
       parameters: {
         type: "object",
         properties: {
-          date: { type: "string", description: "Date to view in YYYY-MM-DD format" },
+          confirm: {
+            type: "boolean",
+            description: "Must be true to execute. Set to false (or omit) to indicate you are unsure.",
+          },
         },
-        required: ["date"],
+        required: ["confirm"],
       },
     },
   },
@@ -715,12 +706,12 @@ export const ACTION_TOOLS = [
     function: {
       name: "read_calendar",
       description:
-        "Read-only view of the student's calendar events and tasks for a date range. Call this when the student asks what's on their calendar, what's coming up, or what's scheduled — WITHOUT intending to add or edit anything. Returns events and tasks for the specified range without making any changes.",
+        "Read-only lookup of the student's calendar, events, tasks, and time blocks. Call this WHENEVER the student asks what is on their schedule, what is coming up, what they have today/tomorrow/this week, or when their next free slot is — any query that is informational, not mutating. Do NOT follow a read_calendar with add_task or add_event unless the student explicitly asks to add something. Returns the contents of the requested date range; makes no changes.",
       parameters: {
         type: "object",
         properties: {
-          start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
-          end_date: { type: "string", description: "End date in YYYY-MM-DD format (defaults to start_date if omitted)" },
+          start_date: { type: "string", description: "Start date in YYYY-MM-DD format. For a single-day query, pass the same value here and in end_date." },
+          end_date: { type: "string", description: "End date in YYYY-MM-DD format (defaults to start_date if omitted)." },
         },
         required: ["start_date"],
       },
@@ -884,6 +875,25 @@ function validateToolArguments(toolName, args) {
     if (expectedType === "array") {
       if (!Array.isArray(value)) {
         issues.push({ field, issue: "type", expected: "array", actual: typeof value });
+        continue;
+      }
+      // Validate nested item shape for object-array fields so a malformed element
+      // (e.g. break_task.subtasks[0] missing title) fails before it hits the client.
+      const itemSchema = schema.items;
+      if (itemSchema && itemSchema.type === "object" && Array.isArray(itemSchema.required)) {
+        value.forEach((item, idx) => {
+          if (typeof item !== "object" || item === null) {
+            issues.push({ field: `${field}[${idx}]`, issue: "type", expected: "object", actual: typeof item });
+            return;
+          }
+          for (const required of itemSchema.required) {
+            const val = item[required];
+            if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) {
+              missingFields.push(`${field}[${idx}].${required}`);
+              issues.push({ field: `${field}[${idx}].${required}`, issue: "missing", expected: "required field" });
+            }
+          }
+        });
       }
       continue;
     }
@@ -1459,12 +1469,37 @@ export function parseLlmResponse(data) {
   const actions = toolCalls.flatMap((tc) => {
     const toolName = tc?.function?.name || "unknown_tool";
     proposedToolCalls.push(toolName);
+    const raw = tc?.function?.arguments;
     let parsedArgs;
-    try {
-      const raw = tc.function.arguments;
-      parsedArgs = (typeof raw === "object" && raw !== null) ? raw : JSON.parse(raw || "{}");
-    } catch (_) {
+    let parseFailed = false;
+    if (typeof raw === "object" && raw !== null) {
+      parsedArgs = raw;
+    } else if (raw == null || raw === "") {
+      // The model emitted the tool call but produced no argument payload.
+      parseFailed = true;
       parsedArgs = {};
+    } else {
+      try {
+        parsedArgs = JSON.parse(raw);
+      } catch (err) {
+        parseFailed = true;
+        parsedArgs = {};
+        try { console.warn("[chat-core] tool-arg JSON parse failed", { tool: toolName, err: String(err), raw }); } catch (_) {}
+      }
+    }
+    if (parseFailed) {
+      validationWarnings.push({
+        tool: toolName,
+        missing_fields: [],
+        issues: [{ field: "arguments", reason: "unparseable_or_missing" }],
+      });
+      clarifications.push({
+        reason: "model_output_invalid",
+        question: "I didn't capture the details cleanly — could you say that again in one sentence?",
+        options: [],
+        multi_select: false,
+      });
+      return [];
     }
 
     if (tc.function.name === "ask_clarification") {

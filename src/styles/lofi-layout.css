@@ -110,6 +110,10 @@
   border-radius: 10px;
   background: rgba(255,255,255,0.02);
   padding: 10px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.study-widget-card:hover {
+  border-color: rgba(255,255,255,0.14);
 }
 
 .study-widget-head {
@@ -122,6 +126,21 @@
   margin-bottom: 8px;
   text-transform: uppercase;
 }
+
+/* Visible drag-affordance — was a dim "⋮⋮" that students missed completely. */
+.study-widget-grip {
+  cursor: grab;
+  opacity: 0.35;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  user-select: none;
+}
+.study-widget-card:hover .study-widget-grip { opacity: 0.85; }
+.study-widget-grip:hover { background: rgba(255,255,255,0.06); }
+.study-widget-grip:active { cursor: grabbing; }
 
 .study-widget-move,
 .study-widget-btn {
@@ -517,6 +536,11 @@
   flex: 1;
   min-height: 0;
 }
+.study-week-grid-7 {
+  /* 7-day variant: weekends slightly narrower than weekdays so the labels
+     still fit without the weekday columns getting cramped. */
+  grid-template-columns: repeat(5, 1.15fr) repeat(2, 0.85fr);
+}
 
 .study-week-col {
   display: flex;
@@ -533,6 +557,54 @@
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.08);
 }
+
+.study-week-col.weekend { opacity: 0.78; }
+.study-week-col.weekend.today { opacity: 1; }
+
+.study-undated-tasks {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255,255,255,0.08);
+}
+.study-undated-tasks-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--lofi-text-dim);
+  font-family: var(--lofi-font-mono);
+  margin-bottom: 6px;
+}
+.study-undated-count { opacity: 0.7; }
+.study-undated-tasks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.study-undated-task {
+  cursor: pointer;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.06);
+  font: inherit;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.study-undated-task:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.12);
+}
+.study-undated-more {
+  background: none;
+  border: none;
+  color: var(--lofi-text-dim);
+  font-family: var(--lofi-font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 3px 6px;
+}
+.study-undated-more:hover { color: var(--lofi-text); }
 
 .study-week-day {
   font-size: 9px;
