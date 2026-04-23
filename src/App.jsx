@@ -556,7 +556,7 @@ async function migrateLocalStorage(userId) {
     }
 
     localStorage.setItem('sos_migrated_' + userId, 'true');
-    console.log('Migration complete');
+    if (import.meta.env.DEV) console.log('Migration complete');
     return true;
   } catch (e) {
     console.error('Migration error:', e);
@@ -3502,6 +3502,80 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
 }
 
 /* ═══════════════════════════════════════════════
+   GLOBAL SEARCH MODAL (Cmd+K)
+   ═══════════════════════════════════════════════ */
+function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, onSelectNote, onSendMessage }) {
+  const inputRef = React.useRef(null);
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const q = query.trim().toLowerCase();
+  const results = React.useMemo(() => {
+    if (!q) return [];
+    const out = [];
+    tasks.forEach(t => {
+      if (t.title?.toLowerCase().includes(q) || t.subject?.toLowerCase().includes(q)) {
+        out.push({ kind: 'task', id: t.id, label: t.title, sub: t.dueDate ? `Due ${t.dueDate}` : t.subject || 'Task', obj: t });
+      }
+    });
+    events.forEach(ev => {
+      if (ev.title?.toLowerCase().includes(q)) {
+        out.push({ kind: 'event', id: ev.id, label: ev.title, sub: ev.date || 'Event', obj: ev });
+      }
+    });
+    notes.forEach(n => {
+      const plain = (n.content || '').replace(/<[^>]+>/g, '');
+      if (n.name?.toLowerCase().includes(q) || plain.toLowerCase().includes(q)) {
+        const idx = plain.toLowerCase().indexOf(q);
+        const snippet = idx >= 0 ? '…' + plain.slice(Math.max(0, idx - 20), idx + 60) + '…' : plain.slice(0, 80);
+        out.push({ kind: 'note', id: n.id, label: n.name || 'Untitled', sub: snippet, obj: n });
+      }
+    });
+    return out.slice(0, 12);
+  }, [q, tasks, events, notes]);
+
+  const kindIcon = { task: '☑', event: '📅', note: '📝' };
+
+  function handleSelect(r) {
+    if (r.kind === 'note') onSelectNote(r.obj);
+    else onSendMessage(`Tell me about "${r.label}"`);
+  }
+
+  return (
+    <div className="gsearch-overlay" onClick={onClose}>
+      <div className="gsearch-modal" onClick={e => e.stopPropagation()} role="dialog" aria-label="Search">
+        <div className="gsearch-input-wrap">
+          <span className="gsearch-icon">⌘K</span>
+          <input
+            ref={inputRef}
+            className="gsearch-input"
+            value={query}
+            onChange={e => onQueryChange(e.target.value)}
+            placeholder="Search tasks, events, notes…"
+            onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+          />
+          {query && <button className="gsearch-clear" onClick={() => onQueryChange('')}>×</button>}
+        </div>
+        {results.length > 0 ? (
+          <div className="gsearch-results">
+            {results.map(r => (
+              <button key={r.kind + r.id} className="gsearch-result" onClick={() => handleSelect(r)}>
+                <span className="gsearch-kind">{kindIcon[r.kind]}</span>
+                <span className="gsearch-result-label">{r.label}</span>
+                <span className="gsearch-result-sub">{r.sub}</span>
+              </button>
+            ))}
+          </div>
+        ) : q ? (
+          <div className="gsearch-empty">No matches for "{query}"</div>
+        ) : (
+          <div className="gsearch-empty">Start typing to search tasks, events, and notes</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
 function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
@@ -4128,6 +4202,9 @@ function App() {
   const [pendingQueue, setPendingQueue] = useState([]); // [{ id, action, addedAt }]
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+  // Undo toast: shown for 8s after a destructive/mutating AI action
+  const [undoToast, setUndoToast] = useState(null); // { label, snap: {tasks, events, notes, blocks} }
+  const undoTimerRef = useRef(null);
   // AbortController for the in-flight chat request; aborted on new send, new chat, layout switch, or unmount
   const streamAbortRef = useRef(null);
   useEffect(() => () => { try { streamAbortRef.current?.abort(); } catch (_) {} }, []);
@@ -4182,6 +4259,8 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -4481,6 +4560,24 @@ function App() {
     });
   }
 
+  function pushUndoToast(label, snap) {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoToast({ label, snap });
+    undoTimerRef.current = setTimeout(() => setUndoToast(null), 8000);
+  }
+
+  function doUndo() {
+    if (!undoToast) return;
+    const { snap } = undoToast;
+    setTasks(snap.tasks);
+    setEvents(snap.events);
+    setNotes(snap.notes);
+    setBlocks(snap.blocks);
+    setUndoToast(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    postAssistantNote("Done — I've undone that action.");
+  }
+
   // ── Update a single task and sync ──
   function updateTask(taskId, updates) {
     setTasks(prev => {
@@ -4502,6 +4599,8 @@ function App() {
         entry,
       ].slice(-10);
     }
+    // Snapshot state before any mutation so the user can undo within 8 seconds
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
     try {
       switch (action.type) {
         case 'add_task': {
@@ -4557,6 +4656,7 @@ function App() {
           if (user) syncOp(() => dbUpsertTask(task, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_task' });
           recordExecution('add_task', `"${task.title}" due ${task.dueDate}`);
+          pushUndoToast(`Undo: added "${task.title}"`, undoSnap);
           break;
         }
         case 'complete_task': {
@@ -4571,6 +4671,7 @@ function App() {
           setRecentlyCompleted(prev => { const n = new Set(prev); n.add(target.id); return n; });
           setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(target.id); return n; }), 900);
           recordExecution('complete_task', `"${target.title}"`);
+          pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
           break;
         }
         case 'update_task': {
@@ -4654,6 +4755,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
+          pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -4678,6 +4780,7 @@ function App() {
             return [...prev, newNote];
           });
           recordExecution('add_note', `note "${tabName}"`);
+          pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
           break;
         }
         case 'edit_note': {
@@ -4714,6 +4817,7 @@ function App() {
           setTasks(prev => prev.filter(t => t.id !== match.id));
           if (user) syncOp(() => dbDeleteTask(match.id, user.id), 'the task');
           recordExecution('delete_task', `"${match.title}"`);
+          pushUndoToast(`Undo: deleted "${match.title}"`, undoSnap);
           break;
         }
         case 'delete_event': {
@@ -4728,6 +4832,7 @@ function App() {
             deleteEventFromGoogle(match.googleId, googleToken);
           }
           recordExecution('delete_event', `"${match.title}"`);
+          pushUndoToast(`Undo: removed "${match.title}"`, undoSnap);
           break;
         }
         case 'update_event': {
@@ -4752,6 +4857,7 @@ function App() {
             return next;
           });
           recordExecution('update_event', `"${match.title}"`);
+          pushUndoToast(`Undo: updated "${match.title}"`, undoSnap);
           break;
         }
         case 'delete_block':
@@ -4906,6 +5012,7 @@ function App() {
             ]), 'your cleared data');
           }
           recordExecution('clear_all', 'all data wiped');
+          pushUndoToast('Undo: clear all data', undoSnap);
           break;
         case 'web_search_reference': {
           const query = String(action.query || '').trim();
@@ -6436,7 +6543,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     // Fallback: use browser SpeechRecognition transcript collected during recording
     if (!transcript) {
       transcript = (speechTranscriptRef.current || '').trim();
-      if (transcript) console.log('Using browser SpeechRecognition fallback');
+      if (transcript && import.meta.env.DEV) console.log('Using browser SpeechRecognition fallback');
     }
     speechTranscriptRef.current = '';
 
@@ -6514,6 +6621,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Keyboard shortcuts ──
   useEffect(()=>{
     function handleKey(e){
+      // Cmd+K / Ctrl+K — global search (works even inside inputs)
+      if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){
+        e.preventDefault();
+        setGlobalSearchQuery('');
+        setShowGlobalSearch(p=>!p);
+        return;
+      }
       const tag=document.activeElement?.tagName?.toLowerCase();
       if(tag==='input'||tag==='textarea'||tag==='select')return;
       const key=e.key.toLowerCase();
@@ -6533,10 +6647,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         }
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,activePanel,layoutMode,openCompanionPanel]);
+  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel,layoutMode,openCompanionPanel]);
 
   function toggleTutorMode(nextValue) {
     setTutorMode(nextValue);
@@ -6886,6 +7000,38 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 </div>
                 <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
               </div>
+              {'Notification' in window && Notification.permission !== 'denied' && (
+                <div className="settings-row">
+                  <div>
+                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Test notification</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Send a test browser notification to confirm everything is working.</div>
+                  </div>
+                  <button className="settings-toggle" onClick={async () => {
+                    if (Notification.permission !== 'granted') {
+                      const perm = await Notification.requestPermission();
+                      if (perm !== 'granted') return;
+                    }
+                    scheduleNotificationsToSW([{ title: '✅ SOS Notifications', body: 'Reminders are working!', fireAt: Date.now() + 1000, tag: 'sos-test' }]);
+                    setToastMsg('Test notification sent — check your browser');
+                  }}>Test</button>
+                </div>
+              )}
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Export data</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Download all your tasks, events, and notes as a JSON file.</div>
+                </div>
+                <button className="settings-toggle" onClick={() => {
+                  const payload = { exportedAt: new Date().toISOString(), tasks, events, notes };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `sos-export-${new Date().toISOString().slice(0,10)}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}>Export</button>
+              </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Replay intro</div>
@@ -7127,6 +7273,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 <button onClick={startNewChat} style={{background:'transparent',border:'1px solid rgba(255,159,67,0.3)',borderRadius:8,color:'var(--warning)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Start fresh</button>
               </div>
             )}
+            {undoToast && (
+              <div className="sos-undo-toast">
+                <span>{undoToast.label}</span>
+                <button onClick={doUndo}>Undo</button>
+                <button onClick={() => { setUndoToast(null); if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }} aria-label="Dismiss">×</button>
+              </div>
+            )}
             {pasteStudyPrompt && (
               <div style={{marginBottom:8,padding:'8px 12px',background:'rgba(134,239,172,0.07)',border:'1px solid rgba(134,239,172,0.2)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,animation:'fadeIn .2s ease',fontSize:'0.80rem',color:'var(--text-dim)'}}>
                 <span>Looks like you pasted a lot of text — want me to make study materials?</span>
@@ -7247,6 +7400,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       />}
       {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showGlobalSearch && <GlobalSearchModal
+        query={globalSearchQuery}
+        onQueryChange={setGlobalSearchQuery}
+        onClose={() => setShowGlobalSearch(false)}
+        tasks={tasks}
+        events={events}
+        notes={notes}
+        onSelectNote={note => { setShowGlobalSearch(false); setShowNotes(true); }}
+        onSendMessage={q => { setShowGlobalSearch(false); sendMessage(q); }}
+      />}
       {authNudge&&(
         <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
           <span>Sign in to save notes across sessions →</span>
