@@ -198,19 +198,27 @@ async function checkContentRateLimit(userId, supabaseUrl, serviceKey) {
     `${supabaseUrl}/rest/v1/content_generations?user_id=eq.${userId}&date=eq.${todayEST}&select=count`,
     { headers }
   );
+  if (!getRes.ok) {
+    const errText = await getRes.text().catch(() => "");
+    throw new Error(`Failed to load rate limit usage (${getRes.status}): ${errText}`);
+  }
   const getData = await getRes.json();
-  const used = getData?.[0]?.count ?? 0;
+  const used = Number(getData?.[0]?.count ?? 0);
   const DAILY_LIMIT = 5;
 
   if (used >= DAILY_LIMIT) {
     return { allowed: false, used };
   }
 
-  await fetch(`${supabaseUrl}/rest/v1/content_generations`, {
+  const upsertRes = await fetch(`${supabaseUrl}/rest/v1/content_generations`, {
     method: "POST",
     headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify({ user_id: userId, date: todayEST, count: used + 1 }),
   });
+  if (!upsertRes.ok) {
+    const errText = await upsertRes.text().catch(() => "");
+    throw new Error(`Failed to update rate limit usage (${upsertRes.status}): ${errText}`);
+  }
 
   return { allowed: true, used: used + 1 };
 }
@@ -240,6 +248,9 @@ export default async function handler(req, res) {
   let telemetry = null;
   try {
     const body = req.body;
+    if (!body || typeof body !== "object") {
+      return res.status(400).json({ error: "Invalid JSON request body" });
+    }
 
     // ── Voice transcription path (Groq Whisper) ──
     if (body.mode === "voice") {
@@ -401,6 +412,12 @@ export default async function handler(req, res) {
         executed_actions: [],
         orchestration: { mode: "tool_fallback", executed_on: "server" },
       });
+    }
+
+    if (typeof systemPrompt !== "string" || !Array.isArray(messages)) {
+      return res
+        .status(400)
+        .json({ error: "systemPrompt must be a string and messages must be an array" });
     }
 
     // Rate limiting for content generation
