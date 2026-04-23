@@ -414,8 +414,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .g-hdr-btn{min-height:44px;min-width:44px;padding:10px 8px}
   .voice-bar-cancel,.voice-bar-send{min-width:44px;min-height:44px}
   .sos-send-btn{min-width:44px;min-height:44px}
-  /* Prevent iOS font zoom on input focus */
-  .sos-input{font-size:16px!important}
+  /* Prevent iOS font zoom on input focus — must cover both input classes */
+  .sos-input,.sos-chat-input{font-size:16px!important}
+  /* Global search modal needs to be full-width on small screens */
+  .gsearch-modal{width:94vw;border-radius:12px}
 }
 @media(max-width:390px){
   /* Extra-small phones (375px iPhone SE etc.) */
@@ -428,6 +430,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .sos-input-area{padding:8px 8px 12px}
   .sos-input-row{gap:6px}
   .sos-bubble{max-width:96%}
+  /* Undo toast: compact on very small phones */
+  .sos-undo-toast{font-size:0.75rem;padding:6px 10px}
+  /* Suggestion chips: 2-column on tiny screens */
+  .sos-empty-suggestions-grid{grid-template-columns:1fr 1fr}
 }
 /* Photo in chat */
 .sos-bubble img[alt="photo"]{transition:opacity .15s}

@@ -4389,6 +4389,44 @@ function App() {
     return () => subscription.unsubscribe();
   }, [user]);
 
+  // ── Realtime multi-device sync ──
+  // When another device inserts/updates/deletes a task, event, or note the change
+  // is pushed here via Supabase's postgres_changes channel so the UI stays in sync
+  // without a manual reload.
+  useEffect(() => {
+    if (!user) return;
+    const channel = sb.channel('sos-user-data-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const t = { id: row.id, title: row.title, subject: row.subject || '', dueDate: row.due_date || '', estTime: row.est_time || 30, status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0, createdAt: row.created_at };
+          setTasks(prev => { const idx = prev.findIndex(x => x.id === t.id); return idx >= 0 ? prev.map((x, i) => i === idx ? t : x) : [...prev, t]; });
+        } else if (payload.eventType === 'DELETE') {
+          setTasks(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const ev = { id: row.id, title: row.title, date: row.event_date || row.start_date || '', start_time: row.start_time || '', end_time: row.end_time || '', type: row.type || 'event', subject: row.subject || '' };
+          setEvents(prev => { const idx = prev.findIndex(x => x.id === ev.id); return idx >= 0 ? prev.map((x, i) => i === idx ? ev : x) : [...prev, ev]; });
+        } else if (payload.eventType === 'DELETE') {
+          setEvents(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const n = { id: row.id, name: row.tab_name || row.name || 'Untitled', content: row.content || '', updatedAt: row.updated_at || row.created_at };
+          setNotes(prev => { const idx = prev.findIndex(x => x.id === n.id); return idx >= 0 ? prev.map((x, i) => i === idx ? n : x) : [...prev, n]; });
+        } else if (payload.eventType === 'DELETE') {
+          setNotes(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [user]);
+
   // ── Google OAuth initialization ──
   useEffect(() => {
     if (!dataLoaded) return;
@@ -4670,6 +4708,7 @@ function App() {
           updateTask(target.id, { status:'done', completedAt:new Date().toISOString() });
           setRecentlyCompleted(prev => { const n = new Set(prev); n.add(target.id); return n; });
           setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(target.id); return n; }), 900);
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
           recordExecution('complete_task', `"${target.title}"`);
           pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
           break;
@@ -4779,6 +4818,7 @@ function App() {
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
             return [...prev, newNote];
           });
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
           recordExecution('add_note', `note "${tabName}"`);
           pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
           break;
@@ -4816,6 +4856,7 @@ function App() {
           }
           setTasks(prev => prev.filter(t => t.id !== match.id));
           if (user) syncOp(() => dbDeleteTask(match.id, user.id), 'the task');
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'delete_task' });
           recordExecution('delete_task', `"${match.title}"`);
           pushUndoToast(`Undo: deleted "${match.title}"`, undoSnap);
           break;
@@ -6659,6 +6700,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function enterTutorMode() {
     toggleTutorMode(true);
+    if (user) trackEvent(user.id, 'tutor_entered', { layout: layoutMode });
     if (layoutMode === 'lofi') {
       setLofiTutorTabActive(true);
       const msg = { role: 'assistant', content: '✨ Tutor Mode Activated — I\'ll guide you step by step. Ask me anything!', timestamp: Date.now() };
