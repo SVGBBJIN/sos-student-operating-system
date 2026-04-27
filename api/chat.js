@@ -1,64 +1,21 @@
 import {
   ACTION_TOOLS,
-  BACKUP_MODEL,
   callGroq,
-  callGroqStream,
-  CONTENT_ACTION_TOOLS,
-  CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
   CORE_VERSION,
-  FAST_MODEL,
   getGroqRpmStatus,
   PRIMARY_MODEL,
-  PROPOSE_ACTION_TOOL,
-  selectModel,
+  STUDIO_TOOLS,
 } from "../shared/ai/chat-core.js";
 
-/* ── Known Groq model IDs — only these may be passed as preferredModel ── */
-const KNOWN_GROQ_MODELS = new Set([PRIMARY_MODEL, CONVERSATIONAL_MODEL, BACKUP_MODEL, FAST_MODEL]);
-
-function resolveModel(preferredModel) {
-  if (typeof preferredModel === "string" && KNOWN_GROQ_MODELS.has(preferredModel)) {
-    return preferredModel;
-  }
-  return PRIMARY_MODEL;
-}
+console.log(`[chat-core] adapter=vercel version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
 // Vercel serverless function — mirrors supabase/functions/sos-chat/index.ts
-
-/**
- * Returns the minimal tool subset for a given route, reducing prompt token cost.
- * Conversational requests get only ask_clarification (~1 tool vs 25).
- */
-function selectToolsForRoute(routeType, workspaceContext, isContentGen) {
-  if (isContentGen) return CONTENT_ACTION_TOOLS;
-  if (routeType === "conversational") {
-    const clarificationTool = ACTION_TOOLS.find(t => t.function.name === "ask_clarification");
-    return [PROPOSE_ACTION_TOOL, clarificationTool].filter(Boolean);
-  }
-  if (workspaceContext === "schedule") {
-    return ACTION_TOOLS.filter(t =>
-      ["add_event","delete_event","update_event","add_task","delete_task",
-       "complete_task","break_task","add_recurring_event","add_block",
-       "delete_block","convert_event_to_block","convert_block_to_event",
-       "ask_clarification","clear_all","read_calendar"].includes(t.function.name)
-    );
-  }
-  if (workspaceContext === "notes") {
-    return ACTION_TOOLS.filter(t =>
-      ["add_note","edit_note","delete_note","ask_clarification"].includes(t.function.name)
-    );
-  }
-  return ACTION_TOOLS;
-}
-// Reads ANTHROPIC_API_KEY, GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from env vars
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-console.log(`[chat-core] adapter=vercel version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
 function estimateTokensFromText(text) {
   const normalized = typeof text === "string" ? text : "";
@@ -86,34 +43,6 @@ function toExecutionOutcome(value) {
 
 function emitRequestEvent(event) {
   console.log("chat_request_event", JSON.stringify(event));
-}
-
-function buildToolFallbackPrompt(failures = []) {
-  const lines = failures.map((failure, idx) => {
-    const actionType = failure?.action_type || "unknown_action";
-    const category = failure?.category || "execution_failed";
-    const detail = typeof failure?.detail === "string" ? failure.detail.trim() : "";
-    const suggestion = Array.isArray(failure?.suggestions) ? failure.suggestions.filter(Boolean).join(" | ") : "";
-    const parts = [
-      `#${idx + 1}`,
-      `action=${actionType}`,
-      `category=${category}`,
-      detail ? `detail=${detail}` : "",
-      suggestion ? `candidates=${suggestion}` : "",
-    ].filter(Boolean);
-    return parts.join(" ; ");
-  });
-  return [
-    "Tool execution failed client-side for one or more proposed actions.",
-    "Write a concise, helpful follow-up question that asks only for the missing/ambiguous details needed to continue.",
-    "If category=not_found: ask for exact title/date/time.",
-    "If category=ambiguous: ask user to choose between candidate options.",
-    "If category=validation_failed: ask for corrected fields using expected formats.",
-    "Do not claim any action was completed.",
-    "",
-    "FAILURE_REPORT:",
-    lines.join("\n"),
-  ].join("\n");
 }
 
 async function persistPromptTelemetry({
@@ -231,13 +160,8 @@ export default async function handler(req, res) {
 
   const startedAt = Date.now();
   const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const stageTimings = {
-    prompt_build_ms: 0,
-    llm_call_ms: 0,
-    parse_ms: 0,
-    execution_ms: 0,
-  };
   let telemetry = null;
+
   try {
     const body = req.body;
 
@@ -288,7 +212,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ text: whisperResult.text || "" });
     }
 
-    // ── Chat completion path (Groq) ──
     if (!GROQ_API_KEY) {
       return res.status(500).json({ error: "GROQ_API_KEY not configured" });
     }
@@ -300,7 +223,6 @@ export default async function handler(req, res) {
       dynamicContext,
       messages,
       maxTokens = 1024,
-      isContentGen,
       imageBase64,
       imageMimeType,
       workspaceContext,
@@ -309,8 +231,6 @@ export default async function handler(req, res) {
       input_tokens_est,
       prompt_flags,
       tool_failures,
-      streaming,
-      preferredModel,
     } = body;
     const userId = extractUserId(req.headers.authorization);
     telemetry = {
@@ -319,7 +239,7 @@ export default async function handler(req, res) {
       contextChars: Number(context_chars),
       inputTokensEst: Number(input_tokens_est),
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
-      isContentGen: Boolean(isContentGen),
+      isContentGen: mode === "studio",
       promptFlags: (prompt_flags && typeof prompt_flags === "object") ? prompt_flags : null,
     };
     const inputTokensEstimated = estimateInputTokens({
@@ -328,231 +248,118 @@ export default async function handler(req, res) {
       inputTokensEst: telemetry?.inputTokensEst,
     });
 
-    if (mode === "tool_fallback") {
-      const fallbackMessages = Array.isArray(messages) ? messages.filter((m) => m && typeof m.content === "string") : [];
-      const failureReport = buildToolFallbackPrompt(Array.isArray(tool_failures) ? tool_failures : []);
-      const followupMessages = [
-        ...fallbackMessages,
-        { role: "user", content: failureReport },
-      ];
-      const llmStartedAt = Date.now();
-      // tool_fallback only needs a short clarifying question — use FAST_MODEL directly
-      // (bypasses conversational routing which would select CONVERSATIONAL_MODEL).
-      const fallbackResult = await callGroq(
-        GROQ_API_KEY,
-        FAST_MODEL,
-        `${systemPrompt || ""}\n\nWhen tool execution fails, ask a targeted clarification question.`,
-        followupMessages,
-        Math.min(Number(maxTokens) || 512, 512),
-        null,
-        null,
-        false,
-        null,
-        "auto",
-        BACKUP_MODEL,
-        {
-          isContentGen: false,
-          routeType: "tool_heavy", // use FAST_MODEL directly as primary
-          geminiApiKey: GEMINI_API_KEY,
-        }
-      );
-      stageTimings.llm_call_ms = Date.now() - llmStartedAt;
-      const fallbackParseStartedAt = Date.now();
-      const toolCallStats = fallbackResult?.tool_call_stats || { proposed: 0, validated: 0 };
-      stageTimings.parse_ms = Date.now() - fallbackParseStartedAt;
-      const executionStartedAt = Date.now();
-      const executionOutcomes = Array.isArray(tool_failures)
-        ? tool_failures.map((failure) => toExecutionOutcome(failure?.outcome || failure?.category || "validation_error"))
-        : [];
-      stageTimings.execution_ms = Date.now() - executionStartedAt;
-      const outputTokensEstimated = estimateTokensFromText(
-        `${fallbackResult?.content || ""}\n${JSON.stringify(fallbackResult?.actions || [])}`
-      );
-      emitRequestEvent({
-        event_type: "chat_request",
-        request_id: requestId,
-        prompt: {
-          version: telemetry?.promptVersion || null,
-          flags: telemetry?.promptFlags || null,
-          workspace_context: telemetry?.workspaceContext || "chat",
-        },
-        model: {
-          primary: PRIMARY_MODEL,
-          backup: FAST_MODEL,
-          selected: fallbackResult?.model_used || null,
-          fallback_used: Boolean(fallbackResult?.fallback_used),
-        },
-        tokens: {
-          input_est: inputTokensEstimated,
-          output_est: outputTokensEstimated,
-        },
-        stages: stageTimings,
-        tool_calls: {
-          proposed: toolCallStats.proposed || 0,
-          validated: toolCallStats.validated || 0,
-          executed: 0,
-        },
-        execution_outcomes: executionOutcomes,
-        status: "success",
-      });
-      return res.status(200).json({
-        ...fallbackResult,
-        actions: [],
-        executed_actions: [],
-        orchestration: { mode: "tool_fallback", executed_on: "server" },
-      });
-    }
-
-    // Rate limiting for content generation
-    if (isContentGen && SUPABASE_SERVICE_ROLE_KEY) {
-      if (userId) {
-        const { allowed, used } = await checkContentRateLimit(
-          userId,
-          SUPABASE_URL,
-          SUPABASE_SERVICE_ROLE_KEY
-        );
+    // ── Studio (content generation) path ──
+    // Uses STUDIO_TOOLS with tool_choice required so the model always returns structured output.
+    if (mode === "studio") {
+      if (userId && SUPABASE_SERVICE_ROLE_KEY) {
+        const { allowed, used } = await checkContentRateLimit(userId, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
         if (!allowed) {
           return res.status(429).json({ error: "Rate limited", rateLimited: true, used });
         }
       }
+
+      const normalizedWorkspace = typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "chat";
+      const contextSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspace}`;
+      const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextSuffix}` : null;
+
+      const studioResult = await callGroq(
+        GROQ_API_KEY,
+        PRIMARY_MODEL,
+        systemPrompt || "",
+        messages,
+        Math.min(Number(maxTokens) || 4096, 4096),
+        null,
+        null,
+        true,
+        STUDIO_TOOLS,
+        "required",
+        null,
+        { isContentGen: true, staticSystemPrompt: staticSystemPrompt || null, dynamicContext: effectiveDynamic, geminiApiKey: GEMINI_API_KEY }
+      );
+
+      if (!Array.isArray(studioResult.actions) || studioResult.actions.length === 0) {
+        throw new Error("Studio mode must return typed actions[] payloads.");
+      }
+
+      await persistPromptTelemetry({
+        supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        userId, requestId, promptVersion: telemetry?.promptVersion,
+        contextChars: telemetry?.contextChars, inputTokensEst: telemetry?.inputTokensEst,
+        workspaceContext: "studio", isContentGen: true, latencyMs: Date.now() - startedAt, ok: true,
+      });
+
+      return res.status(200).json({
+        ...studioResult,
+        executed_actions: [],
+        orchestration: { mode: "studio", executed_on: "client" },
+        rpm: getGroqRpmStatus(),
+      });
     }
 
+    // ── Normal chat path ──
+    // All chat requests use ACTION_TOOLS with reasoning_effort:high on PRIMARY_MODEL.
+    // No route-based model switching — one model handles everything.
     const normalizedWorkspaceContext = typeof workspaceContext === "string"
       ? workspaceContext.trim().toLowerCase()
       : "chat";
-    const latestUserMessage = [...(Array.isArray(messages) ? messages : [])]
-      .reverse()
-      .find((m) => m?.role === "user" && typeof m?.content === "string");
-    const latestUserText = (latestUserMessage?.content || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s|event|remind|meeting|appointment|recurring)/i.test(latestUserText)
-      || normalizedWorkspaceContext === "schedule"
-      || normalizedWorkspaceContext === "notes";
-    const routeType = isContentGen || likelyToolHeavy ? "tool_heavy" : "conversational";
-    const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
-    const toolChoice = isContentGen ? "required" : "auto";
-    const clarificationRule = `\n\nCLARIFICATION RULE: For casual greetings, small talk, or messages that do not involve scheduling or creating something — respond naturally as a person without calling any tool. Reserve ask_clarification STRICTLY for moments when you are about to call an action tool (add_event, add_task, add_block, add_note, etc.) and one or more required fields are missing from the student's message. Never call ask_clarification for general chat, vague requests with no clear action intent, or to suggest features. If you have all required information for an action, execute it immediately without asking.`;
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
-    const promptBuildStartedAt = Date.now();
-    const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
-    // When frontend sends split static/dynamic parts, append workspace suffix to dynamic context
-    // so the static policy stays identical across all requests (Groq can cache it).
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.`;
+    // Only append suffix to dynamicContext (per-request) so the staticSystemPrompt stays
+    // byte-identical across all requests, preserving Groq's prompt cache.
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
-    stageTimings.prompt_build_ms = Date.now() - promptBuildStartedAt;
+    const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
     const callOptions = {
-      isContentGen: Boolean(isContentGen),
-      routeType,
+      isContentGen: false,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
       geminiApiKey: GEMINI_API_KEY,
     };
 
-    // Route-aware tool selection: send only the tools needed for this request type.
-    // This reduces prompt token cost significantly for conversational and single-workspace requests.
     const llmStartedAt = Date.now();
-
-    // Streaming path: only for conversational (non-content-gen, non-image) requests.
-    // Text deltas are piped via SSE; tool-call JSON is buffered and sent in the final event.
-    const useStreaming = Boolean(streaming) && !isContentGen && !imageBase64;
-    if (useStreaming) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.flushHeaders(); // send headers immediately so the client can start reading
-      const streamResult = await callGroqStream(
-        GROQ_API_KEY,
-        CONVERSATIONAL_MODEL,
-        effectiveSystemPrompt,
-        messages,
-        maxTokens,
-        toolsForRequest, // route-filtered tool subset
-        "auto",
-        (delta) => {
-          res.write(`data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`);
-        },
-        { ...callOptions, backupModel: FAST_MODEL } // auto-retries with FAST_MODEL if CONVERSATIONAL_MODEL fails
-      );
-      stageTimings.llm_call_ms = Date.now() - llmStartedAt;
-      const donePayload = {
-        ...streamResult,
-        executed_actions: [],
-        orchestration: { mode: "client_execution", executed_on: "client" },
-      };
-      res.write(`data: ${JSON.stringify({ type: "done", ...donePayload })}\n\n`);
-      res.end();
-      // fire-and-forget telemetry
-      persistPromptTelemetry({
-        supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
-        userId: telemetry?.userId || null, requestId,
-        promptVersion: telemetry?.promptVersion, contextChars: telemetry?.contextChars,
-        inputTokensEst: telemetry?.inputTokensEst, workspaceContext: telemetry?.workspaceContext,
-        isContentGen: telemetry?.isContentGen, latencyMs: Date.now() - startedAt, ok: true,
-      }).catch(() => {});
-      return;
-    }
-
     const result = await callGroq(
       GROQ_API_KEY,
-      resolveModel(preferredModel),
+      PRIMARY_MODEL,
       effectiveSystemPrompt,
       messages,
       maxTokens,
       imageBase64,
       imageMimeType,
-      Boolean(toolsForRequest && toolsForRequest.length > 0), // includeTools
-      toolsForRequest, // toolsOverride — route-filtered subset
-      toolChoice,
-      BACKUP_MODEL,
+      true,
+      ACTION_TOOLS,
+      "auto",
+      null,
       callOptions
     );
-    stageTimings.llm_call_ms = Date.now() - llmStartedAt;
-    const parseStartedAt = Date.now();
-    const toolCallStats = result?.tool_call_stats || { proposed: 0, validated: 0 };
-    stageTimings.parse_ms = Date.now() - parseStartedAt;
-    if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
-      throw new Error("Content generation must return typed actions[] payloads.");
-    }
+    const llmMs = Date.now() - llmStartedAt;
 
-    const executionStartedAt = Date.now();
+    const toolCallStats = result?.tool_call_stats || { proposed: 0, validated: 0 };
     const executionOutcomes = [
       ...(Array.isArray(result?.validation_warnings) && result.validation_warnings.length > 0
         ? result.validation_warnings.map(() => "validation_error")
         : []),
       ...(Array.isArray(tool_failures)
-        ? tool_failures.map((failure) => toExecutionOutcome(failure?.outcome || failure?.category || "validation_error"))
+        ? tool_failures.map((f) => toExecutionOutcome(f?.outcome || f?.category || "validation_error"))
         : []),
     ];
-    stageTimings.execution_ms = Date.now() - executionStartedAt;
     const outputTokensEstimated = estimateTokensFromText(
       `${result?.content || ""}\n${JSON.stringify(result?.actions || [])}`
     );
-      emitRequestEvent({
-        event_type: "chat_request",
-        request_id: requestId,
-        prompt: {
-          version: telemetry?.promptVersion || null,
-          flags: telemetry?.promptFlags || null,
-          workspace_context: telemetry?.workspaceContext || "chat",
-        },
-        model: {
-          primary: PRIMARY_MODEL,
-          backup: BACKUP_MODEL,
+
+    emitRequestEvent({
+      event_type: "chat_request",
+      request_id: requestId,
+      prompt: {
+        version: telemetry?.promptVersion || null,
+        flags: telemetry?.promptFlags || null,
+        workspace_context: telemetry?.workspaceContext || "chat",
+      },
+      model: {
+        primary: PRIMARY_MODEL,
         selected: result?.model_used || null,
         fallback_used: Boolean(result?.fallback_used),
       },
-      tokens: {
-        input_est: inputTokensEstimated,
-        output_est: outputTokensEstimated,
-      },
-      clarification: {
-        asked: Boolean(
-          (Array.isArray(result?.clarifications) && result.clarifications.length > 0)
-          || (result?.clarification && typeof result.clarification === "object")
-        ),
-        count: Array.isArray(result?.clarifications) ? result.clarifications.length : 0,
-      },
-      stages: stageTimings,
+      tokens: { input_est: inputTokensEstimated, output_est: outputTokensEstimated },
+      stages: { llm_call_ms: llmMs },
       tool_calls: {
         proposed: toolCallStats.proposed || 0,
         validated: toolCallStats.validated || 0,
@@ -571,10 +378,11 @@ export default async function handler(req, res) {
       contextChars: telemetry?.contextChars,
       inputTokensEst: telemetry?.inputTokensEst,
       workspaceContext: telemetry?.workspaceContext,
-      isContentGen: telemetry?.isContentGen,
+      isContentGen: false,
       latencyMs: Date.now() - startedAt,
       ok: true,
     });
+
     return res.status(200).json({
       ...result,
       executed_actions: [],
@@ -587,39 +395,26 @@ export default async function handler(req, res) {
       request_id: requestId,
       prompt: {
         version: telemetry?.promptVersion || null,
-        flags: telemetry?.promptFlags || null,
         workspace_context: telemetry?.workspaceContext || "chat",
       },
-      model: {
-        primary: PRIMARY_MODEL,
-        backup: BACKUP_MODEL,
-        selected: null,
-        fallback_used: false,
-      },
-      tokens: {
-        input_est: Number.isFinite(telemetry?.inputTokensEst) ? telemetry.inputTokensEst : null,
-        output_est: 0,
-      },
-      stages: stageTimings,
-      tool_calls: {
-        proposed: 0,
-        validated: 0,
-        executed: 0,
-      },
+      model: { primary: PRIMARY_MODEL, selected: null, fallback_used: false },
+      tokens: { input_est: 0, output_est: 0 },
+      stages: {},
+      tool_calls: { proposed: 0, validated: 0, executed: 0 },
       execution_outcomes: ["validation_error"],
       status: "error",
       error: err?.message || "Internal server error",
     });
     await persistPromptTelemetry({
-      supabaseUrl: SUPABASE_URL,
-      serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+      supabaseUrl: SUPABASE_URL || "",
+      serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
       userId: telemetry?.userId || null,
       requestId,
       promptVersion: telemetry?.promptVersion,
       contextChars: telemetry?.contextChars,
       inputTokensEst: telemetry?.inputTokensEst,
       workspaceContext: telemetry?.workspaceContext,
-      isContentGen: telemetry?.isContentGen,
+      isContentGen: telemetry?.isContentGen || false,
       latencyMs: Date.now() - startedAt,
       ok: false,
       errorMessage: err?.message || "Internal server error",

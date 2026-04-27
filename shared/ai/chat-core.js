@@ -4,33 +4,12 @@
 export const CORE_VERSION = "chat-core-v2-2026-04-12";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
-export const PRIMARY_MODEL        = "openai/gpt-oss-120b";
-export const CONVERSATIONAL_MODEL = "openai/gpt-oss-20b";
-export const BACKUP_MODEL         = "openai/gpt-oss-20b";
-export const FAST_MODEL           = "openai/gpt-oss-20b";
+// PRIMARY: reasoning model used for all chat routes. GEMINI_FALLBACK: cross-provider with thinking.
+// GROQ_FALLBACK: last-resort Groq model (non-reasoning but reliable tool caller).
+export const PRIMARY_MODEL   = "openai/gpt-oss-120b";
+export const GEMINI_FALLBACK = "gemini-2.5-flash";
+export const GROQ_FALLBACK   = "llama-3.3-70b-versatile";
 
-// LITE_MODEL is an alias for FAST_MODEL — used for short/simple turns and classification tasks.
-export const LITE_MODEL = FAST_MODEL;
-
-/**
- * Selects the appropriate Groq model based on the characteristics of the input.
- * Intended to be called once per session; lock the result in sessionStorage.sos_active_model.
- *
- * @param {{ text?: string, toolCount?: number, agentStep?: boolean }} input
- * @returns {string} Groq model ID
- */
-export function selectModel(input = {}) {
-  if (input.agentStep) return PRIMARY_MODEL;
-  if ((input.toolCount ?? 0) > 0) return PRIMARY_MODEL;
-  if ((input.text?.length ?? 0) < 80 && !(input.toolCount)) return FAST_MODEL;
-  return PRIMARY_MODEL;
-}
-
-// Gemini (Google AI) — OpenAI-compatible endpoint, used as cross-provider fallback.
-// gemini-2.5-flash backs PRIMARY/CONVERSATIONAL; gemini-2.5-flash-lite backs FAST/BACKUP paths.
-// NOTE: gemma-3-*-it are HuggingFace open-weight IDs and are NOT valid on this endpoint.
-export const GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash";
-export const GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 const GROQ_CIRCUIT = {
@@ -99,25 +78,8 @@ export function getGroqRpmStatus() {
 }
 
 function isGeminiModel(mdl) {
-  return mdl === GEMINI_CONVERSATIONAL_BACKUP || mdl === GEMINI_FAST_BACKUP;
+  return mdl === GEMINI_FALLBACK;
 }
-
-// Returns the Gemini backup appropriate for a given primary model.
-function geminiBackupFor(mdl) {
-  return mdl === CONVERSATIONAL_MODEL ? GEMINI_CONVERSATIONAL_BACKUP : GEMINI_FAST_BACKUP;
-}
-
-const _CONTENT_ACTION_TYPES = new Set([
-  "create_flashcards",
-  "create_quiz",
-  "create_outline",
-  "create_summary",
-  "create_study_plan",
-  "create_project_breakdown",
-  "make_plan",
-]);
-
-export const CONTENT_ACTION_TYPES = _CONTENT_ACTION_TYPES;
 
 /** @typedef {{role: string, content: unknown}} ChatMessage */
 /** @typedef {{type: string, [key: string]: unknown}} ChatAction */
@@ -144,7 +106,7 @@ export const CONTENT_ACTION_TYPES = _CONTENT_ACTION_TYPES;
  *   toolsOverride?: any[] | null,
  *   toolChoiceOverride?: "auto" | "required",
  *   backupModel?: string | null,
- *   options?: { isContentGen?: boolean, routeType?: "conversational" | "tool_heavy" | "content_gen", budgetMs?: number }
+ *   options?: { isContentGen?: boolean, budgetMs?: number }
  * }} CallGroqRequest */
 
 export const ACTION_TOOLS = [
@@ -153,7 +115,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, use ask_clarification FIRST. NEVER invent or guess values.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, respond with plain text asking for the missing detail. NEVER invent or guess values.",
       parameters: {
         type: "object",
         properties: {
@@ -184,12 +146,12 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). You MUST know the task_name before calling this; if it is unclear, call ask_clarification FIRST. due_date is required: if the student said 'due X', 'by X', 'for X' use that; otherwise ask_clarification rather than guessing. Never invent values.",
+        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). You MUST know the task_name before calling this; if it is unclear, respond with plain text asking for the task name. due_date is required: if the student said 'due X', 'by X', 'for X' use that; otherwise ask for it in plain text rather than guessing. Never invent values.",
       parameters: {
         type: "object",
         properties: {
           task_name: { type: "string", description: "The name or title of the task, phrased as the student said it." },
-          due_date: { type: "string", description: "Due date in ISO format (YYYY-MM-DD). If the student did not specify a date, call ask_clarification instead of guessing." },
+          due_date: { type: "string", description: "Due date in ISO format (YYYY-MM-DD). If the student did not specify a date, respond with plain text asking for the date instead of guessing." },
         },
         required: ["task_name", "due_date"],
       },
@@ -270,7 +232,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_block",
       description:
-        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, use ask_clarification FIRST to ask for the missing details. NEVER guess or fabricate values.",
+        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -425,7 +387,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, use ask_clarification FIRST. NEVER guess or fabricate values.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -456,6 +418,82 @@ export const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "web_search_reference",
+      description:
+        "Search the web for general knowledge, source-backed references, and direct quotes. Use this when the student asks for facts with citations or quote evidence from the web.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query or question to research" },
+          quote_count: { type: "number", description: "Desired number of direct quotes (1-6)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clear_all",
+      description:
+        "DESTRUCTIVE: wipe ALL tasks, events, blocks, and notes. Call this ONLY when the student has explicitly and unambiguously said to clear, reset, wipe, or delete everything. NEVER call it in response to 'clear the chat' or 'start over' (those are not destructive). You MUST set confirm=true; if you are not certain, respond with plain text asking the student to confirm.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirm: {
+            type: "boolean",
+            description: "Must be true to execute. Set to false (or omit) to indicate you are unsure.",
+          },
+        },
+        required: ["confirm"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_calendar",
+      description:
+        "Read-only lookup of the student's calendar, events, tasks, and time blocks. Call this WHENEVER the student asks what is on their schedule, what is coming up, what they have today/tomorrow/this week, or when their next free slot is — any query that is informational, not mutating. Do NOT follow a read_calendar with add_task or add_event unless the student explicitly asks to add something. Returns the contents of the requested date range; makes no changes.",
+      parameters: {
+        type: "object",
+        properties: {
+          start_date: { type: "string", description: "Start date in YYYY-MM-DD format. For a single-day query, pass the same value here and in end_date." },
+          end_date: { type: "string", description: "End date in YYYY-MM-DD format (defaults to start_date if omitted)." },
+        },
+        required: ["start_date"],
+      },
+    },
+  },
+];
+
+/* ── Parse Groq's malformed tool calls from failed_generation ── */
+export function parseFailedGeneration(failedGen) {
+  const results = [];
+  // Matches both Groq malformed formats:
+  //   <function=tool_name {"key":"val"}></function>     (space-separated)
+  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
+  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
+  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
+  let match;
+  while ((match = regex.exec(failedGen)) !== null) {
+    try {
+      const args = JSON.parse(match[2]);
+      results.push({ name: match[1], arguments: args });
+    } catch (_) { /* skip unparseable entries */ }
+  }
+  return results;
+}
+
+const TOOL_SPEC_BY_NAME = new Map(
+  ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
+);
+// STUDIO_TOOLS: content-generation tools used exclusively by the Studio screen.
+// These are NOT part of the chat tool set — they are only sent when mode="studio".
+export const STUDIO_TOOLS = [
+  {
+    type: "function",
+    function: {
       name: "create_flashcards",
       description: "Create flashcards for study. Return concise question/answer pairs.",
       parameters: {
@@ -468,10 +506,7 @@ export const ACTION_TOOLS = [
             type: "array",
             items: {
               type: "object",
-              properties: {
-                q: { type: "string" },
-                a: { type: "string" },
-              },
+              properties: { q: { type: "string" }, a: { type: "string" } },
               required: ["q", "a"],
             },
           },
@@ -634,145 +669,7 @@ export const ACTION_TOOLS = [
       },
     },
   },
-  {
-    type: "function",
-    function: {
-      name: "ask_clarification",
-      description:
-        "ONLY call this when you are about to execute an action tool (add_event, add_task, add_block, add_note, etc.) and one or more REQUIRED fields are missing from the student's message. Do NOT call this for casual greetings, general chat, or non-action conversations — respond naturally in those cases. This tool exists solely to collect missing required fields before executing a tool action.",
-      parameters: {
-        type: "object",
-        properties: {
-          question: {
-            type: "string",
-            description: "A single, focused question asking only for the most critical missing field.",
-          },
-          type: {
-            type: "string",
-            enum: ["multiple_choice", "text"],
-            description: "Type of clarification question.",
-          },
-          choices: {
-            type: "array",
-            description: "List of choices (required if type is multiple_choice).",
-            items: { type: "string" },
-          },
-          missing_fields: {
-            type: "array",
-            description: "The required fields that are missing (e.g. ['date', 'title']).",
-            items: { type: "string" },
-          },
-        },
-        required: ["question", "type", "missing_fields"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search_reference",
-      description:
-        "Search the web for general knowledge, source-backed references, and direct quotes. Use this when the student asks for facts with citations or quote evidence from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query or question to research" },
-          quote_count: { type: "number", description: "Desired number of direct quotes (1-6)" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "clear_all",
-      description:
-        "DESTRUCTIVE: wipe ALL tasks, events, blocks, and notes. Call this ONLY when the student has explicitly and unambiguously said to clear, reset, wipe, or delete everything. NEVER call it in response to 'clear the chat' or 'start over' (those are not destructive). You MUST set confirm=true; if you are not certain, call ask_clarification instead.",
-      parameters: {
-        type: "object",
-        properties: {
-          confirm: {
-            type: "boolean",
-            description: "Must be true to execute. Set to false (or omit) to indicate you are unsure.",
-          },
-        },
-        required: ["confirm"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_calendar",
-      description:
-        "Read-only lookup of the student's calendar, events, tasks, and time blocks. Call this WHENEVER the student asks what is on their schedule, what is coming up, what they have today/tomorrow/this week, or when their next free slot is — any query that is informational, not mutating. Do NOT follow a read_calendar with add_task or add_event unless the student explicitly asks to add something. Returns the contents of the requested date range; makes no changes.",
-      parameters: {
-        type: "object",
-        properties: {
-          start_date: { type: "string", description: "Start date in YYYY-MM-DD format. For a single-day query, pass the same value here and in end_date." },
-          end_date: { type: "string", description: "End date in YYYY-MM-DD format (defaults to start_date if omitted)." },
-        },
-        required: ["start_date"],
-      },
-    },
-  },
 ];
-
-/* ── Parse Groq's malformed tool calls from failed_generation ── */
-export function parseFailedGeneration(failedGen) {
-  const results = [];
-  // Matches both Groq malformed formats:
-  //   <function=tool_name {"key":"val"}></function>     (space-separated)
-  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
-  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
-  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
-  let match;
-  while ((match = regex.exec(failedGen)) !== null) {
-    try {
-      const args = JSON.parse(match[2]);
-      results.push({ name: match[1], arguments: args });
-    } catch (_) { /* skip unparseable entries */ }
-  }
-  return results;
-}
-
-const TOOL_SPEC_BY_NAME = new Map(
-  ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
-);
-export const CONTENT_ACTION_TOOLS = ACTION_TOOLS.filter((tool) => _CONTENT_ACTION_TYPES.has(tool.function.name) || tool.function.name === "ask_clarification");
-
-// Lightweight meta-tool for the conversational model.
-// When the student signals intent to schedule/add something, the model calls this
-// instead of trying to execute the action itself (which it can't in conversational mode).
-// The frontend intercepts it and shows a "Do you want to X?" yes/no card.
-export const PROPOSE_ACTION_TOOL = {
-  type: "function",
-  function: {
-    name: "propose_action",
-    description: "Call this when you detect the student wants to schedule, add, or create something (event, task, study block, or note) but you're in a conversational context. Surfaces a quick 'Do you want to X?' confirmation card in the UI. Include any details the student already mentioned as prefilled data.",
-    parameters: {
-      type: "object",
-      properties: {
-        summary: {
-          type: "string",
-          description: "Short, conversational description shown on the card — e.g. 'add your Chem midterm to the calendar' or 'create a task for your essay'",
-        },
-        action_type: {
-          type: "string",
-          enum: ["add_event", "add_task", "add_block", "add_note"],
-          description: "The action type to propose",
-        },
-        prefilled: {
-          type: "object",
-          description: "Any field values the student already mentioned — title, date, subject, time, etc.",
-          additionalProperties: true,
-        },
-      },
-      required: ["summary", "action_type"],
-    },
-  },
-};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -781,7 +678,7 @@ const LONG_TEXT_MAX_STRING_LENGTH = 5000;
 
 // Generic/placeholder strings the model might use when it doesn't know the real value.
 // If any name field (title, activity) matches one of these, it is treated as missing —
-// triggering ask_clarification instead of executing the action.
+// validation will reject it and the caller should ask the student for the real value.
 const PLACEHOLDER_TITLE_STRINGS = new Set([
   "task title", "new task", "task", "untitled task", "untitled",
   "event title", "new event", "event", "untitled event",
@@ -989,7 +886,7 @@ function withNullableOptionals(tools) {
 
 // Pre-computed at module load — avoids per-request schema deep-cloning.
 const ACTION_TOOLS_NULLABLE = withNullableOptionals(ACTION_TOOLS);
-const CONTENT_ACTION_TOOLS_NULLABLE = withNullableOptionals(CONTENT_ACTION_TOOLS);
+const STUDIO_TOOLS_NULLABLE = withNullableOptionals(STUDIO_TOOLS);
 
 /* ── Groq chat + function calling ── */
 export async function callGroq(
@@ -1015,9 +912,8 @@ export async function callGroq(
     fallback_used: false,
   };
 
-  const routeType = options?.routeType || (isContentGen ? "content_gen" : "conversational");
-  const selectedPrimary = routeType === "conversational" ? CONVERSATIONAL_MODEL : model;
-  const selectedBackup = routeType === "conversational" ? (backupModel || null) : (backupModel || null);
+  // Always use the passed model as primary — no route-based override.
+  const selectedPrimary = model;
 
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
@@ -1083,7 +979,7 @@ export async function callGroq(
     }
 
     // Vision requests always use the vision-capable model regardless of mdl
-    const effectiveModel = imageBase64 ? GEMINI_CONVERSATIONAL_BACKUP : mdl;
+    const effectiveModel = imageBase64 ? GEMINI_FALLBACK : mdl;
     const body = {
       model: effectiveModel,
       messages: groqMessages,
@@ -1093,22 +989,14 @@ export async function callGroq(
     };
     // reasoning_effort is only supported on openai/gpt-oss models, not Gemini fallbacks.
     if (!isGeminiModel(effectiveModel)) {
-      body.reasoning_effort = routeType === "conversational" ? "medium" : "high";
+      body.reasoning_effort = "high";
     }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
-    // propose_action requires structured JSON tool-calling — 8B fallback models
-    // can't reliably produce it and error with tool_use_failed.
-    // Strip it (and any other conversational-only tools) when on FAST_MODEL.
-    const safeRawTools = (mdl === FAST_MODEL && Array.isArray(rawTools))
-      ? (rawTools.filter(t => t?.function?.name !== "propose_action").length > 0
-          ? rawTools.filter(t => t?.function?.name !== "propose_action")
-          : null)
-      : rawTools;
-    const effectiveTools = safeRawTools
-      ? (safeRawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
-        : safeRawTools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
-        : withNullableOptionals(safeRawTools))
+    const effectiveTools = rawTools
+      ? (rawTools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
+        : rawTools === STUDIO_TOOLS ? STUDIO_TOOLS_NULLABLE
+        : withNullableOptionals(rawTools))
       : null;
     if (effectiveTools && effectiveTools.length > 0 && !imageBase64) {
       body.tools = effectiveTools;
@@ -1230,18 +1118,16 @@ export async function callGroq(
   }
 
   // Proactive TPM preemption: if Groq is near its token-per-minute limit and we have
-  // a Gemini key, skip Groq entirely and go straight to the Gemini backup model.
+  // a Gemini key, skip Groq entirely and go straight to the Gemini fallback.
   if (groqTpmNearLimit() && options?.geminiApiKey) {
-    const geminiModel = geminiBackupFor(selectedPrimary);
-    console.warn(`[callGroq] Groq TPM near limit (${GROQ_TPM.remaining}/${GROQ_TPM.limit} tokens remaining) — routing directly to Gemini ${geminiModel}`);
+    console.warn(`[callGroq] Groq TPM near limit (${GROQ_TPM.remaining}/${GROQ_TPM.limit} tokens remaining) — routing directly to ${GEMINI_FALLBACK}`);
     metrics.fallback_used = true;
-    return { ...await attempt(geminiModel), ...metrics };
+    return { ...await attempt(GEMINI_FALLBACK), ...metrics };
   }
 
-  // Try primary model; fall back through: Gemini backup → selectedBackup → FAST_MODEL.
-  // Gemini (cross-provider) is tried before the Groq FAST_MODEL to preserve quality.
-  const geminiBackup = options?.geminiApiKey ? geminiBackupFor(selectedPrimary) : null;
-  const canUseFastFallback = FAST_MODEL && FAST_MODEL !== selectedPrimary && FAST_MODEL !== selectedBackup;
+  // Fallback chain: PRIMARY → GEMINI_FALLBACK → GROQ_FALLBACK.
+  const geminiBackup = options?.geminiApiKey ? GEMINI_FALLBACK : null;
+  const groqLastResort = GROQ_FALLBACK !== selectedPrimary ? GROQ_FALLBACK : null;
 
   // Attempt a model, then try the next in the chain on empty response.
   async function tryChain(primary, chain) {
@@ -1260,17 +1146,12 @@ export async function callGroq(
   }
 
   try {
-    // Build the fallback chain: [Gemini backup, groq selectedBackup, FAST_MODEL]
-    // deduplicated and filtered to avoid looping back to the primary.
-    const chain = [geminiBackup, selectedBackup, canUseFastFallback ? FAST_MODEL : null]
-      .filter((m) => m && m !== selectedPrimary);
+    const chain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
     const result = await tryChain(selectedPrimary, chain);
     return { ...result, ...metrics };
   } catch (primaryErr) {
     let fallbackErr = primaryErr;
-    // On hard error from primary, walk the same chain.
-    const fallbackChain = [geminiBackup, selectedBackup, canUseFastFallback ? FAST_MODEL : null]
-      .filter((m) => m && m !== selectedPrimary);
+    const fallbackChain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
     for (const next of fallbackChain) {
       if (!next || remainingBudgetMs() <= 900) break;
       metrics.fallback_used = true;
@@ -1345,7 +1226,7 @@ async function _callGroqStreamInner(
 
   const effectiveTools = tools
     ? (tools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
-      : tools === CONTENT_ACTION_TOOLS ? CONTENT_ACTION_TOOLS_NULLABLE
+      : tools === STUDIO_TOOLS ? STUDIO_TOOLS_NULLABLE
       : withNullableOptionals(tools))
     : null;
   const body = {
@@ -1502,20 +1383,6 @@ export function parseLlmResponse(data) {
       return [];
     }
 
-    if (tc.function.name === "ask_clarification") {
-      validatedToolCalls.push(toolName);
-      clarifications.push({
-        reason: "",
-        question: parsedArgs.question || "",
-        options: Array.isArray(parsedArgs.choices) ? parsedArgs.choices : [],
-        multi_select: false,
-        ...(Array.isArray(parsedArgs.missing_fields)
-          ? { missing_fields: parsedArgs.missing_fields }
-          : {}),
-      });
-      return [];
-    }
-
     const { issues, missingFields } = validateToolArguments(tc.function.name, parsedArgs);
     if (issues.length > 0) {
       validationWarnings.push({
@@ -1528,7 +1395,7 @@ export function parseLlmResponse(data) {
     }
 
     validatedToolCalls.push(toolName);
-    const actionType = _CONTENT_ACTION_TYPES.has(tc.function.name) ? tc.function.name : (parsedArgs.type || tc.function.name);
+    const actionType = parsedArgs.type || tc.function.name;
     return [{
       type: actionType,
       ...parsedArgs,

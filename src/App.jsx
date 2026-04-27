@@ -583,14 +583,13 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'ask_clarification is ONLY for missing required fields when you are about to call an action tool. For greetings, small talk, or non-action messages, respond naturally — never call ask_clarification.',
-  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Ask clarification only when a missing required field would cause the action to fail or produce wrong output.',
+  clarification: 'If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.',
+  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Only ask for a missing detail when it would cause the action to fail or produce wrong output.',
   action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
-  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
-  content_gen: 'Content-gen requests must return canonical typed actions only.',
+  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
 };
@@ -805,20 +804,14 @@ NOTES: ${noteNames}`;
         POLICY_MODULES.web_refs,
         POLICY_MODULES.conversational_capabilities,
       ]
-    : intentType === 'content_gen'
-      ? [
-          POLICY_MODULES.action_tools,
-          POLICY_MODULES.content_gen,
-          POLICY_MODULES.date_resolution,
-        ]
-      : [
-          POLICY_MODULES.action_tools,
-          POLICY_MODULES.planning_guardrails,
-          POLICY_MODULES.corrections,
-          POLICY_MODULES.web_refs,
-          POLICY_MODULES.date_resolution,
-          POLICY_MODULES.vision,
-        ];
+    : [
+        POLICY_MODULES.action_tools,
+        POLICY_MODULES.planning_guardrails,
+        POLICY_MODULES.corrections,
+        POLICY_MODULES.web_refs,
+        POLICY_MODULES.date_resolution,
+        POLICY_MODULES.vision,
+      ];
   const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 
@@ -5738,21 +5731,28 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Detect content generation requests (for rate limiting + model upgrade)
-    const isContentGen = CONTENT_GEN_REGEX.test(text || '');
+    // Auto-route content generation requests to Studio instead of chat
+    if (CONTENT_GEN_REGEX.test(text || '')) {
+      const redirectMsg = { role: 'assistant', content: "looks like you want study materials — i've opened studio for you! just drop your request there and i'll generate it.", timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, redirectMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', redirectMsg.content, user.id);
+      if (layoutMode === 'lofi') setLofiTutorTabActive(true);
+      else setActivePanel('tutor');
+      setIsLoading(false);
+      return;
+    }
     const isTutorStudyContentRequest = TUTOR_STUDY_REGEX.test(text || '');
     if (isTutorStudyContentRequest) primeTutorSession();
 
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
-      // For content generation: limit to 6 messages to avoid context overflow on Groq.
-      const rawHistory = updated.slice(photo ? -2 : isContentGen ? -6 : -12).map(m => ({
+      const rawHistory = updated.slice(photo ? -2 : -12).map(m => ({
         role: m.role,
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
-      const inferredIntentType = isContentGen ? 'content_gen' : (likelyActionIntent ? 'action' : 'chat');
+      const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
@@ -5765,31 +5765,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const token = session?.data?.session?.access_token;
 
       // Tier routing: pure conversational messages use a lighter system prompt + token budget.
-      // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
-      // conversational replies and tool calling in a single pass. When a message has no action
-      // intent the model simply returns text with no tool_calls (no card shown). This avoids
-      // the bug where phrases like "put in my calendar" were misclassified as conversational
-      // and had tools suppressed, producing a text-only response with no confirmation card.
-      const hasCorrectionSignal = /\b(actually|i meant|wait no|change that|make it|not [a-z]+,|sorry,|oops)\b/i.test(msgContent);
-      const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification && !hasCorrectionSignal
-        && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i.test(msgContent)
-        && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
-        && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
-
-      // Always use the full tier-2 prompt so the AI always has tool definitions.
-      // Tier-1 (conversational) had no tool instructions — casual phrasing like
-      // "yeah next Friday works" would fall through with no action generated.
-      // useStreaming: enabled for pure conversational messages only. The backend streams
-      // text deltas via SSE; tool-call JSON is buffered and sent in the final 'done' event.
-      const useStreaming = isConversational && !photo && !isContentGen;
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : 1024,
-        isContentGen,
+        maxTokens: 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5798,10 +5780,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           intent_type: inferredIntentType,
           tutor_mode: Boolean(tutorMode),
           workspace_context: effectiveWorkspaceContext,
-          use_streaming: useStreaming,
           likely_action_intent: likelyActionIntent,
         },
-        ...(useStreaming ? { streaming: true } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5832,73 +5812,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
       }
 
-      // ── Streaming path ────────────────────────────────────────────────────────────
-      // Consume SSE text deltas in real-time, updating a placeholder message as tokens
-      // arrive. Tool-call JSON is never shown — it arrives only in the final 'done' event.
-      let chatData;
-      if (useStreaming && chatResponse.headers.get('content-type')?.includes('text/event-stream')) {
-        const streamTs = Date.now();
-        // Add an empty placeholder message; spinner is replaced by inline streaming text.
-        setMessages(prev => {
-          const n = [...prev, { role: 'assistant', content: '', timestamp: streamTs, streaming: true }];
-          while (n.length > CHAT_MAX_MESSAGES) n.shift();
-          return n;
-        });
-        setIsLoading(false);
-
-        const reader = chatResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let streamedText = '';
-        let sseBuffer = '';
-        outerStream: while (true) {
-          if (abortSignal.aborted) { try { reader.cancel(); } catch (_) {} break; }
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop();
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            const raw = trimmed.slice(6).trim();
-            if (!raw) continue;
-            let evt;
-            try { evt = JSON.parse(raw); } catch (_) { continue; }
-            if (evt.type === 'text_delta') {
-              streamedText += evt.delta;
-              setMessages(prev => prev.map(m =>
-                m.timestamp === streamTs ? { ...m, content: streamedText } : m
-              ));
-            } else if (evt.type === 'done') {
-              chatData = evt;
-              // Finalise the streaming message content (use server's canonical version)
-              const finalContent = typeof evt.content === 'string' && evt.content.trim()
-                ? evt.content.trim()
-                : streamedText;
-              setMessages(prev => prev.map(m =>
-                m.timestamp === streamTs ? { ...m, content: finalContent, streaming: false } : m
-              ));
-              if (finalContent) {
-                sfx.arrive();
-                if (user) dbInsertChatMsg('assistant', finalContent, user.id);
-                else {
-                  try {
-                    const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
-                    demoChat.push({ role: 'assistant', content: finalContent });
-                    localStorage.setItem('cc_chat', JSON.stringify(demoChat));
-                  } catch (_) {}
-                }
-              }
-              break outerStream;
-            }
-          }
-        }
-        // If no 'done' event arrived, use accumulated text as chatData
-        if (!chatData) chatData = { content: streamedText, actions: [], clarifications: [] };
-      } else {
-        chatData = await chatResponse.json();
-      }
-      // ── End streaming path ────────────────────────────────────────────────────────
+      const chatData = await chatResponse.json();
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
       if (chatData?.model_used) {
@@ -5913,18 +5827,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
 
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
-
-      // ── Intercept propose_action meta-tool calls from the conversational model ──
-      // These are never passed to the main action pipeline — they surface a yes/no card.
-      const proposalAction = actions.find(a => a.type === 'propose_action');
-      if (proposalAction) {
-        actions = actions.filter(a => a.type !== 'propose_action');
-        setPendingProposal({
-          summary: proposalAction.summary || '',
-          action_type: proposalAction.action_type || 'add_event',
-          prefilled: proposalAction.prefilled || {},
-        });
-      }
 
       // Support multiple clarifications (array) or single (object)
       const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
@@ -5971,53 +5873,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         return;
       }
 
-      const validationWarnings = Array.isArray(chatData?.validation_warnings) ? chatData.validation_warnings : [];
-      // Avoid "fan-out" extra AI calls when the model already asked a clarification.
-      // The parser can synthesize clarifications from validation errors; prefer those
-      // instead of issuing another tool_fallback request that may hit multiple models.
-      const shouldRunValidationFallback =
-        validationWarnings.length > 0 &&
-        validClarifications.length === 0 &&
-        actions.length === 0 &&
-        !(typeof chatData?.content === 'string' && chatData.content.trim().length > 0);
-      if (shouldRunValidationFallback) {
-        try {
-          const validationFailures = validationWarnings.map(w => ({
-            action_type: w?.tool || 'unknown_action',
-            category: 'validation_failed',
-            detail: `Validation failed for ${(w?.tool || 'action')}.`,
-            suggestions: (Array.isArray(w?.issues) ? w.issues : []).map(issue => issue?.field).filter(Boolean),
-          }));
-          const fallback = await fetch(EDGE_FN_URL, {
-            method:'POST',
-            headers: {
-              'Content-Type':'application/json',
-              'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
-            },
-            body: JSON.stringify({
-              mode: 'tool_fallback',
-              systemPrompt: promptPayload.prompt,
-              messages: historyForApi,
-              maxTokens: 512,
-              workspaceContext: effectiveWorkspaceContext,
-              tool_failures: validationFailures,
-            }),
-          });
-          if (fallback.ok) {
-            const fallbackData = await fallback.json();
-            const followupText = typeof fallbackData?.content === 'string' ? fallbackData.content.trim() : '';
-            if (followupText) {
-              const assistantMsg = { role:'assistant', content:followupText, timestamp:Date.now() };
-              setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-              if (user) dbInsertChatMsg('assistant', followupText, user.id);
-              return;
-            }
-          }
-        } catch (validationFallbackErr) {
-          console.error('Validation fallback clarification failed:', validationFallbackErr);
-        }
-      }
-
       const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
       const actionAckByType = {
         update_event: 'got it — I can update that event.',
@@ -6040,9 +5895,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             ? "i need one quick detail before i can do that."
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
-      // For streamed responses the message was already inserted + persisted above.
-      // Only insert here for non-streaming paths.
-      if (displayContent && !useStreaming) {
+      if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
         sfx.arrive();
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -6056,31 +5909,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             localStorage.setItem('cc_chat', JSON.stringify(demoChat));
           } catch (_) {}
         }
-      }
-
-      // Actions come back as structured tool_use results — no text parsing needed
-
-      async function requestToolFailureFollowup(toolFailures) {
-        const fallbackResponse = await fetch(EDGE_FN_URL, {
-          method:'POST',
-          headers: {
-            'Content-Type':'application/json',
-            'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
-          },
-          body: JSON.stringify({
-            mode: 'tool_fallback',
-            systemPrompt: promptPayload.prompt,
-            messages: historyForApi,
-            maxTokens: 512,
-            workspaceContext: effectiveWorkspaceContext,
-            tool_failures: toolFailures,
-          }),
-        });
-        if (!fallbackResponse.ok) {
-          const errData = await fallbackResponse.json().catch(() => ({}));
-          throw new Error(errData?.error || `tool fallback failed (${fallbackResponse.status})`);
-        }
-        return fallbackResponse.json();
       }
 
       function buildResolutionFailure(actionType, detail, candidates = []) {
@@ -6189,41 +6017,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (resolutionFailures.length > 0) {
-        try {
-          const fallback = await requestToolFailureFollowup(resolutionFailures);
-          const followupText = typeof fallback?.content === 'string' ? fallback.content.trim() : '';
-          if (followupText) {
-            const msg = { role:'assistant', content: followupText, timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-            if (user) dbInsertChatMsg('assistant', followupText, user.id);
-          }
-        } catch (fallbackErr) {
-          console.error('Tool fallback clarification failed:', fallbackErr);
-          const fallbackMsg = { role:'assistant', content:"I couldn't match part of that action. can you share the exact item name and date/time?", timestamp:Date.now() };
-          setMessages(prev => { const n=[...prev,fallbackMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', fallbackMsg.content, user.id);
-        }
+        const fallbackMsg = { role:'assistant', content:"I couldn't match part of that action — can you share the exact item name and date/time?", timestamp:Date.now() };
+        setMessages(prev => { const n=[...prev,fallbackMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', fallbackMsg.content, user.id);
       }
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
-        const rawContentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
-        const contentActions = rawContentActions.filter(isValidContentAction);
-        const droppedContentActions = rawContentActions.filter(a => !isValidContentAction(a));
-        if (droppedContentActions.length > 0) {
-          console.warn('Dropped invalid content payload(s) from server actions[] response.');
-          droppedContentActions.forEach(a => {
-            const label = a.type?.replace('create_','').replace('make_','') || 'content';
-            const errMsg = { role:'assistant', content:`couldn't generate ${label} — the response was incomplete. try rephrasing your request.`, timestamp:Date.now(), isValidationError: true };
-            setMessages(prev => { const n=[...prev,errMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          });
-        }
-        const tutorContentActions = contentActions.filter(a => a.type === 'create_flashcards' || a.type === 'create_quiz');
-        if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
-        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
+        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type));
         autoExec.forEach(queueOrExecute);
-        if (contentActions.length > 0 && !blockExecution) setPendingContent(prev => [...prev, ...contentActions]);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
           if (aiAutoApprove && !blockExecution) {
