@@ -102,10 +102,17 @@ export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSav
         onDragStart={() => { dragWidgetRef.current = id; }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => reorderByDrag(dragWidgetRef.current, id)}
+        title="Drag to reorder"
       >
         <div className="study-widget-head">
           <span>{title}</span>
-          <span style={{ opacity: 0.65, cursor: 'grab' }}>⋮⋮</span>
+          <span
+            className="study-widget-grip"
+            aria-hidden="true"
+            title="Drag to reorder this widget"
+          >
+            ⠿
+          </span>
         </div>
         {children}
       </div>

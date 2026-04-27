@@ -556,7 +556,7 @@ async function migrateLocalStorage(userId) {
     }
 
     localStorage.setItem('sos_migrated_' + userId, 'true');
-    console.log('Migration complete');
+    if (import.meta.env.DEV) console.log('Migration complete');
     return true;
   } catch (e) {
     console.error('Migration error:', e);
@@ -1538,7 +1538,7 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim() || !!answer.dateValue || !!answer.subjectValue;
 
   return (
-    <div style={{
+    <div className="sos-clarification-card" role="dialog" aria-label="A few quick details" style={{
       background:'rgba(22,22,36,0.98)',
       border:'1px solid rgba(255,255,255,0.08)',
       borderRadius:18,
@@ -3502,6 +3502,80 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
 }
 
 /* ═══════════════════════════════════════════════
+   GLOBAL SEARCH MODAL (Cmd+K)
+   ═══════════════════════════════════════════════ */
+function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, onSelectNote, onSendMessage }) {
+  const inputRef = React.useRef(null);
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const q = query.trim().toLowerCase();
+  const results = React.useMemo(() => {
+    if (!q) return [];
+    const out = [];
+    tasks.forEach(t => {
+      if (t.title?.toLowerCase().includes(q) || t.subject?.toLowerCase().includes(q)) {
+        out.push({ kind: 'task', id: t.id, label: t.title, sub: t.dueDate ? `Due ${t.dueDate}` : t.subject || 'Task', obj: t });
+      }
+    });
+    events.forEach(ev => {
+      if (ev.title?.toLowerCase().includes(q)) {
+        out.push({ kind: 'event', id: ev.id, label: ev.title, sub: ev.date || 'Event', obj: ev });
+      }
+    });
+    notes.forEach(n => {
+      const plain = (n.content || '').replace(/<[^>]+>/g, '');
+      if (n.name?.toLowerCase().includes(q) || plain.toLowerCase().includes(q)) {
+        const idx = plain.toLowerCase().indexOf(q);
+        const snippet = idx >= 0 ? '…' + plain.slice(Math.max(0, idx - 20), idx + 60) + '…' : plain.slice(0, 80);
+        out.push({ kind: 'note', id: n.id, label: n.name || 'Untitled', sub: snippet, obj: n });
+      }
+    });
+    return out.slice(0, 12);
+  }, [q, tasks, events, notes]);
+
+  const kindIcon = { task: '☑', event: '📅', note: '📝' };
+
+  function handleSelect(r) {
+    if (r.kind === 'note') onSelectNote(r.obj);
+    else onSendMessage(`Tell me about "${r.label}"`);
+  }
+
+  return (
+    <div className="gsearch-overlay" onClick={onClose}>
+      <div className="gsearch-modal" onClick={e => e.stopPropagation()} role="dialog" aria-label="Search">
+        <div className="gsearch-input-wrap">
+          <span className="gsearch-icon">⌘K</span>
+          <input
+            ref={inputRef}
+            className="gsearch-input"
+            value={query}
+            onChange={e => onQueryChange(e.target.value)}
+            placeholder="Search tasks, events, notes…"
+            onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+          />
+          {query && <button className="gsearch-clear" onClick={() => onQueryChange('')}>×</button>}
+        </div>
+        {results.length > 0 ? (
+          <div className="gsearch-results">
+            {results.map(r => (
+              <button key={r.kind + r.id} className="gsearch-result" onClick={() => handleSelect(r)}>
+                <span className="gsearch-kind">{kindIcon[r.kind]}</span>
+                <span className="gsearch-result-label">{r.label}</span>
+                <span className="gsearch-result-sub">{r.sub}</span>
+              </button>
+            ))}
+          </div>
+        ) : q ? (
+          <div className="gsearch-empty">No matches for "{query}"</div>
+        ) : (
+          <div className="gsearch-empty">Start typing to search tasks, events, and notes</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
 function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
@@ -4128,6 +4202,12 @@ function App() {
   const [pendingQueue, setPendingQueue] = useState([]); // [{ id, action, addedAt }]
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+  // Undo toast: shown for 8s after a destructive/mutating AI action
+  const [undoToast, setUndoToast] = useState(null); // { label, snap: {tasks, events, notes, blocks} }
+  const undoTimerRef = useRef(null);
+  // AbortController for the in-flight chat request; aborted on new send, new chat, layout switch, or unmount
+  const streamAbortRef = useRef(null);
+  useEffect(() => () => { try { streamAbortRef.current?.abort(); } catch (_) {} }, []);
 
   // Drain the pending action queue when RPM frees up
   useEffect(() => {
@@ -4179,6 +4259,8 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -4305,6 +4387,44 @@ function App() {
       }
     });
     return () => subscription.unsubscribe();
+  }, [user]);
+
+  // ── Realtime multi-device sync ──
+  // When another device inserts/updates/deletes a task, event, or note the change
+  // is pushed here via Supabase's postgres_changes channel so the UI stays in sync
+  // without a manual reload.
+  useEffect(() => {
+    if (!user) return;
+    const channel = sb.channel('sos-user-data-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const t = { id: row.id, title: row.title, subject: row.subject || '', dueDate: row.due_date || '', estTime: row.est_time || 30, status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0, createdAt: row.created_at };
+          setTasks(prev => { const idx = prev.findIndex(x => x.id === t.id); return idx >= 0 ? prev.map((x, i) => i === idx ? t : x) : [...prev, t]; });
+        } else if (payload.eventType === 'DELETE') {
+          setTasks(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const ev = { id: row.id, title: row.title, date: row.event_date || row.start_date || '', start_time: row.start_time || '', end_time: row.end_time || '', type: row.type || 'event', subject: row.subject || '' };
+          setEvents(prev => { const idx = prev.findIndex(x => x.id === ev.id); return idx >= 0 ? prev.map((x, i) => i === idx ? ev : x) : [...prev, ev]; });
+        } else if (payload.eventType === 'DELETE') {
+          setEvents(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${user.id}` }, payload => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const row = payload.new;
+          const n = { id: row.id, name: row.tab_name || row.name || 'Untitled', content: row.content || '', updatedAt: row.updated_at || row.created_at };
+          setNotes(prev => { const idx = prev.findIndex(x => x.id === n.id); return idx >= 0 ? prev.map((x, i) => i === idx ? n : x) : [...prev, n]; });
+        } else if (payload.eventType === 'DELETE') {
+          setNotes(prev => prev.filter(x => x.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
   }, [user]);
 
   // ── Google OAuth initialization ──
@@ -4438,9 +4558,62 @@ function App() {
   }
 
   // ── Sync helper: wraps a DB write with sync status ──
-  async function syncOp(fn) {
+  async function syncOp(fn, label = '') {
     setSyncStatus('saving');
-    try { await fn(); setSyncStatus('saved'); } catch(e) { console.error('Sync error:', e); setSyncStatus('error'); }
+    try {
+      await fn();
+      setSyncStatus('saved');
+    } catch (e) {
+      console.error('Sync error:', e);
+      setSyncStatus('error');
+      // Surface a single soft error in the chat so the student knows persistence failed.
+      // We do not rollback the local state — a subsequent save attempt (or a reload
+      // after reconnecting) will resync. Debouncing prevents a flood of toasts.
+      const now = Date.now();
+      if (!syncOp._lastErrorAt || now - syncOp._lastErrorAt > 8000) {
+        syncOp._lastErrorAt = now;
+        const suffix = label ? ` while saving ${label}` : '';
+        setMessages(prev => {
+          const n = [...prev, {
+            role: 'assistant',
+            content: `I ran into trouble syncing${suffix} — your changes are still on this device, and I'll retry when the connection settles.`,
+            timestamp: now,
+            system: true,
+          }];
+          while (n.length > CHAT_MAX_MESSAGES) n.shift();
+          return n;
+        });
+      }
+    }
+  }
+
+  // Posts an assistant-side system note into the chat (used when an action
+  // can't complete and the student needs to know why).
+  function postAssistantNote(text) {
+    if (!text) return;
+    setMessages(prev => {
+      const n = [...prev, { role: 'assistant', content: text, timestamp: Date.now() }];
+      while (n.length > CHAT_MAX_MESSAGES) n.shift();
+      return n;
+    });
+  }
+
+  function pushUndoToast(label, snap) {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoToast({ label, snap });
+    undoTimerRef.current = setTimeout(() => setUndoToast(null), 8000);
+  }
+
+  function doUndo() {
+    if (!undoToast) return;
+    const { snap } = undoToast;
+    setTasks(snap.tasks);
+    setEvents(snap.events);
+    setNotes(snap.notes);
+    setBlocks(snap.blocks);
+    setUndoToast(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    postAssistantNote("Done — I've undone that action.");
   }
 
   // ── Update a single task and sync ──
@@ -4464,11 +4637,23 @@ function App() {
         entry,
       ].slice(-10);
     }
+    // Snapshot state before any mutation so the user can undo within 8 seconds
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
     try {
       switch (action.type) {
         case 'add_task': {
           const rawDue = action.due_date || action.due || today();
-          const normalizedDue = (() => { try { return toDateStr(new Date(rawDue + 'T12:00:00')); } catch(_) { return today(); } })();
+          // Detect unparseable dates ("next purple") up front so we can tell the user
+          // what happened instead of silently pinning the task to today.
+          let dateParsedOk = true;
+          const normalizedDue = (() => {
+            const d = new Date(rawDue + 'T12:00:00');
+            if (isNaN(d.getTime())) { dateParsedOk = false; return today(); }
+            try { return toDateStr(d); } catch (_) { dateParsedOk = false; return today(); }
+          })();
+          if (!dateParsedOk && rawDue && rawDue !== today()) {
+            setTimeout(() => postAssistantNote(`I couldn't read "${rawDue}" as a date, so I set the task for today — you can say "set the due date for ${action.task_name || action.title || 'that task'} to [date]" to change it.`), 400);
+          }
           // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
           const todayVal = today();
           let finalDue = normalizedDue;
@@ -4509,29 +4694,60 @@ function App() {
           if (user) syncOp(() => dbUpsertTask(task, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_task' });
           recordExecution('add_task', `"${task.title}" due ${task.dueDate}`);
+          pushUndoToast(`Undo: added "${task.title}"`, undoSnap);
           break;
         }
-        case 'complete_task':
-          if (action.task_id) {
-            updateTask(action.task_id, { status:'done', completedAt:new Date().toISOString() });
-            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(action.task_id); return n; });
-            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(action.task_id); return n; }), 900);
-            recordExecution('complete_task', `task id ${action.task_id}`);
+        case 'complete_task': {
+          const target = action.task_id
+            ? tasks.find(t => t.id === action.task_id)
+            : (action.title ? resolveTask(action.title, tasks) : null);
+          if (!target) {
+            postAssistantNote("I couldn't find that task to mark complete — the name didn't match anything on your list. Want me to show what's there?");
+            break;
           }
+          updateTask(target.id, { status:'done', completedAt:new Date().toISOString() });
+          setRecentlyCompleted(prev => { const n = new Set(prev); n.add(target.id); return n; });
+          setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(target.id); return n; }), 900);
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
+          recordExecution('complete_task', `"${target.title}"`);
+          pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
           break;
-        case 'update_task':
-          if (action.task_id) {
-            const upd = {};
-            if (action.title) upd.title = action.title;
-            if (action.due) upd.dueDate = action.due;
-            if (action.estimated_minutes) upd.estTime = action.estimated_minutes;
-            updateTask(action.task_id, upd);
+        }
+        case 'update_task': {
+          const target = action.task_id
+            ? tasks.find(t => t.id === action.task_id)
+            : (action.title ? resolveTask(action.title, tasks) : null);
+          if (!target) {
+            postAssistantNote("I couldn't find that task to update — could you name it exactly as it appears on your list?");
+            break;
           }
+          const upd = {};
+          if (action.new_title || action.title) upd.title = action.new_title || (action.task_id ? action.title : target.title);
+          if (action.due) {
+            const d = new Date(action.due + 'T12:00:00');
+            if (isNaN(d.getTime())) {
+              postAssistantNote(`I couldn't read "${action.due}" as a date, so I kept the current due date. Say something like "set the due date for ${target.title} to next Monday" to change it.`);
+            } else {
+              upd.dueDate = toDateStr(d);
+            }
+          }
+          if (action.estimated_minutes) upd.estTime = action.estimated_minutes;
+          if (Object.keys(upd).length > 0) updateTask(target.id, upd);
           break;
+        }
         case 'add_block': {
           const date = action.date || today();
-          const [sh,sm] = (action.start||'00:00').split(':').map(Number);
-          const [eh,em] = (action.end||'01:00').split(':').map(Number);
+          const hmOk = (t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(t || '').trim());
+          if (!hmOk(action.start) || !hmOk(action.end)) {
+            postAssistantNote(`I need a valid start and end time (like 15:00 to 17:00) to add that block — could you restate the times?`);
+            break;
+          }
+          const [sh,sm] = action.start.split(':').map(Number);
+          const [eh,em] = action.end.split(':').map(Number);
+          if (eh < sh || (eh === sh && em <= sm)) {
+            postAssistantNote(`The end time needs to be after the start time. Want to try again?`);
+            break;
+          }
           const slotOps = [];
           setBlocks(prev => {
             const newDates = { ...(prev.dates||{}) };
@@ -4578,6 +4794,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
+          pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -4601,7 +4818,9 @@ function App() {
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
             return [...prev, newNote];
           });
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
           recordExecution('add_note', `note "${tabName}"`);
+          pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
           break;
         }
         case 'edit_note': {
@@ -4630,30 +4849,40 @@ function App() {
           break;
         }
         case 'delete_task': {
-          setTasks(prev => {
-            const match = resolveTask(action.title || action.task_id, prev);
-            if (!match) return prev;
-            if (user) syncOp(() => dbDeleteTask(match.id, user.id));
-            return prev.filter(t => t.id !== match.id);
-          });
+          const match = resolveTask(action.title || action.task_id, tasks);
+          if (!match) {
+            postAssistantNote(`I couldn't find a task called "${action.title || action.task_id || 'that'}" to delete. It may already be gone.`);
+            break;
+          }
+          setTasks(prev => prev.filter(t => t.id !== match.id));
+          if (user) syncOp(() => dbDeleteTask(match.id, user.id), 'the task');
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'delete_task' });
+          recordExecution('delete_task', `"${match.title}"`);
+          pushUndoToast(`Undo: deleted "${match.title}"`, undoSnap);
           break;
         }
         case 'delete_event': {
-          setEvents(prev => {
-            const match = resolveEvent(action.title || action.event_id, prev);
-            if (!match) return prev;
-            if (user) syncOp(() => dbDeleteEvent(match.id, user.id));
-            if (match.googleId && isGoogleConnected() && calSyncEnabled) {
-              deleteEventFromGoogle(match.googleId, googleToken);
-            }
-            return prev.filter(ev => ev.id !== match.id);
-          });
+          const match = resolveEvent(action.title || action.event_id, events);
+          if (!match) {
+            postAssistantNote(`I couldn't find an event called "${action.title || action.event_id || 'that'}" to remove.`);
+            break;
+          }
+          setEvents(prev => prev.filter(ev => ev.id !== match.id));
+          if (user) syncOp(() => dbDeleteEvent(match.id, user.id), 'the event');
+          if (match.googleId && isGoogleConnected() && calSyncEnabled) {
+            deleteEventFromGoogle(match.googleId, googleToken);
+          }
+          recordExecution('delete_event', `"${match.title}"`);
+          pushUndoToast(`Undo: removed "${match.title}"`, undoSnap);
           break;
         }
         case 'update_event': {
+          const match = resolveEvent(action.title || action.event_id, events);
+          if (!match) {
+            postAssistantNote(`I couldn't find "${action.title || action.event_id || 'that event'}" to update. Could you tell me the exact title?`);
+            break;
+          }
           setEvents(prev => {
-            const match = resolveEvent(action.title || action.event_id, prev);
-            if (!match) return prev;
             const next = prev.map(ev => ev.id === match.id ? {
               ...ev,
               ...(action.new_title && { title: action.new_title }),
@@ -4662,12 +4891,14 @@ function App() {
               ...(action.subject !== undefined && { subject: action.subject })
             } : ev);
             const updated = next.find(ev => ev.id === match.id);
-            if (updated && user) syncOp(() => dbUpsertEvent(updated, user.id));
+            if (updated && user) syncOp(() => dbUpsertEvent(updated, user.id), 'the event');
             if (updated && updated.googleId && isGoogleConnected() && calSyncEnabled) {
               pushEventToGoogle(updated, googleToken);
             }
             return next;
           });
+          recordExecution('update_event', `"${match.title}"`);
+          pushUndoToast(`Undo: updated "${match.title}"`, undoSnap);
           break;
         }
         case 'delete_block':
@@ -4805,6 +5036,12 @@ function App() {
           break;
         }
         case 'clear_all':
+          // Defensive guard: clear_all is destructive. We require an explicit confirm=true
+          // from the model AND route through a proposal card so the student gets one more chance.
+          if (action.confirm !== true) {
+            postAssistantNote("To wipe everything I'll need you to say it plainly — e.g. 'yes, clear all my tasks, events, and blocks'.");
+            break;
+          }
           setTasks([]);
           setEvents([]);
           setBlocks({ dates:{} });
@@ -4813,8 +5050,10 @@ function App() {
               sb.from('tasks').delete().eq('user_id', user.id),
               sb.from('events').delete().eq('user_id', user.id),
               sb.from('date_blocks').delete().eq('user_id', user.id)
-            ]));
+            ]), 'your cleared data');
           }
+          recordExecution('clear_all', 'all data wiped');
+          pushUndoToast('Undo: clear all data', undoSnap);
           break;
         case 'web_search_reference': {
           const query = String(action.query || '').trim();
@@ -5432,6 +5671,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if ((!text?.trim() && !photo) || isLoading) return;
     if (!fromClarification) { autoConfirmPending(); setPendingProposal(null); }
     setChatError(null);
+    // Abort any in-flight request before starting a new one so the old stream
+    // can't keep writing into messages state after we've moved on.
+    try { streamAbortRef.current?.abort(); } catch (_) {}
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+    const abortSignal = abortController.signal;
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
     const msgContent = text?.trim() || '';
@@ -5569,7 +5814,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           'Content-Type':'application/json',
           'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
         },
-        body: JSON.stringify(chatBody)
+        body: JSON.stringify(chatBody),
+        signal: abortSignal,
       });
 
       if (!chatResponse.ok) {
@@ -5605,6 +5851,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         let streamedText = '';
         let sseBuffer = '';
         outerStream: while (true) {
+          if (abortSignal.aborted) { try { reader.cancel(); } catch (_) {} break; }
           const { done, value } = await reader.read();
           if (done) break;
           sseBuffer += decoder.decode(value, { stream: true });
@@ -5929,7 +6176,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         if (a.type === 'add_event') {
           const dupTitle = (a.title||'').toLowerCase();
           const dupDate = a.date || today();
-          if (events.some(ev => ev.title.toLowerCase() === dupTitle && ev.date === dupDate)) continue;
+          // Including time in the dedupe key so that two events legitimately scheduled
+          // on the same day at different times (e.g. two study sessions) can both exist.
+          // A truly-duplicate add (same title, same date, same time — or both all-day) is still filtered.
+          const dupTime = a.time ? String(a.time).trim() : '';
+          if (events.some(ev => ev.title.toLowerCase() === dupTitle
+              && ev.date === dupDate
+              && String(ev.time || '').trim() === dupTime)) continue;
         }
         resolved.push(a);
       }
@@ -5999,11 +6252,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // We intentionally keep the initial conversational reply above even if action resolution fails.
       // Resolution errors are surfaced as follow-up assistant messages.
     } catch(err) {
+      // User-initiated cancel (new chat, layout switch, unmount, subsequent send): silent.
+      if (err?.name === 'AbortError' || abortSignal.aborted) {
+        return;
+      }
       console.error('Chat error:', err);
       const raw = err.message || '';
       let friendlyMsg;
       if (raw.includes('500') || raw.includes('Internal') || raw.includes('timed out')) {
         friendlyMsg = "the AI service is temporarily unavailable — please try again in a moment.";
+      } else if (raw.includes('429') || raw.includes('rate limit')) {
+        friendlyMsg = "we're moving fast — give me a few seconds and try again.";
       } else if (raw.includes('503') || raw.includes('overloaded')) {
         friendlyMsg = "the AI is a bit overloaded right now — wait a few seconds and try again.";
       } else if (raw.includes('401') || raw.includes('403')) {
@@ -6011,7 +6270,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       } else if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('network')) {
         friendlyMsg = "couldn't reach the server — check your connection and try again.";
       } else {
-        friendlyMsg = raw || "Hmm, that hiccuped — want to try again?";
+        // Never leak raw provider JSON / stack traces to the student. If the message
+        // looks structured (JSON-ish, very long, or obviously a provider error) suppress it.
+        const looksLikeProviderError = raw.length > 120 || /[{}\[\]"]/.test(raw) || /Groq|Gemini|openai|tool_use_failed/i.test(raw);
+        friendlyMsg = looksLikeProviderError ? "hmm, something hiccuped — want to try again?" : (raw || "hmm, that hiccuped — want to try again?");
       }
       setChatError(friendlyMsg);
     } finally { setIsLoading(false); }
@@ -6021,19 +6283,27 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (!pendingClarification) return;
     // payload is either a single object { selected, options, otherText } or an array of them
     const payloads = Array.isArray(payload) ? payload : [payload];
-    const responseParts = payloads.map(p => {
+    const perAnswer = payloads.map(p => {
       const selectedOptions = (p?.selected || []).map(id => (p?.options || []).find(o => o.id === id)).filter(Boolean);
       const selectedLabels = selectedOptions.map(o => o.label);
       const otherTxt = p?.otherText?.trim() || '';
       const parts = [];
       if (selectedLabels.length > 0) parts.push(selectedLabels.join(', '));
       if (otherTxt) parts.push(otherTxt);
-      const answer = parts.join(' — ') || '';
-      // Include the question for context if multi-question
-      if (payloads.length > 1 && p?.question) return `${p.question}: ${answer}`;
-      return answer;
-    }).filter(Boolean);
-    const readableResponse = responseParts.join('\n') || 'No selection';
+      return { question: p?.question || '', answer: parts.join(' — ') };
+    });
+    // Submitting with every answer blank would previously send the literal
+    // string "No selection", which the AI misread as a real answer. Block it.
+    const hasAny = perAnswer.some(a => a.answer.length > 0);
+    if (!hasAny) {
+      setChatError("Please answer at least one question before submitting.");
+      setTimeout(() => setChatError(null), 4000);
+      return;
+    }
+    const responseParts = perAnswer
+      .filter(a => a.answer.length > 0)
+      .map(a => (perAnswer.length > 1 && a.question) ? `${a.question}: ${a.answer}` : a.answer);
+    const readableResponse = responseParts.join('\n');
     setPendingClarification(null);
     setPendingClarificationAnswers(null);
     sendMessage(readableResponse, { fromClarification: true });
@@ -6314,7 +6584,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     // Fallback: use browser SpeechRecognition transcript collected during recording
     if (!transcript) {
       transcript = (speechTranscriptRef.current || '').trim();
-      if (transcript) console.log('Using browser SpeechRecognition fallback');
+      if (transcript && import.meta.env.DEV) console.log('Using browser SpeechRecognition fallback');
     }
     speechTranscriptRef.current = '';
 
@@ -6332,8 +6602,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
 
   function clearChat() {
+    // Cancel any in-flight AI request so its response can't land in the cleared chat.
+    try { streamAbortRef.current?.abort(); } catch (_) {}
+    setIsLoading(false);
     setMessages([]); setPendingActions([]); setPendingClarification(null); setPendingClarificationAnswers(null); setChatError(null);
+    setPendingProposal(null);
     setViewingSavedChatId(null);
+    // Recently-executed actions are part of the prior conversation's context.
+    // Leaving them pinned would confuse the AI in a fresh chat (it would think
+    // actions "just happened" when the user has started over).
+    recentlyExecutedActionsRef.current = [];
     if (user) dbClearChat(user.id);
   }
 
@@ -6384,6 +6662,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   // ── Keyboard shortcuts ──
   useEffect(()=>{
     function handleKey(e){
+      // Cmd+K / Ctrl+K — global search (works even inside inputs)
+      if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){
+        e.preventDefault();
+        setGlobalSearchQuery('');
+        setShowGlobalSearch(p=>!p);
+        return;
+      }
       const tag=document.activeElement?.tagName?.toLowerCase();
       if(tag==='input'||tag==='textarea'||tag==='select')return;
       const key=e.key.toLowerCase();
@@ -6403,10 +6688,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         }
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,activePanel,layoutMode,openCompanionPanel]);
+  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel,layoutMode,openCompanionPanel]);
 
   function toggleTutorMode(nextValue) {
     setTutorMode(nextValue);
@@ -6415,6 +6700,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function enterTutorMode() {
     toggleTutorMode(true);
+    if (user) trackEvent(user.id, 'tutor_entered', { layout: layoutMode });
     if (layoutMode === 'lofi') {
       setLofiTutorTabActive(true);
       const msg = { role: 'assistant', content: '✨ Tutor Mode Activated — I\'ll guide you step by step. Ask me anything!', timestamp: Date.now() };
@@ -6756,6 +7042,38 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 </div>
                 <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
               </div>
+              {'Notification' in window && Notification.permission !== 'denied' && (
+                <div className="settings-row">
+                  <div>
+                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Test notification</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Send a test browser notification to confirm everything is working.</div>
+                  </div>
+                  <button className="settings-toggle" onClick={async () => {
+                    if (Notification.permission !== 'granted') {
+                      const perm = await Notification.requestPermission();
+                      if (perm !== 'granted') return;
+                    }
+                    scheduleNotificationsToSW([{ title: '✅ SOS Notifications', body: 'Reminders are working!', fireAt: Date.now() + 1000, tag: 'sos-test' }]);
+                    setToastMsg('Test notification sent — check your browser');
+                  }}>Test</button>
+                </div>
+              )}
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Export data</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Download all your tasks, events, and notes as a JSON file.</div>
+                </div>
+                <button className="settings-toggle" onClick={() => {
+                  const payload = { exportedAt: new Date().toISOString(), tasks, events, notes };
+                  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `sos-export-${new Date().toISOString().slice(0,10)}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}>Export</button>
+              </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Replay intro</div>
@@ -6795,6 +7113,28 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           >
             <img src="/brain-logo.svg" alt="SOS" />
           </button>
+          {messages.length === 0 && !pendingClarification && !pendingProposal && !isLoading && (
+            <div className="sos-empty-suggestions" role="group" aria-label="Try one of these">
+              <div className="sos-empty-suggestions-title">Try one of these to get started</div>
+              <div className="sos-empty-suggestions-grid">
+                {[
+                  'Add a task: physics problem set due Friday',
+                  "What's on my schedule this week?",
+                  'Make a new note for history lecture',
+                  'Block 3-5pm tomorrow for studying',
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="sos-empty-suggestion"
+                    onClick={() => sendMessage(prompt)}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {messages.map((msg,i)=>(
           <React.Fragment key={i}>
             {/* P1.4: "Earlier in conversation" separator */}
@@ -6975,6 +7315,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 <button onClick={startNewChat} style={{background:'transparent',border:'1px solid rgba(255,159,67,0.3)',borderRadius:8,color:'var(--warning)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Start fresh</button>
               </div>
             )}
+            {undoToast && (
+              <div className="sos-undo-toast">
+                <span>{undoToast.label}</span>
+                <button onClick={doUndo}>Undo</button>
+                <button onClick={() => { setUndoToast(null); if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }} aria-label="Dismiss">×</button>
+              </div>
+            )}
             {pasteStudyPrompt && (
               <div style={{marginBottom:8,padding:'8px 12px',background:'rgba(134,239,172,0.07)',border:'1px solid rgba(134,239,172,0.2)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,animation:'fadeIn .2s ease',fontSize:'0.80rem',color:'var(--text-dim)'}}>
                 <span>Looks like you pasted a lot of text — want me to make study materials?</span>
@@ -7031,6 +7378,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               />
               <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1,boxShadow:'0 2px 12px rgba(245,158,11,0.3)'}}>{Icon.send(18)}</button>
             </form>
+            {input.length > 0 && !isLoading && (
+              <div className="sos-enter-hint">Enter to send · Shift+Enter for new line</div>
+            )}
             </div>
           </>
         )}
@@ -7092,6 +7442,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       />}
       {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showGlobalSearch && <GlobalSearchModal
+        query={globalSearchQuery}
+        onQueryChange={setGlobalSearchQuery}
+        onClose={() => setShowGlobalSearch(false)}
+        tasks={tasks}
+        events={events}
+        notes={notes}
+        onSelectNote={note => { setShowGlobalSearch(false); setShowNotes(true); }}
+        onSendMessage={q => { setShowGlobalSearch(false); sendMessage(q); }}
+      />}
       {authNudge&&(
         <div style={{position:'fixed',top:54,right:12,zIndex:300,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'9px 13px',fontSize:'0.8rem',color:'var(--text)',display:'flex',alignItems:'center',gap:8,boxShadow:'0 4px 20px rgba(0,0,0,0.5)',animation:'fadeIn .2s ease'}}>
           <span>Sign in to save notes across sessions →</span>
@@ -7152,7 +7512,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         />
       )}
       {showOnboarding && <FirstRunModal
-        onClose={()=>setShowOnboarding(false)}
+        onClose={()=>{
+          setShowOnboarding(false);
+          try { localStorage.setItem('sos_onboarded', '1'); } catch(_) {}
+        }}
         onConnectGoogle={()=>{connectGoogle();}}
         onSwitchLofi={()=>setLayoutMode('lofi')}
       />}
