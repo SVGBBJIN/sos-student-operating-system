@@ -865,8 +865,9 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
-const CONTENT_GEN_REGEX = /flashcards?|outline|summar|study\s*plan|study\s*guide|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 const TUTOR_STUDY_REGEX = /flashcards?|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?/i;
 
 function isStringArray(value, min = 0) {
@@ -884,8 +885,6 @@ function isValidContentAction(action) {
       return Array.isArray(action.sections) && action.sections.length > 0 && action.sections.every(s => typeof s?.heading === 'string' && isStringArray(s?.points, 1));
     case 'create_summary':
       return isStringArray(action.bullets, 1);
-    case 'create_study_plan':
-      return Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.step === 'string');
     case 'create_project_breakdown':
       return Array.isArray(action.phases) && action.phases.length > 0 && action.phases.every(p => typeof p?.phase === 'string' && isStringArray(p?.tasks, 1));
     case 'make_plan':
@@ -1523,7 +1522,7 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const inputType = (c?.inputType || c?.input_type || '').toLowerCase();
   const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
   const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
-  const subjectOptions = ['Math', 'English', 'Science', 'History', 'Language', 'Computer Science', 'Other'];
+  const subjectOptions = ['Mathematics', 'English', 'Biology', 'Chemistry', 'Physics', 'History', 'Language Arts', 'Spanish', 'French', 'Economics', 'Psychology', 'Government', 'Computer Science', 'Calculus', 'Literature', 'Physical Education', 'Other'];
   const normalizedOptions = options.map(normalizeOption).filter(
     opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
   );
@@ -1597,6 +1596,25 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
           >×</button>
         </div>
       </div>
+
+      {/* Suggested defaults — one-click accept */}
+      {c?.suggested_defaults && Object.keys(c.suggested_defaults).length > 0 && (
+        <div style={{padding:'8px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', display:'flex', flexWrap:'wrap', gap:6, alignItems:'center'}}>
+          <span style={{fontSize:'0.72rem', color:'var(--text-dim)', marginRight:2}}>suggested:</span>
+          {Object.entries(c.suggested_defaults).map(([field, val]) => (
+            <button key={field} onClick={() => {
+              setOtherText(currentQIdx, String(val));
+              advance();
+            }} style={{
+              background:'rgba(43,203,186,0.1)', border:'1px solid rgba(43,203,186,0.25)',
+              borderRadius:20, padding:'3px 10px', fontSize:'0.74rem', fontWeight:600,
+              color:'var(--teal)', cursor:'pointer',
+            }}>
+              {field}: {String(val)} ↵
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Options */}
       {normalizedOptions.length > 0 && (
@@ -2205,8 +2223,6 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
           return (data.bullets||[]).map(b => ({ type:'bullet', text:b }));
         case 'create_outline':
           return (data.sections||[]).flatMap(s => [{ type:'heading', text: s.heading }, ...(s.points||[]).map(p => ({ type:'point', text: p }))]);
-        case 'create_study_plan':
-          return (data.steps||[]).map((s,i) => ({ type:'step', num:i+1, text:s.step, meta:(s.time_minutes||20)+'min'+(s.day?' · '+s.day:'') }));
         case 'create_project_breakdown':
           return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
         default: return [{ type:'bullet', text:'(content generated)' }];
@@ -2406,13 +2422,21 @@ function PlanTemplateSelector({ onSelectTemplate, onCustomPlan, onDismiss }) {
 
 function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogleDocs, googleConnected }) {
   const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
-  const [mode, setMode] = useState('breakdown');
+  const [mode, setMode] = useState(data._propose_mode ? 'propose' : 'breakdown');
+  const [editSteps, setEditSteps] = useState(() => (data.steps||[]).map(s => ({...s})));
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [critiqueOpen, setCritiqueOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [docSyncing, setDocSyncing] = useState(false);
-  const steps = data.steps || [];
+  const rawSteps = data.steps || [];
+  const steps = mode === 'breakdown' && data._propose_mode ? editSteps : rawSteps;
   const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
   const checkedCount = checked.filter(Boolean).length;
+
+  function updateEditStep(idx, field, value) {
+    setEditSteps(prev => prev.map((s, i) => i === idx ? {...s, [field]: value} : s));
+  }
 
   function startTask(i) {
     if (!steps[i]) return;
@@ -2491,8 +2515,51 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
         </div>
       )}
 
-      {/* Mode Toggle */}
+      {/* Propose mode: critique + accept/edit/reject */}
+      {mode === 'propose' && (
+        <>
+          {data._critique && (
+            <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+              <button onClick={() => setCritiqueOpen(o => !o)} style={{
+                background:'none', border:'none', cursor:'pointer',
+                fontSize:'0.72rem', fontWeight:700, color:'var(--text-dim)',
+                display:'flex', alignItems:'center', gap:4, padding:0
+              }}>
+                {critiqueOpen ? Icon.arrowRight(10) : Icon.arrowRight(10)} AI review {critiqueOpen ? '▲' : '▼'}
+              </button>
+              {critiqueOpen && (
+                <div style={{marginTop:6, fontSize:'0.78rem', color:'var(--text-dim)', lineHeight:1.5, fontStyle:'italic'}}>
+                  {data._critique}
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
+            <button onClick={() => { onApply(rawSteps); onDismiss?.(); }} style={{
+              flex:2, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(43,203,186,0.15)', color:'var(--teal)', transition:'all .15s'
+            }}>✓ Accept</button>
+            <button onClick={() => { setMode('breakdown'); setEditSteps(rawSteps.map(s=>({...s}))); }} style={{
+              flex:1, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(108,99,255,0.12)', color:'var(--accent)', transition:'all .15s'
+            }}>Edit</button>
+            <button onClick={() => onDismiss?.()} style={{
+              flex:1, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', transition:'all .15s'
+            }}>✕</button>
+          </div>
+        </>
+      )}
+
+      {/* Mode Toggle (not shown in propose mode) */}
+      {mode !== 'propose' && (
       <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
+        {data._propose_mode && (
+          <button onClick={() => { onApply(editSteps.filter((_,i) => checked[i])); onDismiss?.(); }} style={{
+            flex:2, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
+            background:'rgba(43,203,186,0.15)', color:'var(--teal)', transition:'all .15s'
+          }}>✓ Accept {checkedCount}</button>
+        )}
         <button onClick={() => setMode('breakdown')} style={{
           flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
           background: mode === 'breakdown' ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)',
@@ -2506,6 +2573,7 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
           transition:'all .15s'
         }}>Start task</button>
       </div>
+      )}
 
       {/* Steps */}
       <div style={{padding:'8px 20px'}}>
@@ -2532,8 +2600,26 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
                 fontSize:'0.72rem', fontWeight:700,
                 transition:'all .15s'
               }}>{isActive ? Icon.arrowRight(11) : isChecked ? (i + 1) : Icon.x(10)}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>{step.title}</div>
+              <div style={{flex:1}} onClick={mode === 'breakdown' && data._propose_mode ? (e) => { e.stopPropagation(); setEditingIdx(editingIdx === i ? null : i); } : undefined}>
+                {mode === 'breakdown' && data._propose_mode && editingIdx === i ? (
+                  <input
+                    autoFocus
+                    value={step.title}
+                    onChange={e => updateEditStep(i, 'title', e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    onBlur={() => setEditingIdx(null)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingIdx(null); }}
+                    style={{
+                      width:'100%', background:'rgba(108,99,255,0.08)', border:'1px solid rgba(108,99,255,0.3)',
+                      borderRadius:6, padding:'3px 7px', fontSize:'0.84rem', color:'var(--text)', outline:'none'
+                    }}
+                  />
+                ) : (
+                  <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>
+                    {step.title}
+                    {mode === 'breakdown' && data._propose_mode && <span style={{fontSize:'0.65rem', color:'rgba(108,99,255,0.5)', marginLeft:5}}>✎</span>}
+                  </div>
+                )}
                 <div style={{display:'flex', gap:8, marginTop:2}}>
                   {step.date && <span style={{fontSize:'0.72rem', color:'var(--teal)', fontWeight:600}}>{Icon.calendar(10)} {fmt(step.date)}</span>}
                   {step.time && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{Icon.clock(10)} {step.time}</span>}
@@ -2655,8 +2741,7 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPla
       return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" />;
     case 'create_summary':
       return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
-    case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
+    // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
     default:
@@ -4657,6 +4742,8 @@ function App() {
             const corrected = new Date(todayVal + 'T12:00:00');
             corrected.setDate(corrected.getDate() + daysAhead);
             finalDue = toDateStr(corrected);
+            const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
           }
           const task = { id:uid(), title:action.task_name||action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
@@ -5133,8 +5220,6 @@ function App() {
           return (c.sections||[]).map(s => '## ' + s.heading + '\n' + (s.points||[]).map(p => '- ' + p).join('\n')).join('\n\n');
         case 'create_summary':
           return (c.bullets||[]).map(b => '- ' + b).join('\n');
-        case 'create_study_plan':
-          return (c.steps||[]).map((s,i) => (i+1) + '. ' + s.step + ' (' + (s.time_minutes||20) + 'min' + (s.day ? ', ' + s.day : '') + ')').join('\n');
         case 'create_quiz':
           return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
         case 'create_project_breakdown':
@@ -5731,8 +5816,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Auto-route content generation requests to Studio instead of chat
-    if (CONTENT_GEN_REGEX.test(text || '')) {
+    // Auto-route planning requests directly (3-pass planning pipeline)
+    if (PLANNING_REGEX.test(text || '')) {
+      // Fall through to the normal chat path — sendMessage will use mode: "planning"
+      // (handled in the chatBody block below)
+    } else if (CONTENT_GEN_REGEX.test(text || '')) {
+      // Auto-route other content gen to Studio panel
       const redirectMsg = { role: 'assistant', content: "looks like you want study materials — i've opened studio for you! just drop your request there and i'll generate it.", timestamp: Date.now() };
       setMessages(prev => { const n = [...prev, redirectMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
       if (user) dbInsertChatMsg('assistant', redirectMsg.content, user.id);
@@ -5753,6 +5842,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
+      const isPlanningRequest = PLANNING_REGEX.test(text || '');
+      // Agentic hint: fire multi-turn loop for long/multi-step messages or planning requests
+      const agenticHint = Boolean(
+        agenticMode && (
+          isPlanningRequest ||
+          msgContent.length > 280 ||
+          (likelyActionIntent && /\band\b|,\s*(?:also|and|then|plus)/i.test(msgContent))
+        )
+      );
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
@@ -5771,7 +5869,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: 1024,
+        maxTokens: isPlanningRequest ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5781,7 +5879,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           tutor_mode: Boolean(tutorMode),
           workspace_context: effectiveWorkspaceContext,
           likely_action_intent: likelyActionIntent,
+          agentic_mode: agenticHint,
+          agentic_hint: agenticHint,
         },
+        ...(isPlanningRequest ? { mode: 'planning' } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5826,6 +5927,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
       if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
 
+      // ── Planning pipeline response: show proposed plan in propose mode ──
+      if (chatData?.orchestration?.mode === 'planning') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_plan') {
+          const critiqueText = typeof chatData.planning_critique === 'string' ? chatData.planning_critique : '';
+          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
+          return;
+        }
+      }
+
       let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
       // Support multiple clarifications (array) or single (object)
@@ -5868,6 +5983,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           metadata: c.metadata || c.context || null,
           allowOther: true,
           otherPlaceholder: c.otherPlaceholder,
+          suggested_defaults: c.suggested_defaults || null,
         }));
         setPendingClarification(mapped.length === 1 ? mapped[0] : mapped);
         return;
@@ -5922,21 +6038,45 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
 
       // ── Resolve actions: translate AI names → real IDs/ranges using resolveEvent/resolveTask helpers ──
+      // resolveWithCandidates returns { match, candidates, ambiguous } where ambiguous=true when
+      // the top match is weak (<60) or two candidates are within 10 points.
+      function resolveWithCandidates(query, list, titleKey = 'title') {
+        if (!query || !list?.length) return { match: null, candidates: [], ambiguous: false };
+        const byId = list.find(item => item.id === query);
+        if (byId) return { match: byId, candidates: [], ambiguous: false };
+        const scored = list
+          .map(item => ({ item, score: matchScore(query, item[titleKey] || '') }))
+          .filter(v => v.score >= 30)
+          .sort((a, b) => b.score - a.score);
+        if (scored.length === 0) return { match: null, candidates: [], ambiguous: false };
+        const top = scored[0];
+        const second = scored[1];
+        const ambiguous = top.score < 60 || (second && top.score - second.score < 10);
+        return { match: ambiguous ? null : top.item, candidates: scored.slice(0, 4).map(v => v.item), ambiguous };
+      }
+
       const resolved = [];
       const resolutionFailures = [];
       for (const a of actions) {
         if (a.type === 'delete_event' || a.type === 'update_event' || a.type === 'convert_event_to_block') {
-          const match = resolveEvent(a.title || a.event_id, events);
+          const query = (a.title || a.event_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, events);
           if (match) {
             resolved.push({ ...a, event_id: match.id, title: match.title, date: a.date || match.date });
+          } else if (ambiguous && candidates.length > 0) {
+            // Surface as a clarification instead of silently failing
+            const clarification = {
+              reason: `Multiple events match "${query}" — which one?`,
+              question: `Which event did you mean?`,
+              options: candidates.map(ev => ({ label: `${ev.title}${ev.date ? ' (' + ev.date + ')' : ''}`, value: ev.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['event_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.event_id || '').trim();
-            const eventCandidates = events
-              .map(ev => ({ title: ev.title, score: matchScore(query, ev.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve event "${query}".`, eventCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve event "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }
@@ -5954,32 +6094,44 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           continue;
         }
         if (a.type === 'delete_task') {
-          const match = resolveTask(a.title || a.task_id, tasks);
+          const query = (a.title || a.task_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, tasks);
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
+          } else if (ambiguous && candidates.length > 0) {
+            const clarification = {
+              reason: `Multiple tasks match "${query}" — which one?`,
+              question: `Which task did you mean?`,
+              options: candidates.map(t => ({ label: `${t.title}${t.dueDate ? ' (due ' + t.dueDate + ')' : ''}`, value: t.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['task_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.task_id || '').trim();
-            const taskCandidates = tasks
-              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }
         if (a.type === 'complete_task') {
-          const match = resolveTask(a.title || a.task_id, tasks);
+          const query = (a.title || a.task_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, tasks);
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
+          } else if (ambiguous && candidates.length > 0) {
+            const clarification = {
+              reason: `Multiple tasks match "${query}" — which one?`,
+              question: `Which task did you mean?`,
+              options: candidates.map(t => ({ label: `${t.title}${t.dueDate ? ' (due ' + t.dueDate + ')' : ''}`, value: t.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['task_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.task_id || '').trim();
-            const taskCandidates = tasks
-              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }

@@ -1,6 +1,8 @@
 // Shared chat orchestration core used by both Vercel (Node) and Supabase Edge (Deno).
 // Keep this file runtime-agnostic (Web APIs only).
 
+import { inferSubjectFromTitle } from "../subjects.js";
+
 export const CORE_VERSION = "chat-core-v2-2026-04-12";
 export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
 
@@ -119,9 +121,9 @@ export const ACTION_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Event title" },
-          date: { type: "string", description: "Date in YYYY-MM-DD format" },
-          time: { type: "string", description: "Start time in HH:MM 24h format (e.g. 14:30). Omit for all-day events." },
+          title: { type: "string", description: "Event title exactly as the student said it." },
+          date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates ('tomorrow', 'next Friday') against today's date in the system prompt. Never emit a date in the past unless the student explicitly said 'yesterday' or 'last [day]'." },
+          time: { type: "string", description: "HH:MM 24-hour (e.g. 14:30). Omit entirely if the student did not specify a time — do not guess." },
           description: { type: "string", description: "Brief description or notes about the event (chapters covered, materials needed, etc.)" },
           location: { type: "string", description: "Where the event takes place (room, building, address)" },
           priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level — infer from context (exams/finals = high, optional meetings = low)" },
@@ -134,7 +136,7 @@ export const ACTION_TOOLS = [
           },
           subject: {
             type: "string",
-            description: "School subject (e.g., Math, Biology, English)",
+            description: "Lowercase canonical subject (e.g., 'mathematics', 'biology'). Infer from title only when obvious (e.g. 'Calc Quiz' → 'calculus'). Omit when uncertain.",
           },
         },
         required: ["title", "date"],
@@ -151,7 +153,7 @@ export const ACTION_TOOLS = [
         type: "object",
         properties: {
           task_name: { type: "string", description: "The name or title of the task, phrased as the student said it." },
-          due_date: { type: "string", description: "Due date in ISO format (YYYY-MM-DD). If the student did not specify a date, respond with plain text asking for the date instead of guessing." },
+          due_date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates against today's date in the system prompt. Never emit a past date unless the student explicitly said so. If the student gave no date, respond with plain text asking rather than guessing." },
         },
         required: ["task_name", "due_date"],
       },
@@ -589,33 +591,6 @@ export const STUDIO_TOOLS = [
   {
     type: "function",
     function: {
-      name: "create_study_plan",
-      description: "Create a practical study plan with timed steps.",
-      parameters: {
-        type: "object",
-        properties: {
-          type: { type: "string", enum: ["create_study_plan"] },
-          title: { type: "string" },
-          steps: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                step: { type: "string" },
-                time_minutes: { type: "number" },
-                day: { type: "string" },
-              },
-              required: ["step"],
-            },
-          },
-        },
-        required: ["type", "steps"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "create_project_breakdown",
       description: "Break a project into phases with concrete tasks.",
       parameters: {
@@ -808,7 +783,7 @@ function validateToolArguments(toolName, args) {
   return { issues, missingFields };
 }
 
-function toValidationClarification(toolName, missingFields, issues) {
+function toValidationClarification(toolName, missingFields, issues, args = {}) {
   const detail = issues
     .map((issue) => issue.field)
     .filter((v, i, arr) => arr.indexOf(v) === i);
@@ -816,46 +791,66 @@ function toValidationClarification(toolName, missingFields, issues) {
   const labelForField = (field) => {
     const map = {
       title: "title",
-      due: "due date (YYYY-MM-DD)",
-      date: "date (YYYY-MM-DD)",
-      time: "time (HH:MM)",
-      start: "start time (HH:MM)",
-      end: "end time (HH:MM)",
+      due: "due date",
+      date: "date",
+      time: "time",
+      start: "start time",
+      end: "end time",
       subject: "subject",
       activity: "activity name",
       tab_name: "note name",
       task_name: "task name",
-      due_date: "due date (YYYY-MM-DD)",
+      due_date: "due date",
     };
     return map[field] || field.replace(/_/g, " ");
   };
-  const humanFields = fields.map(labelForField).join(", ");
-  const oneFieldQuestion = fields.length === 1
+
+  // Compute suggested defaults for fields the model left blank.
+  const suggested_defaults = {};
+  if (fields.includes("subject") && (args.title || args.task_name)) {
+    const inferred = inferSubjectFromTitle(args.title || args.task_name);
+    if (inferred) suggested_defaults.subject = inferred;
+  }
+  if (fields.includes("time") && (toolName === "add_event" || toolName === "update_event")) {
+    suggested_defaults.time = "all-day";
+  }
+
+  const humanFields = fields
+    .filter(f => !suggested_defaults[f]) // hide fields we can auto-fill
+    .map(labelForField).join(", ");
+
+  const remainingFields = fields.filter(f => !suggested_defaults[f]);
+
+  const oneFieldQuestion = remainingFields.length === 1
     ? (() => {
-        switch (fields[0]) {
+        switch (remainingFields[0]) {
           case "title": return "What should the title be?";
-          case "due": return "What due date should I use? (YYYY-MM-DD)";
-          case "date": return "What date should I use? (YYYY-MM-DD)";
-          case "time": return "What time should I use? (HH:MM)";
-          case "start": return "What start time should I use? (HH:MM)";
-          case "end": return "What end time should I use? (HH:MM)";
+          case "due": return "What due date should I use? (e.g. next Friday)";
+          case "date": return "What date should I use? (e.g. next Friday)";
+          case "time": return "What time? (e.g. 14:30) — or leave blank for all-day.";
+          case "start": return "What start time? (HH:MM)";
+          case "end": return "What end time? (HH:MM)";
           case "subject": return "Which subject is this for?";
           case "activity": return "What activity should I schedule?";
           case "tab_name": return "Which note should I use?";
-          default: return `Can you share the ${labelForField(fields[0])}?`;
+          default: return `Can you share the ${labelForField(remainingFields[0])}?`;
         }
       })()
     : null;
+
   return {
-    reason: `I need a couple details before I can run ${toolName}.`,
+    reason: remainingFields.length === 0
+      ? null
+      : `I need a couple details before I can run ${toolName}.`,
     question: oneFieldQuestion
       || (humanFields
-        ? `I still need these details: ${humanFields}. Can you share them in one reply?`
+        ? `I still need: ${humanFields}. Can you share them in one reply?`
         : `Can you clarify the details for ${toolName}?`),
     options: [],
     multi_select: false,
     context_action: toolName,
     missing_fields: missingFields,
+    suggested_defaults,
   };
 }
 
@@ -1390,7 +1385,7 @@ export function parseLlmResponse(data) {
         missing_fields: missingFields,
         issues,
       });
-      clarifications.push(toValidationClarification(tc.function.name, missingFields, issues));
+      clarifications.push(toValidationClarification(tc.function.name, missingFields, issues, parsedArgs));
       return [];
     }
 

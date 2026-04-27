@@ -7,6 +7,7 @@ import {
   PRIMARY_MODEL,
   STUDIO_TOOLS,
 } from "../shared/ai/chat-core.js";
+import { runPlanningPipeline } from "../shared/ai/planning-pipeline.js";
 
 console.log(`[chat-core] adapter=vercel version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
@@ -296,6 +297,41 @@ export default async function handler(req, res) {
       });
     }
 
+    // ── Planning pipeline (agentic 3-pass: draft → critique → refine) ──
+    if (mode === "planning") {
+      if (userId && SUPABASE_SERVICE_ROLE_KEY) {
+        const { allowed, used } = await checkContentRateLimit(userId, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+        if (!allowed) {
+          return res.status(429).json({ error: "Rate limited", rateLimited: true, used });
+        }
+      }
+      const normalizedWs = typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "studio";
+      const planDynamic = dynamicContext ? `${dynamicContext}\n\nWORKSPACE_CONTEXT: ${normalizedWs}` : null;
+      const { proposal, critiqueText, iterations } = await runPlanningPipeline({
+        apiKey: GROQ_API_KEY,
+        geminiApiKey: GEMINI_API_KEY,
+        systemPrompt: systemPrompt || "",
+        staticSystemPrompt: staticSystemPrompt || null,
+        dynamicContext: planDynamic,
+        messages,
+      });
+      await persistPromptTelemetry({
+        supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        userId, requestId, promptVersion: telemetry?.promptVersion,
+        contextChars: telemetry?.contextChars, inputTokensEst: telemetry?.inputTokensEst,
+        workspaceContext: "planning", isContentGen: true, latencyMs: Date.now() - startedAt, ok: true,
+      });
+      return res.status(200).json({
+        content: "",
+        actions: [proposal],
+        clarifications: [],
+        executed_actions: [],
+        orchestration: { mode: "planning", iterations, executed_on: "client" },
+        planning_critique: critiqueText,
+        rpm: getGroqRpmStatus(),
+      });
+    }
+
     // ── Normal chat path ──
     // All chat requests use ACTION_TOOLS with reasoning_effort:high on PRIMARY_MODEL.
     // No route-based model switching — one model handles everything.
@@ -315,21 +351,74 @@ export default async function handler(req, res) {
       geminiApiKey: GEMINI_API_KEY,
     };
 
+    const agenticEnabled = Boolean(prompt_flags?.agentic_mode) && Boolean(prompt_flags?.agentic_hint);
+    const MAX_AGENTIC_ITERATIONS = 4;
+
     const llmStartedAt = Date.now();
-    const result = await callGroq(
-      GROQ_API_KEY,
-      PRIMARY_MODEL,
-      effectiveSystemPrompt,
-      messages,
-      maxTokens,
-      imageBase64,
-      imageMimeType,
-      true,
-      ACTION_TOOLS,
-      "auto",
-      null,
-      callOptions
-    );
+    let result;
+
+    if (agenticEnabled) {
+      // Agentic loop: run model, feed tool-call summaries back, repeat until model goes quiet.
+      let loopConversation = [...messages];
+      let allActions = [];
+      let lastContent = "";
+      let iterations = 0;
+      for (let i = 0; i < MAX_AGENTIC_ITERATIONS; i++) {
+        iterations++;
+        const iterDynamic = effectiveDynamic
+          ? `${effectiveDynamic}\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`
+          : `\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`;
+        const iterResult = await callGroq(
+          GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, loopConversation,
+          maxTokens, imageBase64, imageMimeType, true, ACTION_TOOLS, "auto", null,
+          { ...callOptions, dynamicContext: iterDynamic }
+        );
+        lastContent = iterResult.content || "";
+        // Accumulate clarifications — stop the loop if any arise (need user input)
+        if (Array.isArray(iterResult.clarifications) && iterResult.clarifications.length > 0) {
+          result = { ...iterResult, actions: allActions.length > 0 ? [...allActions, ...iterResult.actions] : iterResult.actions };
+          break;
+        }
+        if (!Array.isArray(iterResult.actions) || iterResult.actions.length === 0) {
+          // Model returned only text — conversation complete.
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        // Check for duplicate actions (infinite-loop guard)
+        const newActionKeys = iterResult.actions.map(a => `${a.type}:${a.title || a.task_name || ""}`);
+        const existingKeys = new Set(allActions.map(a => `${a.type}:${a.title || a.task_name || ""}`));
+        if (newActionKeys.every(k => existingKeys.has(k))) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        allActions = [...allActions, ...iterResult.actions];
+        // Build continuation context for next iteration
+        const actionSummary = iterResult.actions.map(a => `${a.type}: "${a.title || a.task_name || a.activity || "(untitled)"}"`).join(", ");
+        loopConversation = [
+          ...loopConversation,
+          { role: "assistant", content: lastContent || `Staged ${iterResult.actions.length} action(s).` },
+          { role: "user", content: `Actions staged: ${actionSummary}. Continue if there are more steps from the original request; otherwise reply in plain text to confirm.` },
+        ];
+        if (i === MAX_AGENTIC_ITERATIONS - 1) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+        }
+      }
+    } else {
+      result = await callGroq(
+        GROQ_API_KEY,
+        PRIMARY_MODEL,
+        effectiveSystemPrompt,
+        messages,
+        maxTokens,
+        imageBase64,
+        imageMimeType,
+        true,
+        ACTION_TOOLS,
+        "auto",
+        null,
+        callOptions
+      );
+    }
     const llmMs = Date.now() - llmStartedAt;
 
     const toolCallStats = result?.tool_call_stats || { proposed: 0, validated: 0 };

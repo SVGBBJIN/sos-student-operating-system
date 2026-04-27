@@ -7,6 +7,7 @@ import {
   PRIMARY_MODEL,
   STUDIO_TOOLS,
 } from "../../../shared/ai/chat-core.js";
+import { runPlanningPipeline } from "../../../shared/ai/planning-pipeline.js";
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -259,6 +260,47 @@ serve(async (req: Request) => {
       );
     }
 
+    // ── Planning pipeline (agentic 3-pass: draft → critique → refine) ──
+    if (mode === "planning") {
+      if (userId) {
+        const { allowed, used } = await checkContentRateLimit(userId);
+        if (!allowed) {
+          return new Response(
+            JSON.stringify({ error: "Rate limited", rateLimited: true, used }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+      const normalizedWs = typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "studio";
+      const planDynamic = dynamicContext ? `${dynamicContext}\n\nWORKSPACE_CONTEXT: ${normalizedWs}` : null;
+      const { proposal, critiqueText, iterations } = await runPlanningPipeline({
+        apiKey: GROQ_API_KEY!,
+        geminiApiKey: GEMINI_API_KEY,
+        systemPrompt: systemPrompt || "",
+        staticSystemPrompt: staticSystemPrompt || null,
+        dynamicContext: planDynamic,
+        messages,
+      });
+      persistPromptTelemetry({
+        request_id: requestId, user_id: userId,
+        prompt_version: telemetry?.promptVersion || null,
+        workspace_context: "planning", is_content_gen: true,
+        latency_ms: Date.now() - startedAt, ok: true,
+      }).catch(() => {});
+      return new Response(
+        JSON.stringify({
+          content: "",
+          actions: [proposal],
+          clarifications: [],
+          executed_actions: [],
+          orchestration: { mode: "planning", iterations, executed_on: "client" },
+          planning_critique: critiqueText,
+          rpm: getGroqRpmStatus(),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // ── Normal chat path ──
     const normalizedWorkspaceContext = typeof workspaceContext === "string"
       ? workspaceContext.trim().toLowerCase()
@@ -274,20 +316,67 @@ serve(async (req: Request) => {
       geminiApiKey: GEMINI_API_KEY,
     };
 
-    const result = await callGroq(
-      GROQ_API_KEY,
-      PRIMARY_MODEL,
-      effectiveSystemPrompt,
-      messages,
-      maxTokens,
-      imageBase64,
-      imageMimeType,
-      true,
-      ACTION_TOOLS,
-      "auto",
-      null,
-      callOptions
-    );
+    const agenticEnabled = Boolean((prompt_flags as any)?.agentic_mode) && Boolean((prompt_flags as any)?.agentic_hint);
+    const MAX_AGENTIC_ITERATIONS = 4;
+    let result: any;
+
+    if (agenticEnabled) {
+      let loopConversation = [...messages];
+      let allActions: any[] = [];
+      let lastContent = "";
+      let iterations = 0;
+      for (let i = 0; i < MAX_AGENTIC_ITERATIONS; i++) {
+        iterations++;
+        const iterDynamic = effectiveDynamic
+          ? `${effectiveDynamic}\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`
+          : `\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`;
+        const iterResult = await callGroq(
+          GROQ_API_KEY!, PRIMARY_MODEL, effectiveSystemPrompt, loopConversation,
+          maxTokens, imageBase64, imageMimeType, true, ACTION_TOOLS, "auto", null,
+          { ...callOptions, dynamicContext: iterDynamic }
+        );
+        lastContent = iterResult.content || "";
+        if (Array.isArray(iterResult.clarifications) && iterResult.clarifications.length > 0) {
+          result = { ...iterResult, actions: allActions.length > 0 ? [...allActions, ...iterResult.actions] : iterResult.actions };
+          break;
+        }
+        if (!Array.isArray(iterResult.actions) || iterResult.actions.length === 0) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        const newActionKeys = iterResult.actions.map((a: any) => `${a.type}:${a.title || a.task_name || ""}`);
+        const existingKeys = new Set(allActions.map((a: any) => `${a.type}:${a.title || a.task_name || ""}`));
+        if (newActionKeys.every((k: string) => existingKeys.has(k))) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        allActions = [...allActions, ...iterResult.actions];
+        const actionSummary = iterResult.actions.map((a: any) => `${a.type}: "${a.title || a.task_name || a.activity || "(untitled)"}"`).join(", ");
+        loopConversation = [
+          ...loopConversation,
+          { role: "assistant", content: lastContent || `Staged ${iterResult.actions.length} action(s).` },
+          { role: "user", content: `Actions staged: ${actionSummary}. Continue if there are more steps from the original request; otherwise reply in plain text to confirm.` },
+        ];
+        if (i === MAX_AGENTIC_ITERATIONS - 1) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+        }
+      }
+    } else {
+      result = await callGroq(
+        GROQ_API_KEY!,
+        PRIMARY_MODEL,
+        effectiveSystemPrompt,
+        messages,
+        maxTokens,
+        imageBase64,
+        imageMimeType,
+        true,
+        ACTION_TOOLS,
+        "auto",
+        null,
+        callOptions
+      );
+    }
 
     if (!Array.isArray(result.actions)) {
       (result as any).actions = [];
