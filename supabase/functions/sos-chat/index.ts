@@ -1,69 +1,24 @@
 import {
   ACTION_TOOLS,
-  BACKUP_MODEL,
   callGroq,
-  callGroqStream,
-  CONTENT_ACTION_TOOLS,
-  CONVERSATIONAL_MODEL,
   CORE_CHECKSUM,
   CORE_VERSION,
-  FAST_MODEL,
   getGroqRpmStatus,
   PRIMARY_MODEL,
-  PROPOSE_ACTION_TOOL,
-  selectModel,
+  STUDIO_TOOLS,
 } from "../../../shared/ai/chat-core.js";
-
-/* ── Known Groq model IDs — only these may be passed as preferredModel ── */
-const KNOWN_GROQ_MODELS = new Set([PRIMARY_MODEL, CONVERSATIONAL_MODEL, BACKUP_MODEL, FAST_MODEL]);
-
-function resolveModel(preferredModel: string | undefined): string {
-  if (typeof preferredModel === "string" && KNOWN_GROQ_MODELS.has(preferredModel)) {
-    return preferredModel;
-  }
-  return PRIMARY_MODEL;
-}
+import { runPlanningPipeline } from "../../../shared/ai/planning-pipeline.js";
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-/**
- * Returns the minimal tool subset for a given route, reducing prompt token cost.
- * Conversational requests get only ask_clarification (~1 tool vs 25).
- */
-function selectToolsForRoute(
-  routeType: "conversational" | "tool_heavy" | "content_gen",
-  workspaceContext: string,
-  isContentGen: boolean
-): typeof ACTION_TOOLS {
-  if (isContentGen) return CONTENT_ACTION_TOOLS;
-  if (routeType === "conversational") {
-    const clarificationTool = ACTION_TOOLS.find(t => t.function.name === "ask_clarification");
-    return [PROPOSE_ACTION_TOOL, clarificationTool].filter(Boolean) as typeof ACTION_TOOLS;
-  }
-  if (workspaceContext === "schedule") {
-    return ACTION_TOOLS.filter(t =>
-      ["add_event","delete_event","update_event","add_task","delete_task",
-       "complete_task","break_task","add_recurring_event","add_block",
-       "delete_block","convert_event_to_block","convert_block_to_event",
-       "ask_clarification","clear_all","read_calendar"].includes(t.function.name)
-    );
-  }
-  if (workspaceContext === "notes") {
-    return ACTION_TOOLS.filter(t =>
-      ["add_note","edit_note","delete_note","ask_clarification"].includes(t.function.name)
-    );
-  }
-  return ACTION_TOOLS;
-}
+console.log(`[chat-core] adapter=supabase version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
-
-console.log(`[chat-core] adapter=supabase version=${CORE_VERSION} checksum=${CORE_CHECKSUM}`);
 
 async function callGroqWhisper(
   apiKey: string,
@@ -108,7 +63,7 @@ async function callGroqWhisper(
   return result.text || "";
 }
 
-/* ── Rate limiting for content generation ── */
+/* ── Rate limiting for Studio content generation ── */
 async function checkContentRateLimit(
   userId: string
 ): Promise<{ allowed: boolean; used: number }> {
@@ -116,10 +71,8 @@ async function checkContentRateLimit(
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(supabaseUrl, serviceKey);
 
-  // Midnight EST = 05:00 UTC
   const now = new Date();
-  const estOffset = -5;
-  const estNow = new Date(now.getTime() + estOffset * 60 * 60 * 1000);
+  const estNow = new Date(now.getTime() + -5 * 60 * 60 * 1000);
   const todayEST =
     estNow.getFullYear() +
     "-" +
@@ -149,6 +102,24 @@ async function checkContentRateLimit(
   return { allowed: true, used: used + 1 };
 }
 
+async function persistPromptTelemetry(payload: Record<string, unknown>) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return;
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/prompt_telemetry_logs`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ ...payload, created_at: new Date().toISOString() }),
+    });
+  } catch (_) { /* fire-and-forget */ }
+}
+
 /* ── Extract user ID from JWT ── */
 function extractUserId(authHeader: string | null): string | null {
   if (!authHeader) return null;
@@ -165,15 +136,8 @@ function extractUserId(authHeader: string | null): string | null {
 serve(async (req: Request) => {
   const startedAt = Date.now();
   const requestId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  let telemetry: {
-    userId: string | null;
-    promptVersion: string | null;
-    contextChars: number | null;
-    inputTokensEst: number | null;
-    workspaceContext: string;
-    isContentGen: boolean;
-    promptFlags?: Record<string, unknown> | null;
-  } | null = null;
+  let telemetry: Record<string, unknown> | null = null;
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -215,24 +179,20 @@ serve(async (req: Request) => {
       }
     }
 
-    // ── Chat completion path (Groq) ──
     if (!GROQ_API_KEY) {
       return new Response(
         JSON.stringify({ error: "GROQ_API_KEY not configured" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const {
+      mode,
       systemPrompt,
       staticSystemPrompt,
       dynamicContext,
       messages,
       maxTokens = 1024,
-      isContentGen,
       imageBase64,
       imageMimeType,
       workspaceContext,
@@ -240,8 +200,6 @@ serve(async (req: Request) => {
       context_chars,
       input_tokens_est,
       prompt_flags,
-      streaming,
-      preferredModel,
     } = body;
     const userId = extractUserId(req.headers.get("Authorization"));
     telemetry = {
@@ -250,139 +208,184 @@ serve(async (req: Request) => {
       contextChars: Number.isFinite(Number(context_chars)) ? Number(context_chars) : null,
       inputTokensEst: Number.isFinite(Number(input_tokens_est)) ? Number(input_tokens_est) : null,
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "chat",
-      isContentGen: Boolean(isContentGen),
+      isContentGen: mode === "studio",
       promptFlags: (prompt_flags && typeof prompt_flags === "object") ? prompt_flags : null,
     };
 
-    // Rate limiting for content generation
-    if (isContentGen) {
+    // ── Studio (content generation) path ──
+    if (mode === "studio") {
       if (userId) {
         const { allowed, used } = await checkContentRateLimit(userId);
         if (!allowed) {
           return new Response(
             JSON.stringify({ error: "Rate limited", rateLimited: true, used }),
-            {
-              status: 429,
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            }
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
       }
+
+      const normalizedWorkspace = typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "chat";
+      const contextSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspace}`;
+      const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextSuffix}` : null;
+
+      const studioResult = await callGroq(
+        GROQ_API_KEY,
+        PRIMARY_MODEL,
+        systemPrompt || "",
+        messages,
+        Math.min(Number(maxTokens) || 4096, 4096),
+        null,
+        null,
+        true,
+        STUDIO_TOOLS,
+        "required",
+        null,
+        { isContentGen: true, staticSystemPrompt: staticSystemPrompt || null, dynamicContext: effectiveDynamic, geminiApiKey: GEMINI_API_KEY }
+      );
+
+      if (!Array.isArray(studioResult.actions) || studioResult.actions.length === 0) {
+        throw new Error("Studio mode must return typed actions[] payloads.");
+      }
+
+      persistPromptTelemetry({
+        request_id: requestId, user_id: userId,
+        prompt_version: telemetry?.promptVersion || null,
+        workspace_context: "studio", is_content_gen: true,
+        latency_ms: Date.now() - startedAt, ok: true,
+      }).catch(() => {});
+
+      return new Response(
+        JSON.stringify({ ...studioResult, rpm: getGroqRpmStatus() }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
+    // ── Planning pipeline (agentic 3-pass: draft → critique → refine) ──
+    if (mode === "planning") {
+      if (userId) {
+        const { allowed, used } = await checkContentRateLimit(userId);
+        if (!allowed) {
+          return new Response(
+            JSON.stringify({ error: "Rate limited", rateLimited: true, used }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+      const normalizedWs = typeof workspaceContext === "string" ? workspaceContext.trim().toLowerCase() : "studio";
+      const planDynamic = dynamicContext ? `${dynamicContext}\n\nWORKSPACE_CONTEXT: ${normalizedWs}` : null;
+      const { proposal, critiqueText, iterations } = await runPlanningPipeline({
+        apiKey: GROQ_API_KEY!,
+        geminiApiKey: GEMINI_API_KEY,
+        systemPrompt: systemPrompt || "",
+        staticSystemPrompt: staticSystemPrompt || null,
+        dynamicContext: planDynamic,
+        messages,
+      });
+      persistPromptTelemetry({
+        request_id: requestId, user_id: userId,
+        prompt_version: telemetry?.promptVersion || null,
+        workspace_context: "planning", is_content_gen: true,
+        latency_ms: Date.now() - startedAt, ok: true,
+      }).catch(() => {});
+      return new Response(
+        JSON.stringify({
+          content: "",
+          actions: [proposal],
+          clarifications: [],
+          executed_actions: [],
+          orchestration: { mode: "planning", iterations, executed_on: "client" },
+          planning_critique: critiqueText,
+          rpm: getGroqRpmStatus(),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Normal chat path ──
     const normalizedWorkspaceContext = typeof workspaceContext === "string"
       ? workspaceContext.trim().toLowerCase()
       : "chat";
-    const latestUserMessage = [...(Array.isArray(messages) ? messages : [])]
-      .reverse()
-      .find((m) => m?.role === "user" && typeof m?.content === "string");
-    const latestUserText = ((latestUserMessage?.content as string) || "").toLowerCase();
-    const likelyToolHeavy = /(schedule|calendar|homework|assignment|deadline|task|plan|quiz|exam|note|midterm|final|cram|study|test|overwhelm|behind|paper|project|presentation|due\s|event|remind|meeting|appointment|recurring)/i.test(latestUserText)
-      || normalizedWorkspaceContext === "schedule"
-      || normalizedWorkspaceContext === "notes";
-    const routeType: "conversational" | "tool_heavy" | "content_gen" =
-      isContentGen ? "content_gen" : (likelyToolHeavy ? "tool_heavy" : "conversational");
-    const toolsForRequest = selectToolsForRoute(routeType, normalizedWorkspaceContext, isContentGen);
-    const toolChoice: "auto" | "required" = isContentGen ? "required" : "auto";
-    const clarificationRule = `\n\nCLARIFICATION RULE: For casual greetings, small talk, or messages that do not involve scheduling or creating something — respond naturally as a person without calling any tool. Reserve ask_clarification STRICTLY for moments when you are about to call an action tool (add_event, add_task, add_block, add_note, etc.) and one or more required fields are missing from the student's message. Never call ask_clarification for general chat, vague requests with no clear action intent, or to suggest features. If you have all required information for an action, execute it immediately without asking.`;
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).${clarificationRule}`;
-    const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
+    const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 
     const callOptions = {
-      isContentGen: Boolean(isContentGen),
-      routeType,
+      isContentGen: false,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
       geminiApiKey: GEMINI_API_KEY,
     };
 
-    // Streaming path: conversational non-content-gen non-image requests only.
-    const useStreaming = Boolean(streaming) && !isContentGen && !imageBase64;
-    if (useStreaming) {
-      const encoder = new TextEncoder();
-      let streamResult: Awaited<ReturnType<typeof callGroqStream>>;
-      const stream = new ReadableStream({
-        async start(controller) {
-          // callGroqStream auto-retries with backupModel if CONVERSATIONAL_MODEL fails
-          streamResult = await callGroqStream(
-            GROQ_API_KEY,
-            CONVERSATIONAL_MODEL,
-            effectiveSystemPrompt,
-            messages,
-            maxTokens,
-            toolsForRequest, // route-filtered tool subset
-            "auto",
-            (delta: string) => {
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({ type: "text_delta", delta })}\n\n`
-              ));
-            },
-            { ...callOptions, backupModel: FAST_MODEL }
-          );
-          const donePayload = {
-            ...streamResult,
-            executed_actions: [],
-            orchestration: { mode: "client_execution", executed_on: "client" },
-          };
-          console.log("chat_request_prompt_snapshot", JSON.stringify({
-            request_id: requestId,
-            prompt: {
-              version: telemetry?.promptVersion || null,
-              flags: telemetry?.promptFlags || null,
-              workspace_context: telemetry?.workspaceContext || "chat",
-            },
-            clarification: {
-              asked: Boolean(
-                (Array.isArray(streamResult?.clarifications) && streamResult.clarifications.length > 0)
-                || (streamResult?.clarification && typeof streamResult.clarification === "object")
-              ),
-              count: Array.isArray(streamResult?.clarifications) ? streamResult.clarifications.length : 0,
-            },
-          }));
-          controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({ type: "done", ...donePayload })}\n\n`
-          ));
-          controller.close();
-          persistPromptTelemetry({
-            userId: telemetry?.userId || null, requestId,
-            promptVersion: telemetry?.promptVersion || null,
-            contextChars: telemetry?.contextChars || null,
-            inputTokensEst: telemetry?.inputTokensEst || null,
-            workspaceContext: telemetry?.workspaceContext || "chat",
-            isContentGen: telemetry?.isContentGen || false,
-            latencyMs: Date.now() - startedAt, ok: true,
-          }).catch(() => {});
-        },
-      });
-      return new Response(stream, {
-        headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
-      });
+    const agenticEnabled = Boolean((prompt_flags as any)?.agentic_mode) && Boolean((prompt_flags as any)?.agentic_hint);
+    const MAX_AGENTIC_ITERATIONS = 4;
+    let result: any;
+
+    if (agenticEnabled) {
+      let loopConversation = [...messages];
+      let allActions: any[] = [];
+      let lastContent = "";
+      let iterations = 0;
+      for (let i = 0; i < MAX_AGENTIC_ITERATIONS; i++) {
+        iterations++;
+        const iterDynamic = effectiveDynamic
+          ? `${effectiveDynamic}\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`
+          : `\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`;
+        const iterResult = await callGroq(
+          GROQ_API_KEY!, PRIMARY_MODEL, effectiveSystemPrompt, loopConversation,
+          maxTokens, imageBase64, imageMimeType, true, ACTION_TOOLS, "auto", null,
+          { ...callOptions, dynamicContext: iterDynamic }
+        );
+        lastContent = iterResult.content || "";
+        if (Array.isArray(iterResult.clarifications) && iterResult.clarifications.length > 0) {
+          result = { ...iterResult, actions: allActions.length > 0 ? [...allActions, ...iterResult.actions] : iterResult.actions };
+          break;
+        }
+        if (!Array.isArray(iterResult.actions) || iterResult.actions.length === 0) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        const newActionKeys = iterResult.actions.map((a: any) => `${a.type}:${a.title || a.task_name || ""}`);
+        const existingKeys = new Set(allActions.map((a: any) => `${a.type}:${a.title || a.task_name || ""}`));
+        if (newActionKeys.every((k: string) => existingKeys.has(k))) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+          break;
+        }
+        allActions = [...allActions, ...iterResult.actions];
+        const actionSummary = iterResult.actions.map((a: any) => `${a.type}: "${a.title || a.task_name || a.activity || "(untitled)"}"`).join(", ");
+        loopConversation = [
+          ...loopConversation,
+          { role: "assistant", content: lastContent || `Staged ${iterResult.actions.length} action(s).` },
+          { role: "user", content: `Actions staged: ${actionSummary}. Continue if there are more steps from the original request; otherwise reply in plain text to confirm.` },
+        ];
+        if (i === MAX_AGENTIC_ITERATIONS - 1) {
+          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
+        }
+      }
+    } else {
+      result = await callGroq(
+        GROQ_API_KEY!,
+        PRIMARY_MODEL,
+        effectiveSystemPrompt,
+        messages,
+        maxTokens,
+        imageBase64,
+        imageMimeType,
+        true,
+        ACTION_TOOLS,
+        "auto",
+        null,
+        callOptions
+      );
     }
 
-    // Route-aware tool selection: send only the tools needed for this request type.
-    const result = await callGroq(
-      GROQ_API_KEY,
-      resolveModel(preferredModel),
-      effectiveSystemPrompt,
-      messages,
-      maxTokens,
-      imageBase64,
-      imageMimeType,
-      Boolean(toolsForRequest && toolsForRequest.length > 0), // includeTools
-      toolsForRequest, // toolsOverride — route-filtered subset
-      toolChoice,
-      BACKUP_MODEL,
-      callOptions
-    );
-    if (isContentGen && (!Array.isArray(result.actions) || result.actions.length === 0)) {
-      throw new Error("Content generation must return typed actions[] payloads.");
+    if (!Array.isArray(result.actions)) {
+      (result as any).actions = [];
     }
+
     console.log("chat_request_prompt_snapshot", JSON.stringify({
       request_id: requestId,
       prompt: {
         version: telemetry?.promptVersion || null,
-        flags: telemetry?.promptFlags || null,
         workspace_context: telemetry?.workspaceContext || "chat",
       },
       clarification: {
@@ -394,42 +397,33 @@ serve(async (req: Request) => {
       },
     }));
 
-    await persistPromptTelemetry({
-      userId: telemetry?.userId || null,
-      requestId,
-      promptVersion: telemetry?.promptVersion || null,
-      contextChars: telemetry?.contextChars || null,
-      inputTokensEst: telemetry?.inputTokensEst || null,
-      workspaceContext: telemetry?.workspaceContext || "chat",
-      isContentGen: telemetry?.isContentGen || false,
-      latencyMs: Date.now() - startedAt,
-      ok: true,
-    });
-    return new Response(JSON.stringify({ ...result, rpm: getGroqRpmStatus() }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    persistPromptTelemetry({
+      request_id: requestId, user_id: userId,
+      prompt_version: telemetry?.promptVersion || null,
+      context_chars: telemetry?.contextChars || null,
+      input_tokens_est: telemetry?.inputTokensEst || null,
+      workspace_context: telemetry?.workspaceContext || "chat",
+      is_content_gen: false,
+      latency_ms: Date.now() - startedAt, ok: true,
+    }).catch(() => {});
+
+    return new Response(
+      JSON.stringify({ ...result, rpm: getGroqRpmStatus() }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (err) {
     const errMsg = (err as Error).message || "Internal server error";
     const errStack = (err as Error).stack || "";
-    await persistPromptTelemetry({
-      userId: telemetry?.userId || null,
-      requestId,
-      promptVersion: telemetry?.promptVersion || null,
-      contextChars: telemetry?.contextChars || null,
-      inputTokensEst: telemetry?.inputTokensEst || null,
-      workspaceContext: telemetry?.workspaceContext || "chat",
-      isContentGen: telemetry?.isContentGen || false,
-      latencyMs: Date.now() - startedAt,
-      ok: false,
-      errorMessage: errMsg,
-    });
+    persistPromptTelemetry({
+      request_id: requestId, user_id: telemetry?.userId || null,
+      workspace_context: telemetry?.workspaceContext || "chat",
+      is_content_gen: telemetry?.isContentGen || false,
+      latency_ms: Date.now() - startedAt, ok: false, error: errMsg,
+    }).catch(() => {});
     console.error("sos-chat error:", errMsg, errStack);
     return new Response(
       JSON.stringify({ error: errMsg }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

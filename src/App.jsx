@@ -583,14 +583,13 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'ask_clarification is ONLY for missing required fields when you are about to call an action tool. For greetings, small talk, or non-action messages, respond naturally — never call ask_clarification.',
-  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Ask clarification only when a missing required field would cause the action to fail or produce wrong output.',
+  clarification: 'If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.',
+  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Only ask for a missing detail when it would cause the action to fail or produce wrong output.',
   action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
-  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
-  content_gen: 'Content-gen requests must return canonical typed actions only.',
+  conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
 };
@@ -805,20 +804,14 @@ NOTES: ${noteNames}`;
         POLICY_MODULES.web_refs,
         POLICY_MODULES.conversational_capabilities,
       ]
-    : intentType === 'content_gen'
-      ? [
-          POLICY_MODULES.action_tools,
-          POLICY_MODULES.content_gen,
-          POLICY_MODULES.date_resolution,
-        ]
-      : [
-          POLICY_MODULES.action_tools,
-          POLICY_MODULES.planning_guardrails,
-          POLICY_MODULES.corrections,
-          POLICY_MODULES.web_refs,
-          POLICY_MODULES.date_resolution,
-          POLICY_MODULES.vision,
-        ];
+    : [
+        POLICY_MODULES.action_tools,
+        POLICY_MODULES.planning_guardrails,
+        POLICY_MODULES.corrections,
+        POLICY_MODULES.web_refs,
+        POLICY_MODULES.date_resolution,
+        POLICY_MODULES.vision,
+      ];
   const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 
@@ -872,8 +865,9 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_study_plan','create_quiz','create_project_breakdown','make_plan'];
-const CONTENT_GEN_REGEX = /flashcards?|outline|summar|study\s*plan|study\s*guide|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
+const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 const TUTOR_STUDY_REGEX = /flashcards?|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?/i;
 
 function isStringArray(value, min = 0) {
@@ -891,8 +885,6 @@ function isValidContentAction(action) {
       return Array.isArray(action.sections) && action.sections.length > 0 && action.sections.every(s => typeof s?.heading === 'string' && isStringArray(s?.points, 1));
     case 'create_summary':
       return isStringArray(action.bullets, 1);
-    case 'create_study_plan':
-      return Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.step === 'string');
     case 'create_project_breakdown':
       return Array.isArray(action.phases) && action.phases.length > 0 && action.phases.every(p => typeof p?.phase === 'string' && isStringArray(p?.tasks, 1));
     case 'make_plan':
@@ -1530,7 +1522,7 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const inputType = (c?.inputType || c?.input_type || '').toLowerCase();
   const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
   const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
-  const subjectOptions = ['Math', 'English', 'Science', 'History', 'Language', 'Computer Science', 'Other'];
+  const subjectOptions = ['Mathematics', 'English', 'Biology', 'Chemistry', 'Physics', 'History', 'Language Arts', 'Spanish', 'French', 'Economics', 'Psychology', 'Government', 'Computer Science', 'Calculus', 'Literature', 'Physical Education', 'Other'];
   const normalizedOptions = options.map(normalizeOption).filter(
     opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
   );
@@ -1604,6 +1596,25 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
           >×</button>
         </div>
       </div>
+
+      {/* Suggested defaults — one-click accept */}
+      {c?.suggested_defaults && Object.keys(c.suggested_defaults).length > 0 && (
+        <div style={{padding:'8px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', display:'flex', flexWrap:'wrap', gap:6, alignItems:'center'}}>
+          <span style={{fontSize:'0.72rem', color:'var(--text-dim)', marginRight:2}}>suggested:</span>
+          {Object.entries(c.suggested_defaults).map(([field, val]) => (
+            <button key={field} onClick={() => {
+              setOtherText(currentQIdx, String(val));
+              advance();
+            }} style={{
+              background:'rgba(43,203,186,0.1)', border:'1px solid rgba(43,203,186,0.25)',
+              borderRadius:20, padding:'3px 10px', fontSize:'0.74rem', fontWeight:600,
+              color:'var(--teal)', cursor:'pointer',
+            }}>
+              {field}: {String(val)} ↵
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Options */}
       {normalizedOptions.length > 0 && (
@@ -2212,8 +2223,6 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
           return (data.bullets||[]).map(b => ({ type:'bullet', text:b }));
         case 'create_outline':
           return (data.sections||[]).flatMap(s => [{ type:'heading', text: s.heading }, ...(s.points||[]).map(p => ({ type:'point', text: p }))]);
-        case 'create_study_plan':
-          return (data.steps||[]).map((s,i) => ({ type:'step', num:i+1, text:s.step, meta:(s.time_minutes||20)+'min'+(s.day?' · '+s.day:'') }));
         case 'create_project_breakdown':
           return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
         default: return [{ type:'bullet', text:'(content generated)' }];
@@ -2413,13 +2422,21 @@ function PlanTemplateSelector({ onSelectTemplate, onCustomPlan, onDismiss }) {
 
 function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogleDocs, googleConnected }) {
   const [checked, setChecked] = useState(() => (data.steps||[]).map(() => true));
-  const [mode, setMode] = useState('breakdown');
+  const [mode, setMode] = useState(data._propose_mode ? 'propose' : 'breakdown');
+  const [editSteps, setEditSteps] = useState(() => (data.steps||[]).map(s => ({...s})));
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [critiqueOpen, setCritiqueOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [docSyncing, setDocSyncing] = useState(false);
-  const steps = data.steps || [];
+  const rawSteps = data.steps || [];
+  const steps = mode === 'breakdown' && data._propose_mode ? editSteps : rawSteps;
   const toggle = i => setChecked(prev => prev.map((v,j) => j===i ? !v : v));
   const checkedCount = checked.filter(Boolean).length;
+
+  function updateEditStep(idx, field, value) {
+    setEditSteps(prev => prev.map((s, i) => i === idx ? {...s, [field]: value} : s));
+  }
 
   function startTask(i) {
     if (!steps[i]) return;
@@ -2498,8 +2515,51 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
         </div>
       )}
 
-      {/* Mode Toggle */}
+      {/* Propose mode: critique + accept/edit/reject */}
+      {mode === 'propose' && (
+        <>
+          {data._critique && (
+            <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+              <button onClick={() => setCritiqueOpen(o => !o)} style={{
+                background:'none', border:'none', cursor:'pointer',
+                fontSize:'0.72rem', fontWeight:700, color:'var(--text-dim)',
+                display:'flex', alignItems:'center', gap:4, padding:0
+              }}>
+                {critiqueOpen ? Icon.arrowRight(10) : Icon.arrowRight(10)} AI review {critiqueOpen ? '▲' : '▼'}
+              </button>
+              {critiqueOpen && (
+                <div style={{marginTop:6, fontSize:'0.78rem', color:'var(--text-dim)', lineHeight:1.5, fontStyle:'italic'}}>
+                  {data._critique}
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
+            <button onClick={() => { onApply(rawSteps); onDismiss?.(); }} style={{
+              flex:2, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(43,203,186,0.15)', color:'var(--teal)', transition:'all .15s'
+            }}>✓ Accept</button>
+            <button onClick={() => { setMode('breakdown'); setEditSteps(rawSteps.map(s=>({...s}))); }} style={{
+              flex:1, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(108,99,255,0.12)', color:'var(--accent)', transition:'all .15s'
+            }}>Edit</button>
+            <button onClick={() => onDismiss?.()} style={{
+              flex:1, padding:'8px 12px', borderRadius:8, border:'none', fontSize:'0.82rem', fontWeight:700, cursor:'pointer',
+              background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', transition:'all .15s'
+            }}>✕</button>
+          </div>
+        </>
+      )}
+
+      {/* Mode Toggle (not shown in propose mode) */}
+      {mode !== 'propose' && (
       <div style={{padding:'10px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', gap:6}}>
+        {data._propose_mode && (
+          <button onClick={() => { onApply(editSteps.filter((_,i) => checked[i])); onDismiss?.(); }} style={{
+            flex:2, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
+            background:'rgba(43,203,186,0.15)', color:'var(--teal)', transition:'all .15s'
+          }}>✓ Accept {checkedCount}</button>
+        )}
         <button onClick={() => setMode('breakdown')} style={{
           flex:1, padding:'6px 12px', borderRadius:8, border:'none', fontSize:'0.78rem', fontWeight:700, cursor:'pointer',
           background: mode === 'breakdown' ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)',
@@ -2513,6 +2573,7 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
           transition:'all .15s'
         }}>Start task</button>
       </div>
+      )}
 
       {/* Steps */}
       <div style={{padding:'8px 20px'}}>
@@ -2539,8 +2600,26 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
                 fontSize:'0.72rem', fontWeight:700,
                 transition:'all .15s'
               }}>{isActive ? Icon.arrowRight(11) : isChecked ? (i + 1) : Icon.x(10)}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>{step.title}</div>
+              <div style={{flex:1}} onClick={mode === 'breakdown' && data._propose_mode ? (e) => { e.stopPropagation(); setEditingIdx(editingIdx === i ? null : i); } : undefined}>
+                {mode === 'breakdown' && data._propose_mode && editingIdx === i ? (
+                  <input
+                    autoFocus
+                    value={step.title}
+                    onChange={e => updateEditStep(i, 'title', e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    onBlur={() => setEditingIdx(null)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingIdx(null); }}
+                    style={{
+                      width:'100%', background:'rgba(108,99,255,0.08)', border:'1px solid rgba(108,99,255,0.3)',
+                      borderRadius:6, padding:'3px 7px', fontSize:'0.84rem', color:'var(--text)', outline:'none'
+                    }}
+                  />
+                ) : (
+                  <div style={{fontSize:'0.84rem', color:'var(--text)', fontWeight: isActive ? 600 : 400, textDecoration: isChecked ? 'none' : 'line-through'}}>
+                    {step.title}
+                    {mode === 'breakdown' && data._propose_mode && <span style={{fontSize:'0.65rem', color:'rgba(108,99,255,0.5)', marginLeft:5}}>✎</span>}
+                  </div>
+                )}
                 <div style={{display:'flex', gap:8, marginTop:2}}>
                   {step.date && <span style={{fontSize:'0.72rem', color:'var(--teal)', fontWeight:600}}>{Icon.calendar(10)} {fmt(step.date)}</span>}
                   {step.time && <span style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>{Icon.clock(10)} {step.time}</span>}
@@ -2662,8 +2741,7 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPla
       return <GenericContentDisplay data={content} icon={Icon.listTree(16)} label="Outline" onSave={onSave} onDismiss={onDismiss} accentColor="var(--blue)" />;
     case 'create_summary':
       return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
-    case 'create_study_plan':
-      return <GenericContentDisplay data={content} icon={Icon.calendar(16)} label="Study Plan" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
+    // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
     default:
@@ -4664,6 +4742,8 @@ function App() {
             const corrected = new Date(todayVal + 'T12:00:00');
             corrected.setDate(corrected.getDate() + daysAhead);
             finalDue = toDateStr(corrected);
+            const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
           }
           const task = { id:uid(), title:action.task_name||action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
@@ -5140,8 +5220,6 @@ function App() {
           return (c.sections||[]).map(s => '## ' + s.heading + '\n' + (s.points||[]).map(p => '- ' + p).join('\n')).join('\n\n');
         case 'create_summary':
           return (c.bullets||[]).map(b => '- ' + b).join('\n');
-        case 'create_study_plan':
-          return (c.steps||[]).map((s,i) => (i+1) + '. ' + s.step + ' (' + (s.time_minutes||20) + 'min' + (s.day ? ', ' + s.day : '') + ')').join('\n');
         case 'create_quiz':
           return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
         case 'create_project_breakdown':
@@ -5738,21 +5816,41 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       dbInsertChatMsg('user', msgContent, user.id);
     }
 
-    // Detect content generation requests (for rate limiting + model upgrade)
-    const isContentGen = CONTENT_GEN_REGEX.test(text || '');
+    // Auto-route planning requests directly (3-pass planning pipeline)
+    if (PLANNING_REGEX.test(text || '')) {
+      // Fall through to the normal chat path — sendMessage will use mode: "planning"
+      // (handled in the chatBody block below)
+    } else if (CONTENT_GEN_REGEX.test(text || '')) {
+      // Auto-route other content gen to Studio panel
+      const redirectMsg = { role: 'assistant', content: "looks like you want study materials — i've opened studio for you! just drop your request there and i'll generate it.", timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, redirectMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', redirectMsg.content, user.id);
+      if (layoutMode === 'lofi') setLofiTutorTabActive(true);
+      else setActivePanel('tutor');
+      setIsLoading(false);
+      return;
+    }
     const isTutorStudyContentRequest = TUTOR_STUDY_REGEX.test(text || '');
     if (isTutorStudyContentRequest) primeTutorSession();
 
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
-      // For content generation: limit to 6 messages to avoid context overflow on Groq.
-      const rawHistory = updated.slice(photo ? -2 : isContentGen ? -6 : -12).map(m => ({
+      const rawHistory = updated.slice(photo ? -2 : -12).map(m => ({
         role: m.role,
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
-      const inferredIntentType = isContentGen ? 'content_gen' : (likelyActionIntent ? 'action' : 'chat');
+      const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
+      const isPlanningRequest = PLANNING_REGEX.test(text || '');
+      // Agentic hint: fire multi-turn loop for long/multi-step messages or planning requests
+      const agenticHint = Boolean(
+        agenticMode && (
+          isPlanningRequest ||
+          msgContent.length > 280 ||
+          (likelyActionIntent && /\band\b|,\s*(?:also|and|then|plus)/i.test(msgContent))
+        )
+      );
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
@@ -5765,31 +5863,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const token = session?.data?.session?.access_token;
 
       // Tier routing: pure conversational messages use a lighter system prompt + token budget.
-      // NOTE: noTools is intentionally NOT set here — llama-3.3-70b-versatile handles both
-      // conversational replies and tool calling in a single pass. When a message has no action
-      // intent the model simply returns text with no tool_calls (no card shown). This avoids
-      // the bug where phrases like "put in my calendar" were misclassified as conversational
-      // and had tools suppressed, producing a text-only response with no confirmation card.
-      const hasCorrectionSignal = /\b(actually|i meant|wait no|change that|make it|not [a-z]+,|sorry,|oops)\b/i.test(msgContent);
-      const isConversational = !isContentGen && !photo && !isPlanRequest && !fromClarification && !hasCorrectionSignal
-        && !/\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i.test(msgContent)
-        && !/\b(test|exam|quiz|homework|assignment|practice|game|meet|tournament|deadline|event|task|appointment|class|lesson|meeting|dentist|doctor|club|lab)\b/i.test(msgContent)
-        && !/\b(calendar|planner|in my|on my)\b/i.test(msgContent);
-
-      // Always use the full tier-2 prompt so the AI always has tool definitions.
-      // Tier-1 (conversational) had no tool instructions — casual phrasing like
-      // "yeah next Friday works" would fall through with no action generated.
-      // useStreaming: enabled for pure conversational messages only. The backend streams
-      // text deltas via SSE; tool-call JSON is buffered and sent in the final 'done' event.
-      const useStreaming = isConversational && !photo && !isContentGen;
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: isContentGen ? 4096 : 1024,
-        isContentGen,
+        maxTokens: isPlanningRequest ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5798,10 +5878,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           intent_type: inferredIntentType,
           tutor_mode: Boolean(tutorMode),
           workspace_context: effectiveWorkspaceContext,
-          use_streaming: useStreaming,
           likely_action_intent: likelyActionIntent,
+          agentic_mode: agenticHint,
+          agentic_hint: agenticHint,
         },
-        ...(useStreaming ? { streaming: true } : {}),
+        ...(isPlanningRequest ? { mode: 'planning' } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5832,73 +5913,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
       }
 
-      // ── Streaming path ────────────────────────────────────────────────────────────
-      // Consume SSE text deltas in real-time, updating a placeholder message as tokens
-      // arrive. Tool-call JSON is never shown — it arrives only in the final 'done' event.
-      let chatData;
-      if (useStreaming && chatResponse.headers.get('content-type')?.includes('text/event-stream')) {
-        const streamTs = Date.now();
-        // Add an empty placeholder message; spinner is replaced by inline streaming text.
-        setMessages(prev => {
-          const n = [...prev, { role: 'assistant', content: '', timestamp: streamTs, streaming: true }];
-          while (n.length > CHAT_MAX_MESSAGES) n.shift();
-          return n;
-        });
-        setIsLoading(false);
-
-        const reader = chatResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let streamedText = '';
-        let sseBuffer = '';
-        outerStream: while (true) {
-          if (abortSignal.aborted) { try { reader.cancel(); } catch (_) {} break; }
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop();
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            const raw = trimmed.slice(6).trim();
-            if (!raw) continue;
-            let evt;
-            try { evt = JSON.parse(raw); } catch (_) { continue; }
-            if (evt.type === 'text_delta') {
-              streamedText += evt.delta;
-              setMessages(prev => prev.map(m =>
-                m.timestamp === streamTs ? { ...m, content: streamedText } : m
-              ));
-            } else if (evt.type === 'done') {
-              chatData = evt;
-              // Finalise the streaming message content (use server's canonical version)
-              const finalContent = typeof evt.content === 'string' && evt.content.trim()
-                ? evt.content.trim()
-                : streamedText;
-              setMessages(prev => prev.map(m =>
-                m.timestamp === streamTs ? { ...m, content: finalContent, streaming: false } : m
-              ));
-              if (finalContent) {
-                sfx.arrive();
-                if (user) dbInsertChatMsg('assistant', finalContent, user.id);
-                else {
-                  try {
-                    const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
-                    demoChat.push({ role: 'assistant', content: finalContent });
-                    localStorage.setItem('cc_chat', JSON.stringify(demoChat));
-                  } catch (_) {}
-                }
-              }
-              break outerStream;
-            }
-          }
-        }
-        // If no 'done' event arrived, use accumulated text as chatData
-        if (!chatData) chatData = { content: streamedText, actions: [], clarifications: [] };
-      } else {
-        chatData = await chatResponse.json();
-      }
-      // ── End streaming path ────────────────────────────────────────────────────────
+      const chatData = await chatResponse.json();
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
       if (chatData?.model_used) {
@@ -5912,19 +5927,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
       if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
 
-      let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
-
-      // ── Intercept propose_action meta-tool calls from the conversational model ──
-      // These are never passed to the main action pipeline — they surface a yes/no card.
-      const proposalAction = actions.find(a => a.type === 'propose_action');
-      if (proposalAction) {
-        actions = actions.filter(a => a.type !== 'propose_action');
-        setPendingProposal({
-          summary: proposalAction.summary || '',
-          action_type: proposalAction.action_type || 'add_event',
-          prefilled: proposalAction.prefilled || {},
-        });
+      // ── Planning pipeline response: show proposed plan in propose mode ──
+      if (chatData?.orchestration?.mode === 'planning') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_plan') {
+          const critiqueText = typeof chatData.planning_critique === 'string' ? chatData.planning_critique : '';
+          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
+          return;
+        }
       }
+
+      let actions = Array.isArray(chatData?.actions) ? chatData.actions : [];
 
       // Support multiple clarifications (array) or single (object)
       const clarificationsArr = Array.isArray(chatData?.clarifications) && chatData.clarifications.length > 0
@@ -5966,56 +5983,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           metadata: c.metadata || c.context || null,
           allowOther: true,
           otherPlaceholder: c.otherPlaceholder,
+          suggested_defaults: c.suggested_defaults || null,
         }));
         setPendingClarification(mapped.length === 1 ? mapped[0] : mapped);
         return;
-      }
-
-      const validationWarnings = Array.isArray(chatData?.validation_warnings) ? chatData.validation_warnings : [];
-      // Avoid "fan-out" extra AI calls when the model already asked a clarification.
-      // The parser can synthesize clarifications from validation errors; prefer those
-      // instead of issuing another tool_fallback request that may hit multiple models.
-      const shouldRunValidationFallback =
-        validationWarnings.length > 0 &&
-        validClarifications.length === 0 &&
-        actions.length === 0 &&
-        !(typeof chatData?.content === 'string' && chatData.content.trim().length > 0);
-      if (shouldRunValidationFallback) {
-        try {
-          const validationFailures = validationWarnings.map(w => ({
-            action_type: w?.tool || 'unknown_action',
-            category: 'validation_failed',
-            detail: `Validation failed for ${(w?.tool || 'action')}.`,
-            suggestions: (Array.isArray(w?.issues) ? w.issues : []).map(issue => issue?.field).filter(Boolean),
-          }));
-          const fallback = await fetch(EDGE_FN_URL, {
-            method:'POST',
-            headers: {
-              'Content-Type':'application/json',
-              'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
-            },
-            body: JSON.stringify({
-              mode: 'tool_fallback',
-              systemPrompt: promptPayload.prompt,
-              messages: historyForApi,
-              maxTokens: 512,
-              workspaceContext: effectiveWorkspaceContext,
-              tool_failures: validationFailures,
-            }),
-          });
-          if (fallback.ok) {
-            const fallbackData = await fallback.json();
-            const followupText = typeof fallbackData?.content === 'string' ? fallbackData.content.trim() : '';
-            if (followupText) {
-              const assistantMsg = { role:'assistant', content:followupText, timestamp:Date.now() };
-              setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-              if (user) dbInsertChatMsg('assistant', followupText, user.id);
-              return;
-            }
-          }
-        } catch (validationFallbackErr) {
-          console.error('Validation fallback clarification failed:', validationFallbackErr);
-        }
       }
 
       const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
@@ -6040,9 +6011,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             ? "i need one quick detail before i can do that."
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
 
-      // For streamed responses the message was already inserted + persisted above.
-      // Only insert here for non-streaming paths.
-      if (displayContent && !useStreaming) {
+      if (displayContent) {
         const assistantMsg = { role:'assistant', content:displayContent, timestamp:Date.now() };
         sfx.arrive();
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -6058,31 +6027,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         }
       }
 
-      // Actions come back as structured tool_use results — no text parsing needed
-
-      async function requestToolFailureFollowup(toolFailures) {
-        const fallbackResponse = await fetch(EDGE_FN_URL, {
-          method:'POST',
-          headers: {
-            'Content-Type':'application/json',
-            'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
-          },
-          body: JSON.stringify({
-            mode: 'tool_fallback',
-            systemPrompt: promptPayload.prompt,
-            messages: historyForApi,
-            maxTokens: 512,
-            workspaceContext: effectiveWorkspaceContext,
-            tool_failures: toolFailures,
-          }),
-        });
-        if (!fallbackResponse.ok) {
-          const errData = await fallbackResponse.json().catch(() => ({}));
-          throw new Error(errData?.error || `tool fallback failed (${fallbackResponse.status})`);
-        }
-        return fallbackResponse.json();
-      }
-
       function buildResolutionFailure(actionType, detail, candidates = []) {
         const filtered = (candidates || []).filter(Boolean).slice(0, 3);
         return {
@@ -6094,21 +6038,45 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       }
 
       // ── Resolve actions: translate AI names → real IDs/ranges using resolveEvent/resolveTask helpers ──
+      // resolveWithCandidates returns { match, candidates, ambiguous } where ambiguous=true when
+      // the top match is weak (<60) or two candidates are within 10 points.
+      function resolveWithCandidates(query, list, titleKey = 'title') {
+        if (!query || !list?.length) return { match: null, candidates: [], ambiguous: false };
+        const byId = list.find(item => item.id === query);
+        if (byId) return { match: byId, candidates: [], ambiguous: false };
+        const scored = list
+          .map(item => ({ item, score: matchScore(query, item[titleKey] || '') }))
+          .filter(v => v.score >= 30)
+          .sort((a, b) => b.score - a.score);
+        if (scored.length === 0) return { match: null, candidates: [], ambiguous: false };
+        const top = scored[0];
+        const second = scored[1];
+        const ambiguous = top.score < 60 || (second && top.score - second.score < 10);
+        return { match: ambiguous ? null : top.item, candidates: scored.slice(0, 4).map(v => v.item), ambiguous };
+      }
+
       const resolved = [];
       const resolutionFailures = [];
       for (const a of actions) {
         if (a.type === 'delete_event' || a.type === 'update_event' || a.type === 'convert_event_to_block') {
-          const match = resolveEvent(a.title || a.event_id, events);
+          const query = (a.title || a.event_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, events);
           if (match) {
             resolved.push({ ...a, event_id: match.id, title: match.title, date: a.date || match.date });
+          } else if (ambiguous && candidates.length > 0) {
+            // Surface as a clarification instead of silently failing
+            const clarification = {
+              reason: `Multiple events match "${query}" — which one?`,
+              question: `Which event did you mean?`,
+              options: candidates.map(ev => ({ label: `${ev.title}${ev.date ? ' (' + ev.date + ')' : ''}`, value: ev.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['event_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.event_id || '').trim();
-            const eventCandidates = events
-              .map(ev => ({ title: ev.title, score: matchScore(query, ev.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve event "${query}".`, eventCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve event "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }
@@ -6126,32 +6094,44 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           continue;
         }
         if (a.type === 'delete_task') {
-          const match = resolveTask(a.title || a.task_id, tasks);
+          const query = (a.title || a.task_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, tasks);
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
+          } else if (ambiguous && candidates.length > 0) {
+            const clarification = {
+              reason: `Multiple tasks match "${query}" — which one?`,
+              question: `Which task did you mean?`,
+              options: candidates.map(t => ({ label: `${t.title}${t.dueDate ? ' (due ' + t.dueDate + ')' : ''}`, value: t.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['task_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.task_id || '').trim();
-            const taskCandidates = tasks
-              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }
         if (a.type === 'complete_task') {
-          const match = resolveTask(a.title || a.task_id, tasks);
+          const query = (a.title || a.task_id || '').trim();
+          const { match, candidates, ambiguous } = resolveWithCandidates(query, tasks);
           if (match) {
             resolved.push({ ...a, task_id: match.id, title: match.title });
+          } else if (ambiguous && candidates.length > 0) {
+            const clarification = {
+              reason: `Multiple tasks match "${query}" — which one?`,
+              question: `Which task did you mean?`,
+              options: candidates.map(t => ({ label: `${t.title}${t.dueDate ? ' (due ' + t.dueDate + ')' : ''}`, value: t.id })),
+              multi_select: false,
+              context_action: a.type,
+              missing_fields: ['task_id'],
+            };
+            setPendingClarification(clarification);
+            return;
           } else {
-            const query = (a.title || a.task_id || '').trim();
-            const taskCandidates = tasks
-              .map(t => ({ title: t.title, score: matchScore(query, t.title) }))
-              .filter(v => v.score >= 30)
-              .sort((x, y) => y.score - x.score)
-              .map(v => v.title);
-            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, taskCandidates));
+            resolutionFailures.push(buildResolutionFailure(a.type, `Unable to resolve task "${query}".`, candidates.map(c => c.title)));
           }
           continue;
         }
@@ -6189,41 +6169,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       actions = resolved;
 
       if (resolutionFailures.length > 0) {
-        try {
-          const fallback = await requestToolFailureFollowup(resolutionFailures);
-          const followupText = typeof fallback?.content === 'string' ? fallback.content.trim() : '';
-          if (followupText) {
-            const msg = { role:'assistant', content: followupText, timestamp:Date.now() };
-            setMessages(prev => { const n=[...prev,msg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-            if (user) dbInsertChatMsg('assistant', followupText, user.id);
-          }
-        } catch (fallbackErr) {
-          console.error('Tool fallback clarification failed:', fallbackErr);
-          const fallbackMsg = { role:'assistant', content:"I couldn't match part of that action. can you share the exact item name and date/time?", timestamp:Date.now() };
-          setMessages(prev => { const n=[...prev,fallbackMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', fallbackMsg.content, user.id);
-        }
+        const fallbackMsg = { role:'assistant', content:"I couldn't match part of that action — can you share the exact item name and date/time?", timestamp:Date.now() };
+        setMessages(prev => { const n=[...prev,fallbackMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', fallbackMsg.content, user.id);
       }
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
-        const rawContentActions = actions.filter(a => CONTENT_TYPES.includes(a.type));
-        const contentActions = rawContentActions.filter(isValidContentAction);
-        const droppedContentActions = rawContentActions.filter(a => !isValidContentAction(a));
-        if (droppedContentActions.length > 0) {
-          console.warn('Dropped invalid content payload(s) from server actions[] response.');
-          droppedContentActions.forEach(a => {
-            const label = a.type?.replace('create_','').replace('make_','') || 'content';
-            const errMsg = { role:'assistant', content:`couldn't generate ${label} — the response was incomplete. try rephrasing your request.`, timestamp:Date.now(), isValidationError: true };
-            setMessages(prev => { const n=[...prev,errMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          });
-        }
-        const tutorContentActions = contentActions.filter(a => a.type === 'create_flashcards' || a.type === 'create_quiz');
-        if (tutorContentActions.length > 0) primeTutorSession();
         const blockExecution = pendingClarification && !fromClarification;
-        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type) && !CONTENT_TYPES.includes(a.type));
+        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type));
         autoExec.forEach(queueOrExecute);
-        if (contentActions.length > 0 && !blockExecution) setPendingContent(prev => [...prev, ...contentActions]);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
           if (aiAutoApprove && !blockExecution) {
