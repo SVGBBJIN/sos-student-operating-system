@@ -5843,14 +5843,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isPlanningRequest = PLANNING_REGEX.test(text || '');
-      // Agentic hint: fire multi-turn loop for long/multi-step messages or planning requests
-      const agenticHint = Boolean(
-        agenticMode && (
-          isPlanningRequest ||
-          msgContent.length > 280 ||
-          (likelyActionIntent && /\band\b|,\s*(?:also|and|then|plus)/i.test(msgContent))
-        )
-      );
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
@@ -5862,7 +5854,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      // Tier routing: pure conversational messages use a lighter system prompt + token budget.
+      const preferredModel = (() => {
+        try { return localStorage.getItem('sos_preferred_model') || 'openai/gpt-oss-120b'; }
+        catch (_) { return 'openai/gpt-oss-120b'; }
+      })();
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
@@ -5874,14 +5869,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
-        prompt_flags: {
-          intent_type: inferredIntentType,
-          tutor_mode: Boolean(tutorMode),
-          workspace_context: effectiveWorkspaceContext,
-          likely_action_intent: likelyActionIntent,
-          agentic_mode: agenticHint,
-          agentic_hint: agenticHint,
-        },
+        preferredModel,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
       };
       if (photo) {

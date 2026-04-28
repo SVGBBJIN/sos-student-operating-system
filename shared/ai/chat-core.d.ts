@@ -36,18 +36,24 @@ export type CallGroqRequest = {
   toolsOverride?: any[] | null;
   toolChoiceOverride?: "auto" | "required";
   backupModel?: string | null;
-  options?: { isContentGen?: boolean; routeType?: "conversational" | "tool_heavy" | "content_gen"; budgetMs?: number };
+  options?: {
+    isContentGen?: boolean;
+    budgetMs?: number;
+    staticSystemPrompt?: string | null;
+    dynamicContext?: string | null;
+  };
 };
 export const CORE_VERSION: string;
 export const CORE_CHECKSUM: string;
 export const PRIMARY_MODEL: string;
-export const CONVERSATIONAL_MODEL: string;
-export const BACKUP_MODEL: string;
-export const FAST_MODEL: string;
+export const MODEL_DEEP: string;
+export const MODEL_FAST: string;
 export const ACTION_TOOLS: any[];
-export const CONTENT_ACTION_TYPES: Set<string>;
-export const CONTENT_ACTION_TOOLS: any[];
-export function parseFailedGeneration(failedGen: string): Array<{ name: string; arguments: Record<string, unknown> }>;
+export const STUDIO_TOOLS: any[];
+export function resolveModel(requested: string | null | undefined): string;
+export function getGroqRpmStatus(): {
+  remaining: number; limit: number; resetAtMs: number; count: number; nearLimit: boolean;
+};
 export function parseLlmResponse(data: any): ParsedLlmResponse;
 export function callGroq(
   apiKey: string,

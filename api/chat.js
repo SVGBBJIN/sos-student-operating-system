@@ -5,6 +5,7 @@ import {
   CORE_VERSION,
   getGroqRpmStatus,
   PRIMARY_MODEL,
+  resolveModel,
   STUDIO_TOOLS,
 } from "../shared/ai/chat-core.js";
 import { runPlanningPipeline } from "../shared/ai/planning-pipeline.js";
@@ -154,7 +155,6 @@ export default async function handler(req, res) {
   }
 
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
   const SUPABASE_URL =
     process.env.SUPABASE_URL || "https://evqylqgkzlbbrvogxsjn.supabase.co";
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -230,9 +230,9 @@ export default async function handler(req, res) {
       prompt_version,
       context_chars,
       input_tokens_est,
-      prompt_flags,
       tool_failures,
     } = body;
+    const preferredModel = resolveModel(body.preferredModel);
     const userId = extractUserId(req.headers.authorization);
     telemetry = {
       userId,
@@ -241,7 +241,6 @@ export default async function handler(req, res) {
       inputTokensEst: Number(input_tokens_est),
       workspaceContext: typeof workspaceContext === "string" ? workspaceContext : "chat",
       isContentGen: mode === "studio",
-      promptFlags: (prompt_flags && typeof prompt_flags === "object") ? prompt_flags : null,
     };
     const inputTokensEstimated = estimateInputTokens({
       systemPrompt,
@@ -265,7 +264,7 @@ export default async function handler(req, res) {
 
       const studioResult = await callGroq(
         GROQ_API_KEY,
-        PRIMARY_MODEL,
+        preferredModel,
         systemPrompt || "",
         messages,
         Math.min(Number(maxTokens) || 4096, 4096),
@@ -275,7 +274,7 @@ export default async function handler(req, res) {
         STUDIO_TOOLS,
         "required",
         null,
-        { isContentGen: true, staticSystemPrompt: staticSystemPrompt || null, dynamicContext: effectiveDynamic, geminiApiKey: GEMINI_API_KEY }
+        { isContentGen: true, staticSystemPrompt: staticSystemPrompt || null, dynamicContext: effectiveDynamic }
       );
 
       if (!Array.isArray(studioResult.actions) || studioResult.actions.length === 0) {
@@ -309,7 +308,6 @@ export default async function handler(req, res) {
       const planDynamic = dynamicContext ? `${dynamicContext}\n\nWORKSPACE_CONTEXT: ${normalizedWs}` : null;
       const { proposal, critiqueText, iterations } = await runPlanningPipeline({
         apiKey: GROQ_API_KEY,
-        geminiApiKey: GEMINI_API_KEY,
         systemPrompt: systemPrompt || "",
         staticSystemPrompt: staticSystemPrompt || null,
         dynamicContext: planDynamic,
@@ -348,77 +346,23 @@ export default async function handler(req, res) {
       isContentGen: false,
       staticSystemPrompt: staticSystemPrompt || null,
       dynamicContext: effectiveDynamic,
-      geminiApiKey: GEMINI_API_KEY,
     };
 
-    const agenticEnabled = Boolean(prompt_flags?.agentic_mode) && Boolean(prompt_flags?.agentic_hint);
-    const MAX_AGENTIC_ITERATIONS = 4;
-
     const llmStartedAt = Date.now();
-    let result;
-
-    if (agenticEnabled) {
-      // Agentic loop: run model, feed tool-call summaries back, repeat until model goes quiet.
-      let loopConversation = [...messages];
-      let allActions = [];
-      let lastContent = "";
-      let iterations = 0;
-      for (let i = 0; i < MAX_AGENTIC_ITERATIONS; i++) {
-        iterations++;
-        const iterDynamic = effectiveDynamic
-          ? `${effectiveDynamic}\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`
-          : `\n\nITERATION: ${i + 1}/${MAX_AGENTIC_ITERATIONS} — ${allActions.length} action(s) staged so far.`;
-        const iterResult = await callGroq(
-          GROQ_API_KEY, PRIMARY_MODEL, effectiveSystemPrompt, loopConversation,
-          maxTokens, imageBase64, imageMimeType, true, ACTION_TOOLS, "auto", null,
-          { ...callOptions, dynamicContext: iterDynamic }
-        );
-        lastContent = iterResult.content || "";
-        // Accumulate clarifications — stop the loop if any arise (need user input)
-        if (Array.isArray(iterResult.clarifications) && iterResult.clarifications.length > 0) {
-          result = { ...iterResult, actions: allActions.length > 0 ? [...allActions, ...iterResult.actions] : iterResult.actions };
-          break;
-        }
-        if (!Array.isArray(iterResult.actions) || iterResult.actions.length === 0) {
-          // Model returned only text — conversation complete.
-          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
-          break;
-        }
-        // Check for duplicate actions (infinite-loop guard)
-        const newActionKeys = iterResult.actions.map(a => `${a.type}:${a.title || a.task_name || ""}`);
-        const existingKeys = new Set(allActions.map(a => `${a.type}:${a.title || a.task_name || ""}`));
-        if (newActionKeys.every(k => existingKeys.has(k))) {
-          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
-          break;
-        }
-        allActions = [...allActions, ...iterResult.actions];
-        // Build continuation context for next iteration
-        const actionSummary = iterResult.actions.map(a => `${a.type}: "${a.title || a.task_name || a.activity || "(untitled)"}"`).join(", ");
-        loopConversation = [
-          ...loopConversation,
-          { role: "assistant", content: lastContent || `Staged ${iterResult.actions.length} action(s).` },
-          { role: "user", content: `Actions staged: ${actionSummary}. Continue if there are more steps from the original request; otherwise reply in plain text to confirm.` },
-        ];
-        if (i === MAX_AGENTIC_ITERATIONS - 1) {
-          result = { ...iterResult, actions: allActions, _agentic_iterations: iterations };
-        }
-      }
-    } else {
-      result = await callGroq(
-        GROQ_API_KEY,
-        PRIMARY_MODEL,
-        effectiveSystemPrompt,
-        messages,
-        maxTokens,
-        imageBase64,
-        imageMimeType,
-        true,
-        ACTION_TOOLS,
-        "auto",
-        null,
-        callOptions
-      );
-    }
+    const result = await callGroq(
+      GROQ_API_KEY,
+      preferredModel,
+      effectiveSystemPrompt,
+      messages,
+      maxTokens,
+      imageBase64,
+      imageMimeType,
+      true,
+      ACTION_TOOLS,
+      "auto",
+      null,
+      callOptions
+    );
     const llmMs = Date.now() - llmStartedAt;
 
     const toolCallStats = result?.tool_call_stats || { proposed: 0, validated: 0 };

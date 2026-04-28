@@ -3,49 +3,19 @@
 
 import { inferSubjectFromTitle } from "../subjects.js";
 
-export const CORE_VERSION = "chat-core-v2-2026-04-12";
-export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
+export const CORE_VERSION = "chat-core-v3-2026-04-28";
+export const CORE_CHECKSUM = "sha256:groq-only-strict-retry-v1";
 
-// PRIMARY: reasoning model used for all chat routes. GEMINI_FALLBACK: cross-provider with thinking.
-// GROQ_FALLBACK: last-resort Groq model (non-reasoning but reliable tool caller).
-export const PRIMARY_MODEL   = "openai/gpt-oss-120b";
-export const GEMINI_FALLBACK = "gemini-2.5-flash";
-export const GROQ_FALLBACK   = "llama-3.3-70b-versatile";
+export const MODEL_DEEP = "openai/gpt-oss-120b";
+export const MODEL_FAST = "openai/gpt-oss-20b";
+// PRIMARY_MODEL kept for back-compat
+export const PRIMARY_MODEL = MODEL_DEEP;
 
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-
-const GROQ_CIRCUIT = {
-  openedUntilMs: 0,
-  spikes: [],
-};
-
-// Tracks Groq's remaining tokens-per-minute, read from response headers after each call.
-// Enables proactive routing to Gemini before hitting a hard TPM 429.
-const GROQ_TPM = {
-  remaining: Infinity,  // x-ratelimit-remaining-tokens
-  limit: Infinity,      // x-ratelimit-limit-tokens
-  resetAtMs: 0,         // absolute ms when the TPM window resets
-};
-const TPM_SWITCH_THRESHOLD = 0.15; // switch providers when <15% of TPM remains
-
-function updateGroqTpm(headers) {
-  const remaining = parseInt(headers.get("x-ratelimit-remaining-tokens") || "", 10);
-  const limit     = parseInt(headers.get("x-ratelimit-limit-tokens")     || "", 10);
-  const resetStr  = headers.get("x-ratelimit-reset-tokens") || "";
-  if (!isNaN(remaining)) GROQ_TPM.remaining = remaining;
-  if (!isNaN(limit))     GROQ_TPM.limit     = limit;
-  // resetStr is like "1.23s" — convert to absolute timestamp
-  const sec = parseFloat(resetStr);
-  if (!isNaN(sec))       GROQ_TPM.resetAtMs = Date.now() + Math.ceil(sec * 1000);
+export function resolveModel(requested) {
+  return (requested === MODEL_FAST || requested === MODEL_DEEP) ? requested : MODEL_DEEP;
 }
 
-function groqTpmNearLimit() {
-  if (GROQ_TPM.limit === Infinity) return false;        // no header data yet
-  if (Date.now() > GROQ_TPM.resetAtMs) return false;   // window already reset
-  return GROQ_TPM.remaining < GROQ_TPM.limit * TPM_SWITCH_THRESHOLD;
-}
-
-// Tracks Groq's remaining requests-per-minute from response headers.
+// Tracks Groq's remaining requests-per-minute from response headers (monitoring-only).
 const GROQ_RPM = {
   remaining: Infinity,  // x-ratelimit-remaining-requests
   limit: Infinity,      // x-ratelimit-limit-requests
@@ -77,10 +47,6 @@ export function getGroqRpmStatus() {
     nearLimit: GROQ_RPM.remaining !== Infinity && Date.now() < GROQ_RPM.resetAtMs
       && GROQ_RPM.remaining < GROQ_RPM.limit * RPM_NEAR_LIMIT_THRESHOLD,
   };
-}
-
-function isGeminiModel(mdl) {
-  return mdl === GEMINI_FALLBACK;
 }
 
 /** @typedef {{role: string, content: unknown}} ChatMessage */
@@ -270,123 +236,6 @@ export const ACTION_TOOLS = [
   {
     type: "function",
     function: {
-      name: "convert_event_to_block",
-      description:
-        "Convert a date-only event into a scheduled time block on the same date.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Event title to convert" },
-          event_id: { type: "string", description: "Event id to convert (optional if title provided)" },
-          date: { type: "string", description: "Date in YYYY-MM-DD format" },
-          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
-          end: { type: "string", description: "End time in HH:MM 24-hour format" },
-          category: {
-            type: "string",
-            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
-          },
-        },
-        required: ["date", "start", "end"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "convert_block_to_event",
-      description:
-        "Convert an existing scheduled block range into a calendar event.",
-      parameters: {
-        type: "object",
-        properties: {
-          date: { type: "string", description: "Date in YYYY-MM-DD format" },
-          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
-          end: { type: "string", description: "End time in HH:MM 24-hour format (optional)" },
-          title: { type: "string", description: "Event title" },
-          event_type: {
-            type: "string",
-            enum: ["test", "exam", "quiz", "practice", "game", "match", "meet", "tournament", "event", "other"],
-          },
-          subject: { type: "string", description: "School subject" },
-        },
-        required: ["date", "start", "title", "event_type", "subject"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_note",
-      description: "Store a note, if you lack any of the contents, you call the ask clarification tool.",
-      parameters: {
-        type: "object",
-        properties: {
-          content: { type: "string", description: "The note content." },
-          title: { type: "string", description: "Optional title for the note." },
-        },
-        required: ["content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "edit_note",
-      description: "Replace the content of an existing note. Use when the student asks to update, rewrite, or change a note's content.",
-      parameters: {
-        type: "object",
-        properties: {
-          tab_name: { type: "string", description: "Name of the note to edit" },
-          new_content: { type: "string", description: "The new content to replace the existing content with" },
-        },
-        required: ["tab_name", "new_content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_note",
-      description: "Delete a note from the student's notes. Use when the student asks to remove or delete a specific note.",
-      parameters: {
-        type: "object",
-        properties: {
-          tab_name: { type: "string", description: "Name of the note to delete" },
-        },
-        required: ["tab_name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "break_task",
-      description:
-        "Break a large task into smaller, manageable subtasks spread across multiple days.",
-      parameters: {
-        type: "object",
-        properties: {
-          parent_title: { type: "string", description: "Title of the task to break up" },
-          subtasks: {
-            type: "array",
-            description: "List of subtasks",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                due: { type: "string", description: "YYYY-MM-DD" },
-                estimated_minutes: { type: "number" },
-              },
-            },
-          },
-        },
-        required: ["parent_title", "subtasks"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "add_recurring_event",
       description:
         "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
@@ -414,22 +263,6 @@ export const ACTION_TOOLS = [
           end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
         },
         required: ["title", "days", "start_date", "end_date"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search_reference",
-      description:
-        "Search the web for general knowledge, source-backed references, and direct quotes. Use this when the student asks for facts with citations or quote evidence from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query or question to research" },
-          quote_count: { type: "number", description: "Desired number of direct quotes (1-6)" },
-        },
-        required: ["query"],
       },
     },
   },
@@ -468,24 +301,6 @@ export const ACTION_TOOLS = [
     },
   },
 ];
-
-/* ── Parse Groq's malformed tool calls from failed_generation ── */
-export function parseFailedGeneration(failedGen) {
-  const results = [];
-  // Matches both Groq malformed formats:
-  //   <function=tool_name {"key":"val"}></function>     (space-separated)
-  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
-  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
-  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
-  let match;
-  while ((match = regex.exec(failedGen)) !== null) {
-    try {
-      const args = JSON.parse(match[2]);
-      results.push({ name: match[1], arguments: args });
-    } catch (_) { /* skip unparseable entries */ }
-  }
-  return results;
-}
 
 const TOOL_SPEC_BY_NAME = new Map(
   ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
@@ -907,42 +722,19 @@ export async function callGroq(
     fallback_used: false,
   };
 
-  // Always use the passed model as primary — no route-based override.
-  const selectedPrimary = model;
-
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
   }
 
-  function noteSpike(statusCode) {
-    const now = Date.now();
-    GROQ_CIRCUIT.spikes = GROQ_CIRCUIT.spikes.filter((ts) => now - ts <= 60000);
-    if (statusCode === 429 || statusCode >= 500) {
-      GROQ_CIRCUIT.spikes.push(now);
-      if (GROQ_CIRCUIT.spikes.length >= 4) {
-        GROQ_CIRCUIT.openedUntilMs = now + 15000;
-      }
-    }
-  }
-
-  function resetCircuit() {
-    GROQ_CIRCUIT.spikes = [];
-    GROQ_CIRCUIT.openedUntilMs = 0;
-  }
-
-  // Inner attempt: builds the request for a specific model and runs it with budget-aware retries.
-  async function attempt(mdl) {
+  // Inner attempt: builds the request for the resolved model and runs it with budget-aware retries.
+  async function attempt(mdl, msgs) {
     // Prompt-caching: when staticSystemPrompt + dynamicContext are provided separately,
     // the static policy becomes a single unchanging system message (Groq can cache it
     // alongside the tool definitions). The dynamic per-user context is sent as a second
     // system message so it doesn't pollute the cached prefix.
-    // Exception: Gemini/Gemma only supports a single system message — merge both parts
-    // into one to prevent the dynamic context from being echoed in the response.
     const staticPrompt = options?.staticSystemPrompt;
     const dynamicContext = options?.dynamicContext;
-    const groqMessages = (staticPrompt && isGeminiModel(mdl))
-      ? [{ role: "system", content: `${staticPrompt}\n\n${dynamicContext || ""}` }]
-      : staticPrompt
+    const groqMessages = staticPrompt
       ? [
           { role: "system", content: staticPrompt },
           { role: "system", content: dynamicContext || "" },
@@ -951,7 +743,7 @@ export async function callGroq(
 
     if (imageBase64) {
       const effectiveMime = imageMimeType || "image/jpeg";
-      const lastUser = [...messages].reverse().find((m) => m.role === "user");
+      const lastUser = [...(msgs || messages)].reverse().find((m) => m.role === "user");
       const textContent =
         lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
           ? lastUser.content.trim()
@@ -967,25 +759,20 @@ export async function callGroq(
         ],
       });
     } else {
-      for (const m of messages) {
+      for (const m of (msgs || messages)) {
         const text = typeof m.content === "string" ? m.content.trim() : "";
         if (text) groqMessages.push({ role: m.role, content: text });
       }
     }
 
-    // Vision requests always use the vision-capable model regardless of mdl
-    const effectiveModel = imageBase64 ? GEMINI_FALLBACK : mdl;
     const body = {
-      model: effectiveModel,
+      model: mdl,
       messages: groqMessages,
       max_completion_tokens: 1000,
       temperature: 1,
       top_p: 1,
+      reasoning_effort: "high",
     };
-    // reasoning_effort is only supported on openai/gpt-oss models, not Gemini fallbacks.
-    if (!isGeminiModel(effectiveModel)) {
-      body.reasoning_effort = "high";
-    }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
     const effectiveTools = rawTools
@@ -1003,12 +790,9 @@ export async function callGroq(
     const MIN_REMAINING_FOR_RETRY_MS = 900;
     let res;
     for (let i = 0; i <= MAX_RETRIES; i++) {
-      if (Date.now() < GROQ_CIRCUIT.openedUntilMs) {
-        throw new Error(`Groq circuit open until ${new Date(GROQ_CIRCUIT.openedUntilMs).toISOString()}`);
-      }
       const remaining = remainingBudgetMs();
       if (remaining <= MIN_REMAINING_FOR_RETRY_MS) {
-        throw new Error(`${isGeminiModel(mdl) ? "Gemini" : "Groq"} ${mdl} budget exhausted (${budgetMs}ms)`);
+        throw new Error(`Groq ${mdl} budget exhausted (${budgetMs}ms)`);
       }
       metrics.attempt_count += 1;
       const controller = new AbortController();
@@ -1016,17 +800,11 @@ export async function callGroq(
         () => controller.abort(),
         Math.max(700, Math.min(remaining - 250, 8000))
       );
-      // Route to Gemini (OpenAI-compatible) or Groq based on model name.
-      const usingGemini = isGeminiModel(effectiveModel);
-      const providerUrl = usingGemini
-        ? `${GEMINI_BASE_URL}/chat/completions`
-        : "https://api.groq.com/openai/v1/chat/completions";
-      const providerKey = usingGemini ? (options?.geminiApiKey || "") : apiKey;
       try {
-        res = await fetch(providerUrl, {
+        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${providerKey}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -1035,21 +813,14 @@ export async function callGroq(
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === "AbortError") {
-          if (!usingGemini) noteSpike(503);
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} request timed out within budget (${budgetMs}ms)`);
+          throw new Error(`Groq ${mdl} request timed out within budget (${budgetMs}ms)`);
         }
         throw err;
       }
       clearTimeout(timeoutId);
 
-      // Update Groq TPM/RPM state from response headers (Gemini doesn't provide these).
-      if (!usingGemini && res.ok) {
-        updateGroqTpm(res.headers);
+      if (res.ok) {
         updateGroqRpm(res.headers);
-      }
-
-      if ((res.status === 429 || res.status >= 500) && i < MAX_RETRIES) {
-        if (!usingGemini) noteSpike(res.status);
       }
 
       if (res.status === 429 && i < MAX_RETRIES) {
@@ -1058,10 +829,10 @@ export async function callGroq(
         const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 8) : Math.min((2 ** i) * 0.8, 8);
         const waitMs = Math.floor(waitSec * 1000);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} rate limited with insufficient budget to retry`);
+          throw new Error(`Groq ${mdl} rate limited with insufficient budget to retry`);
         }
         metrics.retry_wait_ms_total += waitMs;
-        console.warn(`${usingGemini ? "Gemini" : "Groq"} 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
+        console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
@@ -1070,98 +841,54 @@ export async function callGroq(
         const waitMs = Math.min(300 * (2 ** i), 2500);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
           const errText = await res.text().catch(() => "");
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
+          throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
         }
         metrics.retry_wait_ms_total += waitMs;
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
 
-      // Recover from Groq's malformed tool call errors (400 tool_use_failed)
       if (res.status === 400) {
         const errText = await res.text().catch(() => "");
-        let errData;
-        try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
-
-        if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
-          const recovered = parseFailedGeneration(errData.error.failed_generation);
-          if (recovered.length > 0) {
-            const syntheticToolCalls = recovered.map((r, k) => ({
-              id: `recovered_${k}`,
-              type: "function",
-              function: { name: r.name, arguments: JSON.stringify(r.arguments) },
-            }));
-            return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
-          }
-        }
-        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error 400: ${errText.slice(0, 200)}`);
+        throw new Error(`Groq ${mdl} error 400: ${errText.slice(0, 200)}`);
       }
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
+        throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
       }
-      if (!usingGemini) resetCircuit();
       break;
     }
 
     const data = await res.json();
     return {
       ...parseLlmResponse(data),
-      model_used: effectiveModel,
+      model_used: mdl,
     };
   }
 
-  // Proactive TPM preemption: if Groq is near its token-per-minute limit and we have
-  // a Gemini key, skip Groq entirely and go straight to the Gemini fallback.
-  if (groqTpmNearLimit() && options?.geminiApiKey) {
-    console.warn(`[callGroq] Groq TPM near limit (${GROQ_TPM.remaining}/${GROQ_TPM.limit} tokens remaining) — routing directly to ${GEMINI_FALLBACK}`);
-    metrics.fallback_used = true;
-    return { ...await attempt(GEMINI_FALLBACK), ...metrics };
-  }
+  const resolvedModel = resolveModel(model);
 
-  // Fallback chain: PRIMARY → GEMINI_FALLBACK → GROQ_FALLBACK.
-  const geminiBackup = options?.geminiApiKey ? GEMINI_FALLBACK : null;
-  const groqLastResort = GROQ_FALLBACK !== selectedPrimary ? GROQ_FALLBACK : null;
+  // Single attempt — no fallback chain.
+  let parsed = await attempt(resolvedModel);
 
-  // Attempt a model, then try the next in the chain on empty response.
-  async function tryChain(primary, chain) {
-    let result = await attempt(primary);
-    for (const next of chain) {
-      if (!result.content && result.actions.length === 0 && next && next !== primary && remainingBudgetMs() > 900) {
-        metrics.fallback_used = true;
-        console.warn(`[callGroq] ${primary} returned empty — retrying with ${next}`);
-        result = await attempt(next);
-        primary = next;
-      } else {
-        break;
-      }
+  // Strict validate-and-retry: if there are validation warnings, retry once with error context.
+  if (parsed.validation_warnings && parsed.validation_warnings.length > 0) {
+    const warnings = parsed.validation_warnings;
+    const retryMessages = [
+      ...(messages || []),
+      { role: "user", content: "TOOL_VALIDATION_ERROR: " + JSON.stringify(warnings) },
+    ];
+    console.warn(`[callGroq] validation warnings on ${resolvedModel}, retrying once`, warnings);
+    try {
+      parsed = await attempt(resolvedModel, retryMessages);
+    } catch (retryErr) {
+      console.warn(`[callGroq] retry after validation error failed: ${retryErr.message}`);
+      // Return original parsed result if retry fails
     }
-    return result;
   }
 
-  try {
-    const chain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
-    const result = await tryChain(selectedPrimary, chain);
-    return { ...result, ...metrics };
-  } catch (primaryErr) {
-    let fallbackErr = primaryErr;
-    const fallbackChain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
-    for (const next of fallbackChain) {
-      if (!next || remainingBudgetMs() <= 900) break;
-      metrics.fallback_used = true;
-      console.warn(`[callGroq] ${fallbackErr.message} — retrying with ${next}`);
-      try {
-        const fallbackResult = await tryChain(next,
-          fallbackChain.slice(fallbackChain.indexOf(next) + 1)
-        );
-        return { ...fallbackResult, ...metrics };
-      } catch (nextErr) {
-        fallbackErr = nextErr;
-      }
-    }
-    throw fallbackErr;
-  }
+  return { ...parsed, ...metrics };
 }
 
 /**
