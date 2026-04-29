@@ -4720,7 +4720,16 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const rawDue = action.due_date || action.due || today();
+          const taskName = (action.task_name || action.title || '').trim();
+          if (!taskName || taskName.length < 2) {
+            setPendingClarification({ question: "What should I name this task?", context_action: 'add_task', missing_fields: ['task_name'] });
+            return;
+          }
+          const rawDue = action.due_date || action.due || '';
+          if (!rawDue) {
+            setPendingClarification({ question: "When is this task due?", context_action: 'add_task', missing_fields: ['due_date'] });
+            return;
+          }
           // Detect unparseable dates ("next purple") up front so we can tell the user
           // what happened instead of silently pinning the task to today.
           let dateParsedOk = true;
@@ -4729,8 +4738,8 @@ function App() {
             if (isNaN(d.getTime())) { dateParsedOk = false; return today(); }
             try { return toDateStr(d); } catch (_) { dateParsedOk = false; return today(); }
           })();
-          if (!dateParsedOk && rawDue && rawDue !== today()) {
-            setTimeout(() => postAssistantNote(`I couldn't read "${rawDue}" as a date, so I set the task for today — you can say "set the due date for ${action.task_name || action.title || 'that task'} to [date]" to change it.`), 400);
+          if (!dateParsedOk && rawDue) {
+            setTimeout(() => postAssistantNote(`I couldn't read "${rawDue}" as a date, so I set the task for today — you can say "set the due date for ${taskName} to [date]" to change it.`), 400);
           }
           // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
           const todayVal = today();
@@ -4745,7 +4754,7 @@ function App() {
             const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
           }
-          const task = { id:uid(), title:action.task_name||action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const task = { id:uid(), title:taskName, subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -4847,9 +4856,18 @@ function App() {
           break;
         }
         case 'add_event': {
-          const rawEvDate = action.date || today();
+          const evTitle = (action.title || '').trim();
+          if (!evTitle || evTitle.length < 2) {
+            setPendingClarification({ question: "What should I call this event?", context_action: 'add_event', missing_fields: ['title'] });
+            return;
+          }
+          const rawEvDate = (action.date || '').trim();
+          if (!rawEvDate) {
+            setPendingClarification({ question: "What date is this event?", context_action: 'add_event', missing_fields: ['date'] });
+            return;
+          }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -5195,6 +5213,20 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
+    if (action.type === 'add_event' || action.type === 'add_task') {
+      const titleVal = (action.title || action.task_name || '').trim();
+      const dateVal = (action.date || action.due_date || action.due || '').trim();
+      if (!titleVal || titleVal.length < 2) {
+        setPendingClarification({ question: "What should I call this?", context_action: action.type, missing_fields: [action.type === 'add_task' ? 'task_name' : 'title'] });
+        setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+        return;
+      }
+      if (!dateVal) {
+        setPendingClarification({ question: action.type === 'add_task' ? "When is this task due?" : "What date is this event?", context_action: action.type, missing_fields: [action.type === 'add_task' ? 'due_date' : 'date'] });
+        setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+        return;
+      }
+    }
     sfx.confirm();
     executeAction(action);
     setPendingActions(prev => prev.filter((_,i)=>i!==idx));

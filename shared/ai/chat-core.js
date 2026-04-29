@@ -506,6 +506,10 @@ const TITLE_LIKE_FIELDS = new Set([
 // Minimum length for a title-like field. Single chars or "a"/"x" are rejected.
 const MIN_TITLE_LENGTH = 2;
 
+// Detects titles that are instructions ("add an event", "schedule a test") rather
+// than actual names. The model sometimes echoes the user's verb phrase as the title.
+const INSTRUCTION_TITLE_REGEX = /^(add|create|schedule|make|put|set|log|track|book|enter|register|new)\s+/i;
+
 function isValidDateString(value) {
   if (!DATE_RE.test(value)) return false;
   const [y, m, d] = value.split("-").map(Number);
@@ -559,6 +563,9 @@ function validateToolArguments(toolName, args) {
         } else if (trimmed.length < MIN_TITLE_LENGTH) {
           missingFields.push(field);
           issues.push({ field, issue: "too_short", expected: `at least ${MIN_TITLE_LENGTH} characters`, actual: trimmed });
+        } else if (INSTRUCTION_TITLE_REGEX.test(trimmed)) {
+          missingFields.push(field);
+          issues.push({ field, issue: "instruction_as_title", expected: "the actual name, not a command phrase like 'add an event'", actual: trimmed });
         }
       }
       if (field === "subject" && PLACEHOLDER_SUBJECT_STRINGS.has(trimmed.toLowerCase())) {
@@ -683,6 +690,7 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
           case "time": return "What time? (e.g. 14:30) — or leave blank for all-day.";
           case "start": return "What start time? (HH:MM)";
           case "end": return "What end time? (HH:MM)";
+          case "task_name": return "What should I name this task?";
           case "subject": return "Which subject is this for?";
           case "activity": return "What activity should I schedule?";
           case "tab_name": return "Which note should I use?";
@@ -913,6 +921,8 @@ export async function callGroq(
   // Strict validate-and-retry: if there are validation warnings, retry once with
   // human-readable field-by-field feedback so the model can correct the call.
   if (parsed.validation_warnings && parsed.validation_warnings.length > 0) {
+    const originalClarifications = parsed.clarifications || [];
+    const originalClarification = parsed.clarification || null;
     const feedback = buildValidationFeedback(parsed.validation_warnings);
     const retryMessages = [
       ...(messages || []),
@@ -921,10 +931,24 @@ export async function callGroq(
     console.warn(`[callGroq] validation warnings on ${resolvedModel}, retrying once`, parsed.validation_warnings);
     try {
       const retried = await attempt(resolvedModel, retryMessages);
-      // Only adopt retry result if it has fewer warnings (or none).
       const before = parsed.validation_warnings.length;
       const after = (retried.validation_warnings || []).length;
-      if (after <= before) parsed = retried;
+      const retryHasContent = retried.actions.length > 0 || retried.clarifications.length > 0;
+      const retryImproves = after < before;
+      if (retryHasContent || retryImproves) {
+        // Retry produced a tool call or structured clarification — use it.
+        parsed = retried;
+      } else if (retried.content && originalClarifications.length > 0) {
+        // Retry produced only plain text (no tool call, no clarification). Keep the
+        // structured clarification cards from attempt 1 so the UI prompts the user
+        // instead of silently dropping the question.
+        parsed = {
+          ...retried,
+          clarifications: originalClarifications,
+          clarification: originalClarification,
+        };
+      }
+      // If retry has equally many warnings and no content, keep original (do nothing).
     } catch (retryErr) {
       console.warn(`[callGroq] retry after validation error failed: ${retryErr.message}`);
     }
