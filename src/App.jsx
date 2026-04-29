@@ -4810,8 +4810,14 @@ function App() {
             postAssistantNote("I couldn't find that task to update — could you name it exactly as it appears on your list?");
             break;
           }
+          const newTitleRaw = action.new_title;
+          const newTitleClean = typeof newTitleRaw === 'string' ? newTitleRaw.trim() : '';
+          if (newTitleRaw !== undefined && newTitleRaw !== null && (!newTitleClean || newTitleClean.length < 2)) {
+            setPendingClarification({ question: "What should I rename this task to?", context_action: 'update_task', missing_fields: ['new_title'] });
+            return;
+          }
           const upd = {};
-          if (action.new_title || action.title) upd.title = action.new_title || (action.task_id ? action.title : target.title);
+          if (newTitleClean) upd.title = newTitleClean;
           if (action.due) {
             const d = new Date(action.due + 'T12:00:00');
             if (isNaN(d.getTime())) {
@@ -4825,7 +4831,16 @@ function App() {
           break;
         }
         case 'add_block': {
-          const date = action.date || today();
+          const activity = (action.activity || '').trim();
+          if (!activity || activity.length < 2) {
+            setPendingClarification({ question: "What should I call this block?", context_action: 'add_block', missing_fields: ['activity'] });
+            return;
+          }
+          const date = (action.date || '').trim();
+          if (!date) {
+            setPendingClarification({ question: "What date is this block for?", context_action: 'add_block', missing_fields: ['date'] });
+            return;
+          }
           const hmOk = (t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(t || '').trim());
           if (!hmOk(action.start) || !hmOk(action.end)) {
             postAssistantNote(`I need a valid start and end time (like 15:00 to 17:00) to add that block — could you restate the times?`);
@@ -4844,7 +4859,7 @@ function App() {
             let ch=sh, cm=sm;
             while (ch<eh||(ch===eh&&cm<em)) {
               const key = String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');
-              const data = { name:action.activity||'Block', category:action.category||'school' };
+              const data = { name:activity, category:action.category||'school' };
               dayBlocks[key] = data;
               slotOps.push({ date, key, data });
               cm+=30; if(cm>=60){ch++;cm=0;}
@@ -4904,7 +4919,12 @@ function App() {
           break;
         }
         case 'add_note': {
-          const tabName = action.title||action.tab_name||'SOS Note'; const content = action.content||'';
+          const tabName = (action.title || action.tab_name || '').trim();
+          if (!tabName || tabName.length < 2) {
+            setPendingClarification({ question: "What should I name this note?", context_action: 'add_note', missing_fields: ['title'] });
+            return;
+          }
+          const content = action.content || '';
           setNotes(prev => {
             const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {
@@ -4939,8 +4959,15 @@ function App() {
           break;
         }
         case 'break_task': {
-          const newTasks = (action.subtasks||[]).map(st => ({
-            id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+          const validSubtasks = (action.subtasks || [])
+            .map(st => ({ ...st, _title: typeof st.title === 'string' ? st.title.trim() : '' }))
+            .filter(st => st._title.length >= 2);
+          if (validSubtasks.length === 0) {
+            setPendingClarification({ question: "What parts should I break this task into?", context_action: 'break_task', missing_fields: ['subtasks'] });
+            return;
+          }
+          const newTasks = validSubtasks.map(st => ({
+            id:uid(), title:st._title, subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
           }));
           setTasks(prev => [...prev, ...newTasks]);
           if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
@@ -4980,10 +5007,15 @@ function App() {
             postAssistantNote(`I couldn't find "${action.title || action.event_id || 'that event'}" to update. Could you tell me the exact title?`);
             break;
           }
+          const newTitleClean = typeof action.new_title === 'string' ? action.new_title.trim() : '';
+          if (action.new_title !== undefined && (!newTitleClean || newTitleClean.length < 2)) {
+            setPendingClarification({ question: "What should I rename this event to?", context_action: 'update_event', missing_fields: ['new_title'] });
+            return;
+          }
           setEvents(prev => {
             const next = prev.map(ev => ev.id === match.id ? {
               ...ev,
-              ...(action.new_title && { title: action.new_title }),
+              ...(newTitleClean && { title: newTitleClean }),
               ...(action.date && { date: action.date }),
               ...(action.event_type && { type: action.event_type }),
               ...(action.subject !== undefined && { subject: action.subject })
@@ -5213,16 +5245,20 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
-    if (action.type === 'add_event' || action.type === 'add_task') {
-      const titleVal = (action.title || action.task_name || '').trim();
+    if (action.type === 'add_event' || action.type === 'add_task' || action.type === 'add_block') {
+      const titleField = action.type === 'add_task' ? 'task_name' : action.type === 'add_block' ? 'activity' : 'title';
+      const dateField = action.type === 'add_task' ? 'due_date' : 'date';
+      const titleVal = (action.title || action.task_name || action.activity || '').trim();
       const dateVal = (action.date || action.due_date || action.due || '').trim();
+      const titleQuestion = action.type === 'add_task' ? "What should I name this task?" : action.type === 'add_block' ? "What should I call this block?" : "What should I call this event?";
+      const dateQuestion = action.type === 'add_task' ? "When is this task due?" : action.type === 'add_block' ? "What date is this block for?" : "What date is this event?";
       if (!titleVal || titleVal.length < 2) {
-        setPendingClarification({ question: "What should I call this?", context_action: action.type, missing_fields: [action.type === 'add_task' ? 'task_name' : 'title'] });
+        setPendingClarification({ question: titleQuestion, context_action: action.type, missing_fields: [titleField] });
         setPendingActions(prev => prev.filter((_,i)=>i!==idx));
         return;
       }
       if (!dateVal) {
-        setPendingClarification({ question: action.type === 'add_task' ? "When is this task due?" : "What date is this event?", context_action: action.type, missing_fields: [action.type === 'add_task' ? 'due_date' : 'date'] });
+        setPendingClarification({ question: dateQuestion, context_action: action.type, missing_fields: [dateField] });
         setPendingActions(prev => prev.filter((_,i)=>i!==idx));
         return;
       }
