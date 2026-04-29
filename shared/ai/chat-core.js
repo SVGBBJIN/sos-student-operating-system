@@ -83,11 +83,11 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, respond with plain text asking for the missing detail. NEVER invent or guess values.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. STRICT RULES: (1) `title` MUST be the actual name from the student's message — NEVER 'task', 'event', 'untitled', 'tbd', or any placeholder; if the student didn't name it, respond with plain text asking what to call it. (2) `subject` MUST be a real subject name (e.g. 'mathematics', 'biology', 'history', 'spanish') — NEVER 'general', 'subject', 'class', 'school', or 'other'; if you can't infer it from the title (e.g. 'Calc Quiz' → 'calculus', 'Bio Test' → 'biology'), ask the student which class it's for. (3) NEVER invent or guess any value.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Event title exactly as the student said it." },
+          title: { type: "string", description: "Event title EXACTLY as the student named it. Reject any placeholder like 'task', 'event', 'homework', 'untitled'." },
           date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates ('tomorrow', 'next Friday') against today's date in the system prompt. Never emit a date in the past unless the student explicitly said 'yesterday' or 'last [day]'." },
           time: { type: "string", description: "HH:MM 24-hour (e.g. 14:30). Omit entirely if the student did not specify a time — do not guess." },
           description: { type: "string", description: "Brief description or notes about the event (chapters covered, materials needed, etc.)" },
@@ -102,10 +102,10 @@ export const ACTION_TOOLS = [
           },
           subject: {
             type: "string",
-            description: "Lowercase canonical subject (e.g., 'mathematics', 'biology'). Infer from title only when obvious (e.g. 'Calc Quiz' → 'calculus'). Omit when uncertain.",
+            description: "Specific subject name in lowercase. Examples: 'mathematics', 'calculus', 'biology', 'chemistry', 'physics', 'english', 'history', 'spanish', 'french', 'computer science', 'literature', 'economics', 'psychology', 'physical education'. For non-academic events (sports, appointments, social), use the activity name (e.g. 'swim', 'debate'). NEVER use generic words like 'general', 'subject', 'class', 'school', or 'other' — if you don't know the specific subject, ask the student.",
           },
         },
-        required: ["title", "date"],
+        required: ["title", "date", "subject"],
       },
     },
   },
@@ -114,14 +114,18 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). You MUST know the task_name before calling this; if it is unclear, respond with plain text asking for the task name. due_date is required: if the student said 'due X', 'by X', 'for X' use that; otherwise ask for it in plain text rather than guessing. Never invent values.",
+        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). STRICT RULES: (1) `task_name` MUST be the actual task name from the student's message — NEVER 'task', 'homework', 'assignment', 'todo', 'untitled', or any placeholder; if unclear, ask in plain text. (2) `due_date` is required — if the student said 'due X', 'by X', 'for X' use that; otherwise ask, never guess. (3) `subject` MUST be a specific subject when the task is academic (homework, essay, lab, project, paper, study, worksheet) — infer from name (e.g. 'Calc problem set' → 'calculus', 'AP Bio reading' → 'biology'); if you can't, ask the student. For non-academic tasks (chores, errands), use 'personal'. NEVER use 'general', 'subject', 'class', or 'other'.",
       parameters: {
         type: "object",
         properties: {
-          task_name: { type: "string", description: "The name or title of the task, phrased as the student said it." },
+          task_name: { type: "string", description: "The actual task name from the student's message. Reject placeholders like 'task', 'homework', 'todo'." },
           due_date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates against today's date in the system prompt. Never emit a past date unless the student explicitly said so. If the student gave no date, respond with plain text asking rather than guessing." },
+          subject: {
+            type: "string",
+            description: "Specific subject name in lowercase (e.g. 'mathematics', 'calculus', 'biology', 'english', 'history', 'spanish'). For non-academic tasks (chores, errands, personal), use 'personal'. NEVER 'general', 'subject', 'class', 'school', or 'other'.",
+          },
         },
-        required: ["task_name", "due_date"],
+        required: ["task_name", "due_date", "subject"],
       },
     },
   },
@@ -160,12 +164,12 @@ export const ACTION_TOOLS = [
     function: {
       name: "update_event",
       description:
-        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests. STRICT: `title` is the EXISTING event name to look up — must match what's already on the calendar; if the student didn't name the event clearly, ask before calling. Any provided field must be a real value, never a placeholder.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Current event title to look up" },
-          new_title: { type: "string", description: "New title (omit if not changing name)" },
+          title: { type: "string", description: "Current event title to look up — must be the actual name already on the calendar." },
+          new_title: { type: "string", description: "New title (omit if not changing name). If provided, must be a real name — never 'task', 'event', 'untitled'." },
           date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
           event_type: {
             type: "string",
@@ -174,7 +178,10 @@ export const ACTION_TOOLS = [
               "tournament", "event", "other",
             ],
           },
-          subject: { type: "string" },
+          subject: {
+            type: "string",
+            description: "Specific subject name in lowercase. NEVER 'general', 'subject', 'class', or 'other'. Omit if not changing.",
+          },
         },
         required: ["title"],
       },
@@ -238,16 +245,19 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. STRICT RULES: (1) `title` MUST be the activity's actual name from the student — NEVER a placeholder. (2) `subject` MUST be a real subject (e.g. 'mathematics', 'biology') for academic recurrences, or the activity name (e.g. 'swim', 'debate', 'soccer') for non-academic. NEVER 'general', 'subject', 'class', or 'other'. (3) If the title, days, or subject are unclear, ask in plain text before calling. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string" },
+          title: { type: "string", description: "Activity name as the student named it. Reject placeholders." },
           event_type: {
             type: "string",
             enum: ["test", "practice", "game", "match", "event", "other"],
           },
-          subject: { type: "string" },
+          subject: {
+            type: "string",
+            description: "Specific subject (e.g. 'mathematics') for academic events, or the activity name (e.g. 'swim') for non-academic. NEVER 'general', 'subject', 'class', or 'other'.",
+          },
           days: {
             type: "array",
             items: {
@@ -262,7 +272,7 @@ export const ACTION_TOOLS = [
           start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
           end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
         },
-        required: ["title", "days", "start_date", "end_date"],
+        required: ["title", "subject", "days", "start_date", "end_date"],
       },
     },
   },
@@ -467,8 +477,8 @@ const DEFAULT_MAX_STRING_LENGTH = 500;
 const LONG_TEXT_MAX_STRING_LENGTH = 5000;
 
 // Generic/placeholder strings the model might use when it doesn't know the real value.
-// If any name field (title, activity) matches one of these, it is treated as missing —
-// validation will reject it and the caller should ask the student for the real value.
+// If any name field (title, activity, task_name, new_title, parent_title) matches one
+// of these, validation rejects it and the caller asks the student for the real value.
 const PLACEHOLDER_TITLE_STRINGS = new Set([
   "task title", "new task", "task", "untitled task", "untitled",
   "event title", "new event", "event", "untitled event",
@@ -476,7 +486,25 @@ const PLACEHOLDER_TITLE_STRINGS = new Set([
   "assignment", "homework", "new homework",
   "title", "name", "item", "add task", "add event",
   "event name", "task name", "activity name",
+  "todo", "to-do", "to do", "thing", "stuff", "something",
+  "generic event", "generic task", "placeholder", "tbd", "tba", "n/a",
 ]);
+
+// Generic subject strings the model uses when it doesn't actually know the class.
+// "general" is rejected because it's a meaningless catch-all that hides the missing data.
+const PLACEHOLDER_SUBJECT_STRINGS = new Set([
+  "subject", "class", "topic", "course", "lesson", "study", "school",
+  "academic", "education", "general", "other", "misc", "miscellaneous",
+  "n/a", "tbd", "unknown", "none",
+]);
+
+// Fields that should never contain a placeholder name. Checked via PLACEHOLDER_TITLE_STRINGS.
+const TITLE_LIKE_FIELDS = new Set([
+  "title", "activity", "task_name", "new_title", "parent_title",
+]);
+
+// Minimum length for a title-like field. Single chars or "a"/"x" are rejected.
+const MIN_TITLE_LENGTH = 2;
 
 function isValidDateString(value) {
   if (!DATE_RE.test(value)) return false;
@@ -523,9 +551,19 @@ function validateToolArguments(toolName, args) {
       if (trimmed.length === 0) {
         issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
       }
-      if (["title", "activity"].includes(field) && PLACEHOLDER_TITLE_STRINGS.has(trimmed.toLowerCase())) {
+      if (TITLE_LIKE_FIELDS.has(field)) {
+        const lower = trimmed.toLowerCase();
+        if (PLACEHOLDER_TITLE_STRINGS.has(lower)) {
+          missingFields.push(field);
+          issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
+        } else if (trimmed.length < MIN_TITLE_LENGTH) {
+          missingFields.push(field);
+          issues.push({ field, issue: "too_short", expected: `at least ${MIN_TITLE_LENGTH} characters`, actual: trimmed });
+        }
+      }
+      if (field === "subject" && PLACEHOLDER_SUBJECT_STRINGS.has(trimmed.toLowerCase())) {
         missingFields.push(field);
-        issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
+        issues.push({ field, issue: "placeholder_subject", expected: "specific subject (e.g. 'mathematics', 'biology', 'history')", actual: trimmed });
       }
       const maxLen = ["content", "new_content", "description", "reason", "question"].includes(field)
         ? LONG_TEXT_MAX_STRING_LENGTH
@@ -872,23 +910,84 @@ export async function callGroq(
   // Single attempt — no fallback chain.
   let parsed = await attempt(resolvedModel);
 
-  // Strict validate-and-retry: if there are validation warnings, retry once with error context.
+  // Strict validate-and-retry: if there are validation warnings, retry once with
+  // human-readable field-by-field feedback so the model can correct the call.
   if (parsed.validation_warnings && parsed.validation_warnings.length > 0) {
-    const warnings = parsed.validation_warnings;
+    const feedback = buildValidationFeedback(parsed.validation_warnings);
     const retryMessages = [
       ...(messages || []),
-      { role: "user", content: "TOOL_VALIDATION_ERROR: " + JSON.stringify(warnings) },
+      { role: "user", content: feedback },
     ];
-    console.warn(`[callGroq] validation warnings on ${resolvedModel}, retrying once`, warnings);
+    console.warn(`[callGroq] validation warnings on ${resolvedModel}, retrying once`, parsed.validation_warnings);
     try {
-      parsed = await attempt(resolvedModel, retryMessages);
+      const retried = await attempt(resolvedModel, retryMessages);
+      // Only adopt retry result if it has fewer warnings (or none).
+      const before = parsed.validation_warnings.length;
+      const after = (retried.validation_warnings || []).length;
+      if (after <= before) parsed = retried;
     } catch (retryErr) {
       console.warn(`[callGroq] retry after validation error failed: ${retryErr.message}`);
-      // Return original parsed result if retry fails
     }
   }
 
+  // Server-side safety net: auto-fill subject from title for academic events when the
+  // model omitted or generic-ed it. Operates on actions that already passed validation.
+  if (Array.isArray(parsed.actions) && parsed.actions.length > 0) {
+    parsed.actions = parsed.actions.map(enrichActionSubject);
+  }
+
   return { ...parsed, ...metrics };
+}
+
+// Renders validation warnings into actionable instructions for the model retry.
+function buildValidationFeedback(warnings) {
+  const lines = ["Your previous tool call had problems. Fix the listed fields and call the tool again, or ask the student in plain text if you can't determine a value."];
+  for (const w of warnings) {
+    const tool = w.tool || "(unknown tool)";
+    for (const issue of (w.issues || [])) {
+      const field = issue.field;
+      const kind = issue.issue;
+      let instruction;
+      switch (kind) {
+        case "missing":
+          instruction = `field "${field}" is missing — provide the actual value or ask the student.`;
+          break;
+        case "placeholder":
+          instruction = `field "${field}" is a placeholder ("${issue.actual}") — use the real name from the student's message, never generic words like 'task', 'event', 'untitled'.`;
+          break;
+        case "placeholder_subject":
+          instruction = `field "${field}" is a generic subject ("${issue.actual}") — use a specific subject like 'mathematics', 'biology', 'history', 'spanish', etc., or ask the student which class it's for. Do not use 'general', 'class', 'subject', or 'other'.`;
+          break;
+        case "format":
+          instruction = `field "${field}" has wrong format — expected ${issue.expected}, got "${issue.actual}".`;
+          break;
+        case "enum":
+          instruction = `field "${field}" must be one of: ${issue.expected}.`;
+          break;
+        case "too_short":
+          instruction = `field "${field}" is too short — needs ${issue.expected}.`;
+          break;
+        default:
+          instruction = `field "${field}": ${kind}`;
+      }
+      lines.push(`- ${tool}.${field}: ${instruction}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// If an action has a title but no usable subject, infer it from the title.
+// Only fills in when the model left subject blank or used a generic placeholder.
+function enrichActionSubject(action) {
+  if (!action || typeof action !== "object") return action;
+  const titleField = action.title || action.task_name || action.activity || "";
+  if (!titleField) return action;
+  const current = (action.subject || "").trim().toLowerCase();
+  const isGeneric = !current || PLACEHOLDER_SUBJECT_STRINGS.has(current);
+  if (!isGeneric) return action;
+  const inferred = inferSubjectFromTitle(titleField);
+  if (inferred) return { ...action, subject: inferred };
+  return action;
 }
 
 /**
