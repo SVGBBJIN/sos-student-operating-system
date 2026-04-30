@@ -15,7 +15,6 @@ const REFINE_HINT = "\n\nPLANNING PASS: REFINE — You have seen the draft plan 
 /**
  * @param {{
  *   apiKey: string,
- *   geminiApiKey?: string | null,
  *   systemPrompt: string,
  *   staticSystemPrompt: string | null,
  *   dynamicContext: string | null,
@@ -24,12 +23,11 @@ const REFINE_HINT = "\n\nPLANNING PASS: REFINE — You have seen the draft plan 
  * @returns {Promise<{proposal: object, critiqueText: string, iterations: number}>}
  */
 export async function runPlanningPipeline(opts) {
-  const { apiKey, geminiApiKey = null, systemPrompt, staticSystemPrompt, dynamicContext, messages } = opts;
+  const { apiKey, systemPrompt, staticSystemPrompt, dynamicContext, messages } = opts;
 
   const baseCallOpts = {
     isContentGen: true,
     staticSystemPrompt: staticSystemPrompt || null,
-    geminiApiKey,
     budgetMs: 20000,
   };
 

@@ -4720,7 +4720,16 @@ function App() {
     try {
       switch (action.type) {
         case 'add_task': {
-          const rawDue = action.due_date || action.due || today();
+          const taskName = (action.task_name || action.title || '').trim();
+          if (!taskName || taskName.length < 2) {
+            setPendingClarification({ question: "What should I name this task?", context_action: 'add_task', missing_fields: ['task_name'] });
+            return;
+          }
+          const rawDue = action.due_date || action.due || '';
+          if (!rawDue) {
+            setPendingClarification({ question: "When is this task due?", context_action: 'add_task', missing_fields: ['due_date'] });
+            return;
+          }
           // Detect unparseable dates ("next purple") up front so we can tell the user
           // what happened instead of silently pinning the task to today.
           let dateParsedOk = true;
@@ -4729,8 +4738,8 @@ function App() {
             if (isNaN(d.getTime())) { dateParsedOk = false; return today(); }
             try { return toDateStr(d); } catch (_) { dateParsedOk = false; return today(); }
           })();
-          if (!dateParsedOk && rawDue && rawDue !== today()) {
-            setTimeout(() => postAssistantNote(`I couldn't read "${rawDue}" as a date, so I set the task for today — you can say "set the due date for ${action.task_name || action.title || 'that task'} to [date]" to change it.`), 400);
+          if (!dateParsedOk && rawDue) {
+            setTimeout(() => postAssistantNote(`I couldn't read "${rawDue}" as a date, so I set the task for today — you can say "set the due date for ${taskName} to [date]" to change it.`), 400);
           }
           // Guardrail: if AI resolved a weekday to a past date, advance to today or next occurrence
           const todayVal = today();
@@ -4745,7 +4754,7 @@ function App() {
             const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
           }
-          const task = { id:uid(), title:action.task_name||action.title||'Untitled', subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const task = { id:uid(), title:taskName, subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -4801,8 +4810,14 @@ function App() {
             postAssistantNote("I couldn't find that task to update — could you name it exactly as it appears on your list?");
             break;
           }
+          const newTitleRaw = action.new_title;
+          const newTitleClean = typeof newTitleRaw === 'string' ? newTitleRaw.trim() : '';
+          if (newTitleRaw !== undefined && newTitleRaw !== null && (!newTitleClean || newTitleClean.length < 2)) {
+            setPendingClarification({ question: "What should I rename this task to?", context_action: 'update_task', missing_fields: ['new_title'] });
+            return;
+          }
           const upd = {};
-          if (action.new_title || action.title) upd.title = action.new_title || (action.task_id ? action.title : target.title);
+          if (newTitleClean) upd.title = newTitleClean;
           if (action.due) {
             const d = new Date(action.due + 'T12:00:00');
             if (isNaN(d.getTime())) {
@@ -4816,7 +4831,16 @@ function App() {
           break;
         }
         case 'add_block': {
-          const date = action.date || today();
+          const activity = (action.activity || '').trim();
+          if (!activity || activity.length < 2) {
+            setPendingClarification({ question: "What should I call this block?", context_action: 'add_block', missing_fields: ['activity'] });
+            return;
+          }
+          const date = (action.date || '').trim();
+          if (!date) {
+            setPendingClarification({ question: "What date is this block for?", context_action: 'add_block', missing_fields: ['date'] });
+            return;
+          }
           const hmOk = (t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(t || '').trim());
           if (!hmOk(action.start) || !hmOk(action.end)) {
             postAssistantNote(`I need a valid start and end time (like 15:00 to 17:00) to add that block — could you restate the times?`);
@@ -4835,7 +4859,7 @@ function App() {
             let ch=sh, cm=sm;
             while (ch<eh||(ch===eh&&cm<em)) {
               const key = String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');
-              const data = { name:action.activity||'Block', category:action.category||'school' };
+              const data = { name:activity, category:action.category||'school' };
               dayBlocks[key] = data;
               slotOps.push({ date, key, data });
               cm+=30; if(cm>=60){ch++;cm=0;}
@@ -4847,9 +4871,18 @@ function App() {
           break;
         }
         case 'add_event': {
-          const rawEvDate = action.date || today();
+          const evTitle = (action.title || '').trim();
+          if (!evTitle || evTitle.length < 2) {
+            setPendingClarification({ question: "What should I call this event?", context_action: 'add_event', missing_fields: ['title'] });
+            return;
+          }
+          const rawEvDate = (action.date || '').trim();
+          if (!rawEvDate) {
+            setPendingClarification({ question: "What date is this event?", context_action: 'add_event', missing_fields: ['date'] });
+            return;
+          }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:action.title||'Event', type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -4886,7 +4919,12 @@ function App() {
           break;
         }
         case 'add_note': {
-          const tabName = action.title||action.tab_name||'SOS Note'; const content = action.content||'';
+          const tabName = (action.title || action.tab_name || '').trim();
+          if (!tabName || tabName.length < 2) {
+            setPendingClarification({ question: "What should I name this note?", context_action: 'add_note', missing_fields: ['title'] });
+            return;
+          }
+          const content = action.content || '';
           setNotes(prev => {
             const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {
@@ -4921,8 +4959,15 @@ function App() {
           break;
         }
         case 'break_task': {
-          const newTasks = (action.subtasks||[]).map(st => ({
-            id:uid(), title:st.title||'Part', subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+          const validSubtasks = (action.subtasks || [])
+            .map(st => ({ ...st, _title: typeof st.title === 'string' ? st.title.trim() : '' }))
+            .filter(st => st._title.length >= 2);
+          if (validSubtasks.length === 0) {
+            setPendingClarification({ question: "What parts should I break this task into?", context_action: 'break_task', missing_fields: ['subtasks'] });
+            return;
+          }
+          const newTasks = validSubtasks.map(st => ({
+            id:uid(), title:st._title, subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
           }));
           setTasks(prev => [...prev, ...newTasks]);
           if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
@@ -4962,10 +5007,15 @@ function App() {
             postAssistantNote(`I couldn't find "${action.title || action.event_id || 'that event'}" to update. Could you tell me the exact title?`);
             break;
           }
+          const newTitleClean = typeof action.new_title === 'string' ? action.new_title.trim() : '';
+          if (action.new_title !== undefined && (!newTitleClean || newTitleClean.length < 2)) {
+            setPendingClarification({ question: "What should I rename this event to?", context_action: 'update_event', missing_fields: ['new_title'] });
+            return;
+          }
           setEvents(prev => {
             const next = prev.map(ev => ev.id === match.id ? {
               ...ev,
-              ...(action.new_title && { title: action.new_title }),
+              ...(newTitleClean && { title: newTitleClean }),
               ...(action.date && { date: action.date }),
               ...(action.event_type && { type: action.event_type }),
               ...(action.subject !== undefined && { subject: action.subject })
@@ -5195,6 +5245,24 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
+    if (action.type === 'add_event' || action.type === 'add_task' || action.type === 'add_block') {
+      const titleField = action.type === 'add_task' ? 'task_name' : action.type === 'add_block' ? 'activity' : 'title';
+      const dateField = action.type === 'add_task' ? 'due_date' : 'date';
+      const titleVal = (action.title || action.task_name || action.activity || '').trim();
+      const dateVal = (action.date || action.due_date || action.due || '').trim();
+      const titleQuestion = action.type === 'add_task' ? "What should I name this task?" : action.type === 'add_block' ? "What should I call this block?" : "What should I call this event?";
+      const dateQuestion = action.type === 'add_task' ? "When is this task due?" : action.type === 'add_block' ? "What date is this block for?" : "What date is this event?";
+      if (!titleVal || titleVal.length < 2) {
+        setPendingClarification({ question: titleQuestion, context_action: action.type, missing_fields: [titleField] });
+        setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+        return;
+      }
+      if (!dateVal) {
+        setPendingClarification({ question: dateQuestion, context_action: action.type, missing_fields: [dateField] });
+        setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+        return;
+      }
+    }
     sfx.confirm();
     executeAction(action);
     setPendingActions(prev => prev.filter((_,i)=>i!==idx));
@@ -5843,14 +5911,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isPlanningRequest = PLANNING_REGEX.test(text || '');
-      // Agentic hint: fire multi-turn loop for long/multi-step messages or planning requests
-      const agenticHint = Boolean(
-        agenticMode && (
-          isPlanningRequest ||
-          msgContent.length > 280 ||
-          (likelyActionIntent && /\band\b|,\s*(?:also|and|then|plus)/i.test(msgContent))
-        )
-      );
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         tutorMode,
         workspaceContext: effectiveWorkspaceContext,
@@ -5862,7 +5922,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      // Tier routing: pure conversational messages use a lighter system prompt + token budget.
+      const preferredModel = (() => {
+        try { return localStorage.getItem('sos_preferred_model') || 'openai/gpt-oss-120b'; }
+        catch (_) { return 'openai/gpt-oss-120b'; }
+      })();
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
@@ -5874,14 +5937,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
-        prompt_flags: {
-          intent_type: inferredIntentType,
-          tutor_mode: Boolean(tutorMode),
-          workspace_context: effectiveWorkspaceContext,
-          likely_action_intent: likelyActionIntent,
-          agentic_mode: agenticHint,
-          agentic_hint: agenticHint,
-        },
+        preferredModel,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
       };
       if (photo) {

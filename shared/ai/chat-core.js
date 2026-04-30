@@ -3,49 +3,19 @@
 
 import { inferSubjectFromTitle } from "../subjects.js";
 
-export const CORE_VERSION = "chat-core-v2-2026-04-12";
-export const CORE_CHECKSUM = "sha256:action-tools-parse-v1";
+export const CORE_VERSION = "chat-core-v3-2026-04-28";
+export const CORE_CHECKSUM = "sha256:groq-only-strict-retry-v1";
 
-// PRIMARY: reasoning model used for all chat routes. GEMINI_FALLBACK: cross-provider with thinking.
-// GROQ_FALLBACK: last-resort Groq model (non-reasoning but reliable tool caller).
-export const PRIMARY_MODEL   = "openai/gpt-oss-120b";
-export const GEMINI_FALLBACK = "gemini-2.5-flash";
-export const GROQ_FALLBACK   = "llama-3.3-70b-versatile";
+export const MODEL_DEEP = "openai/gpt-oss-120b";
+export const MODEL_FAST = "openai/gpt-oss-20b";
+// PRIMARY_MODEL kept for back-compat
+export const PRIMARY_MODEL = MODEL_DEEP;
 
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
-
-const GROQ_CIRCUIT = {
-  openedUntilMs: 0,
-  spikes: [],
-};
-
-// Tracks Groq's remaining tokens-per-minute, read from response headers after each call.
-// Enables proactive routing to Gemini before hitting a hard TPM 429.
-const GROQ_TPM = {
-  remaining: Infinity,  // x-ratelimit-remaining-tokens
-  limit: Infinity,      // x-ratelimit-limit-tokens
-  resetAtMs: 0,         // absolute ms when the TPM window resets
-};
-const TPM_SWITCH_THRESHOLD = 0.15; // switch providers when <15% of TPM remains
-
-function updateGroqTpm(headers) {
-  const remaining = parseInt(headers.get("x-ratelimit-remaining-tokens") || "", 10);
-  const limit     = parseInt(headers.get("x-ratelimit-limit-tokens")     || "", 10);
-  const resetStr  = headers.get("x-ratelimit-reset-tokens") || "";
-  if (!isNaN(remaining)) GROQ_TPM.remaining = remaining;
-  if (!isNaN(limit))     GROQ_TPM.limit     = limit;
-  // resetStr is like "1.23s" — convert to absolute timestamp
-  const sec = parseFloat(resetStr);
-  if (!isNaN(sec))       GROQ_TPM.resetAtMs = Date.now() + Math.ceil(sec * 1000);
+export function resolveModel(requested) {
+  return (requested === MODEL_FAST || requested === MODEL_DEEP) ? requested : MODEL_DEEP;
 }
 
-function groqTpmNearLimit() {
-  if (GROQ_TPM.limit === Infinity) return false;        // no header data yet
-  if (Date.now() > GROQ_TPM.resetAtMs) return false;   // window already reset
-  return GROQ_TPM.remaining < GROQ_TPM.limit * TPM_SWITCH_THRESHOLD;
-}
-
-// Tracks Groq's remaining requests-per-minute from response headers.
+// Tracks Groq's remaining requests-per-minute from response headers (monitoring-only).
 const GROQ_RPM = {
   remaining: Infinity,  // x-ratelimit-remaining-requests
   limit: Infinity,      // x-ratelimit-limit-requests
@@ -77,10 +47,6 @@ export function getGroqRpmStatus() {
     nearLimit: GROQ_RPM.remaining !== Infinity && Date.now() < GROQ_RPM.resetAtMs
       && GROQ_RPM.remaining < GROQ_RPM.limit * RPM_NEAR_LIMIT_THRESHOLD,
   };
-}
-
-function isGeminiModel(mdl) {
-  return mdl === GEMINI_FALLBACK;
 }
 
 /** @typedef {{role: string, content: unknown}} ChatMessage */
@@ -117,11 +83,11 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. IMPORTANT: Only call this when the student has explicitly stated the title and date. If the student hasn't said what the event is or when it is, respond with plain text asking for the missing detail. NEVER invent or guess values.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. STRICT RULES: (1) `title` MUST be the actual name from the student's message — NEVER 'task', 'event', 'untitled', 'tbd', or any placeholder; if the student didn't name it, respond with plain text asking what to call it. (2) `subject` MUST be a real subject name (e.g. 'mathematics', 'biology', 'history', 'spanish') — NEVER 'general', 'subject', 'class', 'school', or 'other'; if you can't infer it from the title (e.g. 'Calc Quiz' → 'calculus', 'Bio Test' → 'biology'), ask the student which class it's for. (3) NEVER invent or guess any value.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Event title exactly as the student said it." },
+          title: { type: "string", description: "Event title EXACTLY as the student named it. Reject any placeholder like 'task', 'event', 'homework', 'untitled'." },
           date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates ('tomorrow', 'next Friday') against today's date in the system prompt. Never emit a date in the past unless the student explicitly said 'yesterday' or 'last [day]'." },
           time: { type: "string", description: "HH:MM 24-hour (e.g. 14:30). Omit entirely if the student did not specify a time — do not guess." },
           description: { type: "string", description: "Brief description or notes about the event (chapters covered, materials needed, etc.)" },
@@ -136,10 +102,10 @@ export const ACTION_TOOLS = [
           },
           subject: {
             type: "string",
-            description: "Lowercase canonical subject (e.g., 'mathematics', 'biology'). Infer from title only when obvious (e.g. 'Calc Quiz' → 'calculus'). Omit when uncertain.",
+            description: "Specific subject name in lowercase. Examples: 'mathematics', 'calculus', 'biology', 'chemistry', 'physics', 'english', 'history', 'spanish', 'french', 'computer science', 'literature', 'economics', 'psychology', 'physical education'. For non-academic events (sports, appointments, social), use the activity name (e.g. 'swim', 'debate'). NEVER use generic words like 'general', 'subject', 'class', 'school', or 'other' — if you don't know the specific subject, ask the student.",
           },
         },
-        required: ["title", "date"],
+        required: ["title", "date", "subject"],
       },
     },
   },
@@ -148,14 +114,18 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). You MUST know the task_name before calling this; if it is unclear, respond with plain text asking for the task name. due_date is required: if the student said 'due X', 'by X', 'for X' use that; otherwise ask for it in plain text rather than guessing. Never invent values.",
+        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). STRICT RULES: (1) `task_name` MUST be the actual task name from the student's message — NEVER 'task', 'homework', 'assignment', 'todo', 'untitled', or any placeholder; if unclear, ask in plain text. (2) `due_date` is required — if the student said 'due X', 'by X', 'for X' use that; otherwise ask, never guess. (3) `subject` MUST be a specific subject when the task is academic (homework, essay, lab, project, paper, study, worksheet) — infer from name (e.g. 'Calc problem set' → 'calculus', 'AP Bio reading' → 'biology'); if you can't, ask the student. For non-academic tasks (chores, errands), use 'personal'. NEVER use 'general', 'subject', 'class', or 'other'.",
       parameters: {
         type: "object",
         properties: {
-          task_name: { type: "string", description: "The name or title of the task, phrased as the student said it." },
+          task_name: { type: "string", description: "The actual task name from the student's message. Reject placeholders like 'task', 'homework', 'todo'." },
           due_date: { type: "string", description: "YYYY-MM-DD. Resolve relative dates against today's date in the system prompt. Never emit a past date unless the student explicitly said so. If the student gave no date, respond with plain text asking rather than guessing." },
+          subject: {
+            type: "string",
+            description: "Specific subject name in lowercase (e.g. 'mathematics', 'calculus', 'biology', 'english', 'history', 'spanish'). For non-academic tasks (chores, errands, personal), use 'personal'. NEVER 'general', 'subject', 'class', 'school', or 'other'.",
+          },
         },
-        required: ["task_name", "due_date"],
+        required: ["task_name", "due_date", "subject"],
       },
     },
   },
@@ -194,12 +164,12 @@ export const ACTION_TOOLS = [
     function: {
       name: "update_event",
       description:
-        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests.",
+        "Update an existing event — change its title, date, type, or subject. Use for reschedule/move/rename requests. STRICT: `title` is the EXISTING event name to look up — must match what's already on the calendar; if the student didn't name the event clearly, ask before calling. Any provided field must be a real value, never a placeholder.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Current event title to look up" },
-          new_title: { type: "string", description: "New title (omit if not changing name)" },
+          title: { type: "string", description: "Current event title to look up — must be the actual name already on the calendar." },
+          new_title: { type: "string", description: "New title (omit if not changing name). If provided, must be a real name — never 'task', 'event', 'untitled'." },
           date: { type: "string", description: "New date in YYYY-MM-DD format (omit if not changing)" },
           event_type: {
             type: "string",
@@ -208,7 +178,10 @@ export const ACTION_TOOLS = [
               "tournament", "event", "other",
             ],
           },
-          subject: { type: "string" },
+          subject: {
+            type: "string",
+            description: "Specific subject name in lowercase. NEVER 'general', 'subject', 'class', or 'other'. Omit if not changing.",
+          },
         },
         required: ["title"],
       },
@@ -270,135 +243,21 @@ export const ACTION_TOOLS = [
   {
     type: "function",
     function: {
-      name: "convert_event_to_block",
-      description:
-        "Convert a date-only event into a scheduled time block on the same date.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Event title to convert" },
-          event_id: { type: "string", description: "Event id to convert (optional if title provided)" },
-          date: { type: "string", description: "Date in YYYY-MM-DD format" },
-          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
-          end: { type: "string", description: "End time in HH:MM 24-hour format" },
-          category: {
-            type: "string",
-            enum: ["school", "swim", "debate", "free time", "sleep", "other"],
-          },
-        },
-        required: ["date", "start", "end"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "convert_block_to_event",
-      description:
-        "Convert an existing scheduled block range into a calendar event.",
-      parameters: {
-        type: "object",
-        properties: {
-          date: { type: "string", description: "Date in YYYY-MM-DD format" },
-          start: { type: "string", description: "Start time in HH:MM 24-hour format" },
-          end: { type: "string", description: "End time in HH:MM 24-hour format (optional)" },
-          title: { type: "string", description: "Event title" },
-          event_type: {
-            type: "string",
-            enum: ["test", "exam", "quiz", "practice", "game", "match", "meet", "tournament", "event", "other"],
-          },
-          subject: { type: "string", description: "School subject" },
-        },
-        required: ["date", "start", "title", "event_type", "subject"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_note",
-      description: "Store a note, if you lack any of the contents, you call the ask clarification tool.",
-      parameters: {
-        type: "object",
-        properties: {
-          content: { type: "string", description: "The note content." },
-          title: { type: "string", description: "Optional title for the note." },
-        },
-        required: ["content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "edit_note",
-      description: "Replace the content of an existing note. Use when the student asks to update, rewrite, or change a note's content.",
-      parameters: {
-        type: "object",
-        properties: {
-          tab_name: { type: "string", description: "Name of the note to edit" },
-          new_content: { type: "string", description: "The new content to replace the existing content with" },
-        },
-        required: ["tab_name", "new_content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_note",
-      description: "Delete a note from the student's notes. Use when the student asks to remove or delete a specific note.",
-      parameters: {
-        type: "object",
-        properties: {
-          tab_name: { type: "string", description: "Name of the note to delete" },
-        },
-        required: ["tab_name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "break_task",
-      description:
-        "Break a large task into smaller, manageable subtasks spread across multiple days.",
-      parameters: {
-        type: "object",
-        properties: {
-          parent_title: { type: "string", description: "Title of the task to break up" },
-          subtasks: {
-            type: "array",
-            description: "List of subtasks",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                due: { type: "string", description: "YYYY-MM-DD" },
-                estimated_minutes: { type: "number" },
-              },
-            },
-          },
-        },
-        required: ["parent_title", "subtasks"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. IMPORTANT: Only call this when the student has explicitly named the activity and stated which days it repeats. If the title or recurrence days are missing, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. STRICT RULES: (1) `title` MUST be the activity's actual name from the student — NEVER a placeholder. (2) `subject` MUST be a real subject (e.g. 'mathematics', 'biology') for academic recurrences, or the activity name (e.g. 'swim', 'debate', 'soccer') for non-academic. NEVER 'general', 'subject', 'class', or 'other'. (3) If the title, days, or subject are unclear, ask in plain text before calling. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string" },
+          title: { type: "string", description: "Activity name as the student named it. Reject placeholders." },
           event_type: {
             type: "string",
             enum: ["test", "practice", "game", "match", "event", "other"],
           },
-          subject: { type: "string" },
+          subject: {
+            type: "string",
+            description: "Specific subject (e.g. 'mathematics') for academic events, or the activity name (e.g. 'swim') for non-academic. NEVER 'general', 'subject', 'class', or 'other'.",
+          },
           days: {
             type: "array",
             items: {
@@ -413,23 +272,7 @@ export const ACTION_TOOLS = [
           start_date: { type: "string", description: "YYYY-MM-DD — first occurrence" },
           end_date: { type: "string", description: "YYYY-MM-DD — last occurrence" },
         },
-        required: ["title", "days", "start_date", "end_date"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search_reference",
-      description:
-        "Search the web for general knowledge, source-backed references, and direct quotes. Use this when the student asks for facts with citations or quote evidence from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query or question to research" },
-          quote_count: { type: "number", description: "Desired number of direct quotes (1-6)" },
-        },
-        required: ["query"],
+        required: ["title", "subject", "days", "start_date", "end_date"],
       },
     },
   },
@@ -468,24 +311,6 @@ export const ACTION_TOOLS = [
     },
   },
 ];
-
-/* ── Parse Groq's malformed tool calls from failed_generation ── */
-export function parseFailedGeneration(failedGen) {
-  const results = [];
-  // Matches both Groq malformed formats:
-  //   <function=tool_name {"key":"val"}></function>     (space-separated)
-  //   <function=tool_name({"key":"val"})></function>     (parenthesized)
-  //   <function=tool_name({"key":"val"})</function>      (parenthesized, no >)
-  const regex = /<function=(\w+)[\s(>]*(\{[\s\S]*?\})\s*\)?\s*>?\s*<\/function>/g;
-  let match;
-  while ((match = regex.exec(failedGen)) !== null) {
-    try {
-      const args = JSON.parse(match[2]);
-      results.push({ name: match[1], arguments: args });
-    } catch (_) { /* skip unparseable entries */ }
-  }
-  return results;
-}
 
 const TOOL_SPEC_BY_NAME = new Map(
   ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
@@ -652,8 +477,8 @@ const DEFAULT_MAX_STRING_LENGTH = 500;
 const LONG_TEXT_MAX_STRING_LENGTH = 5000;
 
 // Generic/placeholder strings the model might use when it doesn't know the real value.
-// If any name field (title, activity) matches one of these, it is treated as missing —
-// validation will reject it and the caller should ask the student for the real value.
+// If any name field (title, activity, task_name, new_title, parent_title) matches one
+// of these, validation rejects it and the caller asks the student for the real value.
 const PLACEHOLDER_TITLE_STRINGS = new Set([
   "task title", "new task", "task", "untitled task", "untitled",
   "event title", "new event", "event", "untitled event",
@@ -661,7 +486,29 @@ const PLACEHOLDER_TITLE_STRINGS = new Set([
   "assignment", "homework", "new homework",
   "title", "name", "item", "add task", "add event",
   "event name", "task name", "activity name",
+  "todo", "to-do", "to do", "thing", "stuff", "something",
+  "generic event", "generic task", "placeholder", "tbd", "tba", "n/a",
 ]);
+
+// Generic subject strings the model uses when it doesn't actually know the class.
+// "general" is rejected because it's a meaningless catch-all that hides the missing data.
+const PLACEHOLDER_SUBJECT_STRINGS = new Set([
+  "subject", "class", "topic", "course", "lesson", "study", "school",
+  "academic", "education", "general", "other", "misc", "miscellaneous",
+  "n/a", "tbd", "unknown", "none",
+]);
+
+// Fields that should never contain a placeholder name. Checked via PLACEHOLDER_TITLE_STRINGS.
+const TITLE_LIKE_FIELDS = new Set([
+  "title", "activity", "task_name", "new_title", "parent_title",
+]);
+
+// Minimum length for a title-like field. Single chars or "a"/"x" are rejected.
+const MIN_TITLE_LENGTH = 2;
+
+// Detects titles that are instructions ("add an event", "schedule a test") rather
+// than actual names. The model sometimes echoes the user's verb phrase as the title.
+const INSTRUCTION_TITLE_REGEX = /^(add|create|schedule|make|put|set|log|track|book|enter|register|new)\s+/i;
 
 function isValidDateString(value) {
   if (!DATE_RE.test(value)) return false;
@@ -708,9 +555,22 @@ function validateToolArguments(toolName, args) {
       if (trimmed.length === 0) {
         issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
       }
-      if (["title", "activity"].includes(field) && PLACEHOLDER_TITLE_STRINGS.has(trimmed.toLowerCase())) {
+      if (TITLE_LIKE_FIELDS.has(field)) {
+        const lower = trimmed.toLowerCase();
+        if (PLACEHOLDER_TITLE_STRINGS.has(lower)) {
+          missingFields.push(field);
+          issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
+        } else if (trimmed.length < MIN_TITLE_LENGTH) {
+          missingFields.push(field);
+          issues.push({ field, issue: "too_short", expected: `at least ${MIN_TITLE_LENGTH} characters`, actual: trimmed });
+        } else if (INSTRUCTION_TITLE_REGEX.test(trimmed)) {
+          missingFields.push(field);
+          issues.push({ field, issue: "instruction_as_title", expected: "the actual name, not a command phrase like 'add an event'", actual: trimmed });
+        }
+      }
+      if (field === "subject" && PLACEHOLDER_SUBJECT_STRINGS.has(trimmed.toLowerCase())) {
         missingFields.push(field);
-        issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
+        issues.push({ field, issue: "placeholder_subject", expected: "specific subject (e.g. 'mathematics', 'biology', 'history')", actual: trimmed });
       }
       const maxLen = ["content", "new_content", "description", "reason", "question"].includes(field)
         ? LONG_TEXT_MAX_STRING_LENGTH
@@ -830,6 +690,7 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
           case "time": return "What time? (e.g. 14:30) — or leave blank for all-day.";
           case "start": return "What start time? (HH:MM)";
           case "end": return "What end time? (HH:MM)";
+          case "task_name": return "What should I name this task?";
           case "subject": return "Which subject is this for?";
           case "activity": return "What activity should I schedule?";
           case "tab_name": return "Which note should I use?";
@@ -907,42 +768,19 @@ export async function callGroq(
     fallback_used: false,
   };
 
-  // Always use the passed model as primary — no route-based override.
-  const selectedPrimary = model;
-
   function remainingBudgetMs() {
     return budgetMs - (Date.now() - requestStartedAt);
   }
 
-  function noteSpike(statusCode) {
-    const now = Date.now();
-    GROQ_CIRCUIT.spikes = GROQ_CIRCUIT.spikes.filter((ts) => now - ts <= 60000);
-    if (statusCode === 429 || statusCode >= 500) {
-      GROQ_CIRCUIT.spikes.push(now);
-      if (GROQ_CIRCUIT.spikes.length >= 4) {
-        GROQ_CIRCUIT.openedUntilMs = now + 15000;
-      }
-    }
-  }
-
-  function resetCircuit() {
-    GROQ_CIRCUIT.spikes = [];
-    GROQ_CIRCUIT.openedUntilMs = 0;
-  }
-
-  // Inner attempt: builds the request for a specific model and runs it with budget-aware retries.
-  async function attempt(mdl) {
+  // Inner attempt: builds the request for the resolved model and runs it with budget-aware retries.
+  async function attempt(mdl, msgs) {
     // Prompt-caching: when staticSystemPrompt + dynamicContext are provided separately,
     // the static policy becomes a single unchanging system message (Groq can cache it
     // alongside the tool definitions). The dynamic per-user context is sent as a second
     // system message so it doesn't pollute the cached prefix.
-    // Exception: Gemini/Gemma only supports a single system message — merge both parts
-    // into one to prevent the dynamic context from being echoed in the response.
     const staticPrompt = options?.staticSystemPrompt;
     const dynamicContext = options?.dynamicContext;
-    const groqMessages = (staticPrompt && isGeminiModel(mdl))
-      ? [{ role: "system", content: `${staticPrompt}\n\n${dynamicContext || ""}` }]
-      : staticPrompt
+    const groqMessages = staticPrompt
       ? [
           { role: "system", content: staticPrompt },
           { role: "system", content: dynamicContext || "" },
@@ -951,7 +789,7 @@ export async function callGroq(
 
     if (imageBase64) {
       const effectiveMime = imageMimeType || "image/jpeg";
-      const lastUser = [...messages].reverse().find((m) => m.role === "user");
+      const lastUser = [...(msgs || messages)].reverse().find((m) => m.role === "user");
       const textContent =
         lastUser && typeof lastUser.content === "string" && lastUser.content.trim()
           ? lastUser.content.trim()
@@ -967,25 +805,20 @@ export async function callGroq(
         ],
       });
     } else {
-      for (const m of messages) {
+      for (const m of (msgs || messages)) {
         const text = typeof m.content === "string" ? m.content.trim() : "";
         if (text) groqMessages.push({ role: m.role, content: text });
       }
     }
 
-    // Vision requests always use the vision-capable model regardless of mdl
-    const effectiveModel = imageBase64 ? GEMINI_FALLBACK : mdl;
     const body = {
-      model: effectiveModel,
+      model: mdl,
       messages: groqMessages,
       max_completion_tokens: 1000,
       temperature: 1,
       top_p: 1,
+      reasoning_effort: "high",
     };
-    // reasoning_effort is only supported on openai/gpt-oss models, not Gemini fallbacks.
-    if (!isGeminiModel(effectiveModel)) {
-      body.reasoning_effort = "high";
-    }
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
     const effectiveTools = rawTools
@@ -1003,12 +836,9 @@ export async function callGroq(
     const MIN_REMAINING_FOR_RETRY_MS = 900;
     let res;
     for (let i = 0; i <= MAX_RETRIES; i++) {
-      if (Date.now() < GROQ_CIRCUIT.openedUntilMs) {
-        throw new Error(`Groq circuit open until ${new Date(GROQ_CIRCUIT.openedUntilMs).toISOString()}`);
-      }
       const remaining = remainingBudgetMs();
       if (remaining <= MIN_REMAINING_FOR_RETRY_MS) {
-        throw new Error(`${isGeminiModel(mdl) ? "Gemini" : "Groq"} ${mdl} budget exhausted (${budgetMs}ms)`);
+        throw new Error(`Groq ${mdl} budget exhausted (${budgetMs}ms)`);
       }
       metrics.attempt_count += 1;
       const controller = new AbortController();
@@ -1016,17 +846,11 @@ export async function callGroq(
         () => controller.abort(),
         Math.max(700, Math.min(remaining - 250, 8000))
       );
-      // Route to Gemini (OpenAI-compatible) or Groq based on model name.
-      const usingGemini = isGeminiModel(effectiveModel);
-      const providerUrl = usingGemini
-        ? `${GEMINI_BASE_URL}/chat/completions`
-        : "https://api.groq.com/openai/v1/chat/completions";
-      const providerKey = usingGemini ? (options?.geminiApiKey || "") : apiKey;
       try {
-        res = await fetch(providerUrl, {
+        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${providerKey}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -1035,21 +859,14 @@ export async function callGroq(
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === "AbortError") {
-          if (!usingGemini) noteSpike(503);
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} request timed out within budget (${budgetMs}ms)`);
+          throw new Error(`Groq ${mdl} request timed out within budget (${budgetMs}ms)`);
         }
         throw err;
       }
       clearTimeout(timeoutId);
 
-      // Update Groq TPM/RPM state from response headers (Gemini doesn't provide these).
-      if (!usingGemini && res.ok) {
-        updateGroqTpm(res.headers);
+      if (res.ok) {
         updateGroqRpm(res.headers);
-      }
-
-      if ((res.status === 429 || res.status >= 500) && i < MAX_RETRIES) {
-        if (!usingGemini) noteSpike(res.status);
       }
 
       if (res.status === 429 && i < MAX_RETRIES) {
@@ -1058,10 +875,10 @@ export async function callGroq(
         const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 8) : Math.min((2 ** i) * 0.8, 8);
         const waitMs = Math.floor(waitSec * 1000);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} rate limited with insufficient budget to retry`);
+          throw new Error(`Groq ${mdl} rate limited with insufficient budget to retry`);
         }
         metrics.retry_wait_ms_total += waitMs;
-        console.warn(`${usingGemini ? "Gemini" : "Groq"} 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
+        console.warn(`Groq 429 rate limit hit on ${mdl}, retrying in ${waitSec}s (attempt ${i + 1}/${MAX_RETRIES})`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
@@ -1070,98 +887,131 @@ export async function callGroq(
         const waitMs = Math.min(300 * (2 ** i), 2500);
         if (remainingBudgetMs() <= waitMs + MIN_REMAINING_FOR_RETRY_MS) {
           const errText = await res.text().catch(() => "");
-          throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
+          throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
         }
         metrics.retry_wait_ms_total += waitMs;
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
 
-      // Recover from Groq's malformed tool call errors (400 tool_use_failed)
       if (res.status === 400) {
         const errText = await res.text().catch(() => "");
-        let errData;
-        try { errData = JSON.parse(errText); } catch (_) { /* not JSON */ }
-
-        if (errData?.error?.code === "tool_use_failed" && errData?.error?.failed_generation) {
-          const recovered = parseFailedGeneration(errData.error.failed_generation);
-          if (recovered.length > 0) {
-            const syntheticToolCalls = recovered.map((r, k) => ({
-              id: `recovered_${k}`,
-              type: "function",
-              function: { name: r.name, arguments: JSON.stringify(r.arguments) },
-            }));
-            return parseLlmResponse({ choices: [{ message: { content: "", tool_calls: syntheticToolCalls } }] });
-          }
-        }
-        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error 400: ${errText.slice(0, 200)}`);
+        throw new Error(`Groq ${mdl} error 400: ${errText.slice(0, 200)}`);
       }
 
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`${usingGemini ? "Gemini" : "Groq"} ${mdl} error ${res.status}: ${errText}`);
+        throw new Error(`Groq ${mdl} error ${res.status}: ${errText}`);
       }
-      if (!usingGemini) resetCircuit();
       break;
     }
 
     const data = await res.json();
     return {
       ...parseLlmResponse(data),
-      model_used: effectiveModel,
+      model_used: mdl,
     };
   }
 
-  // Proactive TPM preemption: if Groq is near its token-per-minute limit and we have
-  // a Gemini key, skip Groq entirely and go straight to the Gemini fallback.
-  if (groqTpmNearLimit() && options?.geminiApiKey) {
-    console.warn(`[callGroq] Groq TPM near limit (${GROQ_TPM.remaining}/${GROQ_TPM.limit} tokens remaining) — routing directly to ${GEMINI_FALLBACK}`);
-    metrics.fallback_used = true;
-    return { ...await attempt(GEMINI_FALLBACK), ...metrics };
-  }
+  const resolvedModel = resolveModel(model);
 
-  // Fallback chain: PRIMARY → GEMINI_FALLBACK → GROQ_FALLBACK.
-  const geminiBackup = options?.geminiApiKey ? GEMINI_FALLBACK : null;
-  const groqLastResort = GROQ_FALLBACK !== selectedPrimary ? GROQ_FALLBACK : null;
+  // Single attempt — no fallback chain.
+  let parsed = await attempt(resolvedModel);
 
-  // Attempt a model, then try the next in the chain on empty response.
-  async function tryChain(primary, chain) {
-    let result = await attempt(primary);
-    for (const next of chain) {
-      if (!result.content && result.actions.length === 0 && next && next !== primary && remainingBudgetMs() > 900) {
-        metrics.fallback_used = true;
-        console.warn(`[callGroq] ${primary} returned empty — retrying with ${next}`);
-        result = await attempt(next);
-        primary = next;
-      } else {
-        break;
+  // Strict validate-and-retry: if there are validation warnings, retry once with
+  // human-readable field-by-field feedback so the model can correct the call.
+  if (parsed.validation_warnings && parsed.validation_warnings.length > 0) {
+    const originalClarifications = parsed.clarifications || [];
+    const originalClarification = parsed.clarification || null;
+    const feedback = buildValidationFeedback(parsed.validation_warnings);
+    const retryMessages = [
+      ...(messages || []),
+      { role: "user", content: feedback },
+    ];
+    console.warn(`[callGroq] validation warnings on ${resolvedModel}, retrying once`, parsed.validation_warnings);
+    try {
+      const retried = await attempt(resolvedModel, retryMessages);
+      const before = parsed.validation_warnings.length;
+      const after = (retried.validation_warnings || []).length;
+      const retryHasContent = retried.actions.length > 0 || retried.clarifications.length > 0;
+      const retryImproves = after < before;
+      if (retryHasContent || retryImproves) {
+        // Retry produced a tool call or structured clarification — use it.
+        parsed = retried;
+      } else if (retried.content && originalClarifications.length > 0) {
+        // Retry produced only plain text (no tool call, no clarification). Keep the
+        // structured clarification cards from attempt 1 so the UI prompts the user
+        // instead of silently dropping the question.
+        parsed = {
+          ...retried,
+          clarifications: originalClarifications,
+          clarification: originalClarification,
+        };
       }
+      // If retry has equally many warnings and no content, keep original (do nothing).
+    } catch (retryErr) {
+      console.warn(`[callGroq] retry after validation error failed: ${retryErr.message}`);
     }
-    return result;
   }
 
-  try {
-    const chain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
-    const result = await tryChain(selectedPrimary, chain);
-    return { ...result, ...metrics };
-  } catch (primaryErr) {
-    let fallbackErr = primaryErr;
-    const fallbackChain = [geminiBackup, groqLastResort].filter((m) => m && m !== selectedPrimary);
-    for (const next of fallbackChain) {
-      if (!next || remainingBudgetMs() <= 900) break;
-      metrics.fallback_used = true;
-      console.warn(`[callGroq] ${fallbackErr.message} — retrying with ${next}`);
-      try {
-        const fallbackResult = await tryChain(next,
-          fallbackChain.slice(fallbackChain.indexOf(next) + 1)
-        );
-        return { ...fallbackResult, ...metrics };
-      } catch (nextErr) {
-        fallbackErr = nextErr;
-      }
-    }
-    throw fallbackErr;
+  // Server-side safety net: auto-fill subject from title for academic events when the
+  // model omitted or generic-ed it. Operates on actions that already passed validation.
+  if (Array.isArray(parsed.actions) && parsed.actions.length > 0) {
+    parsed.actions = parsed.actions.map(enrichActionSubject);
   }
+
+  return { ...parsed, ...metrics };
+}
+
+// Renders validation warnings into actionable instructions for the model retry.
+function buildValidationFeedback(warnings) {
+  const lines = ["Your previous tool call had problems. Fix the listed fields and call the tool again, or ask the student in plain text if you can't determine a value."];
+  for (const w of warnings) {
+    const tool = w.tool || "(unknown tool)";
+    for (const issue of (w.issues || [])) {
+      const field = issue.field;
+      const kind = issue.issue;
+      let instruction;
+      switch (kind) {
+        case "missing":
+          instruction = `field "${field}" is missing — provide the actual value or ask the student.`;
+          break;
+        case "placeholder":
+          instruction = `field "${field}" is a placeholder ("${issue.actual}") — use the real name from the student's message, never generic words like 'task', 'event', 'untitled'.`;
+          break;
+        case "placeholder_subject":
+          instruction = `field "${field}" is a generic subject ("${issue.actual}") — use a specific subject like 'mathematics', 'biology', 'history', 'spanish', etc., or ask the student which class it's for. Do not use 'general', 'class', 'subject', or 'other'.`;
+          break;
+        case "format":
+          instruction = `field "${field}" has wrong format — expected ${issue.expected}, got "${issue.actual}".`;
+          break;
+        case "enum":
+          instruction = `field "${field}" must be one of: ${issue.expected}.`;
+          break;
+        case "too_short":
+          instruction = `field "${field}" is too short — needs ${issue.expected}.`;
+          break;
+        default:
+          instruction = `field "${field}": ${kind}`;
+      }
+      lines.push(`- ${tool}.${field}: ${instruction}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// If an action has a title but no usable subject, infer it from the title.
+// Only fills in when the model left subject blank or used a generic placeholder.
+function enrichActionSubject(action) {
+  if (!action || typeof action !== "object") return action;
+  const titleField = action.title || action.task_name || action.activity || "";
+  if (!titleField) return action;
+  const current = (action.subject || "").trim().toLowerCase();
+  const isGeneric = !current || PLACEHOLDER_SUBJECT_STRINGS.has(current);
+  if (!isGeneric) return action;
+  const inferred = inferSubjectFromTitle(titleField);
+  if (inferred) return { ...action, subject: inferred };
+  return action;
 }
 
 /**
