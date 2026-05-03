@@ -6905,6 +6905,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         events={events}
         userId={user?.id}
         onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
+        notes={notes}
+        onCreateNote={handleCreateNote}
+        onUpdateNote={handleUpdateNote}
+        onDeleteNote={handleDeleteNote}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
