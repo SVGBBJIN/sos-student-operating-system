@@ -1139,3 +1139,222 @@ button {
   animation: cardPop .25s ease, editFlowGlow 2s ease-in-out infinite;
   border-color: rgba(143, 168, 255, 0.3) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   MINIMAL FLAT PASS — kills gradients, stops surface animations,
+   lifts readability. All rules use !important to win cascade.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Kill all ambient background glows ──────────────────────── */
+.sos-main::before,
+.sos-sidebar::before {
+  display: none !important;
+}
+
+/* ── 2. Flat solid shell surfaces ──────────────────────────────── */
+.sos-app {
+  background: #0f1115 !important;
+}
+
+.sos-sidebar,
+.sos-sidebar.collapsed {
+  background: #12151e !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sos-header {
+  background: #12151e !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sos-input-area {
+  background: transparent !important;
+  border-top: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.sos-chat-companion {
+  background: #12151e !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── 3. Chat input form ─────────────────────────────────────────── */
+.sos-chat-form {
+  background: #1a1f2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+}
+
+/* ── 4. Flat chat bubbles — no gradients, no animations ─────────── */
+.sos-bubble-user {
+  background: rgba(143, 168, 255, 0.18) !important;
+  color: #e7edff !important;
+  border: 1px solid rgba(143, 168, 255, 0.28) !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+.sos-bubble-ai {
+  background: #1a1f2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  animation: none !important;
+  box-shadow: none !important;
+}
+
+/* ── 5. Flat cards ─────────────────────────────────────────────── */
+.settings-card,
+.confirm-card,
+.content-card,
+.plan-card,
+.daily-brief-card,
+.notes-panel,
+.peek-panel {
+  background: #1a1f2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.confirm-card {
+  border-left: 2px solid rgba(143, 168, 255, 0.45) !important;
+}
+
+.content-card {
+  border-left: 2px solid rgba(143, 168, 255, 0.35) !important;
+}
+
+/* ── 6. Settings fullscreen ────────────────────────────────────── */
+.settings-fullscreen-card {
+  background: #1a1f2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-top: none !important;
+}
+
+/* ── 7. Confirm button — no gradient animation ─────────────────── */
+.confirm-btn-yes {
+  background: rgba(143, 168, 255, 0.28) !important;
+  color: #e7edff !important;
+  box-shadow: none !important;
+  animation: none !important;
+  border: 1px solid rgba(143, 168, 255, 0.45) !important;
+}
+.confirm-btn-yes:hover {
+  background: rgba(143, 168, 255, 0.38) !important;
+}
+
+/* ── 8. Chips — flat, no shimmer ───────────────────────────────── */
+.sos-chip {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-secondary) !important;
+}
+.sos-chip:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.sos-chip::after {
+  display: none !important;
+}
+
+/* ── 9. Toast — flat ──────────────────────────────────────────── */
+.sos-toast {
+  background: #1a1f2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: none !important;
+}
+
+/* ── 10. Side nav buttons — flat, remove glows ─────────────────── */
+.sos-side-btn {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: none !important;
+}
+.sos-side-btn:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.sos-side-btn.active {
+  background: rgba(143, 168, 255, 0.1) !important;
+  border: 1px solid rgba(143, 168, 255, 0.3) !important;
+  border-left: 2px solid rgba(143, 168, 255, 0.7) !important;
+  color: #c8d8ff !important;
+  box-shadow: none !important;
+}
+
+/* ── 11. Remove module colour accent borders (too noisy) ──────── */
+.sos-side-btn[data-module] {
+  border-left: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+.sos-side-btn[data-module]:hover {
+  border-left-color: rgba(255, 255, 255, 0.14) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── 12. Lofi study layout — flatten panels ─────────────────────── */
+.study-glass {
+  background: #13161f !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-radius: 12px !important;
+}
+
+/* Kill grain overlay on glass panels */
+.study-glass::before {
+  display: none !important;
+}
+
+/* Right panel — remove gradient tint */
+.study-right {
+  background: #13161f !important;
+}
+
+/* ── 13. Modals/overlays — flat, no heavy blur ─────────────────── */
+.g-modal,
+.auth-form,
+.auth-modal-inner {
+  background: #1a1f2b !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ── 14. Scrollbar — subtle ────────────────────────────────────── */
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* ── 15. Calendar window inside embedded panels — flat bg ──────── */
+.cw-container {
+  background: #13161f !important;
+}
+.cw-header,
+.cw-grid-header,
+.cw-size-bar {
+  background: #13161f !important;
+}
+
+/* ── 16. Settings toggles — cleaner active state ───────────────── */
+.settings-toggle-active {
+  background: rgba(143, 168, 255, 0.16) !important;
+  border-color: rgba(143, 168, 255, 0.4) !important;
+  color: #c8d8ff !important;
+}

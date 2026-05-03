@@ -758,6 +758,9 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
     '- workspace_context: ' + workspaceContext,
     '- intent_type: ' + intentType,
+    options.responseStyle && options.responseStyle !== 'balanced'
+      ? '- response_style: ' + options.responseStyle + (options.responseStyle === 'concise' ? ' (keep replies to 1-2 sentences)' : ' (provide thorough explanations)')
+      : '',
   ].filter(Boolean).join('\n');
 
   const conversationalDynamicSections = [
@@ -766,7 +769,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'TASKS: ' + activeTasks.length + (overdueTasks.length > 0 ? ` active (${overdueTasks.length} overdue)` : ' active'),
     'UPCOMING EVENTS: ' + upcomingEvents.length,
     'WORKSPACE: ' + workspaceContext,
-    'MODE: tutor=' + (tutorMode ? 'ON' : 'OFF'),
+    'MODE: tutor=' + (tutorMode ? 'ON' : 'OFF') + (options.responseStyle && options.responseStyle !== 'balanced' ? ' response_style=' + options.responseStyle : ''),
   ].join('\n');
 
   const contextBlock = intentType === 'chat'
@@ -4206,7 +4209,7 @@ function App() {
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+  const [layoutMode, setLayoutMode] = useState('lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -4217,6 +4220,8 @@ function App() {
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
+  const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
+  const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
   const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
   const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
   // Skill Hub smart trigger nudge state
@@ -4907,6 +4912,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
+          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
@@ -4938,6 +4944,7 @@ function App() {
           });
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
           recordExecution('add_note', `note "${tabName}"`);
+          window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName } }));
           pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
           break;
         }
@@ -5916,6 +5923,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
         recentlyExecutedActions: recentlyExecutedActionsRef.current,
+        responseStyle,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
@@ -6759,7 +6767,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  // layoutMode is fixed to 'lofi' — no persistence needed
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
@@ -6901,14 +6909,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
-        tasks={tasks}
+        userId={user?.id}
+        onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
         notes={notes}
         onCreateNote={handleCreateNote}
-        onSendChatMessage={(msg) => sendMessage(msg)}
-        onNoteClick={() => setLofiNoteOpen(true)}
-        tutorMode={tutorMode}
-        lofiTutorTabActive={lofiTutorTabActive}
-        onCloseTutorTab={() => { setLofiTutorTabActive(false); toggleTutorMode(false); }}
+        onUpdateNote={handleUpdateNote}
+        onDeleteNote={handleDeleteNote}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
@@ -6968,68 +6974,101 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <div className="settings-fullscreen-header">
               <div>
                 <div className="settings-title">Settings</div>
-                <div className="settings-sub">Customize layout, notifications, and appearance with a cleaner full-screen controls panel.</div>
+                <div className="settings-sub">Customize Charles, notifications, and appearance.</div>
               </div>
               <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
             </div>
+
+            {/* ── AI Assistant ── */}
             <div className="settings-card settings-fullscreen-card">
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between lofi grid, sidebar, and topbar navigation.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className={'settings-toggle'+(layoutMode==='lofi'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('lofi')}>Lofi</button>
-                  <button className={'settings-toggle'+(layoutMode==='sidebar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('sidebar')}>Sidebar</button>
-                  <button className={'settings-toggle'+(layoutMode==='topbar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('topbar')}>Topbar</button>
-                </div>
+              <div className="settings-row" style={{paddingBottom:6}}>
+                <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Charles AI</div>
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve actions</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Execute adds instantly without a confirmation popup. Deletes still require confirm.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
+                <button className={'settings-toggle'+(aiAutoApprove?' settings-toggle-active':'')} onClick={()=>{ const next = !aiAutoApprove; setAiAutoApprove(next); localStorage.setItem('sos_ai_auto_approve', next ? 'true' : 'false'); }}>{aiAutoApprove ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Performance mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Auto adjusts based on device speed, or pick a fixed tier.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Agentic mode</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into parallel steps automatically.</div>
                 </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride(null)}>Auto</button>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride('mid')}>Mid</button>
-                  <button className="settings-toggle" onClick={()=>setPerfOverride('low')}>Low</button>
-                </div>
+                <button className={'settings-toggle'+(agenticMode?' settings-toggle-active':'')} onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Activates a guided, step-by-step learning style. Indicator appears in sidebar and topbar when on.</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Guided, step-by-step teaching voice. Great for studying new material.</div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
                   <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>toggleTutorMode(!tutorMode)}>{tutorMode ? 'On' : 'Off'}</button>
-                  <button className="settings-toggle" onClick={enterTutorMode}>Enter mode</button>
+                  <button className="settings-toggle" onClick={enterTutorMode}>Enter</button>
                 </div>
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Agentic Mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into steps</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Response style</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>How detailed Charles should be in replies.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
+                <div style={{display:'flex',gap:6}}>
+                  {['concise','balanced','detailed'].map(style => (
+                    <button
+                      key={style}
+                      className={'settings-toggle'+(responseStyle===style?' settings-toggle-active':'')}
+                      onClick={()=>{ setResponseStyle(style); localStorage.setItem('sos_response_style', style); }}
+                      style={{textTransform:'capitalize'}}
+                    >{style}</button>
+                  ))}
+                </div>
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>User Analytics</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Clear chat history</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Wipe the current conversation. Your tasks, events, and notes stay.</div>
+                </div>
+                <button className="settings-toggle" onClick={()=>{ clearChat(); setToastMsg('Chat cleared'); }}>Clear</button>
+              </div>
+              {currentModel && (
+                <div className="settings-row" style={{opacity:0.7}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Active model</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>The AI model currently powering Charles.</div>
+                  </div>
+                  <span style={{fontSize:'0.78rem',color:'var(--teal)',fontFamily:'var(--font-mono, monospace)',letterSpacing:'0.02em'}}>{currentModel.split('/').pop()}</span>
+                </div>
+              )}
+            </div>
+
+            {/* ── Interface ── */}
+            <div className="settings-card settings-fullscreen-card">
+              <div className="settings-row" style={{paddingBottom:6}}>
+                <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Interface</div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Sound effects</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Lofi UI sounds for actions, navigation, and responses.</div>
+                </div>
+                <AppleSwitch checked={sfxEnabled} onChange={()=>{ const next = sfx.toggle(); setSfxEnabled(next); }} label="Sound effects" />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Usage analytics</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show RPM usage and active AI model in the top bar.</div>
                 </div>
-                <AppleSwitch checked={showAnalytics} onChange={() => { const n = !showAnalytics; setShowAnalytics(n); localStorage.setItem('sos_show_analytics', n ? 'true' : 'false'); }} label="User Analytics" />
+                <AppleSwitch checked={showAnalytics} onChange={() => { const n = !showAnalytics; setShowAnalytics(n); localStorage.setItem('sos_show_analytics', n ? 'true' : 'false'); }} label="Usage analytics" />
               </div>
-              <div className="settings-row" style={{borderTop:'1px solid var(--border)',paddingTop:10,marginTop:4}}>
+            </div>
+
+            {/* ── Notifications ── */}
+            <div className="settings-card settings-fullscreen-card">
+              <div className="settings-row" style={{paddingBottom:6}}>
                 <div>
                   <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Notifications</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>{'Notification' in window && Notification.permission === 'denied' ? '⚠ Notifications blocked — check your browser settings' : 'Get browser reminders for tasks, exams, and your daily plan.'}</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>{'Notification' in window && Notification.permission === 'denied' ? '⚠ Blocked — check your browser settings' : 'Browser reminders for tasks, exams, and your daily plan.'}</div>
                 </div>
               </div>
               <div className="settings-row">
@@ -7048,16 +7087,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily plan reminder (8am)</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Morning nudge with your active task count.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily plan reminder</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Morning nudge at 8am with your active task count.</div>
                 </div>
                 <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
               </div>
               {'Notification' in window && Notification.permission !== 'denied' && (
                 <div className="settings-row">
                   <div>
-                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Test notification</div>
-                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Send a test browser notification to confirm everything is working.</div>
+                    <div style={{fontWeight:600,fontSize:'0.88rem'}}>Send test notification</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Fire a test browser notification to confirm everything is working.</div>
                   </div>
                   <button className="settings-toggle" onClick={async () => {
                     if (Notification.permission !== 'granted') {
@@ -7069,6 +7108,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   }}>Test</button>
                 </div>
               )}
+            </div>
+
+            {/* ── Data ── */}
+            <div className="settings-card settings-fullscreen-card">
+              <div className="settings-row" style={{paddingBottom:6}}>
+                <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Data</div>
+              </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Export data</div>
@@ -7085,21 +7131,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   URL.revokeObjectURL(url);
                 }}>Export</button>
               </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Replay intro</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Walk through the onboarding again to rediscover features.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>{ setActivePanel('chat'); setShowOnboarding(true); }}>Replay</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Back</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Return to the conversation view.</div>
-                </div>
-                <button className="settings-toggle" onClick={()=>setActivePanel('chat')}>Open</button>
-              </div>
             </div>
+
             <AppearanceSettings user={user} />
             <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
               <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>
