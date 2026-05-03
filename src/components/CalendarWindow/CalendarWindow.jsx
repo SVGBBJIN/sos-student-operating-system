@@ -156,6 +156,7 @@ export default function CalendarWindow({
   const [popover,      setPopover]      = useState(null);  // { event, rect }
   const [newEventId,   setNewEventId]   = useState(null);
   const [localEvents,  setLocalEvents]  = useState(events);
+  const [nativeFS,     setNativeFS]     = useState(false);
 
   // Sync prop changes
   useEffect(() => { setLocalEvents(events); }, [events]);
@@ -175,6 +176,21 @@ export default function CalendarWindow({
     setLocalEvents(prev => prev.map(e => e.id === updated.id ? updated : e));
     onEventUpdate?.(updated);
     setPopover(null);
+  }
+
+  // Track native fullscreen state
+  useEffect(() => {
+    const onChange = () => setNativeFS(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  function toggleBrowserFullscreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
   }
 
   // External: expose method to animate a newly added event
@@ -223,22 +239,6 @@ export default function CalendarWindow({
           )}
         </div>
 
-        {/* Size control bar */}
-        <div className="cw-size-bar">
-          {sizeButtons.map(btn => (
-            <button
-              key={btn.id}
-              className={'cw-size-btn' + (size === btn.id ? ' cw-size-btn-active' : '')}
-              onClick={() => setSize(btn.id)}
-            >
-              {btn.icon} {btn.label}
-            </button>
-          ))}
-          {onClose && (
-            <button className="cw-size-btn" onClick={onClose}>✕ Close</button>
-          )}
-        </div>
-
         {/* Body */}
         {isWidget ? (
           <WeekStrip
@@ -254,6 +254,29 @@ export default function CalendarWindow({
             newEventId={newEventId}
           />
         )}
+
+        {/* Bottom toggle bar */}
+        <div className="cw-size-bar">
+          {sizeButtons.map(btn => (
+            <button
+              key={btn.id}
+              className={'cw-size-btn' + (size === btn.id ? ' cw-size-btn-active' : '')}
+              onClick={() => setSize(btn.id)}
+            >
+              {btn.icon} {btn.label}
+            </button>
+          ))}
+          <button
+            className={'cw-size-btn' + (nativeFS ? ' cw-size-btn-active' : '')}
+            onClick={toggleBrowserFullscreen}
+            title={nativeFS ? 'Exit browser fullscreen' : 'Browser fullscreen (hides browser chrome)'}
+          >
+            {nativeFS ? '⊡ Exit FS' : '⛶ Full FS'}
+          </button>
+          {onClose && (
+            <button className="cw-size-btn" onClick={onClose}>✕ Close</button>
+          )}
+        </div>
       </div>
 
       {/* Event edit popover */}
