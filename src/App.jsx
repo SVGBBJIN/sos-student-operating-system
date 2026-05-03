@@ -4206,7 +4206,7 @@ function App() {
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sos_layout_mode') || 'lofi');
+  const [layoutMode, setLayoutMode] = useState('lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -6761,7 +6761,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  useEffect(() => { localStorage.setItem('sos_layout_mode', layoutMode); }, [layoutMode]);
+  // layoutMode is fixed to 'lofi' — no persistence needed
   useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
   useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
   useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
@@ -6903,14 +6903,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
-        tasks={tasks}
-        notes={notes}
-        onCreateNote={handleCreateNote}
-        onSendChatMessage={(msg) => sendMessage(msg)}
-        onNoteClick={() => setLofiNoteOpen(true)}
-        tutorMode={tutorMode}
-        lofiTutorTabActive={lofiTutorTabActive}
-        onCloseTutorTab={() => { setLofiTutorTabActive(false); toggleTutorMode(false); }}
+        userId={user?.id}
+        onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
@@ -6975,17 +6969,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
             </div>
             <div className="settings-card settings-fullscreen-card">
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Layout mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Switch between lofi grid, sidebar, and topbar navigation.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className={'settings-toggle'+(layoutMode==='lofi'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('lofi')}>Lofi</button>
-                  <button className={'settings-toggle'+(layoutMode==='sidebar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('sidebar')}>Sidebar</button>
-                  <button className={'settings-toggle'+(layoutMode==='topbar'?' settings-toggle-active':'')} onClick={()=>setLayoutMode('topbar')}>Topbar</button>
-                </div>
-              </div>
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Auto-approve AI actions</div>
