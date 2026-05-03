@@ -4907,6 +4907,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
+          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
@@ -4938,6 +4939,7 @@ function App() {
           });
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
           recordExecution('add_note', `note "${tabName}"`);
+          window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName } }));
           pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
           break;
         }

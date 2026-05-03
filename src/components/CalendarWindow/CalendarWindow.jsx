@@ -255,8 +255,8 @@ export default function CalendarWindow({
           />
         )}
 
-        {/* Bottom toggle bar */}
-        <div className="cw-size-bar">
+        {/* Bottom toggle bar — hidden when embedded (host provides navigation) */}
+        {!embedded && <div className="cw-size-bar">
           {sizeButtons.map(btn => (
             <button
               key={btn.id}
@@ -276,7 +276,7 @@ export default function CalendarWindow({
           {onClose && (
             <button className="cw-size-btn" onClick={onClose}>✕ Close</button>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* Event edit popover */}
