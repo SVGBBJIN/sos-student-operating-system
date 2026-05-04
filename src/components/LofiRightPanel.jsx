@@ -32,7 +32,7 @@ function formatSeconds(seconds) {
   return `${mins}:${secs}`;
 }
 
-export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSavedChat }) {
+export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSavedChat, onDeleteSavedChat }) {
   const [musicPlaying, setMusicPlaying] = React.useState(false);
   const [timerSeconds, setTimerSeconds] = React.useState(0);
   const [timerRunning, setTimerRunning] = React.useState(false);
@@ -137,15 +137,23 @@ export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSav
           {savedChats.length === 0 ? (
             <div style={{ fontSize: '0.76rem', color: 'var(--lofi-text-dim)' }}>No saved chats yet.</div>
           ) : savedChats.slice(0, 6).map(chat => (
-            <button
-              key={chat.id}
-              className="study-widget-btn"
-              style={{ justifyContent: 'space-between' }}
-              onClick={() => onOpenSavedChat?.(chat.id)}
-            >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{chat.title || 'Saved chat'}</span>
-              <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>{chat.savedAt ? new Date(chat.savedAt).toLocaleDateString() : ''}</span>
-            </button>
+            <div key={chat.id} className="study-saved-chat-row">
+              <button
+                className="study-widget-btn study-saved-chat-open"
+                onClick={() => onOpenSavedChat?.(chat.id)}
+              >
+                <span className="study-saved-chat-title">{chat.title || 'Saved chat'}</span>
+                <span className="study-saved-chat-date">{chat.savedAt ? new Date(chat.savedAt).toLocaleDateString() : ''}</span>
+              </button>
+              <button
+                className="study-saved-chat-delete"
+                onClick={(e) => { e.stopPropagation(); onDeleteSavedChat?.(chat.id); }}
+                aria-label={`Delete ${chat.title || 'saved chat'}`}
+                title="Delete chat"
+              >
+                {Icon.trash(13)}
+              </button>
+            </div>
           ))}
         </div>
       </WidgetFrame>

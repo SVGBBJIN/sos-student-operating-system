@@ -167,6 +167,56 @@
   gap: 8px;
 }
 
+.study-saved-chat-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.study-saved-chat-open {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+}
+
+.study-saved-chat-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 130px;
+}
+
+.study-saved-chat-date {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-size: 0.68rem;
+}
+
+.study-saved-chat-delete {
+  width: 30px;
+  border: 1px solid rgba(255,71,87,0.25);
+  background: rgba(255,71,87,0.06);
+  color: var(--danger);
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.study-saved-chat-delete:hover {
+  background: rgba(255,71,87,0.12);
+  border-color: var(--danger);
+  transform: translateY(-1px);
+}
+
+.study-saved-chat-delete svg {
+  width: 13px;
+  height: 13px;
+}
+
 .study-smash-btn {
   width: 100%;
   border: none;

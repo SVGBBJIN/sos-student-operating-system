@@ -7358,6 +7358,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         weatherData={weatherData}
         savedChats={savedChats}
         onOpenSavedChat={loadSavedChat}
+        onDeleteSavedChat={deleteSavedChat}
       />}
       {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
