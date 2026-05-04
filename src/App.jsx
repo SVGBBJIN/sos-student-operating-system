@@ -3585,8 +3585,9 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
 /* ═══════════════════════════════════════════════
    GLOBAL SEARCH MODAL (Cmd+K)
    ═══════════════════════════════════════════════ */
-function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, onSelectNote, onSendMessage }) {
+function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, savedChats = [], onSelectNote, onOpenSavedChat, onSendMessage }) {
   const inputRef = React.useRef(null);
+  const [activeIndex, setActiveIndex] = React.useState(0);
   React.useEffect(() => { inputRef.current?.focus(); }, []);
 
   const q = query.trim().toLowerCase();
@@ -3611,14 +3612,41 @@ function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes
         out.push({ kind: 'note', id: n.id, label: n.name || 'Untitled', sub: snippet, obj: n });
       }
     });
+    savedChats.forEach(chat => {
+      const haystack = [chat.title, ...(chat.messages || []).map(m => m.content)].join(' ').toLowerCase();
+      if (haystack.includes(q)) {
+        const msg = (chat.messages || []).find(m => (m.content || '').toLowerCase().includes(q));
+        const sub = msg?.content ? 'Chat · ' + msg.content.slice(0, 80) : `Saved chat · ${chat.messageCount || 0} messages`;
+        out.push({ kind: 'chat', id: chat.id, label: chat.title || 'Saved chat', sub, obj: chat });
+      }
+    });
     return out.slice(0, 12);
-  }, [q, tasks, events, notes]);
+  }, [q, tasks, events, notes, savedChats]);
 
-  const kindIcon = { task: '☑', event: '📅', note: '📝' };
+  React.useEffect(() => { setActiveIndex(0); }, [query]);
+
+  const kindIcon = { task: '☑', event: '📅', note: '📝', chat: '💬' };
 
   function handleSelect(r) {
+    if (!r) return;
     if (r.kind === 'note') onSelectNote(r.obj);
+    else if (r.kind === 'chat') onOpenSavedChat?.(r.id);
     else onSendMessage(`Tell me about "${r.label}"`);
+  }
+
+  function handleSearchKeyDown(e) {
+    if (e.key === 'Escape') { onClose(); return; }
+    if (!results.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (i + 1) % results.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (i - 1 + results.length) % results.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSelect(results[activeIndex]);
+    }
   }
 
   return (
@@ -3631,15 +3659,15 @@ function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes
             className="gsearch-input"
             value={query}
             onChange={e => onQueryChange(e.target.value)}
-            placeholder="Search tasks, events, notes…"
-            onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+            placeholder="Search tasks, events, notes, chats…"
+            onKeyDown={handleSearchKeyDown}
           />
           {query && <button className="gsearch-clear" onClick={() => onQueryChange('')}>×</button>}
         </div>
         {results.length > 0 ? (
           <div className="gsearch-results">
-            {results.map(r => (
-              <button key={r.kind + r.id} className="gsearch-result" onClick={() => handleSelect(r)}>
+            {results.map((r, index) => (
+              <button key={r.kind + r.id} className={'gsearch-result' + (index === activeIndex ? ' active' : '')} onMouseEnter={() => setActiveIndex(index)} onClick={() => handleSelect(r)}>
                 <span className="gsearch-kind">{kindIcon[r.kind]}</span>
                 <span className="gsearch-result-label">{r.label}</span>
                 <span className="gsearch-result-sub">{r.sub}</span>
@@ -4217,6 +4245,9 @@ function App() {
   const [savedChats, setSavedChats] = useState([]);
   const [showChatSidebar, setShowChatSidebar] = useState(false);
   const [viewingSavedChatId, setViewingSavedChatId] = useState(null);
+  const [savedChatUndo, setSavedChatUndo] = useState(null);
+  const savedChatUndoTimerRef = useRef(null);
+  useEffect(() => () => { if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current); }, []);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const CHAT_SAVE_PREFIX = '[chat-save]';
@@ -5654,18 +5685,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   // ── Save / Load / Delete chat conversations ──
+  function makeSavedChatNote(chat) {
+    const title = chat.title || 'Saved chat';
+    const savedAt = chat.savedAt || new Date().toISOString();
+    const chatData = {
+      title,
+      messages: chat.messages || [],
+      savedAt,
+      messageCount: chat.messageCount || (chat.messages || []).length,
+    };
+    return { id: chat.id, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
+  }
+
   function autoSaveCurrentChat() {
-    if (messages.length === 0) return;
-    if (viewingSavedChatId) return;
+    if (messages.length === 0) return null;
+    if (viewingSavedChatId) return null;
     const firstUserMsg = messages.find(m => m.role === 'user');
     const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) + (firstUserMsg.content.length > 60 ? '...' : '') : 'Chat ' + new Date().toLocaleDateString();
     const chatId = uid();
     const savedAt = new Date().toISOString();
-    const chatData = { title, messages: messages.slice(), savedAt, messageCount: messages.length };
-    // Save to Supabase via notes table with special prefix
-    const note = { id: chatId, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
-    if (user) syncOp(() => dbUpsertNote(note, user.id));
-    setSavedChats(prev => [{ id: chatId, ...chatData }, ...prev]);
+    const chatData = { id: chatId, title, messages: messages.slice(), savedAt, messageCount: messages.length };
+    if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chatData), user.id));
+    setSavedChats(prev => [chatData, ...prev]);
+    return chatData;
   }
 
   function loadSavedChat(chatId) {
@@ -5674,13 +5716,44 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setViewingSavedChatId(chatId);
     setMessages(chat.messages || []);
     setShowChatSidebar(false);
+    setShowGlobalSearch(false);
+  }
+
+  function renameSavedChat(chatId) {
+    const chat = savedChats.find(c => c.id === chatId);
+    if (!chat) return;
+    const nextTitle = window.prompt('Rename saved chat', chat.title || 'Saved chat')?.trim();
+    if (!nextTitle || nextTitle === chat.title) return;
+    const updated = { ...chat, title: nextTitle, savedAt: chat.savedAt || new Date().toISOString() };
+    setSavedChats(prev => prev.map(c => c.id === chatId ? updated : c));
+    if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(updated), user.id));
+    setToastMsg('Conversation renamed');
+  }
+
+  function restoreDeletedSavedChat() {
+    if (!savedChatUndo) return;
+    const { chat, wasViewing } = savedChatUndo;
+    setSavedChats(prev => prev.some(c => c.id === chat.id) ? prev : [chat, ...prev]);
+    if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chat), user.id));
+    if (wasViewing) {
+      setViewingSavedChatId(chat.id);
+      setMessages(chat.messages || []);
+    }
+    setSavedChatUndo(null);
+    if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current);
+    setToastMsg('Conversation restored');
   }
 
   function deleteSavedChat(chatId) {
+    const chat = savedChats.find(c => c.id === chatId);
+    if (!chat) return;
+    const wasViewing = viewingSavedChatId === chatId;
     setSavedChats(prev => prev.filter(c => c.id !== chatId));
     if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
-    if (viewingSavedChatId === chatId) { setViewingSavedChatId(null); setMessages([]); setDailyBrief(null); briefRequestedRef.current = false; }
-    setToastMsg('Conversation deleted');
+    if (wasViewing) { setViewingSavedChatId(null); setMessages([]); setDailyBrief(null); briefRequestedRef.current = false; }
+    if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current);
+    setSavedChatUndo({ chat, wasViewing });
+    savedChatUndoTimerRef.current = setTimeout(() => setSavedChatUndo(null), 8000);
   }
 
   function autoConfirmPending() {
@@ -6764,6 +6837,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div className="chat-sidebar-item-meta">
                     <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
                     <span style={{display:'flex',gap:4}}>
+                      <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
                       <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
                     </span>
                   </div>
@@ -6904,7 +6978,10 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Clear chat history</div>
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Wipe the current conversation. Your tasks, events, and notes stay.</div>
                 </div>
-                <button className="settings-toggle" onClick={()=>{ clearChat(); setToastMsg('Chat cleared'); }}>Clear</button>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                  <button className="settings-toggle" onClick={()=>{ const saved = autoSaveCurrentChat(); clearChat(); setToastMsg(saved ? 'Chat saved and cleared' : 'Chat cleared'); }}>Save & clear</button>
+                  <button className="settings-toggle" onClick={()=>{ clearChat(); setToastMsg('Chat cleared'); }}>Clear</button>
+                </div>
               </div>
               {currentModel && (
                 <div className="settings-row" style={{opacity:0.7}}>
@@ -7359,6 +7436,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         savedChats={savedChats}
         onOpenSavedChat={loadSavedChat}
         onDeleteSavedChat={deleteSavedChat}
+        onRenameSavedChat={renameSavedChat}
       />}
       {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
@@ -7369,7 +7447,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         tasks={tasks}
         events={events}
         notes={notes}
+        savedChats={savedChats}
         onSelectNote={note => { setShowGlobalSearch(false); setShowNotes(true); }}
+        onOpenSavedChat={loadSavedChat}
         onSendMessage={q => { setShowGlobalSearch(false); sendMessage(q); }}
       />}
       {authNudge&&(
@@ -7402,6 +7482,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     <div className="chat-sidebar-item-meta">
                       <span>{chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''} · {fmt(chat.savedAt)}</span>
                       <span style={{display:'flex',gap:4}}>
+                        <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
                         <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
                       </span>
                     </div>
@@ -7432,6 +7513,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         />
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
+      {savedChatUndo&&(
+        <div className="sos-saved-chat-undo" role="status">
+          <span>Deleted “{savedChatUndo.chat.title || 'Saved chat'}”</span>
+          <button onClick={restoreDeletedSavedChat}>Undo</button>
+          <button onClick={() => { setSavedChatUndo(null); if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current); }} aria-label="Dismiss saved chat undo">×</button>
+        </div>
+      )}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
       <IdleLockScreen />

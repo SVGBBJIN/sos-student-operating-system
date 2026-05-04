@@ -193,26 +193,43 @@
   font-size: 0.68rem;
 }
 
-.study-saved-chat-delete {
-  width: 30px;
-  border: 1px solid rgba(255,71,87,0.25);
-  background: rgba(255,71,87,0.06);
-  color: var(--danger);
+.study-saved-chat-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.study-saved-chat-action {
+  width: 28px;
+  border: 1px solid var(--lofi-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--lofi-text-muted);
   border-radius: 8px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-.study-saved-chat-delete:hover {
-  background: rgba(255,71,87,0.12);
-  border-color: var(--danger);
+.study-saved-chat-action:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.18);
+  color: var(--lofi-text);
   transform: translateY(-1px);
 }
 
-.study-saved-chat-delete svg {
+.study-saved-chat-action.danger {
+  border-color: rgba(255,71,87,0.25);
+  background: rgba(255,71,87,0.06);
+  color: var(--danger);
+}
+
+.study-saved-chat-action.danger:hover {
+  background: rgba(255,71,87,0.12);
+  border-color: var(--danger);
+}
+
+.study-saved-chat-action svg {
   width: 13px;
   height: 13px;
 }

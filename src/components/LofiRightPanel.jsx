@@ -32,7 +32,7 @@ function formatSeconds(seconds) {
   return `${mins}:${secs}`;
 }
 
-export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSavedChat, onDeleteSavedChat }) {
+export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSavedChat, onDeleteSavedChat, onRenameSavedChat }) {
   const [musicPlaying, setMusicPlaying] = React.useState(false);
   const [timerSeconds, setTimerSeconds] = React.useState(0);
   const [timerRunning, setTimerRunning] = React.useState(false);
@@ -145,14 +145,24 @@ export default function LofiRightPanel({ weatherData, savedChats = [], onOpenSav
                 <span className="study-saved-chat-title">{chat.title || 'Saved chat'}</span>
                 <span className="study-saved-chat-date">{chat.savedAt ? new Date(chat.savedAt).toLocaleDateString() : ''}</span>
               </button>
-              <button
-                className="study-saved-chat-delete"
-                onClick={(e) => { e.stopPropagation(); onDeleteSavedChat?.(chat.id); }}
-                aria-label={`Delete ${chat.title || 'saved chat'}`}
-                title="Delete chat"
-              >
-                {Icon.trash(13)}
-              </button>
+              <div className="study-saved-chat-actions">
+                <button
+                  className="study-saved-chat-action"
+                  onClick={(e) => { e.stopPropagation(); onRenameSavedChat?.(chat.id); }}
+                  aria-label={`Rename ${chat.title || 'saved chat'}`}
+                  title="Rename chat"
+                >
+                  {Icon.edit(13)}
+                </button>
+                <button
+                  className="study-saved-chat-action danger"
+                  onClick={(e) => { e.stopPropagation(); onDeleteSavedChat?.(chat.id); }}
+                  aria-label={`Delete ${chat.title || 'saved chat'}`}
+                  title="Delete chat"
+                >
+                  {Icon.trash(13)}
+                </button>
+              </div>
             </div>
           ))}
         </div>
