@@ -1068,107 +1068,41 @@
   }
 }
 
-/* ── Mobile: collapse to single-column with 64px panel strip ──── */
+/* ── Mobile: stack chat + left panel vertically; hide right widget column ── */
 @media (max-width: 768px) {
   .study-app {
     grid-template-columns: 1fr;
-    grid-template-rows: 64px 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45vh);
     padding: 6px;
-    gap: 4px;
-  }
-
-  /* Compact horizontal strip — left + right panels side by side */
-  .study-left,
-  .study-right {
-    display: flex !important;
-    flex-direction: row;
-    align-items: center;
-    height: 64px;
-    overflow: hidden;
-    padding: 0 10px;
-    gap: 8px;
-    border-radius: 12px;
-  }
-
-  /* Strip: left takes 60%, right takes 40% */
-  .study-left {
-    grid-column: 1;
-    grid-row: 1;
-    flex: 3;
-    min-height: unset;
-  }
-
-  .study-right {
-    grid-column: 1;
-    grid-row: 1;
-    flex: 2;
-    min-height: unset;
-    overflow-y: visible;
-  }
-
-  /* Use a wrapper trick: put left+right in a flex row at row 1 */
-  .study-left { order: 0; }
-  .study-right { order: 1; }
-
-  /* Hide verbose content in strip mode */
-  .study-week-grid,
-  .study-notes-list,
-  .study-left-empty,
-  .study-section-label {
-    display: none !important;
+    gap: 6px;
   }
 
   .study-center {
     grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+  }
+
+  .study-left {
+    grid-column: 1;
     grid-row: 2;
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  /* The right column (cat + music + widgets) is hidden on phones to give the
+     chat and left panel real screen space. Tap-targets in the left panel
+     (Calendar / Notes / Proofread tabs) are the priority. */
+  .study-right {
+    display: none !important;
   }
 
   .study-bottombar {
     grid-column: 1;
     grid-row: 3;
-  }
-
-  /* Compact cat */
-  .study-cat-scene {
-    width: 44px;
-    height: 44px;
-    aspect-ratio: unset;
-    flex-shrink: 0;
-    border-radius: 8px;
-  }
-
-  .study-cat-scene .cat-svg {
-    width: 36px;
-  }
-
-  /* Compact music player */
-  .study-music-player {
-    padding: 6px 8px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .study-now-playing-label { display: none; }
-
-  .study-track-name {
-    font-size: 10px;
-  }
-
-  .study-music-controls {
-    gap: 6px;
-  }
-
-  .study-ctrl-btn {
-    width: 26px !important;
-    height: 26px !important;
-  }
-
-  /* Hide weather and notes panels in strip */
-  .study-weather-widget,
-  .study-notes-panel,
-  .study-schedule-panel,
-  .study-right > *:not(.study-cat-scene):not(.study-music-player) {
-    display: none !important;
   }
 }
 
