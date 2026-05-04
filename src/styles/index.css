@@ -367,7 +367,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .chat-sidebar-item.active{border-color:var(--accent);background:rgba(245,158,11,0.06)}
 .chat-sidebar-item-title{font-weight:600;font-size:0.88rem;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-sidebar-item-meta{display:flex;align-items:center;justify-content:space-between;font-size:0.72rem;color:var(--text-dim)}
-.chat-sidebar-item-delete{background:transparent;border:1px solid rgba(255,71,87,0.25);color:var(--danger);border-radius:6px;padding:2px 8px;font-size:0.7rem;font-weight:600;cursor:pointer;transition:all .15s}
+.chat-sidebar-item-rename,.chat-sidebar-item-delete{background:transparent;border:1px solid rgba(245,158,11,0.18);color:var(--text-dim);border-radius:6px;padding:2px 8px;font-size:0.7rem;font-weight:600;cursor:pointer;transition:all .15s}
+.chat-sidebar-item-rename:hover{background:rgba(245,158,11,0.1);border-color:var(--accent);color:var(--accent)}
+.chat-sidebar-item-delete{border-color:rgba(255,71,87,0.25);color:var(--danger)}
 .chat-sidebar-item-delete:hover{background:rgba(255,71,87,0.1);border-color:var(--danger)}
 
 /* Responsive */
@@ -838,7 +840,8 @@ select option{background:#fffbeb;color:var(--text)}
   transition: background .1s;
 }
 .gsearch-result:last-child { border-bottom: none; }
-.gsearch-result:hover { background: rgba(255,255,255,0.06); }
+.gsearch-result:hover,
+.gsearch-result.active { background: rgba(255,255,255,0.06); }
 .gsearch-kind { font-size: 0.9rem; flex-shrink: 0; }
 .gsearch-result-label { font-size: 0.88rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gsearch-result-sub { font-size: 0.74rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
@@ -848,6 +851,30 @@ select option{background:#fffbeb;color:var(--text)}
   font-size: 0.84rem;
   color: var(--text-dim);
 }
+
+
+.sos-saved-chat-undo {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 460px);
+  padding: 10px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 14px;
+  color: var(--text);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.45);
+  animation: fadeIn .2s ease;
+}
+.sos-saved-chat-undo > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.84rem; }
+.sos-saved-chat-undo > button:first-of-type { background: var(--accent); border: none; border-radius: 8px; color: #fff; font-size: 0.78rem; font-weight: 700; padding: 5px 12px; cursor: pointer; }
+.sos-saved-chat-undo > button:last-of-type { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 2px 4px; }
 
 .sos-undo-toast {
   display: flex;
