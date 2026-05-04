@@ -1069,13 +1069,18 @@
 }
 
 /* ── Mobile: 3-row stack — right widget strip / chat / left panel ────────
-   Row 1: .study-right collapsed to a 64px horizontal strip (cat + music + timer button).
-   Row 2: .study-center (chat) flexes to fill remaining space.
-   Row 3: .study-left full panel with Calendar / Notes / Proofread tabs (45vh). */
+   Row 1: .study-right collapsed to a 64px horizontal strip (cat + music).
+   Row 2: .study-center (chat) ~70vh so it stays comfortably tall.
+   Row 3: .study-left full panel with Calendar / Notes / Proofread tabs (45vh).
+   Total exceeds 100vh on purpose — the page scrolls vertically. */
 @media (max-width: 768px) {
   .study-app {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
     grid-template-columns: 1fr;
-    grid-template-rows: 64px minmax(0, 1fr) minmax(0, 45vh);
+    grid-template-rows: 64px 70vh 45vh;
     padding: 6px;
     gap: 6px;
   }
