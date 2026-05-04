@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CalendarWindow from './CalendarWindow/CalendarWindow.jsx';
 import DOMPurify from 'dompurify';
+import ProofreadPanel from './ProofreadPanel.jsx';
 
 /* ── Notes view ──────────────────────────────────────────────── */
 function NotesView({ notes, onCreateNote, onUpdateNote, onDeleteNote }) {
@@ -141,24 +142,6 @@ function NotesView({ notes, onCreateNote, onUpdateNote, onDeleteNote }) {
   );
 }
 
-/* ── Proofread placeholder ──────────────────────────────────── */
-function ProofreadPlaceholder() {
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, background: 'var(--background)' }}>
-      <span style={{ fontSize: 28, opacity: 0.45 }}>✦</span>
-      <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 14, color: 'var(--foreground)' }}>
-        Proofreading Mode
-      </span>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--muted-foreground)', maxWidth: 220, textAlign: 'center', lineHeight: 1.65 }}>
-        AI grammar and style suggestions coming soon.
-      </span>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 10, color: 'var(--muted-foreground)', opacity: 0.5, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 4 }}>
-        Coming soon
-      </span>
-    </div>
-  );
-}
-
 /* ── Main panel ──────────────────────────────────────────────── */
 export default function LofiLeftPanel({
   events, userId, onEventUpdate,
@@ -205,7 +188,7 @@ export default function LofiLeftPanel({
             onDeleteNote={onDeleteNote}
           />
         )}
-        {activeView === 'proofread' && <ProofreadPlaceholder />}
+        {activeView === 'proofread' && <ProofreadPanel />}
       </div>
 
       {/* Bottom toggle bar */}

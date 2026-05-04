@@ -13,4 +13,8 @@ export const SEARCH_LESSON_URL = window.location.hostname.includes('vercel.app')
   ? '/api/search-lesson'
   : SUPABASE_URL + '/functions/v1/search-lesson';
 
+export const PROOFREAD_FN_URL = window.location.hostname.includes('vercel.app')
+  ? '/api/proofread'
+  : SUPABASE_URL + '/functions/v1/sos-proofread';
+
 export const CHAT_MAX_MESSAGES = 60;
