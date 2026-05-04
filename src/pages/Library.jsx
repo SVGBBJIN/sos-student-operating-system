@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { sb } from '../lib/supabase.js';
 import DOMPurify from 'dompurify';
 import CalendarWindow from '../components/CalendarWindow/CalendarWindow.jsx';
+import ProofreadPanel from '../components/ProofreadPanel.jsx';
 
 /* ─── Notes Panel ────────────────────────────────────────────────── */
 function NotesContent({ user }) {
@@ -165,24 +166,6 @@ function NotesContent({ user }) {
   );
 }
 
-/* ─── Proofread placeholder ─────────────────────────────────────── */
-function ProofreadPlaceholder() {
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--background)' }}>
-      <span style={{ fontSize: 36, opacity: 0.6 }}>✦</span>
-      <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 20, color: 'var(--foreground)' }}>
-        Proofreading Mode
-      </span>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--muted-foreground)', maxWidth: 340, textAlign: 'center', lineHeight: 1.65 }}>
-        AI-powered grammar, clarity, and style suggestions are coming soon. This mode will help you refine your notes and written work.
-      </span>
-      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--muted-foreground)', opacity: 0.5, marginTop: 4, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-        Coming soon
-      </span>
-    </div>
-  );
-}
-
 /* ─── Library Page ───────────────────────────────────────────────── */
 export default function Library() {
   const navigate = useNavigate();
@@ -266,7 +249,7 @@ export default function Library() {
           </div>
         )}
 
-        {activeView === 'proofread' && <ProofreadPlaceholder />}
+        {activeView === 'proofread' && <ProofreadPanel />}
       </div>
 
       {/* Bottom toggle bar */}
