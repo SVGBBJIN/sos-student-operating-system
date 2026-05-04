@@ -17,14 +17,14 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Add/change an AI tool | `shared/ai/chat-core.js` → `ACTION_TOOLS` (~line 150) |
 | AI model selection logic | `shared/ai/chat-core.js` lines 1–30, `selectModel()` line 22 |
 | System prompt construction | `src/App.jsx` `buildSystemPrompt()` line 647 |
-| Action execution (client-side) | `src/App.jsx` `executeAction()` line 4454 |
-| Send message / streaming | `src/App.jsx` `sendMessage()` line 5397 |
-| RPM tracking + queue drain | `src/App.jsx` lines 4123–4142, `queueOrExecute()` line 6309 |
-| Layout switching | `src/App.jsx` `layoutMode` state line 4052; render branch line 6457 |
+| Action execution (client-side) | `src/App.jsx` `executeAction()` line 4590 |
+| Send message / streaming | `src/App.jsx` `sendMessage()` line 5693 |
+| RPM tracking + queue drain | `src/App.jsx` lines 4123–4142, `queueOrExecute()` line 6519 |
+| Layout switching | `src/App.jsx` `layoutMode` state line 4087; render branch line 6675 |
 | Lofi left panel (schedule+notes) | `src/components/LofiLeftPanel.jsx` |
 | Lofi right panel (widgets) | `src/components/LofiRightPanel.jsx` |
 | Lofi top bar | `src/components/StudyTopBar.jsx` |
-| Tutor / SkillHub entry | `src/App.jsx` `enterTutorMode()` line 6378 |
+| Tutor / SkillHub entry | `src/App.jsx` `enterTutorMode()` line 6596 |
 | Settings UI (all toggles) | `src/App.jsx` ~line 6620–6980 (inside `activePanel === 'settings'` block) |
 | Supabase client + constants | `src/lib/supabase.js` |
 | Notes panel (overlay/embedded) | `src/App.jsx` `NotesPanel` component line 3503 |
@@ -52,15 +52,12 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 ## Models (current)
 
 ```
-PRIMARY_MODEL        = "openai/gpt-oss-120b"    // tool-heavy + agentic
-CONVERSATIONAL_MODEL = "openai/gpt-oss-20b"     // conversational turns
-BACKUP_MODEL         = "openai/gpt-oss-20b"     // groq fallback
-FAST_MODEL           = "openai/gpt-oss-20b"     // short/simple turns
-GEMINI_CONVERSATIONAL_BACKUP = "gemini-2.5-flash"
-GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite"
+MODEL_DEEP = "openai/gpt-oss-120b"
+MODEL_FAST = "openai/gpt-oss-20b"
+PRIMARY_MODEL = MODEL_DEEP  // back-compat alias
 ```
 
-`selectModel()` in `chat-core.js:22` — picks model per request. Fallback chain: Groq primary → Gemini backup → Groq backup → FAST_MODEL.
+`resolveModel()` in `chat-core.js:14` normalizes requested model to `MODEL_DEEP` or `MODEL_FAST`. Current core is Groq-focused (`CORE_VERSION: chat-core-v3-2026-04-28`) with strict retry/circuit behavior.
 
 ---
 
@@ -87,7 +84,7 @@ GEMINI_FAST_BACKUP           = "gemini-2.5-flash-lite"
 - `ask_clarification` — always available; triggers `ClarificationCard` on client
 - `propose_action` — surfaces yes/no confirmation card; stripped on FAST_MODEL
 
-To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx:4454`).
+To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx:4590`).
 
 ---
 
@@ -102,8 +99,8 @@ To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArgum
 | `messages` | 4024 | chat history (capped at `CHAT_MAX_MESSAGES` = 60) |
 | `user` | 4009 | Supabase auth user or null |
 | `syncStatus` | 4120 | `'saving'|'saved'|'error'` |
-| `layoutMode` | 4052 | `'lofi'|'sidebar'|'topbar'` (localStorage `sos_layout_mode`) |
-| `activePanel` | 4058 | `'chat'|'tutor'|'settings'|…` |
+| `layoutMode` | 4087 | `'lofi'` (fixed in current UI; non-lofi branches still exist in code)  |
+| `activePanel` | 4093 | `'chat'|'tutor'|'settings'|…` |
 | `tutorMode` | 4062 | boolean; toggles guided-learning AI persona |
 | `isLoading` | 4032 | true while awaiting AI response |
 | `pendingQueue` | 4123 | `[{id, action, addedAt}]` — actions queued when RPM near limit |
@@ -155,7 +152,7 @@ LofiRightPanel       ← src/components/LofiRightPanel.jsx  (weather, saved, rad
 rpmStateRef          ← ref, updated from response headers each request (chat-core.js getGroqRpmStatus())
 rpmSnapshot state    ← reactive copy for UI rendering (set alongside rpmStateRef update)
 pendingQueue state   ← actions deferred when RPM near limit
-queueOrExecute()     ← App.jsx:6309 — wraps executeAction(); queues if RPM low
+queueOrExecute()     ← App.jsx:6519 — wraps executeAction(); queues if RPM low
 queue drain effect   ← App.jsx:4129–4142 — fires when pendingQueue changes
 RPM_NEAR_LIMIT_THRESHOLD ← defined in chat-core.js (~10% of limit)
 ```
@@ -166,11 +163,11 @@ Backend response shape includes `rpm: getGroqRpmStatus()`. Client reads `chatDat
 
 ## Chat pipeline (brief)
 
-1. `sendMessage()` (App.jsx:5397) — builds payload with `buildSystemPrompt()`, sends to `EDGE_FN_URL`
+1. `sendMessage()` (App.jsx:5693) — builds payload with `buildSystemPrompt()`, sends to `EDGE_FN_URL`
 2. Backend streams SSE or returns JSON: `{content, actions, clarifications, rpm, model_used}`
 3. Client applies streaming text → `messages` state
 4. On `done` event: sets `rpmSnapshot`, `currentModel`, dispatches `actions` through `executeAction()`
-5. `executeAction()` (App.jsx:4454) — switch on `action.type`, mutates local state + writes Supabase
+5. `executeAction()` (App.jsx:4590) — switch on `action.type`, mutates local state + writes Supabase
 
 **Clarification flow**: `ask_clarification` action → `pendingClarification` state → `ClarificationCard` (~App.jsx:1700) → user answers → `sendMessage()` called with answers
 
@@ -215,11 +212,11 @@ CHAT_MAX_MESSAGES = 60  (also in lib/supabase.js)
 | Function | Location | Does |
 |----------|----------|------|
 | `buildSystemPrompt()` | App.jsx:647 | Constructs system prompt with tiered context budgets; injects RECENTLY COMPLETED ACTIONS |
-| `executeAction()` | App.jsx:4454 | Switch dispatch for all tool actions; records to `recentlyExecutedActionsRef` |
-| `sendMessage()` | App.jsx:5397 | Full chat send + streaming; sets RPM/model state on response |
-| `queueOrExecute()` | App.jsx:6309 | Wraps executeAction; defers to pendingQueue if RPM near limit |
-| `enterTutorMode()` | App.jsx:6378 | Lofi: activates studio tab + posts activation message; other modes: `setActivePanel('tutor')` |
-| `toggleTutorMode()` | App.jsx:6373 | Sets tutorMode state + localStorage |
+| `executeAction()` | App.jsx:4590 | Switch dispatch for all tool actions; records to `recentlyExecutedActionsRef` |
+| `sendMessage()` | App.jsx:5693 | Full chat send + streaming; sets RPM/model state on response |
+| `queueOrExecute()` | App.jsx:6519 | Wraps executeAction; defers to pendingQueue if RPM near limit |
+| `enterTutorMode()` | App.jsx:6595 | Lofi: activates studio tab + posts activation message; other modes: `setActivePanel('tutor')` |
+| `toggleTutorMode()` | App.jsx:6590 | Sets tutorMode state + localStorage |
 | `detectCompanionIntent()` | App.jsx:4102 | Detects if message implies companion panel; only acts if `layoutMode === 'sidebar'` |
 | `handleCreateNote()` | App.jsx:5353 | Optimistic state + Supabase insert |
 | `handleUpdateNote()` | App.jsx:5347 | Optimistic state + Supabase update |
@@ -235,7 +232,7 @@ CHAT_MAX_MESSAGES = 60  (also in lib/supabase.js)
 
 | Key | Controls |
 |-----|----------|
-| `sos_layout_mode` | `'lofi'|'sidebar'|'topbar'` |
+| `sos_layout_mode` | legacy key (layout is currently fixed to `'lofi'`) |
 | `sos_show_analytics` | RPM+model badge in topbar |
 | `sos_ai_auto_approve` | skip confirmation for actions |
 | `sos_tutor_mode` | tutor mode persistence |
