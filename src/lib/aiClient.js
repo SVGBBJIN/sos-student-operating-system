@@ -75,11 +75,22 @@ export async function callAI(params) {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const err = new Error(`AI request failed: ${res.status}`);
+      const bodyText = await res.text().catch(() => "");
+      const err = new Error(`AI request failed: ${res.status}${bodyText ? ` — ${bodyText.slice(0, 300)}` : ""}`);
       err.status = res.status;
+      err.body = bodyText;
       throw err;
     }
     const data = await res.json();
+    const hasActions = Array.isArray(data.actions) && data.actions.length > 0;
+    const hasClarifications = Boolean(data.clarification)
+      || (Array.isArray(data.clarifications) && data.clarifications.length > 0);
+    const hasContent = typeof data.content === "string" && data.content.trim().length > 0;
+    if (!hasContent && !hasActions && !hasClarifications) {
+      const err = new Error("AI service unavailable: backend returned an empty response");
+      err.status = 503;
+      throw err;
+    }
     return {
       content: data.content ?? "",
       actions: data.actions ?? [],

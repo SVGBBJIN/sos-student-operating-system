@@ -297,6 +297,26 @@ export const ACTION_TOOLS = [
   {
     type: "function",
     function: {
+      name: "ask_clarification",
+      description:
+        "Ask the student for missing or ambiguous details before running another tool. Use this instead of calling action tools with blank, placeholder, or guessed titles/dates/subjects.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "A concise question asking for the missing detail." },
+          reason: { type: "string", description: "Briefly explain what is missing or ambiguous." },
+          context_action: { type: "string", description: "The action tool that needs clarification, such as add_task or add_event." },
+          missing_fields: { type: "array", items: { type: "string" }, description: "Field names that need user input, such as task_name, title, due_date, date, or subject." },
+          options: { type: "array", items: { type: "string" }, description: "Optional short answer choices when helpful." },
+          multi_select: { type: "boolean", description: "Whether multiple options can be selected." },
+        },
+        required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "read_calendar",
       description:
         "Read-only lookup of the student's calendar, events, tasks, and time blocks. Call this WHENEVER the student asks what is on their schedule, what is coming up, what they have today/tomorrow/this week, or when their next free slot is — any query that is informational, not mutating. Do NOT follow a read_calendar with add_task or add_event unless the student explicitly asks to add something. Returns the contents of the requested date range; makes no changes.",
@@ -312,9 +332,6 @@ export const ACTION_TOOLS = [
   },
 ];
 
-const TOOL_SPEC_BY_NAME = new Map(
-  ACTION_TOOLS.map((tool) => [tool.function.name, tool.function.parameters])
-);
 // STUDIO_TOOLS: content-generation tools used exclusively by the Studio screen.
 // These are NOT part of the chat tool set — they are only sent when mode="studio".
 export const STUDIO_TOOLS = [
@@ -471,6 +488,10 @@ export const STUDIO_TOOLS = [
   },
 ];
 
+const TOOL_SPEC_BY_NAME = new Map(
+  [...ACTION_TOOLS, ...STUDIO_TOOLS].map((tool) => [tool.function.name, tool.function.parameters])
+);
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_MAX_STRING_LENGTH = 500;
@@ -554,10 +575,15 @@ function validateToolArguments(toolName, args) {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         issues.push({ field, issue: "length", expected: "non-empty string", actual: "empty string" });
+        if (TITLE_LIKE_FIELDS.has(field)) {
+          missingFields.push(field);
+        }
       }
       if (TITLE_LIKE_FIELDS.has(field)) {
         const lower = trimmed.toLowerCase();
-        if (PLACEHOLDER_TITLE_STRINGS.has(lower)) {
+        if (trimmed.length === 0) {
+          // Already recorded above as a missing title-like field.
+        } else if (PLACEHOLDER_TITLE_STRINGS.has(lower)) {
           missingFields.push(field);
           issues.push({ field, issue: "placeholder", expected: "specific name from the student's message", actual: trimmed });
         } else if (trimmed.length < MIN_TITLE_LENGTH) {
@@ -625,6 +651,17 @@ function validateToolArguments(toolName, args) {
               issues.push({ field: `${field}[${idx}].${required}`, issue: "missing", expected: "required field" });
             }
           }
+          for (const [itemField, itemFieldSchema] of Object.entries(itemSchema.properties || {})) {
+            const val = item[itemField];
+            if (itemFieldSchema?.type === "string" && typeof val === "string") {
+              const trimmed = val.trim();
+              if (TITLE_LIKE_FIELDS.has(itemField) && trimmed.length === 0) {
+                const path = `${field}[${idx}].${itemField}`;
+                missingFields.push(path);
+                issues.push({ field: path, issue: "missing", expected: "non-empty title" });
+              }
+            }
+          }
         });
       }
       continue;
@@ -640,14 +677,14 @@ function validateToolArguments(toolName, args) {
     }
   }
 
-  return { issues, missingFields };
+  return { issues, missingFields: [...new Set(missingFields)] };
 }
 
 function toValidationClarification(toolName, missingFields, issues, args = {}) {
   const detail = issues
     .map((issue) => issue.field)
     .filter((v, i, arr) => arr.indexOf(v) === i);
-  const fields = (missingFields.length > 0 ? missingFields : detail);
+  const fields = [...new Set(missingFields.length > 0 ? missingFields : detail)];
   const labelForField = (field) => {
     const map = {
       title: "title",
@@ -965,7 +1002,7 @@ export async function callGroq(
 
 // Renders validation warnings into actionable instructions for the model retry.
 function buildValidationFeedback(warnings) {
-  const lines = ["Your previous tool call had problems. Fix the listed fields and call the tool again, or ask the student in plain text if you can't determine a value."];
+  const lines = ["Your previous tool call had problems. Fix the listed fields and call the tool again, or call ask_clarification if you can't determine a real value from the student's message."];
   for (const w of warnings) {
     const tool = w.tool || "(unknown tool)";
     for (const issue of (w.issues || [])) {
@@ -990,6 +1027,9 @@ function buildValidationFeedback(warnings) {
           break;
         case "too_short":
           instruction = `field "${field}" is too short — needs ${issue.expected}.`;
+          break;
+        case "length":
+          instruction = `field "${field}" must be ${issue.expected}.`;
           break;
         default:
           instruction = `field "${field}": ${kind}`;
@@ -1225,6 +1265,29 @@ export function parseLlmResponse(data) {
         options: [],
         multi_select: false,
       });
+      return [];
+    }
+
+    if (toolName === "ask_clarification") {
+      const { issues, missingFields } = validateToolArguments(toolName, parsedArgs);
+      if (issues.length > 0) {
+        validationWarnings.push({
+          tool: toolName,
+          missing_fields: missingFields,
+          issues,
+        });
+        clarifications.push(toValidationClarification(toolName, missingFields, issues, parsedArgs));
+        return [];
+      }
+      clarifications.push({
+        reason: parsedArgs.reason || null,
+        question: String(parsedArgs.question || "What detail should I use?").trim(),
+        options: Array.isArray(parsedArgs.options) ? parsedArgs.options : [],
+        multi_select: Boolean(parsedArgs.multi_select),
+        context_action: parsedArgs.context_action || null,
+        missing_fields: Array.isArray(parsedArgs.missing_fields) ? parsedArgs.missing_fields : [],
+      });
+      validatedToolCalls.push(toolName);
       return [];
     }
 
