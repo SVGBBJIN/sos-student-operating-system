@@ -21,9 +21,9 @@ const COLOR_SWATCHES = [
  */
 export default function EventEditPopover({ event, anchorRect, onSave, onClose, userId }) {
   const [title,     setTitle]     = useState(event?.title     || '');
-  const [date,      setDate]      = useState(event?.date      || '');
-  const [startTime, setStartTime] = useState(event?.start_time || '');
-  const [endTime,   setEndTime]   = useState(event?.end_time   || '');
+  const [date,      setDate]      = useState(event?.date || event?.event_date || '');
+  const [startTime, setStartTime] = useState(event?.start_time || event?.startTime || event?.time || '');
+  const [endTime,   setEndTime]   = useState(event?.end_time || event?.endTime || '');
   const [color,     setColor]     = useState(event?.color     || 'var(--primary)');
   const [saving,    setSaving]    = useState(false);
   const popoverRef = useRef(null);
@@ -54,12 +54,29 @@ export default function EventEditPopover({ event, anchorRect, onSave, onClose, u
   }, [onClose]);
 
   async function handleSave() {
-    const updated = { ...event, title, date, start_time: startTime, end_time: endTime, color };
+    const updated = { ...event, title, date, start_time: startTime, end_time: endTime, time: startTime || null, color };
     onSave(updated);   // optimistic
     onClose();
     setSaving(true);
     try {
-      await sb.from('events').upsert({ ...updated, user_id: userId }, { onConflict: 'id' });
+      await sb.from('events').upsert({
+        id: updated.id,
+        user_id: userId,
+        title: updated.title,
+        event_type: updated.type || updated.event_type || 'other',
+        subject: updated.subject || '',
+        event_date: updated.date,
+        start_time: updated.start_time || null,
+        end_time: updated.end_time || null,
+        description: updated.description || '',
+        location: updated.location || '',
+        priority: updated.priority || 'medium',
+        color: updated.color || null,
+        recurring: updated.recurring || 'none',
+        created_at: updated.createdAt || updated.created_at || new Date().toISOString(),
+        google_id: updated.googleId || updated.google_id || null,
+        source: updated.source || 'manual',
+      }, { onConflict: 'id' });
     } catch { /* silent — optimistic update already applied */ }
     setSaving(false);
   }

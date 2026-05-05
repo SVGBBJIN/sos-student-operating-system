@@ -214,9 +214,13 @@
 .cw-grid-body {
   flex: 1;
   overflow-y: auto;
-  position: relative;
   scrollbar-width: thin;
   scrollbar-color: hsla(170,50%,50%,0.3) transparent;
+}
+
+.cw-grid-scroll-content {
+  position: relative;
+  min-height: 1344px;
 }
 
 .cw-hour-row {
@@ -249,30 +253,49 @@
 .cw-event {
   position: absolute;
   border-radius: var(--radius-sm);
-  padding: 3px 6px;
+  padding: 4px 6px;
   min-height: 24px;
   overflow: hidden;
   cursor: pointer;
-  opacity: 0.9;
+  opacity: 0.94;
   transition: opacity var(--duration-fast) ease-out,
-              box-shadow var(--duration-fast) ease-out;
+              box-shadow var(--duration-fast) ease-out,
+              transform var(--duration-fast) ease-out;
   z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 
 .cw-event:hover {
   opacity: 1;
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.cw-event-all-day {
+  background-image: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0));
 }
 
 .cw-event-title {
   display: block;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: hsl(0,0%,95%);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.3;
+  line-height: 1.25;
+}
+
+.cw-event-time {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: hsla(0,0%,100%,0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+  margin-top: 1px;
 }
 
 /* New event animation */
