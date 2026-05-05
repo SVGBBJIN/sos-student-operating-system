@@ -245,8 +245,13 @@ function appTaskToDb(t, userId) {
 }
 function dbEventToApp(row) {
   return {
-    id: row.id, title: row.title, type: row.event_type || 'other',
-    subject: row.subject || '', date: row.event_date,
+    id: row.id, title: row.title, type: row.event_type || row.type || 'other',
+    subject: row.subject || '', date: row.event_date || row.start_date || '',
+    start_time: row.start_time ? String(row.start_time).slice(0, 5) : '',
+    end_time: row.end_time ? String(row.end_time).slice(0, 5) : '',
+    time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+    description: row.description || '', location: row.location || '',
+    priority: row.priority || 'medium', color: row.color || undefined,
     recurring: row.recurring || 'none', createdAt: row.created_at,
     googleId: row.google_id || null,
     source: row.source || 'manual'
@@ -256,6 +261,10 @@ function appEventToDb(e, userId) {
   return {
     id: e.id, user_id: userId, title: e.title, event_type: e.type || 'other',
     subject: e.subject || '', event_date: e.date,
+    start_time: e.start_time || e.startTime || e.time || null,
+    end_time: e.end_time || e.endTime || null,
+    description: e.description || '', location: e.location || '',
+    priority: e.priority || 'medium', color: e.color || null,
     recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString(),
     google_id: e.googleId || null,
     source: e.source || 'manual'
@@ -4397,7 +4406,7 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
           const row = payload.new;
-          const ev = { id: row.id, title: row.title, date: row.event_date || row.start_date || '', start_time: row.start_time || '', end_time: row.end_time || '', type: row.type || 'event', subject: row.subject || '' };
+          const ev = dbEventToApp(row);
           setEvents(prev => { const idx = prev.findIndex(x => x.id === ev.id); return idx >= 0 ? prev.map((x, i) => i === idx ? ev : x) : [...prev, ev]; });
         } else if (payload.eventType === 'DELETE') {
           setEvents(prev => prev.filter(x => x.id !== payload.old.id));
@@ -4793,7 +4802,9 @@ function App() {
             return;
           }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const eventStartTime = action.start_time || action.startTime || action.start || action.time || null;
+          const eventEndTime = action.end_time || action.endTime || action.end || null;
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, start_time:eventStartTime, end_time:eventEndTime, time:eventStartTime, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection

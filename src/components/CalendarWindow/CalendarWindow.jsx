@@ -6,6 +6,9 @@ import EventEditPopover    from './EventEditPopover.jsx';
 
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS    = Array.from({ length: 24 }, (_, i) => i);
+const HOUR_HEIGHT = 56;
+const DAY_MINUTES = 24 * 60;
+const DEFAULT_EVENT_MINUTES = 60;
 
 function formatHour(h) {
   if (h === 0)  return '12 AM';
@@ -25,7 +28,79 @@ function getWeekDates(baseDate) {
 }
 
 function toISODate(d) {
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateString(value) {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : toISODate(d);
+}
+
+function parseTimeToMinutes(value) {
+  if (!value) return null;
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  const twentyFourHour = trimmed.match(/^(\d{1,2})(?::(\d{2}))?$/);
+  if (twentyFourHour) {
+    const hours = Number(twentyFourHour[1]);
+    const minutes = Number(twentyFourHour[2] || 0);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return hours * 60 + minutes;
+    }
+  }
+
+  const twelveHour = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i);
+  if (twelveHour) {
+    let hours = Number(twelveHour[1]);
+    const minutes = Number(twelveHour[2] || 0);
+    const period = twelveHour[3].toLowerCase();
+    if (hours >= 1 && hours <= 12 && minutes >= 0 && minutes <= 59) {
+      if (period === 'p' && hours !== 12) hours += 12;
+      if (period === 'a' && hours === 12) hours = 0;
+      return hours * 60 + minutes;
+    }
+  }
+
+  return null;
+}
+
+function minutesToLabel(minutes) {
+  const bounded = Math.max(0, Math.min(minutes, DAY_MINUTES));
+  const hours = Math.floor(bounded / 60);
+  const mins = bounded % 60;
+  const displayHour = hours % 12 || 12;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  return `${displayHour}:${String(mins).padStart(2, '0')} ${suffix}`;
+}
+
+function getEventDate(ev) {
+  return normalizeDateString(ev.date || ev.start_date || ev.start?.date || ev.start?.dateTime);
+}
+
+function getEventTimeRange(ev) {
+  const startCandidates = [ev.start_time, ev.startTime, ev.start, ev.time];
+  const endCandidates = [ev.end_time, ev.endTime, ev.end];
+  const start = startCandidates.map(parseTimeToMinutes).find(v => v !== null);
+  const parsedEnd = endCandidates.map(parseTimeToMinutes).find(v => v !== null);
+
+  if (start === null) {
+    return { startMin: 8 * 60, endMin: 9 * 60, hasTime: false };
+  }
+
+  const end = parsedEnd !== null && parsedEnd > start
+    ? parsedEnd
+    : Math.min(start + DEFAULT_EVENT_MINUTES, DAY_MINUTES);
+
+  return { startMin: start, endMin: end, hasTime: true };
 }
 
 /* ─── Widget Mode: 7-day strip ──────────────────────────────────── */
@@ -90,50 +165,52 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
 
       {/* Scrollable time grid */}
       <div className="cw-grid-body">
-        {/* Hour rows */}
-        {HOURS.map(h => (
-          <div key={h} className="cw-hour-row">
-            <div className="cw-time-label">{formatHour(h)}</div>
-            {weekDates.map(day => (
-              <div key={toISODate(day)} className="cw-time-cell" />
-            ))}
-          </div>
-        ))}
-
-        {/* Events overlay */}
-        {events.map(ev => {
-          const colIdx = weekDates.findIndex(d => toISODate(d) === ev.date);
-          if (colIdx < 0) return null;
-
-          const [sh, sm] = (ev.start_time || '00:00').split(':').map(Number);
-          const [eh, em] = (ev.end_time   || '01:00').split(':').map(Number);
-          const startMin = sh * 60 + sm;
-          const endMin   = eh * 60 + em;
-          const topPct   = (startMin / (24 * 60)) * 100;
-          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 4.17); // min ~1 hour tall
-
-          const isNew = ev.id === newEventId;
-
-          return (
-            <div
-              key={ev.id}
-              className={'cw-event' + (isNew ? ' cw-event-new' : '')}
-              style={{
-                top:    `calc(${topPct}% + 40px)`,
-                left:   `calc(${(colIdx + 1) * (100 / 8)}% + 2px)`,
-                width:  `calc(${100 / 8}% - 4px)`,
-                height: `${heightPct}%`,
-                background: ev.color || 'var(--primary)',
-              }}
-              onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
-            >
-              <span className="cw-event-title">{ev.title}</span>
-              {isNew && (
-                <span className="cw-ai-chip">✦ Added by Charles</span>
-              )}
+        <div className="cw-grid-scroll-content">
+          {/* Hour rows */}
+          {HOURS.map(h => (
+            <div key={h} className="cw-hour-row">
+              <div className="cw-time-label">{formatHour(h)}</div>
+              {weekDates.map(day => (
+                <div key={toISODate(day)} className="cw-time-cell" />
+              ))}
             </div>
-          );
-        })}
+          ))}
+
+          {/* Events overlay */}
+          {events.map(ev => {
+            const eventDate = getEventDate(ev);
+            const colIdx = weekDates.findIndex(d => toISODate(d) === eventDate);
+            if (colIdx < 0) return null;
+
+            const { startMin, endMin, hasTime } = getEventTimeRange(ev);
+            const topPx = (startMin / 60) * HOUR_HEIGHT;
+            const heightPx = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
+            const isNew = ev.id === newEventId;
+
+            return (
+              <div
+                key={ev.id}
+                className={'cw-event' + (isNew ? ' cw-event-new' : '') + (!hasTime ? ' cw-event-all-day' : '')}
+                style={{
+                  top: `${topPx}px`,
+                  left: `calc(56px + ${colIdx} * ((100% - 56px) / 7) + 2px)`,
+                  width: `calc((100% - 56px) / 7 - 4px)`,
+                  height: `${heightPx}px`,
+                  background: ev.color || 'var(--primary)',
+                }}
+                onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
+              >
+                <span className="cw-event-title">{ev.title}</span>
+                <span className="cw-event-time">
+                  {hasTime ? `${minutesToLabel(startMin)}–${minutesToLabel(endMin)}` : 'No time set'}
+                </span>
+                {isNew && (
+                  <span className="cw-ai-chip">✦ Added by Charles</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
