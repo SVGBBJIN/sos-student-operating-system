@@ -117,13 +117,25 @@ function summarizeBlockSlots(slotMap) {
 
 /* ─── Map raw Google Calendar API items → app event shape ─── */
 function mapGoogleCalItems(items) {
-  return items.filter(e => e.summary).map(e => ({
-    googleId: e.id,
-    title: e.summary,
-    date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
-    startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
-    allDay: !!e.start?.date,
-  }));
+  return items.filter(e => e.summary).map(e => {
+    const startTime = e.start?.dateTime
+      ? new Date(e.start.dateTime).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+      : null;
+    const endTime = e.end?.dateTime
+      ? new Date(e.end.dateTime).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+      : null;
+
+    return {
+      googleId: e.id,
+      title: e.summary,
+      date: e.start?.date || (e.start?.dateTime?.split('T')[0] ?? ''),
+      startTime,
+      endTime,
+      start_time: startTime,
+      end_time: endTime,
+      allDay: !!e.start?.date,
+    };
+  });
 }
 
 /* ─── Nudge Engine ─── */
@@ -246,7 +258,9 @@ function appTaskToDb(t, userId) {
 function dbEventToApp(row) {
   return {
     id: row.id, title: row.title, type: row.event_type || 'other',
-    subject: row.subject || '', date: row.event_date,
+    subject: row.subject || '', date: row.event_date || row.start_date || '',
+    start_time: row.start_time?.slice(0, 5) || '',
+    end_time: row.end_time?.slice(0, 5) || '',
     recurring: row.recurring || 'none', createdAt: row.created_at,
     googleId: row.google_id || null,
     source: row.source || 'manual'
@@ -256,6 +270,8 @@ function appEventToDb(e, userId) {
   return {
     id: e.id, user_id: userId, title: e.title, event_type: e.type || 'other',
     subject: e.subject || '', event_date: e.date,
+    start_time: e.start_time || e.startTime || e.time || null,
+    end_time: e.end_time || e.endTime || null,
     recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString(),
     google_id: e.googleId || null,
     source: e.source || 'manual'
@@ -4793,7 +4809,7 @@ function App() {
             return;
           }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, start_time:action.start_time||action.startTime||action.start||action.time||'', end_time:action.end_time||action.endTime||action.end||'', time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -4818,7 +4834,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
-          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
+          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id, date: ev.date } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
@@ -5364,8 +5380,8 @@ function App() {
         // First, try to find an existing SOS event with this googleId
         const existingByGoogleId = next.find(ex => ex.googleId && ex.googleId === gev.googleId);
         if (existingByGoogleId) {
-          if (existingByGoogleId.title !== gev.title || existingByGoogleId.date !== gev.date) {
-            const updatedEv = { ...existingByGoogleId, title: gev.title, date: gev.date };
+          if (existingByGoogleId.title !== gev.title || existingByGoogleId.date !== gev.date || (existingByGoogleId.start_time || '') !== (gev.start_time || '') || (existingByGoogleId.end_time || '') !== (gev.end_time || '')) {
+            const updatedEv = { ...existingByGoogleId, title: gev.title, date: gev.date, start_time: gev.start_time || '', end_time: gev.end_time || '' };
             next = next.map(ev => ev.id === existingByGoogleId.id ? updatedEv : ev);
             if (user) syncOp(() => dbUpsertEvent(updatedEv, user.id));
             updated++;
@@ -5376,7 +5392,7 @@ function App() {
         const dupTitle = (gev.title||'').toLowerCase();
         const isDup = next.some(ex => ex.title.toLowerCase() === dupTitle && ex.date === gev.date);
         if (isDup) { skipped++; return; }
-        const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar', googleId: gev.googleId };
+        const ev = { id: uid(), title: gev.title, type: 'event', subject: '', date: gev.date, start_time: gev.start_time || '', end_time: gev.end_time || '', recurring: 'none', createdAt: new Date().toISOString(), source: 'google_calendar', googleId: gev.googleId };
         next = [...next, ev];
         if (user) syncOp(() => dbUpsertEvent(ev, user.id));
         added++;

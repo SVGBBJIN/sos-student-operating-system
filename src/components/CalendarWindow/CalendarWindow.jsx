@@ -16,6 +16,7 @@ function formatHour(h) {
 
 function getWeekDates(baseDate) {
   const start = new Date(baseDate);
+  start.setHours(12, 0, 0, 0);
   start.setDate(start.getDate() - start.getDay());
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start);
@@ -24,8 +25,84 @@ function getWeekDates(baseDate) {
   });
 }
 
+function getWeekOffsetForDate(dateStr, baseDate = new Date()) {
+  const target = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(target.valueOf())) return 0;
+
+  const currentWeekStart = getWeekDates(baseDate)[0];
+  const targetWeekStart = getWeekDates(target)[0];
+  return Math.round((targetWeekStart - currentWeekStart) / (7 * 24 * 60 * 60 * 1000));
+}
+
 function toISODate(d) {
-  return d.toISOString().slice(0, 10);
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function normalizeDateValue(value) {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.valueOf())) return toISODate(value);
+  const raw = String(value).trim();
+  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.valueOf()) ? '' : toISODate(parsed);
+}
+
+function normalizeTimeValue(value, fallback = '00:00') {
+  if (!value) return fallback;
+  const raw = String(value).trim();
+  const isoTime = raw.match(/T(\d{2}:\d{2})/);
+  if (isoTime) return isoTime[1];
+  const clock = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!clock) return fallback;
+
+  let hours = Number(clock[1]);
+  const minutes = Number(clock[2] || 0);
+  const meridiem = clock[3]?.toUpperCase();
+
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  if (hours > 23 || minutes > 59) return fallback;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function addMinutes(time, minutesToAdd) {
+  const [hours, minutes] = normalizeTimeValue(time).split(':').map(Number);
+  const total = Math.max(0, hours * 60 + minutes + minutesToAdd);
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatEventTime(ev) {
+  const start = normalizeTimeValue(ev.start_time, '00:00');
+  const end = normalizeTimeValue(ev.end_time, addMinutes(start, 60));
+  if (start === '00:00' && (!ev.start_time || ev.allDay)) return 'All day';
+  return `${start}${end ? `–${end}` : ''}`;
+}
+
+function normalizeEvent(event) {
+  const date = normalizeDateValue(event?.date || event?.event_date || event?.start_date || event?.start?.date || event?.start?.dateTime);
+  const startTime = normalizeTimeValue(
+    event?.start_time || event?.startTime || event?.start || event?.time || event?.start?.dateTime,
+    '00:00'
+  );
+  const endTime = normalizeTimeValue(
+    event?.end_time || event?.endTime || event?.end || event?.end?.dateTime,
+    addMinutes(startTime, 60)
+  );
+
+  return {
+    ...event,
+    id: event?.id || event?.googleId || `${date}-${event?.title || 'event'}-${startTime}`,
+    title: event?.title || event?.summary || 'Untitled event',
+    date,
+    start_time: startTime,
+    end_time: endTime,
+  };
 }
 
 /* ─── Widget Mode: 7-day strip ──────────────────────────────────── */
@@ -137,6 +214,75 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
       </div>
     </div>
   );
+
+}
+
+/* ─── Embedded Sidebar Agenda ────────────────────────────────────── */
+function WeekAgenda({ weekDates, events, onEventClick, newEventId }) {
+  const today = toISODate(new Date());
+  const eventsByDate = new Map(weekDates.map(day => [toISODate(day), []]));
+
+  events.forEach(ev => {
+    if (!eventsByDate.has(ev.date)) return;
+    eventsByDate.get(ev.date).push(ev);
+  });
+
+  eventsByDate.forEach(dayEvents => {
+    dayEvents.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+  });
+
+  const visibleEvents = Array.from(eventsByDate.values()).flat();
+
+  return (
+    <div className="cw-agenda" aria-label="Calendar events this week">
+      <WeekStrip weekDates={weekDates} events={events} onDayClick={() => {}} />
+
+      <div className="cw-agenda-list">
+        {visibleEvents.length === 0 && (
+          <div className="cw-agenda-empty">No events this week</div>
+        )}
+
+        {weekDates.map(day => {
+          const dateStr = toISODate(day);
+          const dayEvents = eventsByDate.get(dateStr) || [];
+          if (!dayEvents.length) return null;
+          const isToday = dateStr === today;
+
+          return (
+            <section key={dateStr} className="cw-agenda-day">
+              <div className={'cw-agenda-day-label' + (isToday ? ' cw-agenda-today' : '')}>
+                <span>{DAY_ABBR[day.getDay()]}</span>
+                <span>{day.getDate()}</span>
+              </div>
+
+              <div className="cw-agenda-day-events">
+                {dayEvents.map(ev => {
+                  const isNew = ev.id === newEventId;
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className={'cw-agenda-event' + (isNew ? ' cw-event-new' : '')}
+                      onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <span
+                        className="cw-agenda-event-color"
+                        style={{ background: ev.color || 'var(--primary)' }}
+                      />
+                      <span className="cw-agenda-event-copy">
+                        <span className="cw-agenda-event-title">{ev.title}</span>
+                        <span className="cw-agenda-event-time">{formatEventTime(ev)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 /* ─── CalendarWindow ─────────────────────────────────────────────── */
@@ -147,6 +293,7 @@ export default function CalendarWindow({
   onEventUpdate,
   onClose,
   userId,
+  focusEvent,
 }) {
   const { size, setSize } = useCalendarSize(defaultSize);
   const containerRef = useRef(null);
@@ -155,11 +302,11 @@ export default function CalendarWindow({
   const [weekOffset,   setWeekOffset]   = useState(0);
   const [popover,      setPopover]      = useState(null);  // { event, rect }
   const [newEventId,   setNewEventId]   = useState(null);
-  const [localEvents,  setLocalEvents]  = useState(events);
+  const [localEvents,  setLocalEvents]  = useState(() => events.map(normalizeEvent));
   const [nativeFS,     setNativeFS]     = useState(false);
 
   // Sync prop changes
-  useEffect(() => { setLocalEvents(events); }, [events]);
+  useEffect(() => { setLocalEvents(events.map(normalizeEvent)); }, [events]);
 
   // Drag — only when not fullscreen and not embedded
   useDraggable(headerRef, containerRef, size);
@@ -193,17 +340,30 @@ export default function CalendarWindow({
     }
   }
 
+  const focusCalendarEvent = useCallback((detail = {}) => {
+    const { id, date } = detail;
+    if (!id) return;
+
+    const eventDate = normalizeDateValue(date);
+    if (eventDate) setWeekOffset(getWeekOffsetForDate(eventDate));
+
+    setNewEventId(id);
+    setTimeout(() => setNewEventId(null), 4000);
+  }, []);
+
+  // Focus events that happened before this embedded calendar mounted.
+  useEffect(() => {
+    focusCalendarEvent(focusEvent);
+  }, [focusEvent, focusCalendarEvent]);
+
   // External: expose method to animate a newly added event
   useEffect(() => {
     function onNewEvent(e) {
-      const { id } = e.detail || {};
-      if (!id) return;
-      setNewEventId(id);
-      setTimeout(() => setNewEventId(null), 4000);
+      focusCalendarEvent(e.detail || {});
     }
     window.addEventListener('sos:calendar:new-event', onNewEvent);
     return () => window.removeEventListener('sos:calendar:new-event', onNewEvent);
-  }, []);
+  }, [focusCalendarEvent]);
 
   const sizeButtons = [
     { id: 'fullscreen', label: 'Full',   icon: '⛶' },
@@ -245,6 +405,13 @@ export default function CalendarWindow({
             weekDates={weekDates}
             events={localEvents}
             onDayClick={() => setSize('half-left')}
+          />
+        ) : embedded ? (
+          <WeekAgenda
+            weekDates={weekDates}
+            events={localEvents}
+            onEventClick={handleEventClick}
+            newEventId={newEventId}
           />
         ) : (
           <WeekGrid
