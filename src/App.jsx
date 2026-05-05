@@ -4834,7 +4834,7 @@ function App() {
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
-          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
+          window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id, date: ev.date } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {

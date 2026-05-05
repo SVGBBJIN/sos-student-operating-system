@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './CalendarWindow.css';
 import { useCalendarSize } from './useCalendarSize.js';
 import { useDraggable }    from './useDraggable.js';
@@ -16,12 +16,22 @@ function formatHour(h) {
 
 function getWeekDates(baseDate) {
   const start = new Date(baseDate);
+  start.setHours(12, 0, 0, 0);
   start.setDate(start.getDate() - start.getDay());
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
     return d;
   });
+}
+
+function getWeekOffsetForDate(dateStr, baseDate = new Date()) {
+  const target = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(target.valueOf())) return 0;
+
+  const currentWeekStart = getWeekDates(baseDate)[0];
+  const targetWeekStart = getWeekDates(target)[0];
+  return Math.round((targetWeekStart - currentWeekStart) / (7 * 24 * 60 * 60 * 1000));
 }
 
 function toISODate(d) {
@@ -283,6 +293,7 @@ export default function CalendarWindow({
   onEventUpdate,
   onClose,
   userId,
+  focusEvent,
 }) {
   const { size, setSize } = useCalendarSize(defaultSize);
   const containerRef = useRef(null);
@@ -329,17 +340,30 @@ export default function CalendarWindow({
     }
   }
 
+  const focusCalendarEvent = useCallback((detail = {}) => {
+    const { id, date } = detail;
+    if (!id) return;
+
+    const eventDate = normalizeDateValue(date);
+    if (eventDate) setWeekOffset(getWeekOffsetForDate(eventDate));
+
+    setNewEventId(id);
+    setTimeout(() => setNewEventId(null), 4000);
+  }, []);
+
+  // Focus events that happened before this embedded calendar mounted.
+  useEffect(() => {
+    focusCalendarEvent(focusEvent);
+  }, [focusEvent, focusCalendarEvent]);
+
   // External: expose method to animate a newly added event
   useEffect(() => {
     function onNewEvent(e) {
-      const { id } = e.detail || {};
-      if (!id) return;
-      setNewEventId(id);
-      setTimeout(() => setNewEventId(null), 4000);
+      focusCalendarEvent(e.detail || {});
     }
     window.addEventListener('sos:calendar:new-event', onNewEvent);
     return () => window.removeEventListener('sos:calendar:new-event', onNewEvent);
-  }, []);
+  }, [focusCalendarEvent]);
 
   const sizeButtons = [
     { id: 'fullscreen', label: 'Full',   icon: '⛶' },

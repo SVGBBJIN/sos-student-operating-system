@@ -148,10 +148,14 @@ export default function LofiLeftPanel({
   notes, onCreateNote, onUpdateNote, onDeleteNote,
 }) {
   const [activeView, setActiveView] = useState('calendar');
+  const [calendarFocusEvent, setCalendarFocusEvent] = useState(null);
 
   // AI auto-switch: new calendar event → calendar, new note → notes
   useEffect(() => {
-    function onCalEvent()  { setActiveView('calendar'); }
+    function onCalEvent(e)  {
+      setCalendarFocusEvent(e.detail || null);
+      setActiveView('calendar');
+    }
     function onNoteEvent() { setActiveView('notes'); }
     window.addEventListener('sos:calendar:new-event', onCalEvent);
     window.addEventListener('sos:notes:created',      onNoteEvent);
@@ -178,6 +182,7 @@ export default function LofiLeftPanel({
             events={events || []}
             onEventUpdate={onEventUpdate}
             userId={userId}
+            focusEvent={calendarFocusEvent}
           />
         )}
         {activeView === 'notes' && (
