@@ -216,7 +216,7 @@
   overflow-y: auto;
   position: relative;
   scrollbar-width: thin;
-  scrollbar-color: hsla(170,50%,50%,0.3) transparent;
+  scrollbar-color: var(--border) transparent;
 }
 
 .cw-hour-row {
@@ -356,4 +356,132 @@
   font-size: 9px;
   color: var(--muted-foreground);
   font-family: var(--font-ui);
+}
+
+/* ── Embedded sidebar agenda ────────────────────────────────────── */
+.cw-agenda {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.cw-agenda .cw-strip {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar);
+}
+
+.cw-agenda-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.cw-agenda-empty {
+  padding: var(--spacing-6) var(--spacing-3);
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-align: center;
+}
+
+.cw-agenda-day {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+}
+
+.cw-agenda-day-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: var(--spacing-2);
+}
+
+.cw-agenda-day-label span:last-child {
+  color: var(--foreground);
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.cw-agenda-day-label.cw-agenda-today,
+.cw-agenda-day-label.cw-agenda-today span:last-child {
+  color: var(--primary);
+}
+
+.cw-agenda-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.cw-agenda-event {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-fast) ease-out,
+              border-color var(--duration-fast) ease-out,
+              transform var(--duration-fast) ease-out;
+}
+
+.cw-agenda-event:hover {
+  background: var(--muted);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.cw-agenda-event-color {
+  width: 4px;
+  align-self: stretch;
+  min-height: 32px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.cw-agenda-event-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cw-agenda-event-title {
+  color: var(--foreground);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-agenda-event-time {
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+  font-size: 10px;
 }

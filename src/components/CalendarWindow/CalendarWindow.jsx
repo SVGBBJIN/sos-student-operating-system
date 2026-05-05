@@ -67,6 +67,13 @@ function addMinutes(time, minutesToAdd) {
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
+function formatEventTime(ev) {
+  const start = normalizeTimeValue(ev.start_time, '00:00');
+  const end = normalizeTimeValue(ev.end_time, addMinutes(start, 60));
+  if (start === '00:00' && (!ev.start_time || ev.allDay)) return 'All day';
+  return `${start}${end ? `–${end}` : ''}`;
+}
+
 function normalizeEvent(event) {
   const date = normalizeDateValue(event?.date || event?.event_date || event?.start_date || event?.start?.date || event?.start?.dateTime);
   const startTime = normalizeTimeValue(
@@ -197,6 +204,75 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
       </div>
     </div>
   );
+
+}
+
+/* ─── Embedded Sidebar Agenda ────────────────────────────────────── */
+function WeekAgenda({ weekDates, events, onEventClick, newEventId }) {
+  const today = toISODate(new Date());
+  const eventsByDate = new Map(weekDates.map(day => [toISODate(day), []]));
+
+  events.forEach(ev => {
+    if (!eventsByDate.has(ev.date)) return;
+    eventsByDate.get(ev.date).push(ev);
+  });
+
+  eventsByDate.forEach(dayEvents => {
+    dayEvents.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+  });
+
+  const visibleEvents = Array.from(eventsByDate.values()).flat();
+
+  return (
+    <div className="cw-agenda" aria-label="Calendar events this week">
+      <WeekStrip weekDates={weekDates} events={events} onDayClick={() => {}} />
+
+      <div className="cw-agenda-list">
+        {visibleEvents.length === 0 && (
+          <div className="cw-agenda-empty">No events this week</div>
+        )}
+
+        {weekDates.map(day => {
+          const dateStr = toISODate(day);
+          const dayEvents = eventsByDate.get(dateStr) || [];
+          if (!dayEvents.length) return null;
+          const isToday = dateStr === today;
+
+          return (
+            <section key={dateStr} className="cw-agenda-day">
+              <div className={'cw-agenda-day-label' + (isToday ? ' cw-agenda-today' : '')}>
+                <span>{DAY_ABBR[day.getDay()]}</span>
+                <span>{day.getDate()}</span>
+              </div>
+
+              <div className="cw-agenda-day-events">
+                {dayEvents.map(ev => {
+                  const isNew = ev.id === newEventId;
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className={'cw-agenda-event' + (isNew ? ' cw-event-new' : '')}
+                      onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <span
+                        className="cw-agenda-event-color"
+                        style={{ background: ev.color || 'var(--primary)' }}
+                      />
+                      <span className="cw-agenda-event-copy">
+                        <span className="cw-agenda-event-title">{ev.title}</span>
+                        <span className="cw-agenda-event-time">{formatEventTime(ev)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 /* ─── CalendarWindow ─────────────────────────────────────────────── */
@@ -305,6 +381,13 @@ export default function CalendarWindow({
             weekDates={weekDates}
             events={localEvents}
             onDayClick={() => setSize('half-left')}
+          />
+        ) : embedded ? (
+          <WeekAgenda
+            weekDates={weekDates}
+            events={localEvents}
+            onEventClick={handleEventClick}
+            newEventId={newEventId}
           />
         ) : (
           <WeekGrid
