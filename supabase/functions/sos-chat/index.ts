@@ -302,7 +302,7 @@ serve(async (req: Request) => {
     const normalizedWorkspaceContext = typeof workspaceContext === "string"
       ? workspaceContext.trim().toLowerCase()
       : "chat";
-    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.`;
+    const contextPromptSuffix = `\n\nWORKSPACE_CONTEXT: ${normalizedWorkspaceContext}. Prioritize this context when relevant (schedule => planning/time/tasks, notes => note/doc references, chat/none => general).\n\nCLARIFICATION RULE: The ask_clarification tool is the ONLY way to ask the student for missing or ambiguous details before running an action tool. NEVER call add_event, add_task, add_block, or any other action tool with placeholder, guessed, or fabricated values. NEVER respond with plain text to ask for missing action fields — use ask_clarification. Plain-text responses are for conversational messages only (greetings, explanations, answers to questions). If a required field for an action is not stated in the student's message, call ask_clarification with the specific missing field — do not attempt the action.`;
     const effectiveDynamic = dynamicContext ? `${dynamicContext}${contextPromptSuffix}` : null;
     const effectiveSystemPrompt = `${systemPrompt || ""}${contextPromptSuffix}`;
 

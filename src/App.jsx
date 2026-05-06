@@ -25,6 +25,7 @@ import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
+import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -243,24 +244,9 @@ function appTaskToDb(t, userId) {
     completed_at: t.completedAt || null, created_at: t.createdAt || new Date().toISOString()
   };
 }
-function dbEventToApp(row) {
-  return {
-    id: row.id, title: row.title, type: row.event_type || 'other',
-    subject: row.subject || '', date: row.event_date,
-    recurring: row.recurring || 'none', createdAt: row.created_at,
-    googleId: row.google_id || null,
-    source: row.source || 'manual'
-  };
-}
-function appEventToDb(e, userId) {
-  return {
-    id: e.id, user_id: userId, title: e.title, event_type: e.type || 'other',
-    subject: e.subject || '', event_date: e.date,
-    recurring: e.recurring || 'none', created_at: e.createdAt || new Date().toISOString(),
-    google_id: e.googleId || null,
-    source: e.source || 'manual'
-  };
-}
+// Delegate to shared shape helpers — single source of truth for event ↔ DB conversion.
+function dbEventToApp(row) { return dbEventToAppShared(row); }
+function appEventToDb(e, userId) { return appEventToDbShared(e, userId); }
 function dbNoteToApp(row) {
   return { id: row.id, name: row.name, content: row.content || '', updatedAt: row.updated_at };
 }
@@ -4632,13 +4618,13 @@ function App() {
       switch (action.type) {
         case 'add_task': {
           const taskName = (action.task_name || action.title || '').trim();
-          if (!taskName || taskName.length < 2) {
+          if (!taskName || taskName.length < 3) {
             setPendingClarification({ question: "What should I name this task?", context_action: 'add_task', missing_fields: ['task_name'] });
             return;
           }
           const rawDue = action.due_date || action.due || '';
-          if (!rawDue) {
-            setPendingClarification({ question: "When is this task due?", context_action: 'add_task', missing_fields: ['due_date'] });
+          if (!rawDue || !/^\d{4}-\d{2}-\d{2}$/.test(rawDue)) {
+            setPendingClarification({ question: "When is this task due? (e.g. 2026-05-10)", context_action: 'add_task', missing_fields: ['due_date'] });
             return;
           }
           // Detect unparseable dates ("next purple") up front so we can tell the user
@@ -4782,14 +4768,16 @@ function App() {
           break;
         }
         case 'add_event': {
+          // Validation is done server-side by chat-core before this point.
+          // We still guard against the rare direct-dispatch case (e.g. Google import).
           const evTitle = (action.title || '').trim();
           if (!evTitle || evTitle.length < 2) {
             setPendingClarification({ question: "What should I call this event?", context_action: 'add_event', missing_fields: ['title'] });
             return;
           }
           const rawEvDate = (action.date || '').trim();
-          if (!rawEvDate) {
-            setPendingClarification({ question: "What date is this event?", context_action: 'add_event', missing_fields: ['date'] });
+          if (!rawEvDate || !/^\d{4}-\d{2}-\d{2}$/.test(rawEvDate)) {
+            setPendingClarification({ question: "What date is this event? (e.g. 2026-05-10)", context_action: 'add_event', missing_fields: ['date'] });
             return;
           }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
@@ -5158,20 +5146,22 @@ function App() {
 
   // ── Confirmation handlers ──
   function handleConfirmAction(idx, action) {
+    // Last-resort guard for direct-dispatch paths (Google import, proposal cards, etc.)
+    // that bypass chat-core validation. Mirrors chat-core's MIN_TITLE_LENGTH of 3.
     if (action.type === 'add_event' || action.type === 'add_task' || action.type === 'add_block') {
       const titleField = action.type === 'add_task' ? 'task_name' : action.type === 'add_block' ? 'activity' : 'title';
-      const dateField = action.type === 'add_task' ? 'due_date' : 'date';
-      const titleVal = (action.title || action.task_name || action.activity || '').trim();
-      const dateVal = (action.date || action.due_date || action.due || '').trim();
-      const titleQuestion = action.type === 'add_task' ? "What should I name this task?" : action.type === 'add_block' ? "What should I call this block?" : "What should I call this event?";
-      const dateQuestion = action.type === 'add_task' ? "When is this task due?" : action.type === 'add_block' ? "What date is this block for?" : "What date is this event?";
-      if (!titleVal || titleVal.length < 2) {
-        setPendingClarification({ question: titleQuestion, context_action: action.type, missing_fields: [titleField] });
+      const dateField  = action.type === 'add_task' ? 'due_date' : 'date';
+      const titleVal   = (action.title || action.task_name || action.activity || '').trim();
+      const dateVal    = (action.date || action.due_date || action.due || '').trim();
+      const titleQ     = action.type === 'add_task' ? "What should I name this task?" : action.type === 'add_block' ? "What should I call this block?" : "What should I call this event?";
+      const dateQ      = action.type === 'add_task' ? "When is this task due?" : action.type === 'add_block' ? "What date is this block for?" : "What date is this event? (e.g. 2026-05-10)";
+      if (!titleVal || titleVal.length < 3) {
+        setPendingClarification({ question: titleQ, context_action: action.type, missing_fields: [titleField] });
         setPendingActions(prev => prev.filter((_,i)=>i!==idx));
         return;
       }
-      if (!dateVal) {
-        setPendingClarification({ question: dateQuestion, context_action: action.type, missing_fields: [dateField] });
+      if (!dateVal || (action.type !== 'add_block' && !/^\d{4}-\d{2}-\d{2}$/.test(dateVal))) {
+        setPendingClarification({ question: dateQ, context_action: action.type, missing_fields: [dateField] });
         setPendingActions(prev => prev.filter((_,i)=>i!==idx));
         return;
       }
