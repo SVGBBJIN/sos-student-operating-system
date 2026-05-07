@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { sb } from '../lib/supabase.js';
 import { useNavigate } from 'react-router-dom';
 import CalendarWindow from '../components/CalendarWindow/CalendarWindow.jsx';
+import { dbEventToApp, appEventToDb } from '../lib/eventShape.js';
 
 export default function CalendarPage() {
   const [events, setEvents] = useState([]);
@@ -16,7 +17,7 @@ export default function CalendarPage() {
         sb.from('events')
           .select('*')
           .eq('user_id', u.id)
-          .then(({ data: ev }) => { if (ev) setEvents(ev); });
+          .then(({ data: ev }) => { if (ev) setEvents(ev.map(dbEventToApp)); });
       }
     });
   }, []);

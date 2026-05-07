@@ -67,9 +67,22 @@ function WeekStrip({ weekDates, events, onDayClick }) {
   );
 }
 
+// Resolve the best available time string for an event (handles both field shapes).
+function resolveEventTime(ev) {
+  // Prefer explicit start_time (DB column once migration lands), then single `time` field.
+  return ev.start_time || ev.time || null;
+}
+
+function resolveEventEndTime(ev) {
+  return ev.end_time || null;
+}
+
 /* ─── Full Week Grid ─────────────────────────────────────────────── */
 function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
   const today = toISODate(new Date());
+
+  const allDayEvents  = events.filter(ev => !resolveEventTime(ev));
+  const timedEvents   = events.filter(ev => !!resolveEventTime(ev));
 
   return (
     <div className="cw-grid">
@@ -88,6 +101,35 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
         })}
       </div>
 
+      {/* All-day event row — shown only when there are all-day events this week */}
+      {allDayEvents.length > 0 && (
+        <div className="cw-allday-row">
+          <div className="cw-allday-gutter">all-day</div>
+          {weekDates.map(day => {
+            const dateStr = toISODate(day);
+            const dayAllDay = allDayEvents.filter(ev => ev.date === dateStr);
+            return (
+              <div key={dateStr} className="cw-allday-cell">
+                {dayAllDay.map(ev => {
+                  const isNew = ev.id === newEventId;
+                  return (
+                    <div
+                      key={ev.id}
+                      className={'cw-event cw-event-allday' + (isNew ? ' cw-event-new' : '')}
+                      style={{ background: ev.color || 'var(--primary)' }}
+                      onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <span className="cw-event-title">{ev.title}</span>
+                      {isNew && <span className="cw-ai-chip">✦ Added by Charles</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Scrollable time grid */}
       <div className="cw-grid-body">
         {/* Hour rows */}
@@ -100,17 +142,19 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
           </div>
         ))}
 
-        {/* Events overlay */}
-        {events.map(ev => {
+        {/* Timed events overlay */}
+        {timedEvents.map(ev => {
           const colIdx = weekDates.findIndex(d => toISODate(d) === ev.date);
           if (colIdx < 0) return null;
 
-          const [sh, sm] = (ev.start_time || '00:00').split(':').map(Number);
-          const [eh, em] = (ev.end_time   || '01:00').split(':').map(Number);
-          const startMin = sh * 60 + sm;
-          const endMin   = eh * 60 + em;
-          const topPct   = (startMin / (24 * 60)) * 100;
-          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 4.17); // min ~1 hour tall
+          const startStr = resolveEventTime(ev);
+          const endStr   = resolveEventEndTime(ev);
+          const [sh, sm] = startStr.split(':').map(Number);
+          const [eh, em] = endStr ? endStr.split(':').map(Number) : [sh + 1, sm];
+          const startMin  = sh * 60 + sm;
+          const endMin    = eh * 60 + em;
+          const topPct    = (startMin / (24 * 60)) * 100;
+          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 2.08); // min ~30 min
 
           const isNew = ev.id === newEventId;
 

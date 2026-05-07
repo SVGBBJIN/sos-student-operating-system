@@ -83,7 +83,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. STRICT RULES: (1) `title` MUST be the actual name from the student's message — NEVER 'task', 'event', 'untitled', 'tbd', or any placeholder; if the student didn't name it, respond with plain text asking what to call it. (2) `subject` MUST be a real subject name (e.g. 'mathematics', 'biology', 'history', 'spanish') — NEVER 'general', 'subject', 'class', 'school', or 'other'; if you can't infer it from the title (e.g. 'Calc Quiz' → 'calculus', 'Bio Test' → 'biology'), ask the student which class it's for. (3) NEVER invent or guess any value.",
+        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. STRICT RULES: (1) `title` MUST be the actual name from the student's message — NEVER 'task', 'event', 'untitled', 'tbd', or any placeholder; if the student didn't name it, call ask_clarification with missing_fields:[\"title\"]. (2) `date` MUST be an explicit date from the message; if missing, call ask_clarification with missing_fields:[\"date\"] — NEVER guess. (3) `subject` MUST be a real subject name (e.g. 'mathematics', 'biology', 'history', 'spanish') — NEVER 'general', 'subject', 'class', 'school', or 'other'; if you can't infer it from the title (e.g. 'Calc Quiz' → 'calculus', 'Bio Test' → 'biology'), call ask_clarification with missing_fields:[\"subject\"]. (4) NEVER invent or guess any value — call ask_clarification instead.",
       parameters: {
         type: "object",
         properties: {
@@ -114,7 +114,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). STRICT RULES: (1) `task_name` MUST be the actual task name from the student's message — NEVER 'task', 'homework', 'assignment', 'todo', 'untitled', or any placeholder; if unclear, ask in plain text. (2) `due_date` is required — if the student said 'due X', 'by X', 'for X' use that; otherwise ask, never guess. (3) `subject` MUST be a specific subject when the task is academic (homework, essay, lab, project, paper, study, worksheet) — infer from name (e.g. 'Calc problem set' → 'calculus', 'AP Bio reading' → 'biology'); if you can't, ask the student. For non-academic tasks (chores, errands), use 'personal'. NEVER use 'general', 'subject', 'class', or 'other'.",
+        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). STRICT RULES: (1) `task_name` MUST be the actual task name from the student's message — NEVER 'task', 'homework', 'assignment', 'todo', 'untitled', or any placeholder; if unclear, call ask_clarification with missing_fields:[\"task_name\"]. (2) `due_date` is required — if the student said 'due X', 'by X', 'for X' use that; otherwise call ask_clarification with missing_fields:[\"due_date\"], never guess. (3) `subject` MUST be a specific subject when the task is academic (homework, essay, lab, project, paper, study, worksheet) — infer from name (e.g. 'Calc problem set' → 'calculus', 'AP Bio reading' → 'biology'); if you can't, call ask_clarification with missing_fields:[\"subject\"]. For non-academic tasks (chores, errands), use 'personal'. NEVER use 'general', 'subject', 'class', or 'other'.",
       parameters: {
         type: "object",
         properties: {
@@ -207,7 +207,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_block",
       description:
-        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, respond with plain text asking for the missing detail. NEVER guess or fabricate values.",
+        "Add a time block to the student's daily schedule. IMPORTANT: Only call this when the student has explicitly provided the activity, date, and start/end times. If ANY of these are missing from the student's message, call ask_clarification with the missing_fields list — NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -245,7 +245,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. STRICT RULES: (1) `title` MUST be the activity's actual name from the student — NEVER a placeholder. (2) `subject` MUST be a real subject (e.g. 'mathematics', 'biology') for academic recurrences, or the activity name (e.g. 'swim', 'debate', 'soccer') for non-academic. NEVER 'general', 'subject', 'class', or 'other'. (3) If the title, days, or subject are unclear, ask in plain text before calling. NEVER guess or fabricate values.",
+        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. STRICT RULES: (1) `title` MUST be the activity's actual name from the student — NEVER a placeholder. (2) `subject` MUST be a real subject (e.g. 'mathematics', 'biology') for academic recurrences, or the activity name (e.g. 'swim', 'debate', 'soccer') for non-academic. NEVER 'general', 'subject', 'class', or 'other'. (3) If the title, days, or subject are unclear, call ask_clarification before calling this tool. NEVER guess or fabricate values.",
       parameters: {
         type: "object",
         properties: {
@@ -509,6 +509,12 @@ const PLACEHOLDER_TITLE_STRINGS = new Set([
   "event name", "task name", "activity name",
   "todo", "to-do", "to do", "thing", "stuff", "something",
   "generic event", "generic task", "placeholder", "tbd", "tba", "n/a",
+  // Single filler words the model uses as a fallback
+  "add", "new", "the", "a", "an", "class", "school", "study",
+  // Subject-only titles (model knows subject but not activity)
+  "mathematics", "calculus", "biology", "chemistry", "physics",
+  "english", "history", "spanish", "french", "computer science",
+  "literature", "economics", "psychology", "science",
 ]);
 
 // Generic subject strings the model uses when it doesn't actually know the class.
@@ -524,8 +530,8 @@ const TITLE_LIKE_FIELDS = new Set([
   "title", "activity", "task_name", "new_title", "parent_title",
 ]);
 
-// Minimum length for a title-like field. Single chars or "a"/"x" are rejected.
-const MIN_TITLE_LENGTH = 2;
+// Minimum length for a title-like field. Single chars or 2-char noise are rejected.
+const MIN_TITLE_LENGTH = 3;
 
 // Detects titles that are instructions ("add an event", "schedule a test") rather
 // than actual names. The model sometimes echoes the user's verb phrase as the title.
@@ -677,6 +683,22 @@ function validateToolArguments(toolName, args) {
     }
   }
 
+  // update_event with only `title` is a no-op — require at least one mutation field.
+  if (toolName === "update_event" && issues.length === 0) {
+    const mutationFields = ["new_title", "date", "event_type", "subject"];
+    const hasMutation = mutationFields.some(f => args[f] !== undefined && args[f] !== null && String(args[f]).trim().length > 0);
+    if (!hasMutation) {
+      missingFields.push("new_title");
+      issues.push({ field: "new_title", issue: "missing", expected: "at least one of: new_title, date, event_type, or subject must be provided to update the event" });
+    }
+  }
+
+  // clear_all: confirm:false is treated as a missing confirm — must explicitly say true.
+  if (toolName === "clear_all" && args.confirm === false) {
+    missingFields.push("confirm");
+    issues.push({ field: "confirm", issue: "not_confirmed", expected: "confirm must be true — ask the student to confirm before wiping everything" });
+  }
+
   return { issues, missingFields: [...new Set(missingFields)] };
 }
 
@@ -698,6 +720,7 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
       tab_name: "note name",
       task_name: "task name",
       due_date: "due date",
+      new_title: "new title",
     };
     return map[field] || field.replace(/_/g, " ");
   };
@@ -712,11 +735,8 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
     suggested_defaults.time = "all-day";
   }
 
-  const humanFields = fields
-    .filter(f => !suggested_defaults[f]) // hide fields we can auto-fill
-    .map(labelForField).join(", ");
-
   const remainingFields = fields.filter(f => !suggested_defaults[f]);
+  const humanFields = remainingFields.map(labelForField).join(", ");
 
   const oneFieldQuestion = remainingFields.length === 1
     ? (() => {
@@ -731,15 +751,41 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
           case "subject": return "Which subject is this for?";
           case "activity": return "What activity should I schedule?";
           case "tab_name": return "Which note should I use?";
+          case "new_title": return "What would you like to update this event to?";
           default: return `Can you share the ${labelForField(remainingFields[0])}?`;
         }
       })()
     : null;
 
+  // Build known_fields: what the model DID gather, excluding missing/flagged fields.
+  const knownFields = {};
+  const missingSet = new Set(fields);
+  const KNOWN_CANDIDATES = ["title", "task_name", "activity", "date", "due_date", "due", "time", "start", "end", "subject", "event_type"];
+  for (const f of KNOWN_CANDIDATES) {
+    if (!missingSet.has(f) && args[f] !== undefined && args[f] !== null && String(args[f]).trim().length > 0) {
+      knownFields[f] = args[f];
+    }
+  }
+
+  // severity: "blocking" when required fields are missing; "soft" when only optional fields are malformed.
+  const TOOL_REQUIRED = {
+    add_event: ["title", "date", "subject"],
+    add_task: ["task_name", "due_date", "subject"],
+    add_block: ["date", "start", "end", "activity"],
+    add_recurring_event: ["title", "subject", "days", "start_date", "end_date"],
+    update_event: ["title"],
+    delete_event: ["title"],
+    delete_task: ["title"],
+    clear_all: ["confirm"],
+  };
+  const toolRequired = new Set(TOOL_REQUIRED[toolName] || []);
+  const blockingMissing = remainingFields.some(f => toolRequired.has(f));
+  const severity = blockingMissing ? "blocking" : "soft";
+
   return {
     reason: remainingFields.length === 0
       ? null
-      : `I need a couple details before I can run ${toolName}.`,
+      : `I need a couple details before I can ${toolName === "add_event" ? "add this event" : toolName === "add_task" ? "add this task" : `run ${toolName}`}.`,
     question: oneFieldQuestion
       || (humanFields
         ? `I still need: ${humanFields}. Can you share them in one reply?`
@@ -749,6 +795,8 @@ function toValidationClarification(toolName, missingFields, issues, args = {}) {
     context_action: toolName,
     missing_fields: missingFields,
     suggested_defaults,
+    known_fields: Object.keys(knownFields).length > 0 ? knownFields : null,
+    severity,
   };
 }
 
@@ -1001,8 +1049,16 @@ export async function callGroq(
 }
 
 // Renders validation warnings into actionable instructions for the model retry.
+// CRITICAL: The only legal escape when a required value is not in the student's
+// message is to call ask_clarification. Never invent or guess a value.
 function buildValidationFeedback(warnings) {
-  const lines = ["Your previous tool call had problems. Fix the listed fields and call the tool again, or call ask_clarification if you can't determine a real value from the student's message."];
+  const lines = [
+    "Your previous tool call was rejected. For each field listed below:",
+    "  • If the value is stated in the student's last message → provide it.",
+    "  • If the value is NOT in the student's message → you MUST call ask_clarification. Do NOT invent, guess, or approximate any value.",
+    "Never call an action tool with placeholder, fabricated, or assumed values.",
+    "",
+  ];
   for (const w of warnings) {
     const tool = w.tool || "(unknown tool)";
     for (const issue of (w.issues || [])) {
@@ -1011,28 +1067,34 @@ function buildValidationFeedback(warnings) {
       let instruction;
       switch (kind) {
         case "missing":
-          instruction = `field "${field}" is missing — provide the actual value or ask the student.`;
+          instruction = `"${field}" is required and missing. If the student stated it, use it. Otherwise call ask_clarification.`;
           break;
         case "placeholder":
-          instruction = `field "${field}" is a placeholder ("${issue.actual}") — use the real name from the student's message, never generic words like 'task', 'event', 'untitled'.`;
+          instruction = `"${field}" is a placeholder ("${issue.actual}"). Use the exact name from the student's message. If they didn't name it, call ask_clarification — never use 'task', 'event', 'untitled', or any generic word.`;
           break;
         case "placeholder_subject":
-          instruction = `field "${field}" is a generic subject ("${issue.actual}") — use a specific subject like 'mathematics', 'biology', 'history', 'spanish', etc., or ask the student which class it's for. Do not use 'general', 'class', 'subject', or 'other'.`;
+          instruction = `"${field}" is a generic subject ("${issue.actual}"). Use a specific subject like 'mathematics', 'biology', 'history', 'spanish'. If you can't infer it from the title, call ask_clarification.`;
+          break;
+        case "not_confirmed":
+          instruction = `"${field}" must be true. Ask the student to confirm before proceeding.`;
           break;
         case "format":
-          instruction = `field "${field}" has wrong format — expected ${issue.expected}, got "${issue.actual}".`;
+          instruction = `"${field}" has wrong format — expected ${issue.expected}, got "${issue.actual}". Correct it or call ask_clarification.`;
           break;
         case "enum":
-          instruction = `field "${field}" must be one of: ${issue.expected}.`;
+          instruction = `"${field}" must be one of: ${issue.expected}.`;
           break;
         case "too_short":
-          instruction = `field "${field}" is too short — needs ${issue.expected}.`;
+          instruction = `"${field}" is too short (needs ${issue.expected}). Use the actual name from the message.`;
           break;
         case "length":
-          instruction = `field "${field}" must be ${issue.expected}.`;
+          instruction = `"${field}" must be ${issue.expected}.`;
+          break;
+        case "instruction_as_title":
+          instruction = `"${field}" looks like a command phrase ("${issue.actual}"), not an event/task name. Use the actual name from the student's message, or call ask_clarification.`;
           break;
         default:
-          instruction = `field "${field}": ${kind}`;
+          instruction = `"${field}": ${kind}`;
       }
       lines.push(`- ${tool}.${field}: ${instruction}`);
     }
