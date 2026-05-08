@@ -755,16 +755,6 @@ button {
   font-family: var(--font-body);
 }
 
-/* ─── Tutor Mode ──────────────────────────────────────────────────── */
-
-.tutor-indicator,
-.tutor-badge {
-  border: 1px solid rgba(155, 93, 229, 0.4) !important;
-  background: rgba(155, 93, 229, 0.08) !important;
-  color: var(--neon-violet) !important;
-  border-radius: 2px !important;
-}
-
 /* ─── Performance Tier Overrides ─────────────────────────────────── */
 /* Low-perf devices: strip expensive effects                           */
 

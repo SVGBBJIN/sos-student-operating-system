@@ -1000,8 +1000,34 @@ export async function callGroq(
 
   const resolvedModel = resolveModel(model);
 
-  // Single attempt — no fallback chain.
-  let parsed = await attempt(resolvedModel);
+  // Reliability layer: if the requested (heavy) model fails for any reason
+  // — timeout, rate limit, 5xx, network error — retry once on MODEL_FAST
+  // before surfacing an error. Skipped when the caller explicitly opts out
+  // (`options.disableFallback === true`) or the resolved model is already FAST.
+  const fallbackEnabled = options?.disableFallback !== true && resolvedModel !== MODEL_FAST;
+  const fallbackModel = fallbackEnabled ? MODEL_FAST : null;
+
+  let parsed;
+  try {
+    parsed = await attempt(resolvedModel);
+  } catch (primaryErr) {
+    if (!fallbackModel) throw primaryErr;
+    console.warn(`[callGroq] ${resolvedModel} failed (${primaryErr.message}) — falling back to ${fallbackModel}`);
+    metrics.fallback_used = true;
+    try {
+      parsed = await attempt(fallbackModel);
+    } catch (fallbackErr) {
+      const composed = new Error(
+        `Both models failed. Primary (${resolvedModel}): ${primaryErr.message}. Fallback (${fallbackModel}): ${fallbackErr.message}`
+      );
+      composed.cause_code = "both_models_failed";
+      composed.primary_error = primaryErr.message;
+      composed.fallback_error = fallbackErr.message;
+      composed.primary_model = resolvedModel;
+      composed.fallback_model = fallbackModel;
+      throw composed;
+    }
+  }
 
   // Strict validate-and-retry: if there are validation warnings, retry once with
   // human-readable field-by-field feedback so the model can correct the call.

@@ -1,18 +1,19 @@
 /**
  * aiClient — client-side abstraction over the SOS backend AI endpoint.
  *
- * Model is chosen per-user via the ModelSelect dropdown and persisted in
- * localStorage. The selected model is forwarded as `preferredModel`; the
- * backend validates it against the allowed set and falls back to MODEL_DEEP
- * if unrecognised.
+ * Model identity is the single source of truth in `shared/ai/chat-core.js`.
+ * If the user previously stored a preference in localStorage we honor it,
+ * otherwise we forward MODEL_DEEP. The backend validates and falls back
+ * to MODEL_DEEP if unrecognised, then auto-fails-over to MODEL_FAST inside
+ * callGroq if the heavy model is unreachable.
  */
 
 import { EDGE_FN_URL, SUPABASE_ANON_KEY } from "./supabase.js";
 import { retryAI } from "./retryAI.js";
+import { MODEL_DEEP, MODEL_FAST } from "../../shared/ai/chat-core.js";
 
 const MODEL_KEY = "sos_preferred_model";
-export const MODEL_DEEP = "openai/gpt-oss-120b";
-export const MODEL_FAST = "openai/gpt-oss-20b";
+export { MODEL_DEEP, MODEL_FAST };
 
 export function getPreferredModel() {
   try {

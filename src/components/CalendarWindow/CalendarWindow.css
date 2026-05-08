@@ -287,6 +287,40 @@
   background: hsla(155,25%,55%,0.04);
 }
 
+/* ── Block bands ─────────────────────────────────────────────────
+   Recurring/date blocks are rendered behind events as a translucent
+   striped background. They show context (e.g. "swim", "study") without
+   competing with events for visual weight. */
+.cw-block-band {
+  position: absolute;
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(108, 99, 255, 0.10) 0,
+    rgba(108, 99, 255, 0.10) 6px,
+    rgba(108, 99, 255, 0.05) 6px,
+    rgba(108, 99, 255, 0.05) 12px
+  );
+  border: 1px dashed rgba(108, 99, 255, 0.25);
+  pointer-events: none;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 6px;
+  overflow: hidden;
+}
+
+.cw-block-band-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim, rgba(255,255,255,0.65));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Events ─────────────────────────────────────────────────────── */
 .cw-event {
   position: absolute;

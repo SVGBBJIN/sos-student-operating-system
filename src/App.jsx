@@ -14,12 +14,6 @@ import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import LofiRightPanel from './components/LofiRightPanel';
-import SkillHub from './components/skillhub/SkillHub';
-import NudgeCard from './components/skillhub/NudgeCard';
-import ModePillSwitcher from './components/skillhub/ModePillSwitcher';
-import SkillHubLessons from './components/skillhub/SkillHubLessons';
-import { evaluateTriggers } from './lib/skillHubUtils';
-import { getModeConfig } from './lib/tutorModeConfig';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -29,8 +23,13 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle } from '../shared/subjects.js';
+import { MODEL_DEEP, MODEL_FAST } from '../shared/ai/chat-core.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
-import './styles/skillhub.css';
+import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
+import BacklinksList from './components/BacklinksList';
+import { useColumnLayout } from './hooks/useColumnLayout';
+import { ColumnResizeHandles, ColumnLockToggle } from './components/ColumnResizeHandles';
+import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -252,10 +251,25 @@ function appTaskToDb(t, userId) {
 function dbEventToApp(row) { return dbEventToAppShared(row); }
 function appEventToDb(e, userId) { return appEventToDbShared(e, userId); }
 function dbNoteToApp(row) {
-  return { id: row.id, name: row.name, content: row.content || '', updatedAt: row.updated_at };
+  return {
+    id: row.id,
+    name: row.name,
+    content: row.content || '',
+    updatedAt: row.updated_at,
+    parent_id: row.parent_id || null,
+    is_folder: !!row.is_folder,
+  };
 }
 function appNoteToDb(n, userId) {
-  return { id: n.id, user_id: userId, name: n.name, content: n.content || '', updated_at: n.updatedAt || new Date().toISOString() };
+  return {
+    id: n.id,
+    user_id: userId,
+    name: n.name,
+    content: n.content || '',
+    updated_at: n.updatedAt || new Date().toISOString(),
+    parent_id: n.parent_id || null,
+    is_folder: !!n.is_folder,
+  };
 }
 
 /* Full load from Supabase */
@@ -739,7 +753,6 @@ function dedupeRepeatedLines(blockText = '') {
 }
 
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
-  const tutorMode = !!options.tutorMode;
   const workspaceContext = options.workspaceContext || 'chat';
   const intentType = options.intentType || 'chat';
   const actionFocusedPrompt = intentType === 'action';
@@ -891,7 +904,6 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     ...(graphIndexLines.length > 0 ? ['', 'LINK GRAPH INDEX (compact, neighbors only):', capLines(graphIndexLines, 400, 'links')] : []),
     '',
     'MODE FLAGS:',
-    '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
     '- workspace_context: ' + workspaceContext,
     '- intent_type: ' + intentType,
     options.responseStyle && options.responseStyle !== 'balanced'
@@ -905,8 +917,8 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'TASKS: ' + activeTasks.length + (overdueTasks.length > 0 ? ` active (${overdueTasks.length} overdue)` : ' active'),
     'UPCOMING EVENTS: ' + upcomingEvents.length,
     'WORKSPACE: ' + workspaceContext,
-    'MODE: tutor=' + (tutorMode ? 'ON' : 'OFF') + (options.responseStyle && options.responseStyle !== 'balanced' ? ' response_style=' + options.responseStyle : ''),
-  ].join('\n');
+    options.responseStyle && options.responseStyle !== 'balanced' ? 'STYLE: ' + options.responseStyle : '',
+  ].filter(Boolean).join('\n');
 
   const contextBlock = intentType === 'chat'
     ? truncateWithEllipsis(dedupeRepeatedLines(conversationalDynamicSections), CONVERSATIONAL_CONTEXT_CHAR_BUDGET)
@@ -1007,7 +1019,6 @@ function parseDocId(input) {
 const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan'];
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
-const TUTOR_STUDY_REGEX = /flashcards?|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?/i;
 
 function isStringArray(value, min = 0) {
   return Array.isArray(value) && value.length >= min && value.every(v => typeof v === 'string' && v.trim().length > 0);
@@ -1031,29 +1042,6 @@ function isValidContentAction(action) {
     default:
       return false;
   }
-}
-
-/* Regex-based classifier (kept as fast fallback) */
-function classifyMessageRegex(text) {
-  if (CONTENT_GEN_REGEX.test(text)) {
-    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:true, maxTokens:4096 };
-  }
-  if (/\b(notes?|reference|look\s*up|search\s+(my\s+)?notes|find\s+in|from\s+(my|the)\s+(pdf|doc|notes?)|what\s+(does|did)\s+(my|the)\s+(pdf|doc|notes?)|in\s+my\s+(pdf|doc|notes?))\b/i.test(text)) {
-    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:2048 };
-  }
-  const actionSignals = /\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|tonight|today|this\s+week|next\s+week|\d{1,2}(am|pm|:\d\d))\b|\b(test|exam|quiz|hw|homework|essay|project|lab|report|presentation|practice|game|match|meet|tournament|scrimmage|tryout|rehearsal|class|lesson|club|appointment|deadline|due|midterm|final|paper|assignment|worksheet)\b|\b(add|schedule|remind|mark|cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|pull|cut|move|reschedule|push\s*back|postpone|bump|finish|done|completed|finished|turned\s+in|submitted|started|working\s+on|nevermind|never\s*mind|forget)\b|\b(no\s+longer|not\s+happening|called\s+off|scratch\s+that|off\s+the\s+books|take\s+off|cross\s+out)\b|\b(calc|math|bio|chem|phys|eng|hist|sci|span|french|econ|psych|gov|geo|ap\s+\w+|pe|gym)\b|\b(swim|debate|band|choir|track|soccer|basketball|baseball|football|tennis|volleyball|lacrosse|dance|drama|robotics|chess|music|tutoring)\b/i;
-  if (actionSignals.test(text)) {
-    return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-  }
-  // All messages use GPT-OSS so one model handles chat + actions + content.
-  return { provider:'groq', model:'llama-3.1-8b-instant', tier:2, isContentGen:false, maxTokens:1024 };
-}
-
-/* LLM-based classifier using openai/gpt-oss-20b (with regex fallback) */
-async function classifyMessage(text) {
-  // Deprecated: keep this wrapper to avoid dead-call confusion.
-  // We now use direct intent heuristics in sendMessage and always build tier-2 prompt.
-  return classifyMessageRegex(text);
 }
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
@@ -2085,117 +2073,6 @@ function PerfPill() {
     <button className={pillClass} onClick={cycle} title={`Performance: ${labels[tier]}. Click to cycle.`}>
       {tier === 'full' ? '✦' : tier === 'mid' ? '⚡' : '⚡'} {labels[tier]}
     </button>
-  );
-}
-
-function TutorIndicator({ active }) {
-  return (
-    <div className={'tutor-indicator' + (active ? ' active' : '')} title={active ? 'Tutor mode is ON' : 'Tutor mode is OFF'}>
-      ✦ Tutor {active ? 'ON' : 'OFF'}
-    </div>
-  );
-}
-
-function TutorMissionPage({ tutorMode, tasks, events, notes, onBack, onToggleTutorMode, onPrompt, onOpenNotes, onOpenSchedule, onOpenSettings }) {
-  const activeTasks = tasks.filter(t => t.status !== 'done');
-  const overdueTasks = activeTasks.filter(t => daysUntil(t.dueDate) < 0);
-  const dueSoon = activeTasks.filter(t => { const d = daysUntil(t.dueDate); return d >= 0 && d <= 3; });
-  const upcomingEvents = events.filter(e => { const d = daysUntil(e.date); return d >= 0 && d <= 7; });
-  const hasNotes = notes.length > 0;
-  const primaryFocus = overdueTasks[0] || dueSoon[0] || activeTasks[0] || null;
-  const prompts = [
-    { label: 'Teach me from my notes', msg: hasNotes ? `Teach me the most important ideas from my notes and quiz me one question at a time.` : 'Help me study a topic step by step and quiz me one question at a time.' },
-    { label: 'Build a study sprint', msg: 'Plan a focused 45-minute study sprint for my highest-priority work.' },
-    { label: 'Explain this simply', msg: 'Explain this like I am learning it for the first time, then check my understanding with one question.' },
-    { label: 'Make flashcards', msg: hasNotes ? 'Make flashcards from my notes for the topic I need most right now.' : 'Make me flashcards for the topic I need to study.' },
-  ];
-  const integrations = [
-    { title: 'Notes-aware tutoring', description: hasNotes ? `Pulls from ${notes.length} saved note${notes.length === 1 ? '' : 's'} so explanations can cite your actual material.` : 'Import notes or PDFs and tutor mode will teach from them instead of starting from scratch.', action: onOpenNotes, cta: hasNotes ? 'Open notes' : 'Add notes', icon: Icon.fileText(16) },
-    { title: 'Schedule-aware coaching', description: primaryFocus ? `Your next likely focus is ${primaryFocus.title}${primaryFocus.subject ? ` in ${primaryFocus.subject}` : ''}. Tutor mode can turn that into a plan without losing track of due dates.` : 'Tutor mode can turn explanations into realistic study blocks that fit around your calendar.', action: onOpenSchedule, cta: 'Open schedule', icon: Icon.calendarClock(16) },
-    { title: 'One-click study actions', description: 'Jump from tutoring into flashcards, quizzes, plans, and task support without leaving the workspace.', action: onPrompt, cta: 'Start guided help', icon: Icon.sparkles(16), prompt: 'Help me study step by step using tutor mode.' },
-  ];
-
-  return (
-    <div className="tutor-page">
-      <section className="tutor-hero">
-        <div className="tutor-hero-copy">
-          <div className="tutor-eyebrow">Dedicated tutor workspace</div>
-          <h1>Make tutor mode feel like its own page.</h1>
-          <p>Tutor mode now has a home base for guided explanations, note-aware studying, and schedule-aware next steps. Turn it on when you want SOS to teach, coach, and keep you moving.</p>
-          <div className="tutor-hero-actions">
-            <button className="tutor-primary-btn" onClick={() => onToggleTutorMode(!tutorMode)}>{tutorMode ? 'Tutor mode on' : 'Turn tutor mode on'}</button>
-            <button className="tutor-secondary-btn" onClick={() => onPrompt(prompts[0].msg)}>Try a guided session</button>
-            <button className="tutor-secondary-btn" onClick={onBack}>Back to chat</button>
-          </div>
-        </div>
-        <div className="tutor-hero-card">
-          <div className="tutor-hero-card-top">
-            <TutorIndicator active={tutorMode} />
-            <span>{hasNotes ? 'Notes connected' : 'Bring in notes for better tutoring'}</span>
-          </div>
-          <div className="tutor-focus-label">Current mission</div>
-          <div className="tutor-focus-title">{primaryFocus ? primaryFocus.title : 'Get clear on what to study next'}</div>
-          <div className="tutor-focus-meta">
-            {primaryFocus
-              ? `${primaryFocus.subject || 'General study'} • due ${fmt(primaryFocus.dueDate)}`
-              : `${upcomingEvents.length} event${upcomingEvents.length === 1 ? '' : 's'} this week • ${notes.length} note${notes.length === 1 ? '' : 's'} ready`}
-          </div>
-          <div className="tutor-hero-checklist">
-            <div>{tutorMode ? '✓ Guided teaching voice is active' : '• Guided teaching voice is waiting for you to turn it on'}</div>
-            <div>{hasNotes ? '✓ Can cite your notes while explaining' : '• Add notes to unlock note-grounded explanations'}</div>
-            <div>✓ Can turn help into plans, blocks, flashcards, and quizzes</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="tutor-stats">
-        <div className="tutor-stat-card"><span>Active tasks</span><strong>{activeTasks.length}</strong><small>{overdueTasks.length > 0 ? `${overdueTasks.length} overdue` : 'Nothing overdue right now'}</small></div>
-        <div className="tutor-stat-card"><span>Due soon</span><strong>{dueSoon.length}</strong><small>Tasks due in the next 3 days</small></div>
-        <div className="tutor-stat-card"><span>Study sources</span><strong>{notes.length}</strong><small>{hasNotes ? 'Notes + docs available for reference' : 'Import PDFs or docs to ground answers'}</small></div>
-        <div className="tutor-stat-card"><span>This week</span><strong>{upcomingEvents.length}</strong><small>Upcoming events tutor mode can plan around</small></div>
-      </section>
-
-      <section className="tutor-section">
-        <div className="tutor-section-head">
-          <div>
-            <div className="tutor-section-eyebrow">Start here</div>
-            <h2>Quick tutor workflows</h2>
-          </div>
-          <button className="tutor-text-btn" onClick={() => onPrompt('Help me study step by step using tutor mode and my current workload.')}>Open in chat</button>
-        </div>
-        <div className="tutor-prompt-grid">
-          {prompts.map(prompt => (
-            <button key={prompt.label} className="tutor-prompt-card" onClick={() => onPrompt(prompt.msg)}>
-              <div className="tutor-prompt-icon">{Icon.sparkles(15)}</div>
-              <div>
-                <div className="tutor-prompt-title">{prompt.label}</div>
-                <div className="tutor-prompt-copy">{prompt.msg}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="tutor-section">
-        <div className="tutor-section-head">
-          <div>
-            <div className="tutor-section-eyebrow">Integration upgrades</div>
-            <h2>Tutor mode is connected to the rest of SOS</h2>
-          </div>
-          <button className="tutor-text-btn" onClick={onOpenSettings}>Tune settings</button>
-        </div>
-        <div className="tutor-integration-grid">
-          {integrations.map(item => (
-            <div key={item.title} className="tutor-integration-card">
-              <div className="tutor-integration-icon">{item.icon}</div>
-              <div className="tutor-integration-title">{item.title}</div>
-              <p>{item.description}</p>
-              <button className="tutor-secondary-btn" onClick={() => item.prompt ? item.action(item.prompt) : item.action()}>{item.cta}</button>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
   );
 }
 
@@ -4198,32 +4075,8 @@ function escapeHtml(text) {
 function formatAssistantMessage(content) {
   const raw = String(content || '').trim();
   if (!raw) return '';
-
-  const goalMatch = raw.match(/goal:\s*(.*?)(?=quick check:|next move:|$)/is);
-  const quickCheckMatch = raw.match(/quick check:\s*(.*?)(?=next move:|$)/is);
-  const nextMoveMatch = raw.match(/next move:\s*(.*)$/is);
-
-  if (goalMatch || quickCheckMatch || nextMoveMatch) {
-    const goalSection = (goalMatch?.[1] || '').trim();
-    const goalParts = goalSection ? goalSection.split(/\s+-\s+/).map(part => part.trim()).filter(Boolean) : [];
-    const goalTitle = goalParts[0] || '';
-    const goalBullets = goalParts.slice(1);
-    const quickCheck = (quickCheckMatch?.[1] || '').trim();
-    const nextMove = (nextMoveMatch?.[1] || '').trim();
-
-    const html = `
-      <div class="tutor-msg">
-        ${goalTitle ? `<div class="tutor-msg-section"><div class="tutor-msg-label">goal</div><div class="tutor-msg-title">${escapeHtml(goalTitle)}</div>${goalBullets.length ? `<ul class="tutor-msg-list">${goalBullets.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}</div>` : ''}
-        ${quickCheck ? `<div class="tutor-msg-section"><div class="tutor-msg-label">quick check</div><div class="tutor-msg-body">${escapeHtml(quickCheck)}</div></div>` : ''}
-        ${nextMove ? `<div class="tutor-msg-section tutor-msg-next"><div class="tutor-msg-label">next move</div><div class="tutor-msg-body">${escapeHtml(nextMove)}</div></div>` : ''}
-      </div>
-    `;
-    return DOMPurify.sanitize(html);
-  }
-
   const withBreaks = escapeHtml(raw)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|<br>)(goal|quick check|next move):/gi, '$1<strong>$2:</strong>')
     .replace(/\n/g, '<br/>');
   return DOMPurify.sanitize(withBreaks);
 }
@@ -4319,7 +4172,6 @@ function App() {
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
-  const [lofiTutorTabActive, setLofiTutorTabActive] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
@@ -4334,18 +4186,8 @@ function App() {
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
   const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
-  const [tutorMode, setTutorMode] = useState(() => localStorage.getItem('sos_tutor_mode') === 'true');
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
-  const [showTutorIndicatorSidebar, setShowTutorIndicatorSidebar] = useState(() => localStorage.getItem('sos_tutor_indicator_sidebar') !== 'false');
-  const [showTutorIndicatorTopbar, setShowTutorIndicatorTopbar] = useState(() => localStorage.getItem('sos_tutor_indicator_topbar') !== 'false');
-  // Skill Hub smart trigger nudge state
-  const [skillHubNudgeTrigger, setSkillHubNudgeTrigger] = useState(null);
-  const [skillHubDismissals, setSkillHubDismissals] = useState([]);
-  // Skill Hub lifted state (shared with App sidebar)
-  const [skillHubTab, setSkillHubTab] = useState('home');
-  const [skillHubMode, setSkillHubMode] = useState(() => localStorage.getItem('sos_skill_hub_mode') || 'cause-effect');
-  const [skillHubLessons, setSkillHubLessons] = useState([]);
   const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
   const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
   const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel === 'notes';
@@ -4359,9 +4201,8 @@ function App() {
       if (showNotes) return 'notes';
       if (showPeek) return 'schedule';
     }
-    if (tutorMode && notes.length > 0 && activePanel === 'chat') return 'notes';
     return activePanel === 'chat' ? 'chat' : 'none';
-  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed, showNotes, showPeek, tutorMode, notes.length]);
+  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed, showNotes, showPeek]);
   const workspaceContext = getWorkspaceContext();
   const workspaceModeLabel = workspaceContext === 'schedule'
     ? 'Schedule mode'
@@ -4424,12 +4265,6 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQueue]);
 
-  // Skill Hub nudge — evaluate on tasks load
-  useEffect(() => {
-    if (!tasks.length) return;
-    const triggers = evaluateTriggers(tasks, skillHubDismissals);
-    setSkillHubNudgeTrigger(triggers[0] || null);
-  }, [tasks, skillHubDismissals]);
   const [guestMsgCount, setGuestMsgCount] = useState(
     () => parseInt(localStorage.getItem('sos_guest_msg_count') || '0', 10)
   );
@@ -4498,6 +4333,30 @@ function App() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const chatAreaRef = useRef(null);
+
+  // Wikilink autocomplete on the chat input — opens an entity picker when the
+  // user types `[[`. Inserts `[[Selected Name]]` on commit; ↵/Tab to confirm,
+  // Esc to dismiss, ↑/↓ to navigate.
+  const wikilinkChatHook = useWikilinkAutocomplete({
+    value: input,
+    setValue: setInput,
+    inputRef,
+    notes,
+    events,
+    tasks,
+  });
+
+  // Resizable columns + lock toggle for the lofi 3-column layout.
+  const columnLayout = useColumnLayout();
+  const studyAppRef = useRef(null);
+
+  // Opt-in customizable home screen. Default disabled. Persisted in localStorage
+  // under `sos_home_*` keys. Re-read on mount and whenever settings flip it.
+  const [homePrefs, setHomePrefs] = useState(() => getHomePrefs());
+  function updateHomePref(key, value) {
+    setHomePref(key, value);
+    setHomePrefs(prev => ({ ...prev, [key]: value }));
+  }
 
   // ── Alternating welcome screen content ──
   const welcomeVariants = useMemo(() => [
@@ -4610,8 +4469,9 @@ function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const row = payload.new;
-          const ev = { id: row.id, title: row.title, date: row.event_date || row.start_date || '', start_time: row.start_time || '', end_time: row.end_time || '', type: row.type || 'event', subject: row.subject || '' };
+          // Use the shared event shape so time/description/location/priority make it
+          // through to the calendar without needing a page refresh.
+          const ev = dbEventToApp(payload.new);
           setEvents(prev => { const idx = prev.findIndex(x => x.id === ev.id); return idx >= 0 ? prev.map((x, i) => i === idx ? ev : x) : [...prev, ev]; });
         } else if (payload.eventType === 'DELETE') {
           setEvents(prev => prev.filter(x => x.id !== payload.old.id));
@@ -4619,12 +4479,37 @@ function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const row = payload.new;
-          const n = { id: row.id, name: row.tab_name || row.name || 'Untitled', content: row.content || '', updatedAt: row.updated_at || row.created_at };
+          const n = dbNoteToApp(payload.new);
           setNotes(prev => { const idx = prev.findIndex(x => x.id === n.id); return idx >= 0 ? prev.map((x, i) => i === idx ? n : x) : [...prev, n]; });
         } else if (payload.eventType === 'DELETE') {
           setNotes(prev => prev.filter(x => x.id !== payload.old.id));
         }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_blocks', filter: `user_id=eq.${user.id}` }, () => {
+        // Recurring blocks change rarely; re-fetch the small set rather than reconcile.
+        sb.from('recurring_blocks').select('*').eq('user_id', user.id).then(({ data }) => {
+          if (!data) return;
+          const recurring = data.map(rb => ({
+            name: rb.name, category: rb.category,
+            start: rb.start_time?.slice(0, 5), end: rb.end_time?.slice(0, 5),
+            days: rb.days || [],
+          }));
+          setBlocks(prev => ({ ...prev, recurring }));
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'date_blocks', filter: `user_id=eq.${user.id}` }, () => {
+        sb.from('date_blocks').select('*').eq('user_id', user.id).then(({ data }) => {
+          if (!data) return;
+          const dates = {};
+          data.forEach(db => {
+            const d = db.block_date;
+            if (!dates[d]) dates[d] = {};
+            dates[d][db.time_slot?.slice(0, 5)] = db.cleared
+              ? null
+              : { name: db.name, category: db.category };
+          });
+          setBlocks(prev => ({ ...prev, dates }));
+        });
       })
       .subscribe();
     return () => { sb.removeChannel(channel); };
@@ -5881,7 +5766,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          model: 'llama-3.1-8b-instant',
+          preferredModel: MODEL_FAST,
           provider: 'groq',
           isContentGen: false
         })
@@ -6241,17 +6126,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       // Fall through to the normal chat path — sendMessage will use mode: "planning"
       // (handled in the chatBody block below)
     } else if (CONTENT_GEN_REGEX.test(text || '')) {
-      // Auto-route other content gen to Studio panel
-      const redirectMsg = { role: 'assistant', content: "looks like you want study materials — i've opened studio for you! just drop your request there and i'll generate it.", timestamp: Date.now() };
-      setMessages(prev => { const n = [...prev, redirectMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
-      if (user) dbInsertChatMsg('assistant', redirectMsg.content, user.id);
-      if (layoutMode === 'lofi') setLofiTutorTabActive(true);
-      else setActivePanel('tutor');
-      setIsLoading(false);
-      return;
+      // Content-gen requests fall through to the studio pipeline below.
     }
-    const isTutorStudyContentRequest = TUTOR_STUDY_REGEX.test(text || '');
-    if (isTutorStudyContentRequest) primeTutorSession();
 
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
@@ -6264,7 +6140,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isPlanningRequest = PLANNING_REGEX.test(text || '');
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
-        tutorMode,
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
         recentlyExecutedActions: recentlyExecutedActionsRef.current,
@@ -6277,8 +6152,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const token = session?.data?.session?.access_token;
 
       const preferredModel = (() => {
-        try { return localStorage.getItem('sos_preferred_model') || 'openai/gpt-oss-120b'; }
-        catch (_) { return 'openai/gpt-oss-120b'; }
+        try { return localStorage.getItem('sos_preferred_model') || MODEL_DEEP; }
+        catch (_) { return MODEL_DEEP; }
       })();
       // Build LINKED CONTEXT for any [[wikilinks]] or fuzzy entity mentions in the
       // user's message. Pulls 1-hop neighbors so the model can reason about the
@@ -6639,7 +6514,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       console.error('Chat error:', err);
       const raw = err.message || '';
       let friendlyMsg;
-      if (raw.includes('500') || raw.includes('Internal') || raw.includes('timed out')) {
+      // Cause-coded errors from the AI layer come through with structured fields
+      // attached to the Error object. Prefer those over string matching.
+      if (raw.includes('PlanningPipelineError') || raw.includes('Planning pipeline failed')) {
+        const stageMatch = raw.match(/at (draft|critique|refine)/);
+        const stage = stageMatch ? stageMatch[1] : 'planning';
+        if (raw.includes('both_models_failed')) {
+          friendlyMsg = `I tried both models for your study plan but neither came back — try again in a minute, or simplify the request.`;
+        } else {
+          friendlyMsg = `I couldn't ${stage === 'draft' ? 'draft' : 'finalize'} your study plan. Try a smaller scope or rephrase the request.`;
+        }
+      } else if (raw.includes('Both models failed') || raw.includes('both_models_failed')) {
+        friendlyMsg = "the AI is having trouble on both models right now — try again in a minute.";
+      } else if (raw.includes('budget exhausted') || raw.includes('timed out within budget')) {
+        friendlyMsg = "the request took too long — try again, or try a smaller request.";
+      } else if (raw.includes('500') || raw.includes('Internal')) {
         friendlyMsg = "the AI service is temporarily unavailable — please try again in a moment.";
       } else if (raw.includes('429') || raw.includes('rate limit')) {
         friendlyMsg = "we're moving fast — give me a few seconds and try again.";
@@ -6744,7 +6633,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       : text === 'Quiz me'
         ? (notes.length > 0 ? 'Create a quiz from my notes and ask me one question at a time.' : 'Create a quiz for the topic I should study next and ask me one question at a time.')
         : text;
-    if (/flashcard|quiz me|create a quiz/i.test(normalizedText)) primeTutorSession();
     if(!user){
       if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(normalizedText); setShowAuthModal(true); return; }
       incrementGuestCount();
@@ -7073,59 +6961,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel,layoutMode,openCompanionPanel]);
 
-  function toggleTutorMode(nextValue) {
-    setTutorMode(nextValue);
-    localStorage.setItem('sos_tutor_mode', nextValue ? 'true' : 'false');
-  }
-
-  function enterTutorMode() {
-    toggleTutorMode(true);
-    if (user) trackEvent(user.id, 'tutor_entered', { layout: layoutMode });
-    if (layoutMode === 'lofi') {
-      setLofiTutorTabActive(true);
-      const msg = { role: 'assistant', content: '✨ Tutor Mode Activated — I\'ll guide you step by step. Ask me anything!', timestamp: Date.now() };
-      setMessages(prev => { const n = [...prev, msg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
-    } else {
-      setActivePanel('tutor');
-      setSkillHubTab('home');
-    }
-  }
-
-  function switchSkillHubMode(newMode) {
-    if (newMode === skillHubMode) return;
-    setSkillHubMode(newMode);
-    localStorage.setItem('sos_skill_hub_mode', newMode);
-    const cfg = getModeConfig(newMode);
-    setToastMsg?.(`${cfg.icon} Switched to ${cfg.label} mode`);
-  }
-
-  function primeTutorSession() {
-    toggleTutorMode(true);
-    setActivePanel('chat');
-    if (notes.length > 0) {
-      if (layoutMode === 'sidebar') {
-        openCompanionPanel('notes');
-      } else {
-        setShowNotes(true);
-        setShowPeek(false);
-      }
-    }
-  }
-
-  function launchTutorPrompt(message) {
-    setActivePanel('chat');
-    if (notes.length > 0) {
-      if (layoutMode === 'sidebar') {
-        if (sidebarCompanionPanel !== 'notes') openCompanionPanel('notes');
-      } else {
-        setShowNotes(true);
-        setShowPeek(false);
-      }
-    }
-    setInput(message);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   // layoutMode is fixed to 'lofi' — no persistence needed
@@ -7158,7 +6993,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   return (
-    <div className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'} style={layoutMode !== 'lofi' ? {flexDirection: layoutMode === 'topbar' ? 'column' : 'row'} : undefined} data-tutor-mode={activePanel === 'tutor' ? skillHubMode : undefined}>
+    <div
+      ref={layoutMode === 'lofi' ? studyAppRef : undefined}
+      className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'}
+      style={
+        layoutMode === 'lofi'
+          ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
+          : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
+      }
+    >
+      {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
+      {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
       {/* Neon Lofi — corner targeting reticles (decorative) */}
       {layoutMode !== 'lofi' && <>
         <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
@@ -7182,58 +7027,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </button>
         </div>
         <div className="sos-side-actions">
-          {activePanel === 'tutor' ? (
-            <>
-              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }} title="Back to chat">
-                {Icon.chevronLeft(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Back to chat</span>
-              </button>
-              {[{id:'home',label:'Home',icon:'🏠'},{id:'chat',label:'Chat',icon:'💬'},{id:'lessons',label:'Studio',icon:'🎓'}].map(tab => (
-                <button
-                  key={tab.id}
-                  className={'sos-side-btn' + (skillHubTab === tab.id ? ' active' : '')}
-                  onClick={() => { sfx.nav(); setSkillHubTab(tab.id); }}
-                  title={tab.label}
-                >
-                  <span style={{fontSize:13}}>{tab.icon}</span>
-                  <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>{tab.label}</span>
-                </button>
-              ))}
-              <div style={{padding:'6px 0 2px'}}>
-                <ModePillSwitcher activeMode={skillHubMode} onSwitch={switchSkillHubMode} />
-              </div>
-            </>
-          ) : (
-            <>
-              <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-              <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-              <button className="sos-side-btn" data-module="study" onClick={()=>{ sfx.nav(); enterTutorMode(); }} title="Skill Hub">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Skill Hub</span></button>
-              <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-              <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
-            </>
-          )}
+          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
+          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
           <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
         </div>
-        {(showTutorIndicatorSidebar || showPerfIndicatorSidebar) && (
+        {showPerfIndicatorSidebar && (
           <div className="sos-side-indicators sos-side-meta">
-            {showTutorIndicatorSidebar && <TutorIndicator active={tutorMode} />}
-            {showPerfIndicatorSidebar && <PerfPill />}
+            <PerfPill />
           </div>
-        )}
-        {skillHubNudgeTrigger && activePanel !== 'tutor' && (
-          <NudgeCard
-            trigger={skillHubNudgeTrigger}
-            compact={true}
-            onGo={() => { enterTutorMode(); }}
-            onDismiss={() => {
-              const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-              const d = { task_id: skillHubNudgeTrigger.task.id, expires_at: expiresAt, id: 'local-' + Date.now() };
-              setSkillHubDismissals(prev => [...prev, d]);
-              setSkillHubNudgeTrigger(null);
-            }}
-          />
         )}
         <div className="sos-side-list">
           {savedChats.length === 0 ? (
@@ -7271,25 +7077,29 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
+        blocks={blocks}
+        tasks={tasks}
+        entityLinks={entityLinks}
         userId={user?.id}
         onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
         notes={notes}
         onCreateNote={handleCreateNote}
         onUpdateNote={handleUpdateNote}
         onDeleteNote={handleDeleteNote}
+        onImportClick={() => setShowGoogleModal(true)}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
         <StudyTopBar
           user={user}
           syncStatus={syncStatus}
-          tutorMode={tutorMode}
           onNewChat={startNewChat}
-          onTutorMode={enterTutorMode}
           onImport={() => setShowGoogleModal(true)}
           onSettings={() => setActivePanel('settings')}
           onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onSwitchLayout={() => setLayoutMode('sidebar')}
+          onHome={() => setActivePanel('home')}
+          homeEnabled={homePrefs.enabled}
           queueCount={pendingQueue ? pendingQueue.length : 0}
         />
       )}
@@ -7303,33 +7113,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           </div>}
         </div>
         <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
-          {showTutorIndicatorTopbar && <TutorIndicator active={tutorMode} />}
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
-          <button onClick={enterTutorMode} className="g-hdr-btn">{Icon.bookOpen(14)} <span>Skill Hub</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
           <button onClick={startNewChat} className="g-hdr-btn">{Icon.plus(14)} <span>New chat</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
 
-      {activePanel === 'tutor' ? (
-        <div style={{height:'100%',overflow:'hidden'}}>
-          <SkillHub
-            tasks={tasks}
-            events={events}
-            notes={notes}
-            user={user}
-            onBack={() => { toggleTutorMode(false); setActivePanel('chat'); setSkillHubTab('home'); }}
-            setToastMsg={setToastMsg}
-            activeTab={skillHubTab}
-            setActiveTab={setSkillHubTab}
-            activeMode={skillHubMode}
-            onModeSwitch={switchSkillHubMode}
-            lessons={skillHubLessons}
-            onLessonsChange={setSkillHubLessons}
-          />
-        </div>
+      {activePanel === 'home' ? (
+        <HomeScreen
+          tasks={tasks}
+          events={events}
+          prefs={homePrefs}
+          onOpenChat={() => setActivePanel('chat')}
+        />
       ) : activePanel === 'settings' ? (
         <div className="settings-fullscreen">
           <div className="settings-fullscreen-inner">
@@ -7359,16 +7157,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into parallel steps automatically.</div>
                 </div>
                 <button className={'settings-toggle'+(agenticMode?' settings-toggle-active':'')} onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Tutor mode</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Guided, step-by-step teaching voice. Great for studying new material.</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className={'settings-toggle'+(tutorMode?' settings-toggle-active':'')} onClick={()=>toggleTutorMode(!tutorMode)}>{tutorMode ? 'On' : 'Off'}</button>
-                  <button className="settings-toggle" onClick={enterTutorMode}>Enter</button>
-                </div>
               </div>
               <div className="settings-row">
                 <div>
@@ -7404,6 +7192,75 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   </div>
                   <span style={{fontSize:'0.78rem',color:'var(--teal)',fontFamily:'var(--font-mono, monospace)',letterSpacing:'0.02em'}}>{currentModel.split('/').pop()}</span>
                 </div>
+              )}
+            </div>
+
+            {/* ── Home screen (opt-in) ── */}
+            <div className="settings-card settings-fullscreen-card">
+              <div className="settings-row" style={{paddingBottom:6}}>
+                <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Home screen</div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Enable home screen</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Adds a calm landing surface inside the studio. Shows the time, today's date, and one focus element you pick.</div>
+                </div>
+                <button className={'settings-toggle'+(homePrefs.enabled?' settings-toggle-active':'')} onClick={()=>updateHomePref('enabled', !homePrefs.enabled)}>{homePrefs.enabled ? 'On' : 'Off'}</button>
+              </div>
+              {homePrefs.enabled && (
+                <>
+                  <div className="settings-row">
+                    <div>
+                      <div style={{fontWeight:600,fontSize:'0.88rem'}}>Background</div>
+                      <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Pick a curated gradient.</div>
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                      {HOME_BACKGROUNDS.map(b => (
+                        <button
+                          key={b.id}
+                          className={'settings-toggle'+(homePrefs.background===b.id?' settings-toggle-active':'')}
+                          onClick={()=>updateHomePref('background', b.id)}
+                          title={b.label}
+                          style={{minWidth:62}}
+                        >
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <div style={{fontWeight:600,fontSize:'0.88rem'}}>Focus element</div>
+                      <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>What sits below the time and date.</div>
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                      {HOME_FOCUS_OPTIONS.map(opt => (
+                        <button
+                          key={opt.id}
+                          className={'settings-toggle'+(homePrefs.focus===opt.id?' settings-toggle-active':'')}
+                          onClick={()=>updateHomePref('focus', opt.id)}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {homePrefs.focus === 'message' && (
+                    <div className="settings-row">
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:600,fontSize:'0.88rem'}}>Custom message</div>
+                        <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:6}}>Shown below the clock when "Custom message" is the focus.</div>
+                        <input
+                          type="text"
+                          value={homePrefs.message}
+                          onChange={e=>updateHomePref('message', e.target.value)}
+                          placeholder="Stay focused. The next hour belongs to you."
+                          style={{width:'100%',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'6px 10px',color:'var(--text)',fontSize:'0.85rem',outline:'none',boxSizing:'border-box'}}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -7778,6 +7635,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid var(--border)',color:'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.mic(18)}
               </button>
+              <div style={{position:'relative',flex:1}}>
               <input className="sos-chat-input" ref={inputRef} value={input}
                 onPaste={e=>{
                   const text = e.clipboardData?.getData('text') || '';
@@ -7785,16 +7643,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     setTimeout(()=>setPasteStudyPrompt(text), 50);
                   }
                 }}
-                onChange={e=>{
-                  setInput(e.target.value);
-                }}
+                onChange={wikilinkChatHook.inputProps.onChange}
                 placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"Ask anything"}
                 disabled={isLoading}
-                style={{flex:1,background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
+                style={{width:'100%',background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
                 onKeyDown={e=>{
+                  // Wikilink autocomplete intercepts ↑↓/Enter/Tab/Esc when its popover is open.
+                  if (wikilinkChatHook.isOpen) {
+                    wikilinkChatHook.inputProps.onKeyDown(e);
+                    if (e.defaultPrevented) return;
+                  }
                   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit();}
                 }}
               />
+              {wikilinkChatHook.popover}
+              </div>
               <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1,boxShadow:'0 2px 12px rgba(245,158,11,0.3)'}}>{Icon.send(18)}</button>
             </form>
             {input.length > 0 && !isLoading && (

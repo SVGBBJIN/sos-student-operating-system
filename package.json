@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "eval:harness": "node scripts/eval-harness.mjs"
+    "eval:harness": "node scripts/eval-harness.mjs",
+    "eval:planning": "node scripts/eval-planning-fallback.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
