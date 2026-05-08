@@ -26,6 +26,10 @@ import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
+import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
+import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
+import { inferSubjectFromTitle } from '../shared/subjects.js';
+import LinkSuggestionCard from './components/LinkSuggestionCard';
 import './styles/skillhub.css';
 
 // Configure pdfjs worker
@@ -257,14 +261,15 @@ function appNoteToDb(n, userId) {
 /* Full load from Supabase */
 async function loadAllFromSupabase(userId) {
   try {
-    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes] = await Promise.all([
+    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes, linksRes] = await Promise.all([
       sb.from('tasks').select('*').eq('user_id', userId),
       sb.from('events').select('*').eq('user_id', userId),
       sb.from('notes').select('*').eq('user_id', userId),
       sb.from('chat_messages').select('*').eq('user_id', userId).order('created_at', { ascending: true }).limit(CHAT_MAX_MESSAGES),
       sb.from('recurring_blocks').select('*').eq('user_id', userId),
       sb.from('date_blocks').select('*').eq('user_id', userId),
-      sb.from('profiles').select('*').eq('id', userId).single()
+      sb.from('profiles').select('*').eq('id', userId).single(),
+      sb.from('entity_links').select('*').eq('user_id', userId)
     ]);
 
     const tasks = (tasksRes.data || []).map(dbTaskToApp);
@@ -290,7 +295,9 @@ async function loadAllFromSupabase(userId) {
       ? { lat: profileRes.data.weather_lat || 42.33, lon: profileRes.data.weather_lon || -71.21 }
       : { lat: 42.33, lon: -71.21 };
 
-    return { tasks, events, notes, messages, blocks, weatherCoords };
+    const entityLinks = linksRes.error ? [] : (linksRes.data || []);
+
+    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -429,6 +436,40 @@ async function dbDeleteEvent(eventId, userId) {
 async function dbUpsertNote(note, userId) {
   const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
   if (error) console.error('Note upsert error:', error);
+}
+/* ── Entity links: bidirectional graph between notes/events/tasks ── */
+async function dbInsertEntityLink(link, userId) {
+  const row = {
+    user_id: userId,
+    source_type: link.source_type,
+    source_id: link.source_id,
+    target_type: link.target_type,
+    target_id: link.target_id,
+    origin: link.origin || 'manual',
+    confirmed_at: link.confirmed_at || (link.origin === 'rejected' ? null : new Date().toISOString()),
+  };
+  const { data, error } = await sb.from('entity_links')
+    .upsert(row, { onConflict: 'user_id,source_type,source_id,target_type,target_id' })
+    .select()
+    .single();
+  if (error) { console.error('Entity link insert error:', error); return null; }
+  return data;
+}
+async function dbDeleteEntityLink(linkId, userId) {
+  const { error } = await sb.from('entity_links').delete().eq('id', linkId).eq('user_id', userId);
+  if (error) console.error('Entity link delete error:', error);
+}
+async function dbDeleteEntityLinkByPair(link, userId) {
+  const { error } = await sb.from('entity_links').delete()
+    .eq('user_id', userId)
+    .eq('source_type', link.source_type).eq('source_id', link.source_id)
+    .eq('target_type', link.target_type).eq('target_id', link.target_id);
+  if (error) console.error('Entity link delete by pair error:', error);
+}
+async function dbLoadEntityLinks(userId) {
+  const { data, error } = await sb.from('entity_links').select('*').eq('user_id', userId);
+  if (error) { console.error('Entity links load error:', error); return []; }
+  return data || [];
 }
 async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
   const row = { user_id: userId, role, content };
@@ -584,6 +625,73 @@ function estimateInputTokens(text = '') {
   return Math.max(1, Math.ceil((text || '').length / 4));
 }
 
+// Build a "LINKED CONTEXT" block for a chat message: pull referenced entities
+// (via [[wikilinks]] + fuzzy title matches) and their 1-hop graph neighbors,
+// formatted as text the model can read. Strict budget: 3 sources × 5 neighbors,
+// 300 chars per neighbor preview, ~1.1k tokens worst case.
+function buildLinkedContextBlock({ message, notes, events, tasks, entityLinks, normalizeFn }) {
+  if (!message || !Array.isArray(entityLinks) || entityLinks.length === 0) return '';
+  const explicit = extractWikilinks(message)
+    .map(w => resolveLinkName(w.name, { notes, events, tasks }, normalizeFn))
+    .filter(Boolean);
+  const fuzzy = findEntityMentions(message, { notes, events }, normalizeFn);
+  const seen = new Set();
+  const sources = [];
+  for (const e of [...explicit, ...fuzzy]) {
+    if (!e) continue;
+    const key = `${e.type}:${e.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push(e);
+    if (sources.length >= 3) break;
+  }
+  if (sources.length === 0) return '';
+
+  function fetchEntity(type, id) {
+    if (type === 'note') { const n = notes.find(x => x.id === id); return n ? { type, id, title: n.name, body: stripNoteHtml(n.content || '') } : null; }
+    if (type === 'event') { const ev = events.find(x => x.id === id); return ev ? { type, id, title: ev.title, body: ev.description || '' } : null; }
+    if (type === 'task') { const t = tasks.find(x => x.id === id); return t ? { type, id, title: t.title, body: '' } : null; }
+    return null;
+  }
+  function neighborsOf(src) {
+    const n = [];
+    for (const l of entityLinks) {
+      if (l.origin === 'rejected') continue;
+      if (l.source_type === src.type && l.source_id === src.id) n.push(fetchEntity(l.target_type, l.target_id));
+      else if (l.target_type === src.type && l.target_id === src.id) n.push(fetchEntity(l.source_type, l.source_id));
+    }
+    return n.filter(Boolean).slice(0, 5);
+  }
+
+  const blocks = [];
+  let totalChars = 0;
+  const HARD_CAP = 4500;
+  for (const src of sources) {
+    if (totalChars >= HARD_CAP) break;
+    const srcFull = fetchEntity(src.type, src.id);
+    if (!srcFull) continue;
+    const lines = [`LINKED CONTEXT FOR "${truncateWithEllipsis(srcFull.title, 60)}" (${srcFull.type}):`];
+    if (srcFull.body) lines.push(`  - source body: ${truncateWithEllipsis(srcFull.body.replace(/\s+/g,' ').trim(), 300)}`);
+    const nbrs = neighborsOf(srcFull);
+    if (nbrs.length === 0) {
+      lines.push('  - (no linked neighbors)');
+    } else {
+      for (const nb of nbrs) {
+        if (totalChars >= HARD_CAP) break;
+        const preview = truncateWithEllipsis((nb.body || '').replace(/\s+/g,' ').trim(), 300);
+        const line = `  - linked ${nb.type}: "${truncateWithEllipsis(nb.title, 60)}"${preview ? ` — ${preview}` : ''}`;
+        lines.push(line);
+        totalChars += line.length;
+      }
+    }
+    const block = lines.join('\n');
+    blocks.push(block);
+    totalChars += block.length;
+  }
+  if (blocks.length === 0) return '';
+  return blocks.join('\n\n');
+}
+
 function truncateWithEllipsis(text = '', maxChars = 300) {
   if (!text || text.length <= maxChars) return text || '';
   return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
@@ -700,6 +808,47 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
 
   const noteNames = notes.map(n => n.name).join(', ') || 'none';
   const noteLines = [];
+  // Build a compact "link graph index" so the model knows which entities are
+  // connected without paying the token cost of full linked content.
+  const entityLinks = Array.isArray(options.entityLinks) ? options.entityLinks : [];
+  const graphIndexLines = (() => {
+    if (entityLinks.length === 0) return [];
+    const counts = new Map(); // key: type:id → { title, type, neighbors: { note:0, event:0, task:0 } }
+    function nameOf(type, id) {
+      if (type === 'note') return notes.find(n => n.id === id)?.name;
+      if (type === 'event') return events.find(e => e.id === id)?.title;
+      if (type === 'task') return tasks.find(t => t.id === id)?.title;
+      return null;
+    }
+    function bump(type, id, otherType) {
+      const key = `${type}:${id}`;
+      let bucket = counts.get(key);
+      if (!bucket) {
+        const title = nameOf(type, id);
+        if (!title) return;
+        bucket = { title, type, neighbors: { note: 0, event: 0, task: 0 } };
+        counts.set(key, bucket);
+      }
+      bucket.neighbors[otherType] = (bucket.neighbors[otherType] || 0) + 1;
+    }
+    for (const l of entityLinks) {
+      if (l.origin === 'rejected') continue;
+      bump(l.source_type, l.source_id, l.target_type);
+      bump(l.target_type, l.target_id, l.source_type);
+    }
+    const sorted = [...counts.values()].sort((a, b) => {
+      const ta = a.neighbors.note + a.neighbors.event + a.neighbors.task;
+      const tb = b.neighbors.note + b.neighbors.event + b.neighbors.task;
+      return tb - ta;
+    });
+    return sorted.map(b => {
+      const parts = [];
+      if (b.neighbors.note) parts.push(`${b.neighbors.note} note${b.neighbors.note === 1 ? '' : 's'}`);
+      if (b.neighbors.event) parts.push(`${b.neighbors.event} event${b.neighbors.event === 1 ? '' : 's'}`);
+      if (b.neighbors.task) parts.push(`${b.neighbors.task} task${b.neighbors.task === 1 ? '' : 's'}`);
+      return `- "${truncateWithEllipsis(b.title, 50)}" (${b.type}) ↔ ${parts.join(', ')}`;
+    });
+  })();
   if (notes.length > 0) {
     const sortOrder = { pdf: 0, google_docs: 1 };
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
@@ -739,6 +888,7 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'NOTES INDEX: ' + noteNames,
     'NOTES PREVIEWS (budgeted):',
     capLines(noteLines, notesBudget, 'note previews') || '(none)',
+    ...(graphIndexLines.length > 0 ? ['', 'LINK GRAPH INDEX (compact, neighbors only):', capLines(graphIndexLines, 400, 'links')] : []),
     '',
     'MODE FLAGS:',
     '- tutor_mode: ' + (tutorMode ? 'ON' : 'OFF'),
@@ -3673,7 +3823,7 @@ function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes
 /* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
+function NotesPanel({ notes, events = [], tasks = [], entityLinks = [], onClose, onDeleteNote, onUpdateNote, onCreateNote, onWikilinkClick, embedded = false }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -3926,7 +4076,29 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
                       </div>
                     )}
                     {isExpanded && (
-                      <div className="notes-item-content" dangerouslySetInnerHTML={{__html: note.content || ''}}/>
+                      <>
+                        <div
+                          className="notes-item-content"
+                          onClick={(e) => {
+                            const a = e.target.closest && e.target.closest('a.wikilink');
+                            if (!a) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const type = a.getAttribute('data-target-type');
+                            const id = a.getAttribute('data-target-id');
+                            if (type && id && onWikilinkClick) onWikilinkClick({ type, id });
+                          }}
+                          dangerouslySetInnerHTML={{__html: renderWikilinks(note.content || '', (name) => resolveLinkName(name, { notes, events, tasks }, normalize))}}
+                        />
+                        <BacklinksSection
+                          entity={{ type: 'note', id: note.id }}
+                          entityLinks={entityLinks}
+                          notes={notes}
+                          events={events}
+                          tasks={tasks}
+                          onWikilinkClick={onWikilinkClick}
+                        />
+                      </>
                     )}
                   </>
                 )}
@@ -3936,6 +4108,57 @@ function NotesPanel({ notes, onClose, onDeleteNote, onUpdateNote, onCreateNote, 
         </div>
       </div>
     </>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   BACKLINKS SECTION (used inside NotesPanel + event detail)
+   ═══════════════════════════════════════════════ */
+function BacklinksSection({ entity, entityLinks = [], notes = [], events = [], tasks = [], onWikilinkClick }) {
+  const links = (entityLinks || []).filter(l => l.origin !== 'rejected' && (
+    (l.source_type === entity.type && l.source_id === entity.id) ||
+    (l.target_type === entity.type && l.target_id === entity.id)
+  ));
+  if (links.length === 0) return null;
+
+  function resolve(type, id) {
+    if (type === 'note') { const n = notes.find(x => x.id === id); return n ? { title: n.name, type, id } : null; }
+    if (type === 'event') { const e = events.find(x => x.id === id); return e ? { title: e.title, type, id } : null; }
+    if (type === 'task') { const t = tasks.find(x => x.id === id); return t ? { title: t.title, type, id } : null; }
+    return null;
+  }
+
+  const others = links.map(l => {
+    const isSource = l.source_type === entity.type && l.source_id === entity.id;
+    const otherType = isSource ? l.target_type : l.source_type;
+    const otherId = isSource ? l.target_id : l.source_id;
+    return { ...resolve(otherType, otherId), origin: l.origin, linkId: l.id };
+  }).filter(x => x && x.title);
+
+  if (others.length === 0) return null;
+
+  const TYPE_LABEL = { note: 'Note', event: 'Event', task: 'Task' };
+  const TYPE_COLOR = { note: 'var(--teal)', event: 'var(--blue)', task: 'var(--accent)' };
+
+  return (
+    <div style={{marginTop:12,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+      <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
+        <span style={{display:'flex',color:'var(--teal)'}}>{Icon.link(11)}</span>
+        Linked ({others.length})
+      </div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+        {others.map((o,i) => (
+          <button
+            key={(o.linkId || '') + ':' + i}
+            onClick={(e) => { e.stopPropagation(); if (onWikilinkClick) onWikilinkClick({ type: o.type, id: o.id }); }}
+            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 8px',borderRadius:8,border:'1px solid rgba(255,255,255,0.08)',background:'var(--bg2)',color:'var(--text)',fontSize:'0.74rem',cursor:'pointer'}}
+          >
+            <span style={{fontSize:'0.62rem',color:TYPE_COLOR[o.type],fontWeight:700,textTransform:'uppercase'}}>{TYPE_LABEL[o.type]}</span>
+            <span>{o.title}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -4088,6 +4311,9 @@ function App() {
   const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
   const [pendingClarification, setPendingClarification] = useState(null);
   const [pendingClarificationAnswers, setPendingClarificationAnswers] = useState(null);
+  const [entityLinks, setEntityLinks] = useState([]); // [{id,source_type,source_id,target_type,target_id,origin,confirmed_at,created_at}]
+  const [pendingLinkSuggestions, setPendingLinkSuggestions] = useState([]); // [{key,source,target,score}]
+  const linkSuggestTimerRef = useRef(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [pendingProposal, setPendingProposal] = useState(null); // { summary, action_type, prefilled }
   const [showPeek, setShowPeek] = useState(false);
@@ -4312,6 +4538,7 @@ function App() {
       setMessages(data.messages);
       setDbMessageCount(data.messages.length); // P1.4
       setWeatherCoords(data.weatherCoords);
+      setEntityLinks(data.entityLinks || []);
     }
 
     // Fetch today's content generation count
@@ -4353,6 +4580,7 @@ function App() {
         setUser(null);
         setDataLoaded(false);
         setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
+        setEntityLinks([]); setPendingLinkSuggestions([]);
         setPendingClarification(null); setPendingClarificationAnswers(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
@@ -4805,6 +5033,11 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
+          if (user) {
+            const eventEntity = { type: 'event', id: ev.id, title: ev.title };
+            syncWikilinksForEntity(eventEntity, ev.description || '');
+            maybeSuggestLink(eventEntity);
+          }
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
@@ -4825,17 +5058,25 @@ function App() {
             return;
           }
           const content = action.content || '';
+          let savedNote = null;
           setNotes(prev => {
             const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {
               const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString() } : n);
               if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
+              savedNote = updated[existing];
               return updated;
             }
             const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString() };
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
+            savedNote = newNote;
             return [...prev, newNote];
           });
+          if (user && savedNote) {
+            const noteEntity = { type: 'note', id: savedNote.id, title: savedNote.name };
+            syncWikilinksForEntity(noteEntity, savedNote.content || '');
+            maybeSuggestLink(noteEntity);
+          }
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
           recordExecution('add_note', `note "${tabName}"`);
           window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName } }));
@@ -4848,7 +5089,12 @@ function App() {
           setNotes(prev => {
             const updated = prev.map(n => n.id === noteId ? { ...n, content: newContent, updatedAt: new Date().toISOString() } : n);
             const note = updated.find(n => n.id === noteId);
-            if (note && user) syncOp(() => dbUpsertNote(note, user.id));
+            if (note && user) {
+              syncOp(() => dbUpsertNote(note, user.id));
+              const noteEntity = { type: 'note', id: note.id, title: note.name };
+              syncWikilinksForEntity(noteEntity, note.content || '');
+              maybeSuggestLink(noteEntity);
+            }
             return updated;
           });
           break;
@@ -4856,7 +5102,14 @@ function App() {
         case 'delete_note': {
           const noteId = action.note_id;
           setNotes(prev => prev.filter(n => n.id !== noteId));
-          if (user) syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+          if (user) {
+            syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+            const orphaned = entityLinks.filter(l =>
+              (l.source_type === 'note' && l.source_id === noteId) ||
+              (l.target_type === 'note' && l.target_id === noteId));
+            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
+            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
+          }
           break;
         }
         case 'break_task': {
@@ -4882,6 +5135,13 @@ function App() {
           }
           setTasks(prev => prev.filter(t => t.id !== match.id));
           if (user) syncOp(() => dbDeleteTask(match.id, user.id), 'the task');
+          if (user) {
+            const orphaned = entityLinks.filter(l =>
+              (l.source_type === 'task' && l.source_id === match.id) ||
+              (l.target_type === 'task' && l.target_id === match.id));
+            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
+            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
+          }
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'delete_task' });
           recordExecution('delete_task', `"${match.title}"`);
           pushUndoToast(`Undo: deleted "${match.title}"`, undoSnap);
@@ -4895,6 +5155,13 @@ function App() {
           }
           setEvents(prev => prev.filter(ev => ev.id !== match.id));
           if (user) syncOp(() => dbDeleteEvent(match.id, user.id), 'the event');
+          if (user) {
+            const orphaned = entityLinks.filter(l =>
+              (l.source_type === 'event' && l.source_id === match.id) ||
+              (l.target_type === 'event' && l.target_id === match.id));
+            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
+            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
+          }
           if (match.googleId && isGoogleConnected() && calSyncEnabled) {
             deleteEventFromGoogle(match.googleId, googleToken);
           }
@@ -4919,12 +5186,18 @@ function App() {
               ...(newTitleClean && { title: newTitleClean }),
               ...(action.date && { date: action.date }),
               ...(action.event_type && { type: action.event_type }),
-              ...(action.subject !== undefined && { subject: action.subject })
+              ...(action.subject !== undefined && { subject: action.subject }),
+              ...(action.description !== undefined && { description: action.description })
             } : ev);
             const updated = next.find(ev => ev.id === match.id);
             if (updated && user) syncOp(() => dbUpsertEvent(updated, user.id), 'the event');
             if (updated && updated.googleId && isGoogleConnected() && calSyncEnabled) {
               pushEventToGoogle(updated, googleToken);
+            }
+            if (updated && user && action.description !== undefined) {
+              const eventEntity = { type: 'event', id: updated.id, title: updated.title };
+              syncWikilinksForEntity(eventEntity, updated.description || '');
+              maybeSuggestLink(eventEntity);
             }
             return next;
           });
@@ -5655,15 +5928,144 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
   }
 
+  // ── Entity-link CRUD + wikilink sync ──
+  function _normalizeEntity(entity) {
+    if (!entity) return null;
+    if (entity.type && entity.id) return entity;
+    if (entity.name && !entity.title) return { type: 'note', id: entity.id, title: entity.name };
+    if (entity.title) return { type: entity.type || 'event', id: entity.id, title: entity.title };
+    return null;
+  }
+  function _resolverFor() {
+    return (name) => resolveLinkName(name, { notes, events, tasks }, normalize);
+  }
+  async function createEntityLink({ source, target, origin = 'manual' }) {
+    const s = _normalizeEntity(source); const t = _normalizeEntity(target);
+    if (!s || !t || !user) return null;
+    if (s.type === t.type && s.id === t.id) return null;
+    const exists = entityLinks.find(l =>
+      l.source_type === s.type && l.source_id === s.id &&
+      l.target_type === t.type && l.target_id === t.id);
+    if (exists && exists.origin !== 'rejected' && origin !== 'rejected') return exists;
+    const row = await dbInsertEntityLink({
+      source_type: s.type, source_id: s.id,
+      target_type: t.type, target_id: t.id,
+      origin,
+    }, user.id);
+    if (row) {
+      setEntityLinks(prev => {
+        const idx = prev.findIndex(l => l.id === row.id);
+        return idx >= 0 ? prev.map((l,i) => i===idx ? row : l) : [...prev, row];
+      });
+    }
+    return row;
+  }
+  async function deleteEntityLinkRow(link) {
+    if (!user || !link) return;
+    if (link.id) {
+      await dbDeleteEntityLink(link.id, user.id);
+    } else {
+      await dbDeleteEntityLinkByPair(link, user.id);
+    }
+    setEntityLinks(prev => prev.filter(l => link.id ? l.id !== link.id :
+      !(l.source_type===link.source_type && l.source_id===link.source_id &&
+        l.target_type===link.target_type && l.target_id===link.target_id)));
+  }
+  // Reconcile [[wikilinks]] inside an HTML body against existing wikilink-origin
+  // rows for that source. Inserts new ones, removes ones the user took out.
+  async function syncWikilinksForEntity(source, html) {
+    const s = _normalizeEntity(source); if (!s || !user) return;
+    const found = extractWikilinks(html || '');
+    const resolver = _resolverFor();
+    const resolved = found
+      .map(f => resolver(f.name))
+      .filter(t => t && !(t.type === s.type && t.id === s.id));
+    const wantKeys = new Set(resolved.map(t => `${t.type}:${t.id}`));
+    const existingWiki = entityLinks.filter(l =>
+      l.origin === 'wikilink' && l.source_type === s.type && l.source_id === s.id);
+    // Insert missing
+    for (const t of resolved) {
+      const has = existingWiki.find(l => l.target_type === t.type && l.target_id === t.id);
+      if (!has) await createEntityLink({ source: s, target: t, origin: 'wikilink' });
+    }
+    // Delete removed
+    for (const l of existingWiki) {
+      const key = `${l.target_type}:${l.target_id}`;
+      if (!wantKeys.has(key)) await deleteEntityLinkRow(l);
+    }
+  }
+  // Debounced auto-suggestion: 2s after a save, scan for the best heuristic
+  // candidate and surface it for user approval.
+  function maybeSuggestLink(changedEntity) {
+    const s = _normalizeEntity(changedEntity); if (!s) return;
+    if (linkSuggestTimerRef.current) clearTimeout(linkSuggestTimerRef.current);
+    linkSuggestTimerRef.current = setTimeout(() => {
+      try {
+        const all = flattenEntities({ notes, events, tasks });
+        const changedFull = all.find(e => e.type === s.type && e.id === s.id) || s;
+        const suggestion = bestSuggestion(changedFull, all, {
+          threshold: 80,
+          links: entityLinks,
+          deriveSubject: inferSubjectFromTitle,
+        });
+        if (!suggestion) return;
+        const key = [suggestion.source.type, suggestion.source.id, suggestion.target.type, suggestion.target.id].join('|');
+        setPendingLinkSuggestions(prev => prev.find(p => p.key === key) ? prev : [...prev, { ...suggestion, key }]);
+      } catch (e) { console.warn('link suggestion failed:', e); }
+    }, 2000);
+  }
+  async function confirmLinkSuggestion(item) {
+    if (!item) return;
+    await createEntityLink({ source: item.source, target: item.target, origin: 'heuristic' });
+    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
+    setToastMsg('Linked');
+  }
+  async function rejectLinkSuggestion(item) {
+    if (!item) return;
+    await createEntityLink({ source: item.source, target: item.target, origin: 'rejected' });
+    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
+  }
+  function dismissLinkSuggestion(item) {
+    if (!item) return;
+    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
+  }
+  // Click handler for rendered <a class="wikilink"> spans inside notes/event descriptions.
+  function handleWikilinkClick(target) {
+    if (!target) return;
+    if (target.type === 'event') {
+      window.dispatchEvent(new CustomEvent('sos:calendar:focus-event', { detail: { id: target.id } }));
+      setShowNotes(false);
+      setLofiNoteOpen(false);
+    } else if (target.type === 'task') {
+      setActivePanel('tasks');
+      window.dispatchEvent(new CustomEvent('sos:tasks:focus', { detail: { id: target.id } }));
+    } else if (target.type === 'note') {
+      window.dispatchEvent(new CustomEvent('sos:notes:focus', { detail: { id: target.id } }));
+    }
+  }
+
   function handleDeleteNote(noteId) {
     setNotes(prev => prev.filter(n => n.id !== noteId));
-    if (user) syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+    if (user) {
+      syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+      // Remove links referencing this note (either side).
+      const orphaned = entityLinks.filter(l =>
+        (l.source_type === 'note' && l.source_id === noteId) ||
+        (l.target_type === 'note' && l.target_id === noteId));
+      orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
+      setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
+    }
     setToastMsg('Note deleted');
   }
 
   function handleUpdateNote(updated) {
     setNotes(prev => prev.map(n => n.id === updated.id ? { ...n, ...updated } : n));
     if (user) syncOp(() => dbUpsertNote(updated, user.id));
+    if (user) {
+      const entity = { type: 'note', id: updated.id, title: updated.name };
+      syncWikilinksForEntity(entity, updated.content || '');
+      maybeSuggestLink(entity);
+    }
     setToastMsg('Note saved');
   }
 
@@ -5671,6 +6073,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     const note = { id: uid(), ...noteData, updatedAt: new Date().toISOString() };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    if (user) {
+      const entity = { type: 'note', id: note.id, title: note.name };
+      syncWikilinksForEntity(entity, note.content || '');
+      maybeSuggestLink(entity);
+    }
     setToastMsg('Note created');
   }
 
@@ -5862,6 +6269,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         intentType: inferredIntentType,
         recentlyExecutedActions: recentlyExecutedActionsRef.current,
         responseStyle,
+        entityLinks,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
@@ -5872,11 +6280,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         try { return localStorage.getItem('sos_preferred_model') || 'openai/gpt-oss-120b'; }
         catch (_) { return 'openai/gpt-oss-120b'; }
       })();
+      // Build LINKED CONTEXT for any [[wikilinks]] or fuzzy entity mentions in the
+      // user's message. Pulls 1-hop neighbors so the model can reason about the
+      // mentioned project's surrounding work. Empty string when nothing matches.
+      const linkedContextBlock = buildLinkedContextBlock({
+        message: msgContent,
+        notes, events, tasks,
+        entityLinks,
+        normalizeFn: normalize,
+      });
+      // For planning requests, the same block doubles as Pass 0 grounding —
+      // the planning pipeline forwards dynamicContext through draft/critique/refine.
+      const groundedDynamic = linkedContextBlock
+        ? `${promptPayload.dynamicContext || ''}${promptPayload.dynamicContext ? '\n\n' : ''}${isPlanningRequest ? 'GROUNDED SOURCES (use these as the basis for the plan; do not invent material outside them):\n' : ''}${linkedContextBlock}`
+        : promptPayload.dynamicContext;
+
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
         staticSystemPrompt: promptPayload.stablePrompt,
-        dynamicContext: promptPayload.dynamicContext,
+        dynamicContext: groundedDynamic,
         messages: historyForApi,
         maxTokens: isPlanningRequest ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
@@ -7231,6 +7654,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
           </div>
         ))}
+        {pendingLinkSuggestions.map((sug)=>(
+          <div key={'pls-'+sug.key} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+            <LinkSuggestionCard
+              suggestion={sug}
+              onApprove={confirmLinkSuggestion}
+              onReject={rejectLinkSuggestion}
+              onDismiss={dismissLinkSuggestion}
+            />
+          </div>
+        ))}
         {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
         {autoApproveStatus && <AutoApproveIndicator status={autoApproveStatus} />}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:16,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
@@ -7403,7 +7836,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           )}
           {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <NotesPanel notes={notes} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
+            <NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick} embedded/>
           )}
         </div>
       )}
@@ -7428,8 +7861,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onDeleteSavedChat={deleteSavedChat}
         onRenameSavedChat={renameSavedChat}
       />}
-      {showNotes&&<NotesPanel notes={notes} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
-      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
+      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}
         onQueryChange={setGlobalSearchQuery}

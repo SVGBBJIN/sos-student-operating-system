@@ -333,6 +333,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .notes-cancel-btn:hover{border-color:var(--accent);color:var(--text)}
 .notes-fs-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:10px;padding:4px 8px;cursor:pointer;font-size:0.85rem;transition:all .15s}
 .notes-fs-btn:hover{border-color:var(--accent);color:var(--accent)}
+.wikilink{color:var(--teal);text-decoration:none;border-bottom:1px dashed rgba(43,203,186,0.45);padding:0 2px;border-radius:2px;cursor:pointer;transition:background .12s,color .12s}
+.wikilink:hover{background:rgba(43,203,186,0.1);color:var(--teal)}
+.wikilink.unresolved{color:var(--text-dim);border-bottom-color:rgba(255,255,255,0.18);font-style:italic}
+.wikilink.unresolved:hover{background:rgba(255,255,255,0.04)}
 
 /* Calendar month grid */
 .cal-month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
