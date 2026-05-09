@@ -626,7 +626,7 @@ const POLICY_MODULES = {
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
   clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
   clarification_style: 'Execute when the student\'s message clearly contains all required fields. Use ask_clarification whenever a required field is missing, ambiguous, or only partially given.',
-  action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
+  action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
@@ -1081,9 +1081,11 @@ function inferActionFromMessage(text) {
     }
   }
 
-  // Classify as event vs task
-  const eventWords = /\b(test|exam|quiz|game|match|practice|rehearsal|tryout|meet|tournament|scrimmage|recital|lesson|appointment|meeting|class)\b/i;
-  const taskWords = /\b(hw|homework|essay|project|paper|assignment|lab|report|presentation|reading|worksheet|finish|complete|do|write|study)\b/i;
+  // Negations: "I don't have a test today" should NOT create anything.
+  if (/\b(don'?t|do\s+not|never|no(?:\s+longer|t)\b)\s+(have|need|got|gotta|want)\b/i.test(text)) return null;
+
+  const eventWords = /\b(test|exam|quiz|midterm|final|game|match|practice|rehearsal|tryout|meet|tournament|scrimmage|recital|concert|lesson|appointment|meeting|class|interview|workshop|seminar|orientation|deadline)\b/i;
+  const taskWords = /\b(hw|homework|essay|project|paper|assignment|lab|report|presentation|deck|slides|writeup|outline|draft|chapter|chapters|reading|worksheet|pset|problem\s+set|finish|complete|do|write|study)\b/i;
 
   // ── Check for remove/delete intent FIRST (before add logic) ──
   const removeSignals = /\b(cancel|remove|delete|clear|scratch|drop|ditch|wipe|axe|nix|scrap|erase|purge|yeet|bin|toss|dump|trash|strike|cut|forget|nevermind|never\s*mind)\b/i;
@@ -1109,9 +1111,10 @@ function inferActionFromMessage(text) {
     }
   }
 
-  // Try to build a title — strip scheduling noise
+  // Try to build a title — strip scheduling noise + statement-form openers
   let title = text.trim()
-    .replace(/\b(add|create|schedule|put|mark|set\s*up|log|i\s+have|i('ve|\s+got)|got|gotta|need\s*to|have\s*to|hafta|remind\s+me\s+to|remind\s+me\s+about|on|at|by|due|this|next|my|a|an|the|for|to)\b/gi, ' ')
+    .replace(/\b(hey|so|um|btw|just|fyi|also)\b[\s,]*/gi, ' ')
+    .replace(/\b(add|create|schedule|put|mark|set\s*up|log|i\s+have|i'?ve\s+got|ive\s+got|i\s+just\s+got|i\s+just\s+found\s+out|there'?s\s+a|got|gotta|need\s*to|have\s*to|hafta|i'?m\s+supposed\s+to|supposed\s+to|remind\s+me\s+to|remind\s+me\s+about|on|at|by|due|this|next|my|a|an|the|for|to)\b/gi, ' ')
     .replace(/\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|today|2day|next\s+week)\b/gi, ' ')
     .replace(/\s+/g, ' ').trim();
   if (title) title = title.charAt(0).toUpperCase() + title.slice(1);
@@ -1545,12 +1548,65 @@ const FIELD_LABELS = {
   subject: 'Subject', event_type: 'Type', category: 'Category',
 };
 
-function buildLocalClarification({ contextAction, knownFields = {}, missingFields = [], message }) {
+const ACTION_SCHEMAS = {
+  add_event: {
+    required: ['title', 'date'],
+    recommended: ['event_type'],
+    optional: ['subject', 'time', 'end_time', 'description', 'location', 'priority'],
+  },
+  add_task: {
+    required: ['title', 'due_date'],
+    recommended: ['subject'],
+    optional: ['est_time', 'priority', 'description'],
+  },
+};
+
+function readField(action, key) {
+  if (action == null) return undefined;
+  const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  if (action[key] !== undefined && action[key] !== null && String(action[key]).trim() !== '') return action[key];
+  if (action[camel] !== undefined && action[camel] !== null && String(action[camel]).trim() !== '') return action[camel];
+  if (key === 'title' && action.task_name) return action.task_name;
+  if (key === 'due_date' && action.due) return action.due;
+  return undefined;
+}
+
+function validateActionSchema(action) {
+  const schema = ACTION_SCHEMAS[action?.type];
+  if (!schema) return { valid: true, missing_required: [], missing_recommended: [] };
+  const missing = (keys) => keys.filter(k => readField(action, k) === undefined);
+  const missing_required = missing(schema.required);
+  const missing_recommended = missing(schema.recommended);
+  return { valid: missing_required.length === 0, missing_required, missing_recommended };
+}
+
+function defaultsForAction(actionType) {
+  if (actionType === 'add_event') return { event_type: 'other', subject: '', time: null, end_time: null };
+  if (actionType === 'add_task')  return { subject: '', est_time: 30, priority: 'medium' };
+  return {};
+}
+
+function valueForAssumption(field, clarification) {
+  const sd = clarification?.suggested_defaults?.[field];
+  if (sd !== undefined && sd !== null) return sd;
+  const d = defaultsForAction(clarification?.context_action)[field];
+  return d !== undefined ? d : null;
+}
+
+function buildLocalClarification({ contextAction, knownFields = {}, missingFields = [], message, suggestedDefaults = {}, optionsByField = {} }) {
+  const checklist = missingFields.map(f => ({
+    field: f,
+    status: 'pending',
+    value: null,
+    options: Array.isArray(optionsByField[f]) ? optionsByField[f].slice(0, 6) : null,
+  }));
   return {
     question: message || `A few details for this ${contextAction.replace(/_/g, ' ')}.`,
     context_action: contextAction,
     known_fields: knownFields,
     missing_fields: missingFields,
+    suggested_defaults: suggestedDefaults,
+    checklist,
     multi_field: true,
   };
 }
@@ -1611,9 +1667,27 @@ function TimeRangeSlider({ start, end, onChange }) {
   );
 }
 
-// Render a single missing-field input, picking the right control by field name.
-function FieldInput({ field, value, secondaryValue, onChange }) {
+function FieldInput({ field, value, secondaryValue, onChange, options }) {
   const inputType = FIELD_INPUT_TYPES[field] || 'text';
+  // AI-supplied options take precedence over the default control: render up to 6 chips.
+  if (Array.isArray(options) && options.length > 0) {
+    const visible = options.slice(0, 6);
+    return (
+      <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+        {visible.map(opt => {
+          const selected = String(value || '').toLowerCase() === String(opt).toLowerCase();
+          return (
+            <button key={opt} onClick={() => onChange(opt)} style={{
+              background: selected ? 'rgba(108,99,255,0.18)' : 'rgba(255,255,255,0.05)',
+              border: selected ? '1px solid rgba(108,99,255,0.45)' : '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 16, padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600,
+              color: selected ? 'var(--accent)' : 'var(--text)', cursor: 'pointer',
+            }}>{opt}</button>
+          );
+        })}
+      </div>
+    );
+  }
   if (inputType === 'date') {
     const todayStr = today();
     const tomorrow = new Date(todayStr + 'T12:00:00'); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -1694,12 +1768,16 @@ function FieldInput({ field, value, secondaryValue, onChange }) {
 }
 
 function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAnswersChange }) {
-  const { context_action, known_fields = {}, missing_fields = [], question, suggested_defaults = {} } = clarification || {};
+  const { context_action, known_fields = {}, missing_fields = [], question, suggested_defaults = {}, checklist = [] } = clarification || {};
+  const optionsFor = (field) => {
+    const fromChecklist = checklist.find(c => c.field === field)?.options;
+    return Array.isArray(fromChecklist) && fromChecklist.length > 0 ? fromChecklist.slice(0, 6) : null;
+  };
   const initialValues = () => {
     const init = {};
     if (missing_fields.includes('time')) { init.time = '17:00'; init.endTime = '18:00'; }
     for (const [k, v] of Object.entries(suggested_defaults || {})) {
-      if (missing_fields.includes(k) && !(k in init)) init[k] = v;
+      if (missing_fields.includes(k) && !(k in init) && v !== undefined && v !== null && v !== '') init[k] = v;
     }
     return init;
   };
@@ -1707,11 +1785,17 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
     (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers))
       ? savedAnswers : initialValues()
   );
+  const [fieldStatuses, setFieldStatuses] = useState(() => {
+    const s = {};
+    for (const f of missing_fields) s[f] = 'pending';
+    return s;
+  });
   const [stepIdx, setStepIdx] = useState(0);
   const ctxKey = `${context_action}|${missing_fields.join(',')}`;
   useEffect(() => {
     if (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers)) return;
     setFieldValues(initialValues());
+    const s = {}; for (const f of missing_fields) s[f] = 'pending'; setFieldStatuses(s);
     setStepIdx(0);
   }, [ctxKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1722,6 +1806,7 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
       if (onAnswersChange) onAnswersChange(next);
       return next;
     });
+    setFieldStatuses(prev => ({ ...prev, [name]: 'answered' }));
   }
 
   const totalSteps = missing_fields.length;
@@ -1734,27 +1819,51 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
   });
   const isLast = stepIdx === totalSteps - 1;
 
+  function submitAll(values) {
+    onSubmit({ context_action, known_fields, field_values: values, statuses: fieldStatuses, multi_field: true });
+  }
+
   function handleNext() {
     if (!currentFilled) return;
-    if (isLast) {
-      onSubmit({ context_action, known_fields, field_values: fieldValues, multi_field: true });
-    } else {
-      setStepIdx(i => i + 1);
-    }
+    if (isLast) submitAll(fieldValues);
+    else setStepIdx(i => i + 1);
   }
+
+  function handleAssume() {
+    const v = valueForAssumption(currentField, clarification);
+    const next = { ...fieldValues, [currentField]: v == null ? '' : v };
+    if (currentField === 'time' && (v == null || v === '')) {
+      next.time = '17:00'; next.endTime = '18:00';
+    }
+    setFieldValues(next);
+    setFieldStatuses(prev => ({ ...prev, [currentField]: 'assumed' }));
+    if (onAnswersChange) onAnswersChange(next);
+    if (isLast) submitAll(next);
+    else setStepIdx(i => i + 1);
+  }
+
+  const assumeAvailable = (() => {
+    const v = valueForAssumption(currentField, clarification);
+    return v !== null && v !== undefined;
+  })();
 
   const labelFor = (f) => FIELD_LABELS[f] || f.replace(/_/g, ' ');
 
-  // Dot indicators for progress
   const dots = missing_fields.map((_, i) => {
-    const filled = (() => { const v = fieldValues[missing_fields[i]]; return v !== undefined && v !== null && String(v).trim().length > 0; })();
+    const f = missing_fields[i];
+    const status = fieldStatuses[f] || 'pending';
+    const v = fieldValues[f];
+    const filled = v !== undefined && v !== null && String(v).trim().length > 0;
     const active = i === stepIdx;
+    let bg = 'rgba(255,255,255,0.12)';
+    if (active) bg = 'var(--accent)';
+    else if (status === 'assumed') bg = 'rgba(108,99,255,0.45)';
+    else if (filled) bg = 'rgba(255,255,255,0.35)';
     return (
       <button key={i} onClick={() => setStepIdx(i)} style={{
         width: active ? 20 : 7, height:7,
         borderRadius:4, border:'none', padding:0, cursor:'pointer',
-        background: active ? 'var(--accent)' : filled ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)',
-        transition:'width 0.2s, background 0.2s',
+        background: bg, transition:'width 0.2s, background 0.2s',
       }}/>
     );
   });
@@ -1807,17 +1916,23 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
         </div>
       )}
 
-      {/* Current field input */}
       <div style={{padding:'10px 20px 18px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
         <FieldInput
           field={currentField}
           value={currentValue}
           secondaryValue={currentField === 'time' ? fieldValues.endTime : undefined}
           onChange={(v, secondary) => setField(currentField, v, secondary)}
+          options={optionsFor(currentField)}
         />
+        {assumeAvailable && (
+          <button onClick={handleAssume} style={{
+            marginTop:10, background:'transparent', border:'1px dashed rgba(255,255,255,0.18)',
+            borderRadius:8, padding:'6px 10px', color:'var(--text-dim)', fontSize:'0.78rem',
+            fontWeight:600, cursor:'pointer',
+          }}>Let AI decide</button>
+        )}
       </div>
 
-      {/* Footer: dots + back + next/submit */}
       <div style={{display:'flex', alignItems:'center', gap:8, padding:'8px 16px 14px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
         <div style={{display:'flex', alignItems:'center', gap:4, flex:'0 0 auto'}}>
           {dots}
@@ -1841,6 +1956,48 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
           fontSize:'0.86rem', fontWeight:700, cursor: currentFilled ? 'pointer' : 'default',
         }}>{isLast ? 'Add it →' : 'Next →'}</button>
       </div>
+    </div>
+  );
+}
+
+function SubjectChipGroup({ subjects, value, otherText, onPick, onOtherText }) {
+  const [expanded, setExpanded] = useState(false);
+  const list = subjects.filter(s => s.toLowerCase() !== 'other');
+  const visible = expanded ? list : list.slice(0, 6);
+  const isOther = value === 'other';
+  return (
+    <div style={{flex:1, display:'flex', flexDirection:'column', gap:6}}>
+      <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+        {visible.map(s => {
+          const selected = String(value || '').toLowerCase() === s.toLowerCase();
+          return (
+            <button key={s} onClick={() => onPick(s)} style={{
+              background: selected ? 'rgba(108,99,255,0.18)' : 'rgba(255,255,255,0.05)',
+              border: selected ? '1px solid rgba(108,99,255,0.45)' : '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 16, padding: '4px 10px', fontSize: '0.76rem', fontWeight: 600,
+              color: selected ? 'var(--accent)' : 'var(--text)', cursor: 'pointer',
+            }}>{s}</button>
+          );
+        })}
+        {!expanded && list.length > 6 && (
+          <button onClick={() => setExpanded(true)} style={{
+            background:'transparent', border:'1px dashed rgba(255,255,255,0.18)',
+            borderRadius:16, padding:'4px 10px', fontSize:'0.76rem', fontWeight:600,
+            color:'var(--text-dim)', cursor:'pointer',
+          }}>More…</button>
+        )}
+        <button onClick={() => onPick('other')} style={{
+          background: isOther ? 'rgba(108,99,255,0.18)' : 'rgba(255,255,255,0.05)',
+          border: isOther ? '1px solid rgba(108,99,255,0.45)' : '1px dashed rgba(255,255,255,0.18)',
+          borderRadius: 16, padding: '4px 10px', fontSize: '0.76rem', fontWeight: 600,
+          color: isOther ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer',
+        }}>Other</button>
+      </div>
+      {isOther && (
+        <input type="text" value={otherText || ''} onChange={(e) => onOtherText(e.target.value)}
+          placeholder="Type the subject"
+          style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, color:'var(--text)', fontSize:'0.84rem', padding:'6px 10px', outline:'none'}}/>
+      )}
     </div>
   );
 }
@@ -1985,9 +2142,12 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
   const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
   const subjectOptions = ['Mathematics', 'English', 'Biology', 'Chemistry', 'Physics', 'History', 'Language Arts', 'Spanish', 'French', 'Economics', 'Psychology', 'Government', 'Computer Science', 'Calculus', 'Literature', 'Physical Education', 'Other'];
-  const normalizedOptions = options.map(normalizeOption).filter(
+  const normalizedOptionsAll = options.map(normalizeOption).filter(
     opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
   );
+  const [optionsExpanded, setOptionsExpanded] = useState(false);
+  const normalizedOptions = optionsExpanded ? normalizedOptionsAll : normalizedOptionsAll.slice(0, 6);
+  const hasMoreOptions = normalizedOptionsAll.length > normalizedOptions.length;
   const answer = answers[currentQIdx] || { selected: [], otherText: '', dateValue: '', subjectValue: '' };
   const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim() || !!answer.dateValue || !!answer.subjectValue;
 
@@ -2124,6 +2284,12 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
               </div>
             );
           })}
+          {hasMoreOptions && (
+            <div onClick={() => setOptionsExpanded(true)} style={{
+              padding:'10px 20px', cursor:'pointer', textAlign:'center',
+              fontSize:'0.78rem', color:'var(--text-dim)', fontWeight:600,
+            }}>Show {normalizedOptionsAll.length - normalizedOptions.length} more…</div>
+          )}
         </div>
       )}
 
@@ -2141,44 +2307,13 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
           </svg>
         </div>
         {isSubjectInput ? (
-          <>
-            <select
-              value={answer.subjectValue || ''}
-              onChange={(e) => setSubjectValue(currentQIdx, e.target.value)}
-              style={{
-                flex: 1,
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 8,
-                color: 'var(--text)',
-                fontSize: '0.82rem',
-                padding: '6px 8px',
-                outline: 'none',
-              }}
-            >
-              <option value="">Choose a subject…</option>
-              {subjectOptions.map((subject) => (
-                <option key={subject} value={subject.toLowerCase() === 'other' ? 'other' : subject}>{subject}</option>
-              ))}
-            </select>
-            {(answer.subjectValue === 'other') && (
-              <input
-                type="text"
-                value={answer.otherText}
-                onChange={(e) => setOtherText(currentQIdx, e.target.value)}
-                placeholder="Other subject"
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-dim)',
-                  fontSize: '0.84rem',
-                  outline: 'none',
-                  padding: '4px 0',
-                }}
-              />
-            )}
-          </>
+          <SubjectChipGroup
+            subjects={subjectOptions}
+            value={answer.subjectValue}
+            otherText={answer.otherText}
+            onPick={(v) => setSubjectValue(currentQIdx, v)}
+            onOtherText={(t) => setOtherText(currentQIdx, t)}
+          />
         ) : (
           <input
             type={isDateInput ? 'date' : 'text'}
@@ -5098,20 +5233,21 @@ function App() {
           const rawDue = (action.due_date || action.due || '').trim();
           const titleValid = taskName && taskName.length >= 3;
           const dueValid = rawDue && /^\d{4}-\d{2}-\d{2}$/.test(rawDue);
-          if (!titleValid || !dueValid) {
+          const normalized = { ...action, type: 'add_task', title: titleValid ? taskName : '', due_date: dueValid ? rawDue : '' };
+          const { valid, missing_required } = validateActionSchema(normalized);
+          if (!valid) {
             const known = {};
             if (titleValid) known.task_name = taskName;
             if (dueValid) known.due_date = rawDue;
             if (action.subject) known.subject = action.subject;
             if (action.estimated_minutes) known.estimated_minutes = action.estimated_minutes;
-            const missing = [];
-            if (!titleValid) missing.push('task_name');
-            if (!dueValid) missing.push('due_date');
+            const missing = missing_required.map(f => f === 'title' ? 'task_name' : f);
             setPendingClarification(buildLocalClarification({
               contextAction: 'add_task',
               knownFields: known,
               missingFields: missing,
               message: missing.length > 1 ? "I need a couple details for this task." : (missing[0] === 'task_name' ? "What should I call this task?" : "When is this task due?"),
+              suggestedDefaults: { subject: action.subject || '', est_time: action.estimated_minutes || 30 },
             }));
             return;
           }
@@ -5256,13 +5392,13 @@ function App() {
           break;
         }
         case 'add_event': {
-          // Validation is done server-side by chat-core before this point.
-          // We still guard against the rare direct-dispatch case (e.g. Google import).
           const evTitle = (action.title || '').trim();
           const rawEvDate = (action.date || '').trim();
           const titleValid = evTitle && evTitle.length >= 2;
           const dateValid = rawEvDate && /^\d{4}-\d{2}-\d{2}$/.test(rawEvDate);
-          if (!titleValid || !dateValid) {
+          const normalized = { ...action, type: 'add_event', title: titleValid ? evTitle : '', date: dateValid ? rawEvDate : '' };
+          const { valid, missing_required } = validateActionSchema(normalized);
+          if (!valid) {
             const known = {};
             if (titleValid) known.title = evTitle;
             if (dateValid) known.date = rawEvDate;
@@ -5272,14 +5408,12 @@ function App() {
             if (action.endTime) known.endTime = action.endTime;
             if (action.location) known.location = action.location;
             if (action.description) known.description = action.description;
-            const missing = [];
-            if (!titleValid) missing.push('title');
-            if (!dateValid) missing.push('date');
             setPendingClarification(buildLocalClarification({
               contextAction: 'add_event',
               knownFields: known,
-              missingFields: missing,
-              message: missing.length > 1 ? "I need a couple details for this event." : (missing[0] === 'title' ? "What should I call this event?" : "What date?"),
+              missingFields: missing_required,
+              message: missing_required.length > 1 ? "I need a couple details for this event." : (missing_required[0] === 'title' ? "What should I call this event?" : "What date?"),
+              suggestedDefaults: { event_type: action.event_type || 'other', subject: action.subject || '' },
             }));
             return;
           }
@@ -6532,7 +6666,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         content: m.content || '',
       }));
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
-      const likelyActionIntent = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register|task|assignment|deadline|calendar|event|homework|quiz|exam)\b/i.test(msgContent);
+      const negationPattern = /\b(don'?t|do\s+not|never|no(?:\s+longer|t)\b)\s+(have|need|got|gotta|want)\b/i;
+      const imperativeSignals = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i;
+      const itemSignals = /\b(task|assignment|deadline|calendar|event|homework|quiz|exam|test|midterm|final|essay|project|paper|presentation|deck|slides|writeup|outline|draft|chapter|chapters|reading|worksheet|lab|report|pset|problem\s+set|recital|concert|interview|workshop|seminar|orientation|appointment|meeting|class|practice|game|match|tournament|tryout)\b/i;
+      const statementSignals = /\b(i\s+have|i've\s+got|ive\s+got|there'?s\s+a|i\s+just\s+(?:got|found\s+out)|i\s+need\s+to|i\s+gotta|i'?m\s+supposed\s+to|got\s+to|due\s+\w+)\b/i;
+      const dateSignals = /\b(today|tonight|tomorrow|tmrw|tmw|2morrow|2day|next\s+\w+|this\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|\d{1,2}\/\d{1,2})\b/i;
+      const looksLikeNegation = negationPattern.test(msgContent);
+      const likelyActionIntent = !looksLikeNegation && (
+        imperativeSignals.test(msgContent)
+        || itemSignals.test(msgContent)
+        || (statementSignals.test(msgContent) && (itemSignals.test(msgContent) || dateSignals.test(msgContent)))
+      );
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isPlanningRequest = PLANNING_REGEX.test(text || '');
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
@@ -6911,7 +7055,35 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             }, 450);
             setTimeout(() => setAutoApproveStatus(null), 2200);
           } else {
-            setPendingActions(prev => [...prev, ...needsConfirm.map(a => ({ action:a, timestamp:Date.now() }))]);
+            // Schema gate: bounce add_event/add_task with missing required fields back to clarification
+            // instead of confirmation so the user fills the gaps before the ConfirmationCard renders.
+            const gated = [];
+            let bounced = false;
+            for (const a of needsConfirm) {
+              if (a.type === 'add_event' || a.type === 'add_task') {
+                const norm = { ...a, due_date: a.due_date || a.due };
+                const { valid, missing_required } = validateActionSchema(norm);
+                if (!valid && !bounced) {
+                  const known = {};
+                  for (const k of Object.keys(a)) {
+                    if (a[k] !== undefined && a[k] !== null && String(a[k]).trim() !== '' && k !== 'type') known[k] = a[k];
+                  }
+                  setPendingClarification(buildLocalClarification({
+                    contextAction: a.type,
+                    knownFields: known,
+                    missingFields: missing_required,
+                    message: `I need ${missing_required.length > 1 ? 'a couple more details' : (missing_required[0] === 'title' ? 'a title' : missing_required[0] === 'date' ? 'a date' : missing_required[0] === 'due_date' ? 'a due date' : 'one more detail')} for this ${a.type === 'add_event' ? 'event' : 'task'}.`,
+                    suggestedDefaults: { event_type: a.event_type, subject: a.subject, est_time: a.estimated_minutes },
+                  }));
+                  bounced = true;
+                  continue;
+                }
+              }
+              gated.push(a);
+            }
+            if (gated.length > 0) {
+              setPendingActions(prev => [...prev, ...gated.map(a => ({ action:a, timestamp:Date.now() }))]);
+            }
           }
         }
       }
@@ -6967,10 +7139,32 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     // fields can't get dropped in re-routing.
     if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.multi_field && payload.context_action) {
       const { context_action, known_fields = {}, field_values = {} } = payload;
-      const action = { type: context_action, ...known_fields, ...field_values };
+      // Normalize: task_name → title for schema check
+      const merged = { type: context_action, ...known_fields, ...field_values };
+      if (merged.task_name && !merged.title) merged.title = merged.task_name;
+      // Apply soft defaults for any missing recommended fields so we don't ask twice.
+      const defaults = defaultsForAction(context_action);
+      for (const [k, v] of Object.entries(defaults)) {
+        if (merged[k] === undefined || merged[k] === null || merged[k] === '') merged[k] = v;
+      }
+      const { valid, missing_required } = validateActionSchema(merged);
+      if (!valid) {
+        // Re-ask only the still-missing required fields. Preserve everything we have.
+        const known = { ...known_fields, ...field_values };
+        delete known.endTime; // endTime is internal to the wizard, not a known field
+        setPendingClarification(buildLocalClarification({
+          contextAction: context_action,
+          knownFields: known,
+          missingFields: missing_required,
+          message: 'Just one more thing —',
+          suggestedDefaults: pendingClarification?.suggested_defaults || {},
+        }));
+        setPendingClarificationAnswers(null);
+        return;
+      }
       setPendingClarification(null);
       setPendingClarificationAnswers(null);
-      setPendingActions(prev => [...prev, { action, timestamp: Date.now() }]);
+      setPendingActions(prev => [...prev, { action: merged, timestamp: Date.now() }]);
       return;
     }
     // payload is either a single object { selected, options, otherText } or an array of them

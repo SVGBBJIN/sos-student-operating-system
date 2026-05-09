@@ -299,15 +299,15 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student for any missing or ambiguous detail BEFORE you run an action tool. Use this whenever a required field (title, date, due_date, subject, time, days, start, end) isn't clearly stated in the message. ALWAYS prefer ask_clarification over (a) calling an action tool with placeholder/guessed/fabricated values, or (b) replying in plain text to ask for the value. The only exception is greetings, small talk, or non-action messages — those get a plain-text reply with no tool call.",
+        "Ask the student for any missing or ambiguous detail BEFORE you run an action tool. Use this whenever a REQUIRED field (title + date for add_event, title + due_date for add_task) isn't clearly stated. ALWAYS prefer ask_clarification over (a) calling an action tool with placeholder/guessed/fabricated values, or (b) replying in plain text to ask for the value. RULES: (1) Always populate `missing_fields[]` precisely — list only fields the user actually has not given. (2) When the field has a small set of natural choices (event_type, subject, priority), provide up to 6 short single-word `options` — never more than 6, fewer is better. (3) Don't ask about fields the system can default (event_type defaults to 'other', subject can be empty, time is optional). (4) Greetings, small talk, or non-action messages → plain-text reply, no tool call.",
       parameters: {
         type: "object",
         properties: {
-          question: { type: "string", description: "A concise question asking for the missing detail." },
+          question: { type: "string", description: "One concise question asking for the missing detail. Keep it short — under 12 words when possible." },
           reason: { type: "string", description: "Briefly explain what is missing or ambiguous." },
           context_action: { type: "string", description: "The action tool that needs clarification, such as add_task or add_event." },
-          missing_fields: { type: "array", items: { type: "string" }, description: "Field names that need user input, such as task_name, title, due_date, date, or subject." },
-          options: { type: "array", items: { type: "string" }, description: "Optional short answer choices when helpful." },
+          missing_fields: { type: "array", items: { type: "string" }, description: "Required fields the user has not specified. Use exact names: title, task_name, date, due_date, subject, event_type, time. Do NOT include fields that already have a clear value." },
+          options: { type: "array", items: { type: "string" }, description: "Up to 6 short answer choices when helpful. Skip if the answer is free-form (title, date)." },
           multi_select: { type: "boolean", description: "Whether multiple options can be selected." },
         },
         required: ["question"],

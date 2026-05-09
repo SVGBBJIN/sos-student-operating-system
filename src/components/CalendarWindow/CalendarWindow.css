@@ -3,6 +3,12 @@
    No hardcoded hex, rgb, or hsl values.
    ═══════════════════════════════════════════════════════════════ */
 
+@keyframes sos-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sos-modal-pop {
+  0%   { opacity: 0; transform: scale(0.94) translateY(8px); }
+  100% { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
 /* ── Size states ────────────────────────────────────────────────── */
 .cw-container {
   display: flex;
