@@ -624,8 +624,8 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If a required field is missing for an action, respond with plain text asking for the specific missing detail — do not call any tool with placeholder values. For greetings, small talk, or messages with no action intent, respond naturally without calling any tool.',
-  clarification_style: 'Prefer executing with reasonable defaults when confidence is high. Only ask for a missing detail when it would cause the action to fail or produce wrong output.',
+  clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
+  clarification_style: 'Execute when the student\'s message clearly contains all required fields. Use ask_clarification whenever a required field is missing, ambiguous, or only partially given.',
   action_tools: 'When details are explicit, call the matching action tool. Use specific student-provided titles only.',
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
@@ -6039,7 +6039,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   function autoConfirmPending() {
-    if (pendingClarification) return;
+    // A new free-form message means the student moved on — treat any open
+    // clarification card as skipped instead of letting it lock new actions
+    // out of execution downstream. Mirrors what the card's own Skip button does.
+    if (pendingClarification) {
+      setPendingClarification(null);
+      setPendingClarificationAnswers(null);
+    }
     if (pendingActions.length > 0) { pendingActions.forEach(a => executeAction(a.action)); setPendingActions([]); }
     if (pendingContent.length > 0) { pendingContent.forEach((c,i) => { const formatted = formatContentForNote(c); executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted }); }); setPendingContent([]); }
   }
@@ -6289,6 +6295,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         return;
       }
 
+      // Recovery fallback: if the model returned plain text with neither an
+      // action nor a clarification, but the student's message clearly intends
+      // an action, run the deterministic regex parser so the request doesn't
+      // dead-end at the "I didn't get a response" message. We never auto-fire
+      // the destructive clear_all from this path — that always needs an
+      // explicit tool call.
+      if (actions.length === 0 && validClarifications.length === 0
+          && likelyActionIntent && msgContent && !photo && !fromClarification) {
+        const inferred = inferActionFromMessage(msgContent);
+        if (inferred && inferred.type && inferred.type !== 'clear_all') {
+          actions = [inferred];
+        }
+      }
+
       const rawContent = typeof chatData?.content === 'string' ? chatData.content.trim() : '';
       const actionAckByType = {
         update_event: 'got it — I can update that event.',
@@ -6476,12 +6496,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       if (actions.length > 0) {
         const confirmTypes = ['add_task','add_event','add_block','break_task','delete_task','delete_event','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event','clear_all','edit_note','delete_note'];
-        const blockExecution = pendingClarification && !fromClarification;
-        const autoExec = blockExecution ? [] : actions.filter(a => !confirmTypes.includes(a.type));
+        // No more blockExecution gate: a fresh user message has already cleared
+        // any stale pendingClarification via autoConfirmPending(), and a freshly
+        // produced clarification short-circuits earlier in this function.
+        const autoExec = actions.filter(a => !confirmTypes.includes(a.type));
         autoExec.forEach(queueOrExecute);
         const needsConfirm = actions.filter(a => confirmTypes.includes(a.type));
         if (needsConfirm.length > 0) {
-          if (aiAutoApprove && !blockExecution) {
+          if (aiAutoApprove) {
             const editingActionTypes = ['update_event','convert_event_to_block','convert_block_to_event','edit_note'];
             const hasEditingAction = needsConfirm.some(a => editingActionTypes.includes(a.type));
             setAutoApproveStatus({
