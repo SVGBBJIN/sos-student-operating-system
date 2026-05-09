@@ -1698,7 +1698,6 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
   const initialValues = () => {
     const init = {};
     if (missing_fields.includes('time')) { init.time = '17:00'; init.endTime = '18:00'; }
-    // Pre-fill suggested defaults (e.g. inferred subject) so the user just confirms.
     for (const [k, v] of Object.entries(suggested_defaults || {})) {
       if (missing_fields.includes(k) && !(k in init)) init[k] = v;
     }
@@ -1708,11 +1707,12 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
     (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers))
       ? savedAnswers : initialValues()
   );
-  // Reset when a fresh clarification arrives
+  const [stepIdx, setStepIdx] = useState(0);
   const ctxKey = `${context_action}|${missing_fields.join(',')}`;
   useEffect(() => {
     if (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers)) return;
     setFieldValues(initialValues());
+    setStepIdx(0);
   }, [ctxKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setField(name, value, secondary) {
@@ -1724,17 +1724,40 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
     });
   }
 
+  const totalSteps = missing_fields.length;
+  const currentField = missing_fields[stepIdx];
+  const currentValue = fieldValues[currentField];
+  const currentFilled = currentValue !== undefined && currentValue !== null && String(currentValue).trim().length > 0;
   const allFilled = missing_fields.every(f => {
     const v = fieldValues[f];
     return v !== undefined && v !== null && String(v).trim().length > 0;
   });
+  const isLast = stepIdx === totalSteps - 1;
 
-  function handleSubmit() {
-    if (!allFilled) return;
-    onSubmit({ context_action, known_fields, field_values: fieldValues, multi_field: true });
+  function handleNext() {
+    if (!currentFilled) return;
+    if (isLast) {
+      onSubmit({ context_action, known_fields, field_values: fieldValues, multi_field: true });
+    } else {
+      setStepIdx(i => i + 1);
+    }
   }
 
   const labelFor = (f) => FIELD_LABELS[f] || f.replace(/_/g, ' ');
+
+  // Dot indicators for progress
+  const dots = missing_fields.map((_, i) => {
+    const filled = (() => { const v = fieldValues[missing_fields[i]]; return v !== undefined && v !== null && String(v).trim().length > 0; })();
+    const active = i === stepIdx;
+    return (
+      <button key={i} onClick={() => setStepIdx(i)} style={{
+        width: active ? 20 : 7, height:7,
+        borderRadius:4, border:'none', padding:0, cursor:'pointer',
+        background: active ? 'var(--accent)' : filled ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)',
+        transition:'width 0.2s, background 0.2s',
+      }}/>
+    );
+  });
 
   return (
     <div className="sos-clarification-card sos-clarification-card-multi" role="dialog" style={{
@@ -1742,46 +1765,81 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
       borderRadius:18, padding:0, maxWidth:460, width:'100%',
       boxShadow:'0 8px 32px rgba(0,0,0,0.4)', overflow:'hidden',
     }}>
-      <div style={{padding:'18px 20px 12px', display:'flex', alignItems:'flex-start', gap:12}}>
-        <div style={{flex:1, fontSize:'1rem', fontWeight:700, color:'var(--text)', lineHeight:1.4, letterSpacing:'-0.2px'}}>
-          {question || 'A few quick details'}
+      {/* Header */}
+      <div style={{padding:'18px 20px 10px', display:'flex', alignItems:'flex-start', gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:'0.7rem', color:'var(--text-dim)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:4}}>
+            {question || 'A few quick details'} · {stepIdx + 1} of {totalSteps}
+          </div>
+          <div style={{fontSize:'1.05rem', fontWeight:700, color:'var(--text)', lineHeight:1.3}}>
+            {labelFor(currentField)}
+          </div>
         </div>
         <button onClick={onSkip} style={{background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1}}>×</button>
       </div>
 
+      {/* Known fields summary chips */}
       {Object.keys(known_fields).length > 0 && (
-        <div style={{padding:'4px 20px 10px', display:'flex', flexWrap:'wrap', gap:6}}>
+        <div style={{padding:'0 20px 8px', display:'flex', flexWrap:'wrap', gap:5}}>
           {Object.entries(known_fields).map(([k, v]) => (
             <span key={k} style={{
-              fontSize:'0.7rem', color:'var(--text-dim)', background:'rgba(255,255,255,0.04)',
-              padding:'3px 8px', borderRadius:10, border:'1px solid rgba(255,255,255,0.06)',
+              fontSize:'0.68rem', color:'var(--text-dim)', background:'rgba(255,255,255,0.04)',
+              padding:'2px 7px', borderRadius:10, border:'1px solid rgba(255,255,255,0.06)',
             }}>{labelFor(k)}: <span style={{color:'var(--text)'}}>{String(v)}</span></span>
           ))}
         </div>
       )}
 
-      <div style={{padding:'8px 20px 16px', display:'flex', flexDirection:'column', gap:14, borderTop:'1px solid rgba(255,255,255,0.06)'}}>
-        {missing_fields.map(f => (
-          <div key={f} style={{display:'flex', flexDirection:'column', gap:6}}>
-            <label style={{fontSize:'0.72rem', color:'var(--text-dim)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px'}}>{labelFor(f)}</label>
-            <FieldInput field={f} value={fieldValues[f]} secondaryValue={f === 'time' ? fieldValues.endTime : undefined}
-              onChange={(v, secondary) => setField(f, v, secondary)}/>
-          </div>
-        ))}
+      {/* Completed steps summary */}
+      {stepIdx > 0 && (
+        <div style={{padding:'0 20px 8px', display:'flex', flexWrap:'wrap', gap:5}}>
+          {missing_fields.slice(0, stepIdx).map(f => {
+            const v = fieldValues[f];
+            if (v === undefined || v === null || String(v).trim().length === 0) return null;
+            return (
+              <button key={f} onClick={() => setStepIdx(missing_fields.indexOf(f))} style={{
+                fontSize:'0.68rem', color:'rgba(255,255,255,0.6)', background:'rgba(255,255,255,0.06)',
+                padding:'2px 7px', borderRadius:10, border:'1px solid rgba(255,255,255,0.10)',
+                cursor:'pointer', fontFamily:'inherit',
+              }}>{labelFor(f)}: <span style={{color:'var(--text)'}}>{f === 'time' ? `${v}${fieldValues.endTime ? ' — ' + fieldValues.endTime : ''}` : String(v)}</span> ✎</button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Current field input */}
+      <div style={{padding:'10px 20px 18px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+        <FieldInput
+          field={currentField}
+          value={currentValue}
+          secondaryValue={currentField === 'time' ? fieldValues.endTime : undefined}
+          onChange={(v, secondary) => setField(currentField, v, secondary)}
+        />
       </div>
 
-      <div style={{display:'flex', gap:8, padding:'10px 16px 14px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+      {/* Footer: dots + back + next/submit */}
+      <div style={{display:'flex', alignItems:'center', gap:8, padding:'8px 16px 14px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+        <div style={{display:'flex', alignItems:'center', gap:4, flex:'0 0 auto'}}>
+          {dots}
+        </div>
+        <div style={{flex:1}}/>
+        {stepIdx > 0 && (
+          <button onClick={() => setStepIdx(i => i - 1)} style={{
+            background:'transparent', border:'1px solid rgba(255,255,255,0.1)',
+            borderRadius:8, padding:'8px 14px', color:'var(--text-dim)', fontSize:'0.84rem', fontWeight:600, cursor:'pointer',
+          }}>← Back</button>
+        )}
         <button onClick={onSkip} style={{
-          flex:'0 0 auto', background:'transparent', border:'1px solid rgba(255,255,255,0.1)',
+          background:'transparent', border:'1px solid rgba(255,255,255,0.1)',
           borderRadius:8, padding:'8px 14px', color:'var(--text-dim)', fontSize:'0.84rem', fontWeight:600, cursor:'pointer',
         }}>Skip</button>
-        <button onClick={handleSubmit} disabled={!allFilled} style={{
-          flex:1, background: allFilled ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-          border: allFilled ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
-          borderRadius:8, padding:'8px 14px',
-          color: allFilled ? '#fff' : 'rgba(255,255,255,0.3)',
-          fontSize:'0.86rem', fontWeight:700, cursor: allFilled ? 'pointer' : 'default',
-        }}>Add it →</button>
+        <button onClick={handleNext} disabled={!currentFilled} style={{
+          background: currentFilled ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+          border: currentFilled ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+          borderRadius:8, padding:'8px 18px',
+          color: currentFilled ? '#fff' : 'rgba(255,255,255,0.3)',
+          fontSize:'0.86rem', fontWeight:700, cursor: currentFilled ? 'pointer' : 'default',
+        }}>{isLast ? 'Add it →' : 'Next →'}</button>
       </div>
     </div>
   );
