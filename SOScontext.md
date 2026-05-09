@@ -6,7 +6,7 @@
 
 ## What this app is
 
-Chat-first AI student planner. All tasks, events, and notes are created through natural language. The AI parses intent into structured actions; the client executes them against Supabase. Three UI modes: **lofi** (default), **sidebar**, **topbar**.
+Chat-first AI student planner. All tasks, events, and notes are created through natural language. The AI parses intent into structured actions; the client executes them against Supabase. The current UI is a single **lofi** three-column layout (Calendar/Notes-Projects-Proofread on the left, chat in the center, widgets on the right). The non-lofi `sidebar` and `topbar` branches are dormant code.
 
 ---
 
@@ -14,36 +14,37 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 
 | Need | Go to |
 |------|-------|
-| Add/change an AI tool | `shared/ai/chat-core.js` → `ACTION_TOOLS` (~line 150) |
-| AI model selection logic | `shared/ai/chat-core.js` lines 1–30, `selectModel()` line 22 |
-| System prompt construction | `src/App.jsx` `buildSystemPrompt()` line 647 |
-| Action execution (client-side) | `src/App.jsx` `executeAction()` line 4590 |
-| Send message / streaming | `src/App.jsx` `sendMessage()` line 5693 |
-| RPM tracking + queue drain | `src/App.jsx` lines 4123–4142, `queueOrExecute()` line 6519 |
-| Layout switching | `src/App.jsx` `layoutMode` state line 4087; render branch line 6675 |
-| Lofi left panel (schedule+notes) | `src/components/LofiLeftPanel.jsx` |
+| Add/change an AI tool | `shared/ai/chat-core.js` → `ACTION_TOOLS` (~line 80) |
+| AI model selection logic | `shared/ai/chat-core.js` lines 9–16, `resolveModel()` line 14 |
+| AI fallback chain | `shared/ai/chat-core.js` `callGroq()` lines ~1001–1030 (try MODEL_DEEP → fallback to MODEL_FAST) |
+| Planning pipeline (study plans) | `shared/ai/planning-pipeline.js` — 3-pass draft→critique→refine, each pass auto-falls-over |
+| System prompt construction | `src/App.jsx` `buildSystemPrompt()` ~line 647 |
+| Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 4730 |
+| Send message / streaming | `src/App.jsx` `sendMessage()` ~line 5970 |
+| RPM tracking + queue drain | `src/App.jsx` `pendingQueue` state + `queueOrExecute()` |
+| Lofi left panel (Calendar / Projects / Proofread tabs) | `src/components/LofiLeftPanel.jsx` |
+| Projects tree (folders + notes) | `src/components/ProjectsTree.jsx` |
 | Lofi right panel (widgets) | `src/components/LofiRightPanel.jsx` |
 | Lofi top bar | `src/components/StudyTopBar.jsx` |
-| Tutor / SkillHub entry | `src/App.jsx` `enterTutorMode()` line 6596 |
-| Settings UI (all toggles) | `src/App.jsx` ~line 6620–6980 (inside `activePanel === 'settings'` block) |
+| Calendar window (events + block bands) | `src/components/CalendarWindow/CalendarWindow.jsx` |
+| Settings UI (all toggles) | `src/App.jsx` activePanel `'settings'` block |
+| Home screen (opt-in) | `src/components/HomeScreen.jsx` |
+| Wikilink autocomplete + popover | `src/components/WikilinkAutocomplete.jsx`, `src/lib/wikilinkSearch.js` |
+| Backlinks panel (always visible on notes) | `src/components/BacklinksList.jsx` |
+| Column resize + lock | `src/hooks/useColumnLayout.js`, `src/components/ColumnResizeHandles.jsx` |
 | Supabase client + constants | `src/lib/supabase.js` |
-| Notes panel (overlay/embedded) | `src/App.jsx` `NotesPanel` component line 3503 |
-| Clarification card | `src/App.jsx` `ClarificationCard` component (~line 1700) |
-| DB field name mappings | `src/App.jsx` load functions ~line 4200–4400 |
-| CSS: lofi layout | `src/styles/lofi-layout.css` |
-| CSS: global / topbar / sidebar | `src/styles/index.css` |
-| CSS: neon/lofi theme tokens | `src/styles/neon-lofi.css` |
 | Vercel API handler | `api/chat.js` |
 | Supabase edge function | `supabase/functions/sos-chat/index.ts` |
 | Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` |
+| Regression eval (planning fallback) | `scripts/eval-planning-fallback.mjs` |
 
 ---
 
 ## Architecture (one-liner per layer)
 
-- **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` (~7000 lines) owns all state, chat, and action execution.
+- **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` owns state, chat, action execution.
 - **Serverless** — Vercel `/api/chat` (Node) or Supabase Edge `sos-chat` (Deno); both import from `shared/ai/chat-core.js`.
-- **AI** — Groq as primary LLM provider; Gemini as cross-provider fallback. Tool-calling via `ACTION_TOOLS` schema.
+- **AI** — Groq is the LLM provider. Heavy model handles planning + content gen + tool-heavy chat; fast model handles small content tasks AND auto-takes-over when the heavy model fails.
 - **Storage** — Supabase Postgres + Auth. Client writes directly via `sb` client after action execution.
 - **Shared core** — `shared/ai/chat-core.js` is the single source of truth for models, tools, and `callGroq()`.
 
@@ -52,20 +53,24 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 ## Models (current)
 
 ```
-MODEL_DEEP = "openai/gpt-oss-120b"
-MODEL_FAST = "openai/gpt-oss-20b"
-PRIMARY_MODEL = MODEL_DEEP  // back-compat alias
+MODEL_DEEP = "openai/gpt-oss-120b"   // heavy: planning, proofreading, step generation
+MODEL_FAST = "openai/gpt-oss-20b"    // fast: tagging, status updates, fallback
+PRIMARY_MODEL = MODEL_DEEP
 ```
 
-`resolveModel()` in `chat-core.js:14` normalizes requested model to `MODEL_DEEP` or `MODEL_FAST`. Current core is Groq-focused (`CORE_VERSION: chat-core-v3-2026-04-28`) with strict retry/circuit behavior.
+`resolveModel()` (chat-core.js:14) normalizes the requested model. **Single source of truth** — all client-side model references import from `shared/ai/chat-core.js`. `src/lib/aiClient.js` re-exports for convenience; do not redeclare model strings elsewhere.
+
+**Reliability fallback** (chat-core.js `callGroq` ~line 1010): on any throw from MODEL_DEEP — timeout, rate limit, 5xx, network — the call retries once on MODEL_FAST. If both fail, throws an `Error` with `cause_code: "both_models_failed"`. The planning pipeline wraps each pass in a try/catch and re-throws `PlanningPipelineError` with `stage: 'draft'|'critique'|'refine'` so the UI can surface specific copy. The critique and refine passes degrade gracefully — if either fails, the pipeline still ships the draft plan.
+
+Run the regression eval with `npm run eval:planning`.
 
 ---
 
 ## Action tools (`ACTION_TOOLS` in `shared/ai/chat-core.js`)
 
 **Scheduling**
-- `add_event` · `update_event` · `delete_event` — calendar events
-- `add_block` · `delete_block` — time blocks (recurring or date-specific)
+- `add_event` · `update_event` · `delete_event` — calendar events. Now persists `time`, `description`, `location`, `priority` (migration `20260508_events_time_columns.sql`).
+- `add_block` · `delete_block` — time blocks (recurring or date-specific). Render as translucent bands behind events in `CalendarWindow`.
 - `convert_event_to_block` · `convert_block_to_event`
 - `add_recurring_event`
 - `view_schedule` — no-op; redirects AI away from `add_task` when user asks what's on calendar
@@ -73,7 +78,7 @@ PRIMARY_MODEL = MODEL_DEEP  // back-compat alias
 **Tasks**
 - `add_task` · `update_task` · `delete_task` · `complete_task` · `break_task`
 
-**Notes**
+**Notes & projects** (notes table now has `parent_id` + `is_folder`; folders == projects)
 - `add_note` · `edit_note` · `delete_note`
 
 **Content generation** (only available when `isContentGen: true`)
@@ -82,149 +87,140 @@ PRIMARY_MODEL = MODEL_DEEP  // back-compat alias
 
 **Meta**
 - `ask_clarification` — always available; triggers `ClarificationCard` on client
-- `propose_action` — surfaces yes/no confirmation card; stripped on FAST_MODEL
+- `propose_action` — surfaces yes/no confirmation card
 
-To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx:4590`).
+To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx`).
+
+---
+
+## Layout
+
+```
+layoutMode === 'lofi'    → <div className="study-app">  3-column grid (resizable)
+layoutMode === 'sidebar' → dormant, kept for migration
+layoutMode === 'topbar'  → dormant, kept for migration
+```
+
+**Lofi render tree**:
+```
+StudyTopBar            ← src/components/StudyTopBar.jsx        (clock, settings, optional Home button)
+LofiLeftPanel          ← src/components/LofiLeftPanel.jsx      (Calendar / Projects / Proofread tabs)
+<div.study-center>     ← chat + settings + home (center column)
+LofiRightPanel         ← src/components/LofiRightPanel.jsx     (weather, saved, radio, timer)
+ColumnResizeHandles    ← src/components/ColumnResizeHandles.jsx (between columns 0/1 and 1/2 when unlocked)
+ColumnLockToggle       ← lock icon at bottom-right; double-click to reset to defaults
+```
+
+`StudyTopBar` props: `user, syncStatus, onNewChat, onImport, onSettings, onAuthAction, onSwitchLayout, onHome, homeEnabled, queueCount`. **Import button is no longer rendered in the lofi top bar**; import lives in the Projects tab folder header.
+
+`LofiLeftPanel` props: `events, blocks, tasks, entityLinks, userId, onEventUpdate, notes, onCreateNote, onUpdateNote, onDeleteNote, onImportClick`.
+
+---
+
+## Projects + Notes (unified file system)
+
+The notes table is a tree. A folder is `is_folder = true`; a project is a folder at the root. A note is `is_folder = false` and may live at any depth. Migration `20260508_notes_hierarchy.sql` adds `parent_id` (self-FK with `ON DELETE CASCADE`) and `is_folder`.
+
+UI:
+- Projects tab in `LofiLeftPanel` renders `ProjectsTree.jsx` — indent-based, expand/collapse, click leaf to open in a focused note editor (`ProjectNoteEditor`, defined inline in `LofiLeftPanel.jsx`) with a Backlinks section pinned at the bottom.
+- Folder header hosts `+ Folder`, `+ Note`, and `Import` buttons. There is no separate Notes tab — Projects is the unified home for the notes file system.
+
+Field mapping for notes:
+- JS `parent_id` ↔ DB `parent_id`
+- JS `is_folder` ↔ DB `is_folder`
+- existing: JS `name`/`content`/`updatedAt` ↔ DB `name`/`content`/`updated_at`
+
+---
+
+## Calendar + blocks
+
+`CalendarWindow` accepts `events` and `blocks={ recurring, dates }`. Events render as positioned cards using `start_time`/`end_time` (or `time` as a fallback). Blocks render as translucent striped bands behind events via `blockBandsForDate()` (CalendarWindow.jsx).
+
+Events table now has `start_time`, `end_time`, `description`, `location`, `priority` (migration `20260508_events_time_columns.sql`); shape converters live in `src/lib/eventShape.js`.
+
+Realtime: `App.jsx` subscribes to `postgres_changes` on `events`, `notes`, `tasks`, `recurring_blocks`, `date_blocks` for the current `user_id` so calendar / notes update without a page refresh. Standalone `/calendar` route does the same in `src/pages/CalendarPage.jsx`.
+
+---
+
+## WikiLinks
+
+Discoverable, approval-first.
+
+- **Autocomplete**: `useWikilinkAutocomplete` (in `WikilinkAutocomplete.jsx`) opens a popover when the user types `[[` in the chat input. Shows matching notes / events / tasks ranked by prefix match. ↑/↓ to navigate, ↵/Tab to commit, Esc to dismiss. On commit, inserts `[[Selected Name]]` and closes.
+- **Search**: `searchEntities()` in `src/lib/wikilinkSearch.js` ranks by exact > prefix > substring > word-prefix.
+- **Rendering**: existing `renderWikilinks()` in `src/lib/wikilinks.js` walks text nodes and wraps `[[Name]]` with `<a class="wikilink">`. Unresolved names get `.wikilink.unresolved`.
+- **Backlinks**: `BacklinksList.jsx` queries `entity_links` table via `findBacklinks()` and is always visible on note detail views (no toggle).
+- **Soft suggestions**: `LinkSuggestionCard` (existing) surfaces "Link this to `[[X]]`?" cards in chat. Approval is one tap; SOS never auto-links.
+
+---
+
+## Home screen (opt-in)
+
+`HomeScreen.jsx` — calm landing surface inside the studio. Disabled by default (`sos_home_enabled` localStorage key). When enabled, a Home button appears in the top bar and `activePanel === 'home'` renders the screen.
+
+Configurable in Settings → Home screen:
+- Background: 5 curated gradients (`HOME_BACKGROUNDS` in `HomeScreen.jsx`). No upload yet.
+- Focus element: today's top task / next upcoming event / custom message.
+- Custom message text (when focus = message).
+
+Persisted in `sos_home_*` localStorage keys; not in Supabase.
+
+---
+
+## Resizable columns
+
+`useColumnLayout()` (in `src/hooks/useColumnLayout.js`) owns three fr-weighted column widths and a lock state, persisted in `sos_column_layout` localStorage. Drag handles between columns trigger `startDrag(dividerIdx, e, containerEl)`. Widths clamp to `[0.18, 4.0]` fr and persist on mouseup. The lock toggle (`ColumnLockToggle`) hides the handles; double-click the lock to reset to defaults.
 
 ---
 
 ## Key state in `App.jsx`
 
-| State | Line | Purpose |
-|-------|------|---------|
-| `tasks` | 4020 | array of task objects |
-| `blocks` | 4021 | `{ recurring: [], dates: {} }` |
-| `notes` | 4022 | array of note objects |
-| `events` | 4023 | array of event objects |
-| `messages` | 4024 | chat history (capped at `CHAT_MAX_MESSAGES` = 60) |
-| `user` | 4009 | Supabase auth user or null |
-| `syncStatus` | 4120 | `'saving'|'saved'|'error'` |
-| `layoutMode` | 4087 | `'lofi'` (fixed in current UI; non-lofi branches still exist in code)  |
-| `activePanel` | 4093 | `'chat'|'tutor'|'settings'|…` |
-| `tutorMode` | 4062 | boolean; toggles guided-learning AI persona |
-| `isLoading` | 4032 | true while awaiting AI response |
-| `pendingQueue` | 4123 | `[{id, action, addedAt}]` — actions queued when RPM near limit |
-| `rpmSnapshot` | 4050 | `{remaining, limit, resetAtMs}` — reactive copy of RPM state |
-| `currentModel` | 4051 | last model string reported by backend |
-| `showAnalytics` | 4049 | show RPM+model badge in topbar (localStorage `sos_show_analytics`) |
-| `lofiNoteOpen` | 4047 | opens NotesPanel overlay in lofi mode |
-| `lofiTutorTabActive` | 4048 | flips left panel to Studio tab in lofi mode |
-| `agenticMode` | 4008 | via `useAgenticMode()` hook |
-| `pendingClarification` | 4041 | current clarification payload → renders `ClarificationCard` |
-| `pendingProposal` | 4044 | `{summary, action_type, prefilled}` → renders yes/no card |
-| `showAttachMenu` | 4162 | + button dropdown (File / Google) |
-| `showGoogleModal` | 4161 | Google import modal |
-| `savedChats` | 4174 | array for saved chat sidebar |
+| State | Purpose |
+|-------|---------|
+| `tasks` | array of task objects |
+| `blocks` | `{ recurring: [], dates: {} }` |
+| `notes` | array of note objects (each may have `parent_id`/`is_folder`) |
+| `events` | array of event objects (with `time`/`end_time`/`description`/`location`/`priority`) |
+| `entityLinks` | `entity_links` graph; powers backlinks + suggestions |
+| `messages` | chat history (capped at `CHAT_MAX_MESSAGES` = 60) |
+| `user` | Supabase auth user or null |
+| `syncStatus` | `'saving'|'saved'|'error'` |
+| `layoutMode` | `'lofi'` (current default; sidebar/topbar branches dormant) |
+| `activePanel` | `'chat'|'settings'|'home'` |
+| `isLoading` | true while awaiting AI response |
+| `pendingQueue` | actions queued when RPM near limit |
+| `rpmSnapshot` | reactive RPM snapshot for UI |
+| `currentModel` | last model string reported by backend (note `fallback_used` flag in response) |
+| `homePrefs` | mirror of `sos_home_*` localStorage |
+| `pendingClarification` | renders `ClarificationCard` |
+| `pendingProposal` | renders yes/no card |
+| `savedChats` | array for saved chat sidebar |
 
-**Refs** (not state, don't trigger renders):
-- `rpmStateRef` (4124) — raw RPM data, updated from response headers
-- `recentlyExecutedActionsRef` (4125) — last 10 actions, injected into system prompt as "RECENTLY COMPLETED ACTIONS" to prevent AI re-asking
-
----
-
-## Layout modes
-
-```
-layoutMode === 'lofi'    → <div className="study-app">  3-column grid
-layoutMode === 'sidebar' → <div className="sos-app">    left sidebar + main
-layoutMode === 'topbar'  → <div className="sos-app">    topbar + main
-```
-
-**Lofi render tree** (all inside `layoutMode === 'lofi'` branches):
-```
-StudyTopBar          ← src/components/StudyTopBar.jsx
-LofiLeftPanel        ← src/components/LofiLeftPanel.jsx   (schedule + notes/studio)
-<div.study-center>   ← chat + settings (center column)
-LofiRightPanel       ← src/components/LofiRightPanel.jsx  (weather, saved, radio, timer)
-```
-
-`StudyTopBar` props: `user, syncStatus, tutorMode, onNewChat, onTutorMode, onImport, onSettings, onAuthAction, onSwitchLayout, queueCount, analyticsInfo`
-
-`LofiLeftPanel` props: `events, tasks, notes, onCreateNote, onSendChatMessage, onNoteClick, tutorMode, lofiTutorTabActive, onCloseTutorTab`
-
-`LofiRightPanel` props: `weatherData, savedChats, onOpenSavedChat`
-
----
-
-## RPM / queue system
-
-```
-rpmStateRef          ← ref, updated from response headers each request (chat-core.js getGroqRpmStatus())
-rpmSnapshot state    ← reactive copy for UI rendering (set alongside rpmStateRef update)
-pendingQueue state   ← actions deferred when RPM near limit
-queueOrExecute()     ← App.jsx:6519 — wraps executeAction(); queues if RPM low
-queue drain effect   ← App.jsx:4129–4142 — fires when pendingQueue changes
-RPM_NEAR_LIMIT_THRESHOLD ← defined in chat-core.js (~10% of limit)
-```
-
-Backend response shape includes `rpm: getGroqRpmStatus()`. Client reads `chatData.rpm` at `App.jsx:5622`.
-
----
-
-## Chat pipeline (brief)
-
-1. `sendMessage()` (App.jsx:5693) — builds payload with `buildSystemPrompt()`, sends to `EDGE_FN_URL`
-2. Backend streams SSE or returns JSON: `{content, actions, clarifications, rpm, model_used}`
-3. Client applies streaming text → `messages` state
-4. On `done` event: sets `rpmSnapshot`, `currentModel`, dispatches `actions` through `executeAction()`
-5. `executeAction()` (App.jsx:4590) — switch on `action.type`, mutates local state + writes Supabase
-
-**Clarification flow**: `ask_clarification` action → `pendingClarification` state → `ClarificationCard` (~App.jsx:1700) → user answers → `sendMessage()` called with answers
-
-**Proposal flow**: `propose_action` → `pendingProposal` state → yes/no card → confirm calls `executeAction()`
+**Refs** (no re-render):
+- `rpmStateRef` — raw RPM data, updated from response headers
+- `recentlyExecutedActionsRef` — last 10 actions, injected as RECENTLY COMPLETED ACTIONS
 
 ---
 
 ## Supabase
 
 ```
-URL:     https://evqylqgkzlbbrvogxsjn.supabase.co
 Client:  src/lib/supabase.js  →  sb
-CHAT_MAX_MESSAGES = 60  (also in lib/supabase.js)
+CHAT_MAX_MESSAGES = 60
 ```
 
-**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`
+**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`.
 
-**Field mapping** (JS ↔ DB):
-- `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`
-- `completedAt` ↔ `completed_at`, `event_date` ↔ `date`, `event_type` ↔ `type`
+**Active migrations**:
+- `20260507_entity_links.sql` — bidirectional link graph for backlinks/suggestions.
+- `20260508_events_time_columns.sql` — adds `start_time`, `end_time`, `description`, `location`, `priority` to `events`.
+- `20260508_notes_hierarchy.sql` — adds `parent_id` (self-FK, cascade delete) and `is_folder` to `notes`.
+
+**Field mapping (JS ↔ DB)**:
+- `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`, `completedAt` ↔ `completed_at`
+- Events: JS `date` ↔ DB `event_date`; JS `time` ↔ DB `start_time`; JS `end_time` ↔ DB `end_time`
+- Notes: JS `parent_id`/`is_folder` ↔ DB `parent_id`/`is_folder`
 - Blocks: recurring templates → `recurring_blocks`; per-date overrides → `date_blocks`
-
----
-
-## Components reference
-
-| Component | File | Notes |
-|-----------|------|-------|
-| `NotesPanel` | App.jsx:3503 | `embedded` prop = sidebar inline; no prop = `position:fixed` overlay |
-| `ClarificationCard` | App.jsx:~1700 | date inputs get a "Done" submit button |
-| `StudyTopBar` | components/StudyTopBar.jsx | Lofi topbar; shows clock, queue badge, analytics badge |
-| `LofiLeftPanel` | components/LofiLeftPanel.jsx | Schedule week grid + notes list; notes section flips to Studio tab when `lofiTutorTabActive` |
-| `LofiRightPanel` | components/LofiRightPanel.jsx | Draggable widgets: weather, saved chats, radio, timer+smash |
-| `SkyBackground` | components/SkyBackground.jsx | Animated sky (no city SVG) |
-| `PomodoroTimer` | components/PomodoroTimer.jsx | Standalone timer |
-| `ErrorBoundary` | components/ErrorBoundary.jsx | Top-level error catch |
-
----
-
-## Key functions
-
-| Function | Location | Does |
-|----------|----------|------|
-| `buildSystemPrompt()` | App.jsx:647 | Constructs system prompt with tiered context budgets; injects RECENTLY COMPLETED ACTIONS |
-| `executeAction()` | App.jsx:4590 | Switch dispatch for all tool actions; records to `recentlyExecutedActionsRef` |
-| `sendMessage()` | App.jsx:5693 | Full chat send + streaming; sets RPM/model state on response |
-| `queueOrExecute()` | App.jsx:6519 | Wraps executeAction; defers to pendingQueue if RPM near limit |
-| `enterTutorMode()` | App.jsx:6595 | Lofi: activates studio tab + posts activation message; other modes: `setActivePanel('tutor')` |
-| `toggleTutorMode()` | App.jsx:6590 | Sets tutorMode state + localStorage |
-| `detectCompanionIntent()` | App.jsx:4102 | Detects if message implies companion panel; only acts if `layoutMode === 'sidebar'` |
-| `handleCreateNote()` | App.jsx:5353 | Optimistic state + Supabase insert |
-| `handleUpdateNote()` | App.jsx:5347 | Optimistic state + Supabase update |
-| `handleDeleteNote()` | App.jsx:5341 | Optimistic state + Supabase delete |
-| `startNewChat()` | App.jsx:6321 | Clears messages, resets pending state |
-| `callGroq()` | chat-core.js | LLM call with retries, circuit breaker, Gemini fallback chain |
-| `parseLlmResponse()` | chat-core.js | Parses tool calls, runs validators, converts failures to clarifications |
-| `getGroqRpmStatus()` | chat-core.js:89 | Returns current RPM snapshot from module-level GROQ_RPM object |
 
 ---
 
@@ -232,23 +228,30 @@ CHAT_MAX_MESSAGES = 60  (also in lib/supabase.js)
 
 | Key | Controls |
 |-----|----------|
-| `sos_layout_mode` | legacy key (layout is currently fixed to `'lofi'`) |
 | `sos_show_analytics` | RPM+model badge in topbar |
 | `sos_ai_auto_approve` | skip confirmation for actions |
-| `sos_tutor_mode` | tutor mode persistence |
+| `sos_response_style` | `'concise'`/`'balanced'`/`'detailed'` |
 | `sos_right_widget_order` | draggable widget order in LofiRightPanel |
 | `sos_sidebar_companion_panel` | `'notes'|'schedule'` |
 | `sos_companion_collapsed` | companion panel collapse state |
-| `sos_skill_hub_mode` | SkillHub learning mode |
+| `sos_column_layout` | `{ widths: [num, num, num], locked: bool }` |
+| `sos_home_enabled` | opt-in home screen toggle |
+| `sos_home_background` | curated background id |
+| `sos_home_focus` | `'task'|'event'|'message'` |
+| `sos_home_message` | custom message string |
+| `sos_perf_indicator_*` | perf pill visibility (sidebar/topbar) |
 | `sos-notif-prefs` | notification preferences JSON |
+
+Removed (tutor mode is gone): `sos_tutor_mode`, `sos_skill_hub_mode`, `sos_tutor_indicator_sidebar`, `sos_tutor_indicator_topbar`.
 
 ---
 
 ## Conventions
 
 - **No new tool definitions in `api/chat.js` or `sos-chat/index.ts`** — all tools live in `chat-core.js ACTION_TOOLS` only.
-- **Field name conflicts**: AI sees camelCase; Supabase gets snake_case. Conversion happens in load/save functions in App.jsx ~4200–4400.
-- **Lofi note actions**: always route through `onSendChatMessage` → `sendMessage()` → AI → `executeAction()`. Don't call `handleCreateNote` directly from lofi UI (except the Add Note shortcut which sends the message "Create a new note").
-- **Layout guard**: `detectCompanionIntent()` only switches layout if already in sidebar mode. Never force-switch to sidebar from lofi.
+- **Single source of truth for model strings** — import `MODEL_DEEP` / `MODEL_FAST` from `shared/ai/chat-core.js`. Never redeclare them.
+- **Field name conflicts**: AI sees camelCase; Supabase gets snake_case. Conversion happens in load/save functions in App.jsx and in `src/lib/eventShape.js`.
+- **Layout guard**: realtime subscriptions use the shared `dbEventToApp` / `dbNoteToApp` so all event/note metadata flows through one place.
 - **Content generation**: set `isContentGen: true` in the chat payload to constrain available tools to `CONTENT_ACTION_TOOLS` and enforce rate limits via `content_generations` table.
 - **Streaming**: backend sends SSE `data: {...}` lines; client accumulates in `streamedText`; final `data: [DONE]` line carries `chatData` with actions/clarifications.
+- **Wikilinks never auto-commit** — `LinkSuggestionCard` is approval-first, one tap to confirm or dismiss.

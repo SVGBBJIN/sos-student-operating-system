@@ -2,157 +2,106 @@ import React, { useState, useEffect, useRef } from 'react';
 import CalendarWindow from './CalendarWindow/CalendarWindow.jsx';
 import DOMPurify from 'dompurify';
 import ProofreadPanel from './ProofreadPanel.jsx';
+import BacklinksList from './BacklinksList.jsx';
+import ProjectsTree from './ProjectsTree.jsx';
 
-/* ── Notes view ──────────────────────────────────────────────── */
-function NotesView({ notes, onCreateNote, onUpdateNote, onDeleteNote }) {
-  const [selected,  setSelected]  = useState(null);
-  const [editing,   setEditing]   = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [search,    setSearch]    = useState('');
+/* ── Focused note editor for the Projects tree ─────────────── */
+function ProjectNoteEditor({ note, notes, events, tasks, entityLinks, onBack, onUpdateNote, onDeleteNote }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(note?.name || '');
   const editorRef = useRef(null);
 
-  function openNote(note) { setSelected(note); setEditing(false); }
+  useEffect(() => {
+    setTitle(note?.name || '');
+    setEditing(false);
+  }, [note?.id]);
 
   function startEdit() {
-    setEditTitle(selected?.name || '');
     setEditing(true);
     setTimeout(() => {
-      if (editorRef.current) editorRef.current.innerHTML = selected?.content || '';
+      if (editorRef.current) editorRef.current.innerHTML = note?.content || '';
     }, 0);
   }
 
-  function saveNote() {
-    if (!selected) return;
+  function save() {
     const content = editorRef.current?.innerHTML || '';
-    const updated = { ...selected, name: editTitle, content, updatedAt: new Date().toISOString() };
-    onUpdateNote?.(updated);
-    setSelected(updated);
+    onUpdateNote?.({ ...note, name: title, content, updatedAt: new Date().toISOString() });
     setEditing(false);
   }
 
-  function createNote() {
-    onCreateNote?.({ name: 'Untitled', content: '' });
-  }
-
-  const sorted = [...(notes || [])].sort((a, b) =>
-    (b.updatedAt || '') > (a.updatedAt || '') ? 1 : -1
-  );
-  const filtered = sorted.filter(n =>
-    !search ||
-    n.name.toLowerCase().includes(search.toLowerCase()) ||
-    (n.content || '').toLowerCase().includes(search.toLowerCase())
-  );
+  if (!note) return null;
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      {/* Sidebar */}
-      <div style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--sidebar)' }}>
-        <div style={{ padding: '8px' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--background)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+        <button onClick={onBack} style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-dim)', borderRadius: 4, fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>‹ Back</button>
+        {editing ? (
           <input
             type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search..."
-            style={{ width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', color: 'var(--foreground)', fontFamily: 'var(--font-ui)', fontSize: 11, outline: 'none', boxSizing: 'border-box' }}
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '3px 8px', color: 'var(--foreground)', fontSize: 12, fontWeight: 600, outline: 'none' }}
           />
-        </div>
-        <button
-          onClick={createNote}
-          style={{ margin: '0 8px 8px', background: 'var(--primary)', color: 'var(--primary-foreground)', border: 'none', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)', fontSize: 11, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}
-        >
-          + New note
-        </button>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {filtered.map(note => (
-            <div
-              key={note.id}
-              onClick={() => openNote(note)}
-              style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selected?.id === note.id ? 'var(--muted)' : 'transparent', transition: 'background 0.12s ease' }}
-              onMouseEnter={e => { if (selected?.id !== note.id) e.currentTarget.style.background = 'var(--surface)'; }}
-              onMouseLeave={e => { if (selected?.id !== note.id) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: 11, fontWeight: 600, color: 'var(--foreground)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {note.name || 'Untitled'}
-              </div>
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: 10, color: 'var(--muted-foreground)' }}>
-                {note.updatedAt ? new Date(note.updatedAt).toLocaleDateString() : ''}
-              </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div style={{ padding: '16px', textAlign: 'center', fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--muted-foreground)' }}>
-              No notes found
-            </div>
+        ) : (
+          <span style={{ flex: 1, fontWeight: 700, fontSize: 12, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {note.is_folder ? '📁 ' : ''}{note.name || 'Untitled'}
+          </span>
+        )}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {editing ? (
+            <>
+              <button onClick={save} style={{ background: 'var(--primary)', color: 'var(--primary-foreground)', border: 'none', borderRadius: 4, fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Save</button>
+              <button onClick={() => setEditing(false)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)', borderRadius: 4, fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button onClick={startEdit} style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)', borderRadius: 4, fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Edit</button>
+              <button onClick={() => onDeleteNote?.(note.id)} style={{ background: 'transparent', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: 4, fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Del</button>
+            </>
           )}
         </div>
       </div>
 
-      {/* Editor / viewer */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--background)' }}>
-        {selected ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-              {editing ? (
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={e => setEditTitle(e.target.value)}
-                  style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '3px 8px', color: 'var(--foreground)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, outline: 'none' }}
-                />
-              ) : (
-                <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 12, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {selected.name || 'Untitled'}
-                </span>
-              )}
-              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                {editing ? (
-                  <>
-                    <button onClick={saveNote} style={{ background: 'var(--primary)', color: 'var(--primary-foreground)', border: 'none', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Save</button>
-                    <button onClick={() => setEditing(false)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted-foreground)', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Cancel</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={startEdit} style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Edit</button>
-                    <button onClick={() => { onDeleteNote?.(selected.id); setSelected(null); }} style={{ background: 'transparent', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}>Del</button>
-                  </>
-                )}
-              </div>
-            </div>
-            {editing ? (
-              <div
-                ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
-                style={{ flex: 1, padding: '12px 14px', color: 'var(--foreground)', fontFamily: 'var(--font-ui)', fontSize: 13, lineHeight: 1.65, outline: 'none', overflowY: 'auto' }}
-              />
-            ) : (
-              <div
-                style={{ flex: 1, padding: '12px 14px', color: 'var(--foreground)', fontFamily: 'var(--font-ui)', fontSize: 13, lineHeight: 1.65, overflowY: 'auto' }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.content || '') }}
-              />
-            )}
-          </>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontFamily: 'var(--font-ui)', fontSize: 12 }}>
-            Select a note to view or edit it
-          </div>
-        )}
-      </div>
+      {editing ? (
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          style={{ flex: 1, padding: '12px 14px', color: 'var(--foreground)', fontSize: 13, lineHeight: 1.65, outline: 'none', overflowY: 'auto' }}
+        />
+      ) : (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
+          <div
+            style={{ padding: '12px 14px', color: 'var(--foreground)', fontSize: 13, lineHeight: 1.65 }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(note.content || '') }}
+          />
+          <BacklinksList
+            entityType="note"
+            entityId={note.id}
+            entityLinks={entityLinks}
+            notes={notes}
+            events={events}
+            tasks={tasks}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 /* ── Main panel ──────────────────────────────────────────────── */
 export default function LofiLeftPanel({
-  events, userId, onEventUpdate,
-  notes, onCreateNote, onUpdateNote, onDeleteNote,
+  events, blocks, userId, onEventUpdate,
+  notes, tasks, entityLinks,
+  onCreateNote, onUpdateNote, onDeleteNote, onImportClick,
 }) {
   const [activeView, setActiveView] = useState('calendar');
+  const [openNoteId, setOpenNoteId] = useState(null);
 
-  // AI auto-switch: new calendar event → calendar, new note → notes
+  // AI auto-switch: new calendar event → calendar, new note → projects
   useEffect(() => {
     function onCalEvent()  { setActiveView('calendar'); }
-    function onNoteEvent() { setActiveView('notes'); }
+    function onNoteEvent() { setActiveView('projects'); }
     window.addEventListener('sos:calendar:new-event', onCalEvent);
     window.addEventListener('sos:notes:created',      onNoteEvent);
     return () => {
@@ -163,9 +112,11 @@ export default function LofiLeftPanel({
 
   const views = [
     { id: 'calendar',  label: 'Calendar',  icon: '📅' },
-    { id: 'notes',     label: 'Notes',     icon: '⊡' },
+    { id: 'projects',  label: 'Projects',  icon: '📁' },
     { id: 'proofread', label: 'Proofread', icon: '✦' },
   ];
+
+  const openNote = openNoteId ? (notes || []).find(n => n.id === openNoteId) : null;
 
   return (
     <div className="study-left study-glass" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -176,16 +127,31 @@ export default function LofiLeftPanel({
             embedded
             defaultSize="fullscreen"
             events={events || []}
+            blocks={blocks || { recurring: [], dates: {} }}
             onEventUpdate={onEventUpdate}
             userId={userId}
           />
         )}
-        {activeView === 'notes' && (
-          <NotesView
+        {activeView === 'projects' && !openNote && (
+          <ProjectsTree
             notes={notes || []}
-            onCreateNote={onCreateNote}
+            selectedId={openNoteId}
+            onOpenNote={(n) => setOpenNoteId(n.id)}
+            onCreateNote={({ parent_id }) => onCreateNote?.({ name: 'Untitled', content: '', parent_id, is_folder: false })}
+            onCreateFolder={({ parent_id }) => onCreateNote?.({ name: 'New folder', content: '', parent_id, is_folder: true })}
+            onImport={onImportClick}
+          />
+        )}
+        {activeView === 'projects' && openNote && (
+          <ProjectNoteEditor
+            note={openNote}
+            notes={notes || []}
+            events={events || []}
+            tasks={tasks || []}
+            entityLinks={entityLinks || []}
+            onBack={() => setOpenNoteId(null)}
             onUpdateNote={onUpdateNote}
-            onDeleteNote={onDeleteNote}
+            onDeleteNote={(id) => { onDeleteNote?.(id); setOpenNoteId(null); }}
           />
         )}
         {activeView === 'proofread' && <ProofreadPanel />}

@@ -77,8 +77,53 @@ function resolveEventEndTime(ev) {
   return ev.end_time || null;
 }
 
+// Compute block bands for a given date from the App's blocks state shape
+// `{ recurring: [], dates: {"YYYY-MM-DD": {"HH:MM": {name,category} | null}} }`.
+// Returns an array of `{ start: "HH:MM", end: "HH:MM", name, category }` rows.
+function blockBandsForDate(blocks, dateStr, dow) {
+  if (!blocks || (typeof blocks !== 'object')) return [];
+  // Build a 30-minute slot map for this day from recurring + dated overrides.
+  const slots = {};
+  (blocks.recurring || []).forEach(rb => {
+    if (!Array.isArray(rb?.days) || !rb.days.includes(dow)) return;
+    const [sh, sm] = (rb.start || '00:00').split(':').map(Number);
+    const [eh, em] = (rb.end || '00:00').split(':').map(Number);
+    let ch = sh, cm = sm;
+    while (ch < eh || (ch === eh && cm < em)) {
+      const k = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+      slots[k] = { name: rb.name, category: rb.category };
+      cm += 30; if (cm >= 60) { ch++; cm = 0; }
+    }
+  });
+  const overrides = blocks.dates?.[dateStr] || {};
+  Object.entries(overrides).forEach(([k, v]) => {
+    if (v === null) delete slots[k];
+    else slots[k] = v;
+  });
+  // Condense consecutive equal slots into bands.
+  const sorted = Object.entries(slots).sort(([a], [b]) => a.localeCompare(b));
+  const bands = [];
+  let cur = null;
+  sorted.forEach(([time, data]) => {
+    if (cur && cur.name === data.name && cur.category === data.category) {
+      cur.end = time;
+    } else {
+      if (cur) bands.push(cur);
+      cur = { start: time, end: time, name: data.name, category: data.category };
+    }
+  });
+  if (cur) bands.push(cur);
+  // Each slot represents 30 minutes — bump the band's end-time forward by 30 min.
+  return bands.map(b => {
+    const [eh, em] = b.end.split(':').map(Number);
+    let nh = eh, nm = em + 30;
+    if (nm >= 60) { nh++; nm = 0; }
+    return { ...b, end: String(nh).padStart(2, '0') + ':' + String(nm).padStart(2, '0') };
+  });
+}
+
 /* ─── Full Week Grid ─────────────────────────────────────────────── */
-function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
+function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
   const today = toISODate(new Date());
 
   const allDayEvents  = events.filter(ev => !resolveEventTime(ev));
@@ -142,6 +187,34 @@ function WeekGrid({ weekDates, events, onEventClick, newEventId }) {
           </div>
         ))}
 
+        {/* Block bands — rendered behind events as a translucent background */}
+        {weekDates.flatMap((day, colIdx) => {
+          const bands = blockBandsForDate(blocks, toISODate(day), day.getDay());
+          return bands.map((b, i) => {
+            const [sh, sm] = b.start.split(':').map(Number);
+            const [eh, em] = b.end.split(':').map(Number);
+            const startMin = sh * 60 + sm;
+            const endMin = eh * 60 + em;
+            const topPct = (startMin / (24 * 60)) * 100;
+            const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 1);
+            return (
+              <div
+                key={`block-${toISODate(day)}-${i}`}
+                className="cw-block-band"
+                title={b.name || b.category || 'block'}
+                style={{
+                  top:    `calc(${topPct}% + 40px)`,
+                  left:   `calc(${(colIdx + 1) * (100 / 8)}% + 2px)`,
+                  width:  `calc(${100 / 8}% - 4px)`,
+                  height: `${heightPct}%`,
+                }}
+              >
+                <span className="cw-block-band-label">{b.name || b.category}</span>
+              </div>
+            );
+          });
+        })}
+
         {/* Timed events overlay */}
         {timedEvents.map(ev => {
           const colIdx = weekDates.findIndex(d => toISODate(d) === ev.date);
@@ -188,6 +261,7 @@ export default function CalendarWindow({
   defaultSize = 'fullscreen',
   embedded    = false,
   events      = [],
+  blocks      = { recurring: [], dates: {} },
   onEventUpdate,
   onClose,
   userId,
@@ -294,6 +368,7 @@ export default function CalendarWindow({
           <WeekGrid
             weekDates={weekDates}
             events={localEvents}
+            blocks={blocks}
             onEventClick={handleEventClick}
             newEventId={newEventId}
           />

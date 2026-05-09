@@ -4,13 +4,13 @@ import { Icon } from '../lib/icons';
 export default function StudyTopBar({
   user,
   syncStatus,
-  tutorMode,
   onNewChat,
-  onTutorMode,
   onImport,
   onSettings,
   onAuthAction,
   onSwitchLayout,
+  onHome,
+  homeEnabled = false,
   queueCount = 0,
 }) {
   const [time, setTime] = useState('');
@@ -56,23 +56,20 @@ export default function StudyTopBar({
 
         <span className="study-topbar-clock">{time}</span>
 
-        <button
-          className={'study-icon-btn' + (tutorMode ? ' active' : '')}
-          onClick={onTutorMode}
-          title={tutorMode ? 'Exit tutor mode' : 'Enter tutor mode'}
-          aria-label="Tutor mode"
-        >
-          {Icon.bookOpen(14)}
-        </button>
+        {homeEnabled && onHome && (
+          <button
+            className="study-icon-btn"
+            onClick={onHome}
+            title="Home screen"
+            aria-label="Home screen"
+          >
+            {Icon.home ? Icon.home(14) : '🏠'}
+          </button>
+        )}
 
-        <button
-          className="study-icon-btn"
-          onClick={onImport}
-          title="Import / Google"
-          aria-label="Import"
-        >
-          {Icon.link(14)}
-        </button>
+        {/* Import is now hosted in the Projects tab folder header — keep the
+            top bar minimal. The `onImport` prop stays in the contract for the
+            sidebar/topbar layouts that still want a button. */}
 
         <button
           className="study-icon-btn"

@@ -2,24 +2,89 @@ import React, { useState, useEffect } from 'react';
 import { sb } from '../lib/supabase.js';
 import { useNavigate } from 'react-router-dom';
 import CalendarWindow from '../components/CalendarWindow/CalendarWindow.jsx';
-import { dbEventToApp, appEventToDb } from '../lib/eventShape.js';
+import { dbEventToApp } from '../lib/eventShape.js';
 
 export default function CalendarPage() {
   const [events, setEvents] = useState([]);
+  const [blocks, setBlocks] = useState({ recurring: [], dates: {} });
   const [user,   setUser]   = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
+    let evChan, rbChan, dbChan;
     sb.auth.getSession().then(({ data }) => {
       const u = data?.session?.user;
-      if (u) {
-        setUser(u);
-        sb.from('events')
-          .select('*')
-          .eq('user_id', u.id)
-          .then(({ data: ev }) => { if (ev) setEvents(ev.map(dbEventToApp)); });
-      }
+      if (!u) return;
+      setUser(u);
+      const userId = u.id;
+
+      // Initial load: events + blocks in parallel
+      Promise.all([
+        sb.from('events').select('*').eq('user_id', userId),
+        sb.from('recurring_blocks').select('*').eq('user_id', userId),
+        sb.from('date_blocks').select('*').eq('user_id', userId),
+      ]).then(([evRes, rbRes, dbRes]) => {
+        if (evRes.data) setEvents(evRes.data.map(dbEventToApp));
+        const recurring = (rbRes.data || []).map(rb => ({
+          name: rb.name, category: rb.category,
+          start: rb.start_time?.slice(0, 5), end: rb.end_time?.slice(0, 5),
+          days: rb.days || [],
+        }));
+        const dates = {};
+        (dbRes.data || []).forEach(db => {
+          const d = db.block_date;
+          if (!dates[d]) dates[d] = {};
+          dates[d][db.time_slot?.slice(0, 5)] = db.cleared
+            ? null
+            : { name: db.name, category: db.category };
+        });
+        setBlocks({ recurring, dates });
+      });
+
+      // Realtime: refresh on any insert/update/delete to events or blocks
+      const refreshEvents = () => {
+        sb.from('events').select('*').eq('user_id', userId).then(({ data }) => {
+          if (data) setEvents(data.map(dbEventToApp));
+        });
+      };
+      const refreshBlocks = () => {
+        Promise.all([
+          sb.from('recurring_blocks').select('*').eq('user_id', userId),
+          sb.from('date_blocks').select('*').eq('user_id', userId),
+        ]).then(([rbRes, dbRes]) => {
+          const recurring = (rbRes.data || []).map(rb => ({
+            name: rb.name, category: rb.category,
+            start: rb.start_time?.slice(0, 5), end: rb.end_time?.slice(0, 5),
+            days: rb.days || [],
+          }));
+          const dates = {};
+          (dbRes.data || []).forEach(db => {
+            const d = db.block_date;
+            if (!dates[d]) dates[d] = {};
+            dates[d][db.time_slot?.slice(0, 5)] = db.cleared
+              ? null
+              : { name: db.name, category: db.category };
+          });
+          setBlocks({ recurring, dates });
+        });
+      };
+
+      evChan = sb.channel(`cal-events-${userId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `user_id=eq.${userId}` }, refreshEvents)
+        .subscribe();
+      rbChan = sb.channel(`cal-rb-${userId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_blocks', filter: `user_id=eq.${userId}` }, refreshBlocks)
+        .subscribe();
+      dbChan = sb.channel(`cal-db-${userId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'date_blocks', filter: `user_id=eq.${userId}` }, refreshBlocks)
+        .subscribe();
     });
+
+    return () => {
+      try { evChan && sb.removeChannel(evChan); } catch (_) {}
+      try { rbChan && sb.removeChannel(rbChan); } catch (_) {}
+      try { dbChan && sb.removeChannel(dbChan); } catch (_) {}
+    };
   }, []);
 
   function handleEventUpdate(updated) {
@@ -30,6 +95,7 @@ export default function CalendarPage() {
     <CalendarWindow
       defaultSize="fullscreen"
       events={events}
+      blocks={blocks}
       onEventUpdate={handleEventUpdate}
       onClose={() => navigate('/studio')}
       userId={user?.id}

@@ -208,11 +208,6 @@ export default function Landing() {
       body: 'Imports from Google. Suggests study blocks. Keeps you on track.',
     },
     {
-      icon: '🤖',
-      title: 'AI Tutor',
-      body: 'Three tutoring modes built for STEM, writing, and recall.',
-    },
-    {
       icon: '📚',
       title: 'Library',
       body: 'Notes, lessons, flashcards, and AI podcasts unified.',
@@ -288,7 +283,7 @@ export default function Landing() {
             animation: 'fadeUp 0.4s ease-out both',
             animationDelay: '160ms',
           }}>
-            Tasks, calendar, AI tutor, and study tools — built for the
+            Tasks, calendar, notes, and study tools — built for the
             way students actually think.
           </p>
 
