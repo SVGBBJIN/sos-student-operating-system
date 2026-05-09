@@ -1322,7 +1322,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   useEffect(() => { setEditData({ ...action }); }, [action]);
 
   // P1.3: field type map for inline editing
-  const fieldTypes = { due:'date', due_date:'date', date:'date', estimated_minutes:'number', start:'time', end:'time' };
+  const fieldTypes = { due:'date', due_date:'date', date:'date', estimated_minutes:'number', start:'time', end:'time', time:'time' };
 
   function getCardInfo() {
     switch (action.type) {
@@ -1333,8 +1333,7 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
       case 'add_event': return { icon:Icon.calendar(16), label:'New Event', badge:'event', badgeColor:'var(--teal)', borderColor:'var(--teal)', bgTint:'rgba(43,203,186,0.03)', fields: [
         { key:'title', label:'Event', value:action.title, editable:true }, { key:'date', label:'Date', value:action.date?fmt(action.date):'No date', editable:true },
         { key:'event_type', label:'Type', value:action.event_type||'other', editable:true }, { key:'subject', label:'Class', value:action.subject||'—', editable:true },
-        ...(action.startTime ? [{ key:'startTime', label:'Start', value:action.startTime }] : []),
-        ...(action.endTime ? [{ key:'endTime', label:'End', value:action.endTime }] : [])
+        ...((action.time || action.startTime) ? [{ key:'time', label:'Time', value:(action.time||action.startTime) + ((action.endTime||action.end_time) ? ' — ' + (action.endTime||action.end_time) : '') }] : [])
       ]};
       case 'add_block': return { icon:Icon.calendarClock(16), label:'Schedule Block', badge:'block', badgeColor:'var(--blue)', borderColor:'var(--blue)', bgTint:'rgba(69,170,242,0.03)', fields: [
         { key:'activity', label:'Activity', value:action.activity, editable:true }, { key:'date', label:'Date', value:action.date?fmt(action.date):'Today', editable:true },
@@ -1505,6 +1504,284 @@ function BulkConfirmationCard({ actions, onConfirmSelected, onCancel }) {
           {Icon.check(14)} Approve {selectedCount}
         </button>
         <button className="confirm-btn confirm-btn-cancel" onClick={onCancel}>{Icon.x(14)} Dismiss All</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   STRUCTURED CLARIFICATION (multi-field, direct-merge)
+   ═══════════════════════════════════════════════ */
+
+// Maps a missing field name to the input control we want to render for it.
+// 'time' is special: it drives a two-thumb time-range slider that also writes endTime.
+const FIELD_INPUT_TYPES = {
+  title: 'text', task_name: 'text', activity: 'text', new_title: 'text',
+  date: 'date', due_date: 'date', due: 'date', start_date: 'date', end_date: 'date',
+  time: 'time-range', start: 'time', end: 'time',
+  subject: 'subject-picker',
+  event_type: 'event-type-picker',
+  category: 'category-picker',
+};
+
+const SUBJECT_QUICK_PICKS = [
+  'Mathematics', 'Calculus', 'Biology', 'Chemistry', 'Physics',
+  'English', 'Literature', 'History', 'Spanish', 'Computer Science',
+];
+
+const EVENT_TYPE_QUICK_PICKS = [
+  { id: 'test', label: 'Test' },
+  { id: 'exam', label: 'Exam' },
+  { id: 'quiz', label: 'Quiz' },
+  { id: 'practice', label: 'Practice' },
+  { id: 'game', label: 'Game' },
+  { id: 'event', label: 'Other' },
+];
+
+const FIELD_LABELS = {
+  title: 'Title', task_name: 'Title', activity: 'Activity', new_title: 'New title',
+  date: 'Date', due_date: 'Due date', due: 'Due date', start_date: 'Start date', end_date: 'End date',
+  time: 'Time', start: 'Start time', end: 'End time',
+  subject: 'Subject', event_type: 'Type', category: 'Category',
+};
+
+function buildLocalClarification({ contextAction, knownFields = {}, missingFields = [], message }) {
+  return {
+    question: message || `A few details for this ${contextAction.replace(/_/g, ' ')}.`,
+    context_action: contextAction,
+    known_fields: knownFields,
+    missing_fields: missingFields,
+    multi_field: true,
+  };
+}
+
+function TimeRangeSlider({ start, end, onChange }) {
+  const STEP = 15;          // 15-minute increments
+  const MIN_MIN = 6 * 60;   // 6 AM
+  const MAX_MIN = 23 * 60;  // 11 PM
+  const toMins = (hhmm) => {
+    if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const toHHMM = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  const toLabel = (mins) => {
+    const h = Math.floor(mins / 60), m = mins % 60;
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
+  };
+  const startMin = toMins(start) ?? 17 * 60;
+  const endMin = toMins(end) ?? Math.min(startMin + 60, MAX_MIN);
+  const handleStart = (v) => {
+    const newStart = Math.max(MIN_MIN, Math.min(Number(v), MAX_MIN - STEP));
+    const newEnd = newStart >= endMin ? Math.min(newStart + STEP, MAX_MIN) : endMin;
+    onChange(toHHMM(newStart), toHHMM(newEnd));
+  };
+  const handleEnd = (v) => {
+    const newEnd = Math.max(MIN_MIN + STEP, Math.min(Number(v), MAX_MIN));
+    const newStart = newEnd <= startMin ? Math.max(newEnd - STEP, MIN_MIN) : startMin;
+    onChange(toHHMM(newStart), toHHMM(newEnd));
+  };
+  const totalMins = Math.max(0, endMin - startMin);
+  const hours = Math.floor(totalMins / 60), mins = totalMins % 60;
+  const durationLabel = hours > 0 ? `${hours}h${mins > 0 ? ` ${mins}m` : ''}` : `${mins}m`;
+  const startPct = ((startMin - MIN_MIN) / (MAX_MIN - MIN_MIN)) * 100;
+  const endPct = ((endMin - MIN_MIN) / (MAX_MIN - MIN_MIN)) * 100;
+  return (
+    <div style={{padding:'4px 0 8px'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10, fontSize:'0.92rem'}}>
+        <span style={{color:'var(--teal)', fontWeight:700}}>{toLabel(startMin)}</span>
+        <span style={{fontSize:'0.74rem', color:'var(--text-dim)', fontWeight:600}}>{durationLabel}</span>
+        <span style={{color:'var(--teal)', fontWeight:700}}>{toLabel(endMin)}</span>
+      </div>
+      <div style={{position:'relative', height:36}}>
+        <div style={{position:'absolute', top:16, left:0, right:0, height:4, background:'rgba(255,255,255,0.08)', borderRadius:2}}/>
+        <div style={{position:'absolute', top:16, height:4, borderRadius:2, background:'var(--teal)', left:`${startPct}%`, width:`${endPct - startPct}%`}}/>
+        <input type="range" min={MIN_MIN} max={MAX_MIN} step={STEP} value={startMin}
+          onChange={(e) => handleStart(e.target.value)}
+          style={{position:'absolute', top:0, left:0, width:'100%', height:36, background:'transparent', appearance:'none', WebkitAppearance:'none', pointerEvents:'auto'}}
+          className="sos-time-range-input"/>
+        <input type="range" min={MIN_MIN} max={MAX_MIN} step={STEP} value={endMin}
+          onChange={(e) => handleEnd(e.target.value)}
+          style={{position:'absolute', top:0, left:0, width:'100%', height:36, background:'transparent', appearance:'none', WebkitAppearance:'none', pointerEvents:'auto'}}
+          className="sos-time-range-input"/>
+      </div>
+    </div>
+  );
+}
+
+// Render a single missing-field input, picking the right control by field name.
+function FieldInput({ field, value, secondaryValue, onChange }) {
+  const inputType = FIELD_INPUT_TYPES[field] || 'text';
+  if (inputType === 'date') {
+    const todayStr = today();
+    const tomorrow = new Date(todayStr + 'T12:00:00'); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toDateStr(tomorrow);
+    const inWeek = new Date(todayStr + 'T12:00:00'); inWeek.setDate(inWeek.getDate() + 7);
+    const inWeekStr = toDateStr(inWeek);
+    const quicks = [
+      { label: 'Today', val: todayStr },
+      { label: 'Tomorrow', val: tomorrowStr },
+      { label: 'In a week', val: inWeekStr },
+    ];
+    return (
+      <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+          {quicks.map(q => (
+            <button key={q.val} onClick={() => onChange(q.val)} style={{
+              background: value === q.val ? 'rgba(43,203,186,0.18)' : 'rgba(255,255,255,0.05)',
+              border: value === q.val ? '1px solid rgba(43,203,186,0.45)' : '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 16, padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600,
+              color: value === q.val ? 'var(--teal)' : 'var(--text)', cursor: 'pointer',
+            }}>{q.label}</button>
+          ))}
+        </div>
+        <input type="date" value={value || ''} onChange={(e) => onChange(e.target.value)}
+          style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, color:'var(--text)', fontSize:'0.86rem', padding:'8px 10px', outline:'none', colorScheme:'dark'}}/>
+      </div>
+    );
+  }
+  if (inputType === 'time-range') {
+    return <TimeRangeSlider start={value} end={secondaryValue} onChange={(s, e) => onChange(s, e)}/>;
+  }
+  if (inputType === 'subject-picker') {
+    const isCustom = value && !SUBJECT_QUICK_PICKS.some(s => s.toLowerCase() === String(value).toLowerCase());
+    return (
+      <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+          {SUBJECT_QUICK_PICKS.map(s => {
+            const selected = value && value.toLowerCase() === s.toLowerCase();
+            return (
+              <button key={s} onClick={() => onChange(s.toLowerCase())} style={{
+                background: selected ? 'rgba(108,99,255,0.18)' : 'rgba(255,255,255,0.05)',
+                border: selected ? '1px solid rgba(108,99,255,0.45)' : '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 16, padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600,
+                color: selected ? 'var(--accent)' : 'var(--text)', cursor: 'pointer',
+              }}>{s}</button>
+            );
+          })}
+        </div>
+        <input type="text" value={isCustom ? value : ''} onChange={(e) => onChange(e.target.value)}
+          placeholder="Or type a custom subject"
+          style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, color:'var(--text)', fontSize:'0.86rem', padding:'8px 10px', outline:'none'}}/>
+      </div>
+    );
+  }
+  if (inputType === 'event-type-picker') {
+    return (
+      <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+        {EVENT_TYPE_QUICK_PICKS.map(t => {
+          const selected = value === t.id;
+          return (
+            <button key={t.id} onClick={() => onChange(t.id)} style={{
+              background: selected ? 'rgba(43,203,186,0.18)' : 'rgba(255,255,255,0.05)',
+              border: selected ? '1px solid rgba(43,203,186,0.45)' : '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 16, padding: '5px 12px', fontSize: '0.78rem', fontWeight: 600,
+              color: selected ? 'var(--teal)' : 'var(--text)', cursor: 'pointer',
+            }}>{t.label}</button>
+          );
+        })}
+      </div>
+    );
+  }
+  // Default: free-text input (title, task_name, activity)
+  return (
+    <input type="text" value={value || ''} onChange={(e) => onChange(e.target.value)}
+      placeholder={field === 'task_name' || field === 'title' ? 'e.g. Physics problem set' : 'Type here…'}
+      style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, color:'var(--text)', fontSize:'0.92rem', padding:'10px 12px', outline:'none', width:'100%'}}/>
+  );
+}
+
+function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAnswersChange }) {
+  const { context_action, known_fields = {}, missing_fields = [], question, suggested_defaults = {} } = clarification || {};
+  const initialValues = () => {
+    const init = {};
+    if (missing_fields.includes('time')) { init.time = '17:00'; init.endTime = '18:00'; }
+    // Pre-fill suggested defaults (e.g. inferred subject) so the user just confirms.
+    for (const [k, v] of Object.entries(suggested_defaults || {})) {
+      if (missing_fields.includes(k) && !(k in init)) init[k] = v;
+    }
+    return init;
+  };
+  const [fieldValues, setFieldValues] = useState(() =>
+    (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers))
+      ? savedAnswers : initialValues()
+  );
+  // Reset when a fresh clarification arrives
+  const ctxKey = `${context_action}|${missing_fields.join(',')}`;
+  useEffect(() => {
+    if (savedAnswers && typeof savedAnswers === 'object' && !Array.isArray(savedAnswers)) return;
+    setFieldValues(initialValues());
+  }, [ctxKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function setField(name, value, secondary) {
+    setFieldValues(prev => {
+      const next = { ...prev, [name]: value };
+      if (name === 'time' && secondary !== undefined) next.endTime = secondary;
+      if (onAnswersChange) onAnswersChange(next);
+      return next;
+    });
+  }
+
+  const allFilled = missing_fields.every(f => {
+    const v = fieldValues[f];
+    return v !== undefined && v !== null && String(v).trim().length > 0;
+  });
+
+  function handleSubmit() {
+    if (!allFilled) return;
+    onSubmit({ context_action, known_fields, field_values: fieldValues, multi_field: true });
+  }
+
+  const labelFor = (f) => FIELD_LABELS[f] || f.replace(/_/g, ' ');
+
+  return (
+    <div className="sos-clarification-card sos-clarification-card-multi" role="dialog" style={{
+      background:'rgba(22,22,36,0.98)', border:'1px solid rgba(255,255,255,0.08)',
+      borderRadius:18, padding:0, maxWidth:460, width:'100%',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.4)', overflow:'hidden',
+    }}>
+      <div style={{padding:'18px 20px 12px', display:'flex', alignItems:'flex-start', gap:12}}>
+        <div style={{flex:1, fontSize:'1rem', fontWeight:700, color:'var(--text)', lineHeight:1.4, letterSpacing:'-0.2px'}}>
+          {question || 'A few quick details'}
+        </div>
+        <button onClick={onSkip} style={{background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1}}>×</button>
+      </div>
+
+      {Object.keys(known_fields).length > 0 && (
+        <div style={{padding:'4px 20px 10px', display:'flex', flexWrap:'wrap', gap:6}}>
+          {Object.entries(known_fields).map(([k, v]) => (
+            <span key={k} style={{
+              fontSize:'0.7rem', color:'var(--text-dim)', background:'rgba(255,255,255,0.04)',
+              padding:'3px 8px', borderRadius:10, border:'1px solid rgba(255,255,255,0.06)',
+            }}>{labelFor(k)}: <span style={{color:'var(--text)'}}>{String(v)}</span></span>
+          ))}
+        </div>
+      )}
+
+      <div style={{padding:'8px 20px 16px', display:'flex', flexDirection:'column', gap:14, borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+        {missing_fields.map(f => (
+          <div key={f} style={{display:'flex', flexDirection:'column', gap:6}}>
+            <label style={{fontSize:'0.72rem', color:'var(--text-dim)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px'}}>{labelFor(f)}</label>
+            <FieldInput field={f} value={fieldValues[f]} secondaryValue={f === 'time' ? fieldValues.endTime : undefined}
+              onChange={(v, secondary) => setField(f, v, secondary)}/>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:'flex', gap:8, padding:'10px 16px 14px', borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+        <button onClick={onSkip} style={{
+          flex:'0 0 auto', background:'transparent', border:'1px solid rgba(255,255,255,0.1)',
+          borderRadius:8, padding:'8px 14px', color:'var(--text-dim)', fontSize:'0.84rem', fontWeight:600, cursor:'pointer',
+        }}>Skip</button>
+        <button onClick={handleSubmit} disabled={!allFilled} style={{
+          flex:1, background: allFilled ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+          border: allFilled ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+          borderRadius:8, padding:'8px 14px',
+          color: allFilled ? '#fff' : 'rgba(255,255,255,0.3)',
+          fontSize:'0.86rem', fontWeight:700, cursor: allFilled ? 'pointer' : 'default',
+        }}>Add it →</button>
       </div>
     </div>
   );
@@ -4760,13 +5037,24 @@ function App() {
       switch (action.type) {
         case 'add_task': {
           const taskName = (action.task_name || action.title || '').trim();
-          if (!taskName || taskName.length < 3) {
-            setPendingClarification({ question: "What should I name this task?", context_action: 'add_task', missing_fields: ['task_name'] });
-            return;
-          }
-          const rawDue = action.due_date || action.due || '';
-          if (!rawDue || !/^\d{4}-\d{2}-\d{2}$/.test(rawDue)) {
-            setPendingClarification({ question: "When is this task due? (e.g. 2026-05-10)", context_action: 'add_task', missing_fields: ['due_date'] });
+          const rawDue = (action.due_date || action.due || '').trim();
+          const titleValid = taskName && taskName.length >= 3;
+          const dueValid = rawDue && /^\d{4}-\d{2}-\d{2}$/.test(rawDue);
+          if (!titleValid || !dueValid) {
+            const known = {};
+            if (titleValid) known.task_name = taskName;
+            if (dueValid) known.due_date = rawDue;
+            if (action.subject) known.subject = action.subject;
+            if (action.estimated_minutes) known.estimated_minutes = action.estimated_minutes;
+            const missing = [];
+            if (!titleValid) missing.push('task_name');
+            if (!dueValid) missing.push('due_date');
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'add_task',
+              knownFields: known,
+              missingFields: missing,
+              message: missing.length > 1 ? "I need a couple details for this task." : (missing[0] === 'task_name' ? "What should I call this task?" : "When is this task due?"),
+            }));
             return;
           }
           // Detect unparseable dates ("next purple") up front so we can tell the user
@@ -4913,17 +5201,32 @@ function App() {
           // Validation is done server-side by chat-core before this point.
           // We still guard against the rare direct-dispatch case (e.g. Google import).
           const evTitle = (action.title || '').trim();
-          if (!evTitle || evTitle.length < 2) {
-            setPendingClarification({ question: "What should I call this event?", context_action: 'add_event', missing_fields: ['title'] });
-            return;
-          }
           const rawEvDate = (action.date || '').trim();
-          if (!rawEvDate || !/^\d{4}-\d{2}-\d{2}$/.test(rawEvDate)) {
-            setPendingClarification({ question: "What date is this event? (e.g. 2026-05-10)", context_action: 'add_event', missing_fields: ['date'] });
+          const titleValid = evTitle && evTitle.length >= 2;
+          const dateValid = rawEvDate && /^\d{4}-\d{2}-\d{2}$/.test(rawEvDate);
+          if (!titleValid || !dateValid) {
+            const known = {};
+            if (titleValid) known.title = evTitle;
+            if (dateValid) known.date = rawEvDate;
+            if (action.subject) known.subject = action.subject;
+            if (action.event_type) known.event_type = action.event_type;
+            if (action.time) known.time = action.time;
+            if (action.endTime) known.endTime = action.endTime;
+            if (action.location) known.location = action.location;
+            if (action.description) known.description = action.description;
+            const missing = [];
+            if (!titleValid) missing.push('title');
+            if (!dateValid) missing.push('date');
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'add_event',
+              knownFields: known,
+              missingFields: missing,
+              message: missing.length > 1 ? "I need a couple details for this event." : (missing[0] === 'title' ? "What should I call this event?" : "What date?"),
+            }));
             return;
           }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, end_time:action.endTime||action.end_time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -6601,6 +6904,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
   function handleClarificationSubmit(payload) {
     if (!pendingClarification) return;
+    // Structured submission from MultiFieldClarificationCard — merge known + answers
+    // and queue the action directly. Skips the AI roundtrip so previously-extracted
+    // fields can't get dropped in re-routing.
+    if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.multi_field && payload.context_action) {
+      const { context_action, known_fields = {}, field_values = {} } = payload;
+      const action = { type: context_action, ...known_fields, ...field_values };
+      setPendingClarification(null);
+      setPendingClarificationAnswers(null);
+      setPendingActions(prev => [...prev, { action, timestamp: Date.now() }]);
+      return;
+    }
     // payload is either a single object { selected, options, otherText } or an array of them
     const payloads = Array.isArray(payload) ? payload : [payload];
     const perAnswer = payloads.map(p => {
@@ -7495,15 +7809,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             <ProposalCard proposal={pendingProposal} onApprove={handleProposalApprove} onDismiss={handleProposalDismiss} />
           </div>
         )}
-        {pendingClarification && (
-          <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px', flexDirection:'column'}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,fontSize:'0.72rem',color:'var(--text-dim)',fontWeight:600,letterSpacing:'0.02em'}}>
-              <span style={{display:'flex',color:'var(--accent)'}}>{Icon.clipboard(12)}</span>
-              <span style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>Collecting details to complete action</span>
+        {pendingClarification && (() => {
+          // Structured (context_action + missing_fields) → direct-merge multi-field card.
+          // Falls back to legacy ClarificationCard for vague/options-based AI clarifications.
+          const c = Array.isArray(pendingClarification) ? pendingClarification[0] : pendingClarification;
+          const useMulti = c && c.context_action && Array.isArray(c.missing_fields) && c.missing_fields.length > 0
+            && (c.multi_field || (!c.options || c.options.length === 0));
+          return (
+            <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px', flexDirection:'column'}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,fontSize:'0.72rem',color:'var(--text-dim)',fontWeight:600,letterSpacing:'0.02em'}}>
+                <span style={{display:'flex',color:'var(--accent)'}}>{Icon.clipboard(12)}</span>
+                <span style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>Collecting details to complete action</span>
+              </div>
+              {useMulti
+                ? <MultiFieldClarificationCard clarification={{...c, multi_field: true}} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers && typeof pendingClarificationAnswers === 'object' && !Array.isArray(pendingClarificationAnswers) ? pendingClarificationAnswers : null} onAnswersChange={setPendingClarificationAnswers}/>
+                : <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />}
             </div>
-            <ClarificationCard clarification={pendingClarification} onSubmit={handleClarificationSubmit} onSkip={() => { setPendingClarification(null); setPendingClarificationAnswers(null); }} savedAnswers={pendingClarificationAnswers} onAnswersChange={setPendingClarificationAnswers} />
-          </div>
-        )}
+          );
+        })()}
         {!pendingClarification && pendingActions.length > 1 ? (
           <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             <BulkConfirmationCard
