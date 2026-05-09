@@ -4159,16 +4159,46 @@ function App() {
   const [autoApproveStatus, setAutoApproveStatus] = useState(null);
   const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
   const [recentlyCompleted, setRecentlyCompleted] = useState(new Set()); // task IDs completing right now
-  const [pendingActions, setPendingActions] = useState([]);
-  const [pendingContent, setPendingContent] = useState([]);
-  const [pendingTemplateSelector, setPendingTemplateSelector] = useState(null);
-  const [pendingClarification, setPendingClarification] = useState(null);
-  const [pendingClarificationAnswers, setPendingClarificationAnswers] = useState(null);
+  // Unified AI-pending state — one object for everything the AI surfaces after a response.
+  const PENDING_INITIAL = {
+    actions: [],            // action cards awaiting user approval [{ action, timestamp }]
+    content: [],            // studio content cards (flashcards, quiz, plan, etc.)
+    templateSelector: null, // { context } when template picker is active
+    clarification: null,    // active clarification question object
+    clarificationAnswers: null, // cached partial answers to the clarification
+    linkSuggestions: [],    // [{key,source,target,score}]
+    proposal: null,         // plan proposal { summary, action_type, prefilled }
+    queue: [],              // rate-limit execution queue [{ id, action, addedAt }]
+  };
+  const [pending, setPending] = useState(PENDING_INITIAL);
+  const updatePending = (patch) =>
+    setPending((prev) => ({
+      ...prev,
+      ...(typeof patch === "function" ? patch(prev) : patch),
+    }));
+  const clearPending = () => setPending(PENDING_INITIAL);
+  const {
+    actions: pendingActions,
+    content: pendingContent,
+    templateSelector: pendingTemplateSelector,
+    clarification: pendingClarification,
+    clarificationAnswers: pendingClarificationAnswers,
+    linkSuggestions: pendingLinkSuggestions,
+    proposal: pendingProposal,
+    queue: pendingQueue,
+  } = pending;
+  // Bridge setters — preserve old call-site signatures; functional updates forwarded safely.
+  const setPendingActions = (v) => updatePending(typeof v === "function" ? (p) => ({ actions: v(p.actions) }) : { actions: v });
+  const setPendingContent = (v) => updatePending(typeof v === "function" ? (p) => ({ content: v(p.content) }) : { content: v });
+  const setPendingTemplateSelector = (v) => updatePending(typeof v === "function" ? (p) => ({ templateSelector: v(p.templateSelector) }) : { templateSelector: v });
+  const setPendingClarification = (v) => updatePending(typeof v === "function" ? (p) => ({ clarification: v(p.clarification) }) : { clarification: v });
+  const setPendingClarificationAnswers = (v) => updatePending(typeof v === "function" ? (p) => ({ clarificationAnswers: v(p.clarificationAnswers) }) : { clarificationAnswers: v });
+  const setPendingLinkSuggestions = (v) => updatePending(typeof v === "function" ? (p) => ({ linkSuggestions: v(p.linkSuggestions) }) : { linkSuggestions: v });
+  const setPendingProposal = (v) => updatePending(typeof v === "function" ? (p) => ({ proposal: v(p.proposal) }) : { proposal: v });
+  const setPendingQueue = (v) => updatePending(typeof v === "function" ? (p) => ({ queue: v(p.queue) }) : { queue: v });
   const [entityLinks, setEntityLinks] = useState([]); // [{id,source_type,source_id,target_type,target_id,origin,confirmed_at,created_at}]
-  const [pendingLinkSuggestions, setPendingLinkSuggestions] = useState([]); // [{key,source,target,score}]
   const linkSuggestTimerRef = useRef(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
-  const [pendingProposal, setPendingProposal] = useState(null); // { summary, action_type, prefilled }
   const [showPeek, setShowPeek] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
@@ -4238,7 +4268,6 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
-  const [pendingQueue, setPendingQueue] = useState([]); // [{ id, action, addedAt }]
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
   // Undo toast: shown for 8s after a destructive/mutating AI action

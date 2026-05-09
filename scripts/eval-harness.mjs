@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { callGroq, ACTION_TOOLS, MODEL_DEEP } from "../shared/ai/chat-core.js";
 
 function parseArgs(argv) {
-  const args = { fixtures: "eval/fixtures/conversations.json", runs: "eval/fixtures/sample-runs.jsonl" };
+  const args = {
+    fixtures: "eval/fixtures/conversations.json",
+    runs: "eval/fixtures/sample-runs.jsonl",
+    live: false,
+  };
   for (let i = 2; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--fixtures") args.fixtures = argv[i + 1];
     if (token === "--runs") args.runs = argv[i + 1];
+    if (token === "--live") args.live = true;
   }
   return args;
 }
@@ -16,6 +22,7 @@ function loadFixtures(path) {
 }
 
 function loadRuns(path) {
+  if (!fs.existsSync(path)) return [];
   return fs.readFileSync(path, "utf8")
     .split("\n")
     .map((line) => line.trim())
@@ -91,7 +98,93 @@ function evaluate(fixtures, runs) {
   return { aggregate, latency };
 }
 
+// Minimal routing-focused system prompt — enough context for the model to exercise
+// all tool-selection paths without any real user data. The date anchor prevents
+// the model from hallucinating relative dates into the past.
+function buildEvalSystemPrompt() {
+  const today = new Date().toISOString().slice(0, 10);
+  return [
+    `You are SOS, a student scheduling assistant. Today is ${today}.`,
+    "When the student gives you actionable information, call the right tool.",
+    "When required fields are missing or ambiguous, call ask_clarification.",
+    "Never invent values. Never use placeholders.",
+  ].join("\n");
+}
+
+async function runLive(fixtures, runsPath, apiKey) {
+  const systemPrompt = buildEvalSystemPrompt();
+  const promptVersion = "eval-live-v1";
+  const modelRevision = MODEL_DEEP;
+  const lines = [];
+
+  for (const fixture of fixtures) {
+    const t0 = Date.now();
+    let result;
+    try {
+      result = await callGroq(
+        apiKey,
+        modelRevision,
+        systemPrompt,
+        fixture.messages,
+        512,
+        null,
+        null,
+        true,
+        ACTION_TOOLS,
+        "auto",
+        null,
+        { disableFallback: true }
+      );
+    } catch (err) {
+      process.stderr.write(`[eval] fixture ${fixture.id} failed: ${err.message}\n`);
+      continue;
+    }
+    const latencyMs = Date.now() - t0;
+
+    const predictedTools = [
+      ...(result.actions || []).map((a) => a.type),
+      ...(result.clarifications && result.clarifications.length > 0 ? [] : []),
+    ].filter(Boolean);
+
+    // ask_clarification shows up in clarifications, not actions
+    const clarification = result.clarifications && result.clarifications.length > 0
+      ? result.clarifications[0]
+      : null;
+
+    // Collect all unique field names across all actions
+    const actionFields = [...new Set(
+      (result.actions || []).flatMap((a) => Object.keys(a))
+    )];
+
+    const record = {
+      fixture_id: fixture.id,
+      prompt_version: promptVersion,
+      model_revision: modelRevision,
+      predicted_tools: predictedTools,
+      clarification: clarification ? { question: clarification.question } : null,
+      action_fields: actionFields,
+      latency_ms: latencyMs,
+    };
+    lines.push(JSON.stringify(record));
+    process.stderr.write(`[eval] ${fixture.id}: tools=${predictedTools.join(",") || "(none)"} latency=${latencyMs}ms\n`);
+  }
+
+  fs.writeFileSync(runsPath, lines.join("\n") + (lines.length > 0 ? "\n" : ""), "utf8");
+  process.stderr.write(`[eval] wrote ${lines.length} runs to ${runsPath}\n`);
+}
+
 const args = parseArgs(process.argv);
+
+if (args.live) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    process.stderr.write("Error: GROQ_API_KEY env var is required for --live mode\n");
+    process.exit(1);
+  }
+  const fixtures = loadFixtures(args.fixtures);
+  await runLive(fixtures, args.runs, apiKey);
+}
+
 const fixtures = loadFixtures(args.fixtures);
 const runs = loadRuns(args.runs);
 const report = evaluate(fixtures, runs);

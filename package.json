@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "eval:harness": "node scripts/eval-harness.mjs",
+    "eval:live": "node scripts/eval-harness.mjs --live",
     "eval:planning": "node scripts/eval-planning-fallback.mjs"
   },
   "dependencies": {
