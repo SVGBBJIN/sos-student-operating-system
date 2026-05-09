@@ -22,7 +22,7 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 4730 |
 | Send message / streaming | `src/App.jsx` `sendMessage()` ~line 5970 |
 | RPM tracking + queue drain | `src/App.jsx` `pendingQueue` state + `queueOrExecute()` |
-| Lofi left panel (Calendar / Projects / Notes / Proofread tabs) | `src/components/LofiLeftPanel.jsx` |
+| Lofi left panel (Calendar / Projects / Proofread tabs) | `src/components/LofiLeftPanel.jsx` |
 | Projects tree (folders + notes) | `src/components/ProjectsTree.jsx` |
 | Lofi right panel (widgets) | `src/components/LofiRightPanel.jsx` |
 | Lofi top bar | `src/components/StudyTopBar.jsx` |
@@ -104,7 +104,7 @@ layoutMode === 'topbar'  → dormant, kept for migration
 **Lofi render tree**:
 ```
 StudyTopBar            ← src/components/StudyTopBar.jsx        (clock, settings, optional Home button)
-LofiLeftPanel          ← src/components/LofiLeftPanel.jsx      (Calendar / Projects / Notes / Proofread tabs)
+LofiLeftPanel          ← src/components/LofiLeftPanel.jsx      (Calendar / Projects / Proofread tabs)
 <div.study-center>     ← chat + settings + home (center column)
 LofiRightPanel         ← src/components/LofiRightPanel.jsx     (weather, saved, radio, timer)
 ColumnResizeHandles    ← src/components/ColumnResizeHandles.jsx (between columns 0/1 and 1/2 when unlocked)
@@ -123,7 +123,7 @@ The notes table is a tree. A folder is `is_folder = true`; a project is a folder
 
 UI:
 - Projects tab in `LofiLeftPanel` renders `ProjectsTree.jsx` — indent-based, expand/collapse, click leaf to open in a focused note editor (`ProjectNoteEditor`, defined inline in `LofiLeftPanel.jsx`) with a Backlinks section pinned at the bottom.
-- Folder header hosts `+ Folder`, `+ Note`, and `Import` buttons. The legacy "Notes" tab still renders the flat list for back-compat.
+- Folder header hosts `+ Folder`, `+ Note`, and `Import` buttons. There is no separate Notes tab — Projects is the unified home for the notes file system.
 
 Field mapping for notes:
 - JS `parent_id` ↔ DB `parent_id`
