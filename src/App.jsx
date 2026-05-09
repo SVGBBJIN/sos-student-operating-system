@@ -1322,13 +1322,13 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
   useEffect(() => { setEditData({ ...action }); }, [action]);
 
   // P1.3: field type map for inline editing
-  const fieldTypes = { due:'date', date:'date', estimated_minutes:'number', start:'time', end:'time' };
+  const fieldTypes = { due:'date', due_date:'date', date:'date', estimated_minutes:'number', start:'time', end:'time' };
 
   function getCardInfo() {
     switch (action.type) {
       case 'add_task': return { icon:Icon.clipboard(16), label:'New Task', badge:'task', badgeColor:'var(--accent)', borderColor:'var(--accent)', bgTint:'rgba(108,99,255,0.03)', fields: [
-        { key:'title', label:'Title', value:action.title, editable:true }, { key:'subject', label:'Class', value:action.subject||'—', editable:true },
-        { key:'due', label:'Due', value:action.due?fmt(action.due):'No date', editable:true }, { key:'estimated_minutes', label:'Time', value:(action.estimated_minutes||30)+' min', editable:true }
+        { key:'task_name', label:'Title', value:action.task_name||action.title, editable:true }, { key:'subject', label:'Class', value:action.subject||'—', editable:true },
+        { key:'due_date', label:'Due', value:(action.due_date||action.due)?fmt(action.due_date||action.due):'No date', editable:true }, { key:'estimated_minutes', label:'Time', value:(action.estimated_minutes||30)+' min', editable:true }
       ]};
       case 'add_event': return { icon:Icon.calendar(16), label:'New Event', badge:'event', badgeColor:'var(--teal)', borderColor:'var(--teal)', bgTint:'rgba(43,203,186,0.03)', fields: [
         { key:'title', label:'Event', value:action.title, editable:true }, { key:'date', label:'Date', value:action.date?fmt(action.date):'No date', editable:true },
@@ -1421,8 +1421,8 @@ function ConfirmationCard({ action, onConfirm, onCancel, isFallback }) {
       )) : (
         <div>
           {(action.type === 'add_task') && <>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.title||''} onChange={e=>setEditData(p=>({...p,title:e.target.value}))}/></div>
-            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Due</span><input className="confirm-edit-input" type="date" value={editData.due||''} onChange={e=>setEditData(p=>({...p,due:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Title</span><input className="confirm-edit-input" value={editData.task_name||editData.title||''} onChange={e=>setEditData(p=>({...p,task_name:e.target.value}))}/></div>
+            <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Due</span><input className="confirm-edit-input" type="date" value={editData.due_date||editData.due||''} onChange={e=>setEditData(p=>({...p,due_date:e.target.value}))}/></div>
             <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Mins</span><input className="confirm-edit-input" type="number" min="5" step="5" value={editData.estimated_minutes||30} onChange={e=>setEditData(p=>({...p,estimated_minutes:Number(e.target.value)}))}/></div>
             <div className="confirm-edit-row"><span style={{fontSize:'0.75rem',color:'var(--text-dim)',fontWeight:600,width:52,textTransform:'uppercase',letterSpacing:'0.5px',flexShrink:0}}>Class</span><input className="confirm-edit-input" value={editData.subject||''} onChange={e=>setEditData(p=>({...p,subject:e.target.value}))} placeholder="e.g. Math"/></div>
           </>}
