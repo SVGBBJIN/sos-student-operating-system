@@ -40,6 +40,13 @@ import {
   recordSuccess,
 } from "./resilience.js";
 import { persistTelemetry, type RequestTelemetry } from "./telemetry.js";
+import {
+  aggregateRpmStatus,
+  getRpmStatus,
+  nearLimit,
+  overLimit,
+  recordRequest,
+} from "./rpm-tracker.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -102,6 +109,14 @@ export interface CallModelResponse {
     proposed_tools: string[];
     validated_tools: string[];
   };
+  rpm: { remaining: number; limit: number; resetAtMs: number; tier: Tier };
+}
+
+export class RpmExhaustedError extends Error {
+  constructor(public tier: Tier, public resetAtMs: number) {
+    super(`RPM budget exhausted for tier=${tier}`);
+    this.name = "RpmExhaustedError";
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -278,12 +293,34 @@ async function invokeProvider(
 
 export async function callModel(req: CallModelRequest): Promise<CallModelResponse> {
   const startedAt = Date.now();
-  const r = route(req.intent, req.tierOverride, req.providerOverride);
+  let r = route(req.intent, req.tierOverride, req.providerOverride);
+
+  // Preemptive tier downgrade: if Pro is near-limit and the intent isn't one
+  // that absolutely requires Pro reasoning, route to Flash instead. Planning
+  // stays on Pro — its critique/refine passes degrade visibly when downgraded.
+  const PRO_REQUIRED: Intent[] = ["planning"];
+  if (r.tier === "pro" && !PRO_REQUIRED.includes(req.intent) && nearLimit("pro")) {
+    r = route(req.intent, "flash", req.providerOverride);
+  }
+
+  // Hard cap: if even Flash is exhausted, fail loud so the client can queue.
+  if (overLimit(r.tier)) {
+    const status = getRpmStatus(r.tier);
+    throw new RpmExhaustedError(r.tier, status.resetAtMs);
+  }
+
   const circuitKey = `${r.provider}:${r.tier}`;
   if (circuitOpen(circuitKey)) {
     const f = circuitFallbackResponse();
     return buildResponse(req, f, { fallbackUsed: false, attempts: 0, primaryModel: r.model, status: "error", causeCode: "circuit_open" });
   }
+
+  // Record the request against the tier window up-front. We do this before
+  // dispatch (not after success) because: (a) a request in flight still counts
+  // against the upstream quota, and (b) we want the next concurrent call to
+  // see the budget shrink immediately. On hard provider failure the window
+  // entry stays — slight over-counting beats double-spend.
+  recordRequest(r.tier);
 
   let attempts = 0;
   let response: ChatResponse | null = null;
@@ -382,6 +419,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     usage: response.usage,
     grounding: response.groundingMetadata,
     finish_reason: response.finishReason,
+    rpm: { ...aggregateRpmStatus() },
   };
 }
 
@@ -413,10 +451,11 @@ function buildResponse(
     usage: base.usage,
     finish_reason: base.finishReason,
     tool_call_stats: { proposed: 0, validated: 0, proposed_tools: [], validated_tools: [] },
+    rpm: { ...aggregateRpmStatus() },
   };
 }
 
-function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<CallModelResponse, "model_used" | "fallback_used" | "attempt_count" | "schema_version" | "usage" | "grounding" | "finish_reason"> {
+function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<CallModelResponse, "model_used" | "fallback_used" | "attempt_count" | "schema_version" | "usage" | "grounding" | "finish_reason" | "rpm"> {
   const validationWarnings: CallModelResponse["validation_warnings"] = [];
   const clarifications: ClarificationCard[] = [];
   const proposed: string[] = [];

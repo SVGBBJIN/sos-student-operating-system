@@ -1,7 +1,26 @@
 // sos-chat Edge Function — Gemini-native. Mirrors api/chat.ts.
 
-import { callModel, runPlanningPipeline, getProvider, SCHEMA_VERSIONS } from "../../../shared/ai/index.js";
-import type { StreamChunk } from "../../../shared/ai/index.js";
+import { callModel, runPlanningPipeline, getProvider, SCHEMA_VERSIONS, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../../../shared/ai/index.js";
+import type { StreamChunk, Intent } from "../../../shared/ai/index.js";
+
+function overLimitForIntent(intent: Intent): boolean {
+  return overLimit(route(intent).tier);
+}
+
+function rpmExhaustedResponse(tier: string, resetAtMs: number, corsHeaders: Record<string, string>): Response {
+  const retryAfterSec = Math.max(1, Math.ceil((resetAtMs - Date.now()) / 1000));
+  return new Response(JSON.stringify({
+    error: "Gemini RPM budget exhausted — try again shortly.",
+    rateLimited: true,
+    rpmExhausted: true,
+    tier,
+    resetAtMs,
+    rpm: aggregateRpmStatus(),
+  }), {
+    status: 429,
+    headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": String(retryAfterSec) },
+  });
+}
 import { getEnv } from "../../../shared/env.js";
 import { extractUserId } from "../../../shared/auth.js";
 import { checkContentRateLimit } from "../../../shared/rate-limit.js";
@@ -127,6 +146,11 @@ serve(async (req: Request): Promise<Response> => {
       : undefined;
 
     if (wantsSSE(req)) {
+      // Precheck RPM before flushing SSE headers — see api/chat.ts for rationale.
+      if (overLimitForIntent("action_routing")) {
+        const snap = aggregateRpmStatus();
+        return rpmExhaustedResponse(snap.tier, snap.resetAtMs, corsHeaders);
+      }
       const { response, writer } = createSSEStream();
       // Pump the model call into the SSE writer in the background so we can return
       // the streaming Response immediately.
@@ -174,6 +198,9 @@ serve(async (req: Request): Promise<Response> => {
       orchestration: { mode: "client_execution", executed_on: "client" },
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
+    if (err instanceof RpmExhaustedError) {
+      return rpmExhaustedResponse(err.tier, err.resetAtMs, corsHeaders);
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("sos-chat error:", message);
     return new Response(JSON.stringify({ error: message }), {

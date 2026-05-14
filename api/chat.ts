@@ -11,7 +11,12 @@
 //   - mode === "planning"  → 3-pass planning pipeline (non-streaming)
 //   - default              → chat with ACTION_TOOLS
 
-import { callModel, runPlanningPipeline, PlanningPipelineError } from "../shared/ai/index.js";
+import { callModel, runPlanningPipeline, PlanningPipelineError, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../shared/ai/index.js";
+import type { Intent } from "../shared/ai/index.js";
+
+function overLimitForIntent(intent: Intent): boolean {
+  return overLimit(route(intent).tier);
+}
 import type { StreamChunk } from "../shared/ai/index.js";
 import { getEnv, requireEnv } from "../shared/env.js";
 import { extractUserId } from "../shared/auth.js";
@@ -178,6 +183,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       : undefined;
 
     if (wantsSSE(req)) {
+      // Precheck RPM *before* flushing SSE headers — once we start streaming
+      // we can't return a 429 JSON body, so the client would have to scrape
+      // an `error` event. Catching here lets the existing 429 path handle it.
+      // The RPM tracker is process-local; if we pass this gate, callModel
+      // will atomically re-check and record the request.
+      if (overLimitForIntent("action_routing")) {
+        const snap = aggregateRpmStatus();
+        const retryAfterSec = Math.max(1, Math.ceil((snap.resetAtMs - Date.now()) / 1000));
+        res.setHeader("Retry-After", String(retryAfterSec));
+        res.status(429).json({
+          error: "Gemini RPM budget exhausted — try again shortly.",
+          rateLimited: true,
+          rpmExhausted: true,
+          tier: snap.tier,
+          resetAtMs: snap.resetAtMs,
+          rpm: snap,
+        });
+        return;
+      }
       const writer = createSSEWriterForNode(res as unknown as NodeResponseLike);
       const onChunk = (chunk: StreamChunk): void => {
         if (chunk.type === "delta") writer.send({ event: "delta", data: { text: chunk.text } });
@@ -222,6 +246,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       orchestration: { mode: "client_execution", executed_on: "client" },
     });
   } catch (err) {
+    if (err instanceof RpmExhaustedError) {
+      const snap = aggregateRpmStatus();
+      const retryAfterSec = Math.max(1, Math.ceil((snap.resetAtMs - Date.now()) / 1000));
+      if (!res.headersSent) {
+        res.setHeader("Retry-After", String(retryAfterSec));
+        res.status(429).json({
+          error: "Gemini RPM budget exhausted — try again shortly.",
+          rateLimited: true,
+          rpmExhausted: true,
+          tier: err.tier,
+          resetAtMs: err.resetAtMs,
+          rpm: snap,
+        });
+      }
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("api/chat error:", message);
     if (!res.headersSent) {

@@ -1,12 +1,13 @@
 // Public entrypoint for shared/ai. Handlers should import from here.
 
-export { callModel } from "./chat-core.js";
+export { callModel, RpmExhaustedError } from "./chat-core.js";
 export type {
   CallModelRequest,
   CallModelResponse,
   ChatAction,
   ClarificationCard,
 } from "./chat-core.js";
+export { getRpmStatus, aggregateRpmStatus, nearLimit, overLimit, type RpmStatus } from "./rpm-tracker.js";
 export { route, modelForTier, fallbackForTier, type Intent, type Tier } from "./router.js";
 export { getProvider, type ProviderName } from "./providers/index.js";
 export type { LlmProvider, ChatRequest, ChatResponse, StreamChunk, Message, ToolCall } from "./providers/types.js";

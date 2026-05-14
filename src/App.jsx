@@ -6744,6 +6744,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onDelta: (_, aggregated) => setStreamingMessage(aggregated),
         });
       } catch (err) {
+        if (err?.status === 429 && err?.payload?.rpmExhausted) {
+          // Per-minute Gemini quota tripped. Push the current snapshot into
+          // state so the analytics indicator + queueOrExecute see the binding
+          // limit immediately, then surface a friendly retry message.
+          if (err.payload.rpm) {
+            rpmStateRef.current = err.payload.rpm;
+            setRpmSnapshot(err.payload.rpm);
+          }
+          const resetMs = Number(err.payload.resetAtMs || 0);
+          const waitSec = Math.max(1, Math.ceil((resetMs - Date.now()) / 1000));
+          const limitMsg = `traffic's heavy right now — give it about ${waitSec}s and try again. (the AI's per-minute quota refilled.)`;
+          const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
+          setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
+          setIsLoading(false);
+          setStreamingMessage('');
+          return;
+        }
         if (err?.status === 429 && err?.payload?.rateLimited) {
           const limitMsg = "hey, you've used all 5 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
