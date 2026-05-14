@@ -8,7 +8,18 @@ export default function CalendarPage() {
   const [events, setEvents] = useState([]);
   const [blocks, setBlocks] = useState({ recurring: [], dates: {} });
   const [user,   setUser]   = useState(null);
+  const [newEventId, setNewEventId] = useState(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    function onNew(e) {
+      const id = e.detail?.id;
+      if (!id) return;
+      setNewEventId(id);
+    }
+    window.addEventListener('sos:calendar:new-event', onNew);
+    return () => window.removeEventListener('sos:calendar:new-event', onNew);
+  }, []);
 
   useEffect(() => {
     let evChan, rbChan, dbChan;
@@ -91,12 +102,22 @@ export default function CalendarPage() {
     setEvents(prev => prev.map(e => e.id === updated.id ? updated : e));
   }
 
+  async function handleEventDelete(ev) {
+    if (!ev?.id) return;
+    setEvents(prev => prev.filter(e => e.id !== ev.id));
+    try {
+      if (user?.id) await sb.from('events').delete().eq('id', ev.id).eq('user_id', user.id);
+    } catch (_) {}
+  }
+
   return (
     <CalendarWindow
       defaultSize="fullscreen"
       events={events}
       blocks={blocks}
       onEventUpdate={handleEventUpdate}
+      onEventDelete={handleEventDelete}
+      newEventId={newEventId}
       onClose={() => navigate('/studio')}
       userId={user?.id}
     />

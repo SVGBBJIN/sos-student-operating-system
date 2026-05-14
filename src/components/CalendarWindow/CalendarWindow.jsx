@@ -3,6 +3,7 @@ import './CalendarWindow.css';
 import { useCalendarSize } from './useCalendarSize.js';
 import { useDraggable }    from './useDraggable.js';
 import EventEditPopover    from './EventEditPopover.jsx';
+import EventDetailModal    from './EventDetailModal.jsx';
 
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS    = Array.from({ length: 24 }, (_, i) => i);
@@ -122,7 +123,10 @@ function blockBandsForDate(blocks, dateStr, dow) {
   });
 }
 
-/* ─── Full Week Grid ─────────────────────────────────────────────── */
+const HOUR_PX = 56;
+const minutesToTopPx = (mins) => (mins / 60) * HOUR_PX;
+const minutesToHeightPx = (mins) => Math.max((mins / 60) * HOUR_PX, 20);
+
 function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
   const today = toISODate(new Date());
 
@@ -187,7 +191,6 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
           </div>
         ))}
 
-        {/* Block bands — rendered behind events as a translucent background */}
         {weekDates.flatMap((day, colIdx) => {
           const bands = blockBandsForDate(blocks, toISODate(day), day.getDay());
           return bands.map((b, i) => {
@@ -195,18 +198,16 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
             const [eh, em] = b.end.split(':').map(Number);
             const startMin = sh * 60 + sm;
             const endMin = eh * 60 + em;
-            const topPct = (startMin / (24 * 60)) * 100;
-            const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 1);
             return (
               <div
                 key={`block-${toISODate(day)}-${i}`}
                 className="cw-block-band"
                 title={b.name || b.category || 'block'}
                 style={{
-                  top:    `calc(${topPct}% + 40px)`,
-                  left:   `calc(${(colIdx + 1) * (100 / 8)}% + 2px)`,
-                  width:  `calc(${100 / 8}% - 4px)`,
-                  height: `${heightPct}%`,
+                  top:    `${minutesToTopPx(startMin)}px`,
+                  left:   `calc(56px + ${colIdx} * ((100% - 56px) / 7) + 2px)`,
+                  width:  `calc((100% - 56px) / 7 - 4px)`,
+                  height: `${minutesToHeightPx(endMin - startMin)}px`,
                 }}
               >
                 <span className="cw-block-band-label">{b.name || b.category}</span>
@@ -215,7 +216,6 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
           });
         })}
 
-        {/* Timed events overlay */}
         {timedEvents.map(ev => {
           const colIdx = weekDates.findIndex(d => toISODate(d) === ev.date);
           if (colIdx < 0) return null;
@@ -224,10 +224,8 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
           const endStr   = resolveEventEndTime(ev);
           const [sh, sm] = startStr.split(':').map(Number);
           const [eh, em] = endStr ? endStr.split(':').map(Number) : [sh + 1, sm];
-          const startMin  = sh * 60 + sm;
-          const endMin    = eh * 60 + em;
-          const topPct    = (startMin / (24 * 60)) * 100;
-          const heightPct = Math.max(((endMin - startMin) / (24 * 60)) * 100, 2.08); // min ~30 min
+          const startMin = sh * 60 + sm;
+          const endMin   = eh * 60 + em;
 
           const isNew = ev.id === newEventId;
 
@@ -236,10 +234,10 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
               key={ev.id}
               className={'cw-event' + (isNew ? ' cw-event-new' : '')}
               style={{
-                top:    `calc(${topPct}% + 40px)`,
-                left:   `calc(${(colIdx + 1) * (100 / 8)}% + 2px)`,
-                width:  `calc(${100 / 8}% - 4px)`,
-                height: `${heightPct}%`,
+                top:    `${minutesToTopPx(startMin)}px`,
+                left:   `calc(56px + ${colIdx} * ((100% - 56px) / 7) + 2px)`,
+                width:  `calc((100% - 56px) / 7 - 4px)`,
+                height: `${minutesToHeightPx(endMin - startMin)}px`,
                 background: ev.color || 'var(--primary)',
               }}
               onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
@@ -263,23 +261,24 @@ export default function CalendarWindow({
   events      = [],
   blocks      = { recurring: [], dates: {} },
   onEventUpdate,
+  onEventDelete,
   onClose,
   userId,
+  newEventId: newEventIdProp = null,
 }) {
   const { size, setSize } = useCalendarSize(defaultSize);
   const containerRef = useRef(null);
   const headerRef    = useRef(null);
 
   const [weekOffset,   setWeekOffset]   = useState(0);
-  const [popover,      setPopover]      = useState(null);  // { event, rect }
+  const [popover,      setPopover]      = useState(null);  // { event, rect }  (edit form)
+  const [detail,       setDetail]       = useState(null);  // { event }        (read-only view)
   const [newEventId,   setNewEventId]   = useState(null);
   const [localEvents,  setLocalEvents]  = useState(events);
   const [nativeFS,     setNativeFS]     = useState(false);
 
-  // Sync prop changes
   useEffect(() => { setLocalEvents(events); }, [events]);
 
-  // Drag — only when not fullscreen and not embedded
   useDraggable(headerRef, containerRef, size);
 
   const weekDates = getWeekDates(new Date(
@@ -287,7 +286,20 @@ export default function CalendarWindow({
   ));
 
   function handleEventClick(ev, rect) {
+    setDetail({ event: ev, rect });
+  }
+
+  function handleEditFromDetail(ev) {
+    const rect = detail?.rect || null;
+    setDetail(null);
     setPopover({ event: ev, rect });
+  }
+
+  function handleDeleteFromDetail(ev) {
+    if (!ev) return;
+    setLocalEvents(prev => prev.filter(e => e.id !== ev.id));
+    onEventDelete?.(ev);
+    setDetail(null);
   }
 
   function handleEventSave(updated) {
@@ -311,17 +323,24 @@ export default function CalendarWindow({
     }
   }
 
-  // External: expose method to animate a newly added event
   useEffect(() => {
-    function onNewEvent(e) {
-      const { id } = e.detail || {};
-      if (!id) return;
+    let cancelled = false;
+    let timer = null;
+    const flag = (id) => {
+      if (!id || cancelled) return;
       setNewEventId(id);
-      setTimeout(() => setNewEventId(null), 4000);
-    }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { if (!cancelled) setNewEventId(null); }, 5000);
+    };
+    function onNewEvent(e) { flag(e.detail?.id); }
     window.addEventListener('sos:calendar:new-event', onNewEvent);
-    return () => window.removeEventListener('sos:calendar:new-event', onNewEvent);
-  }, []);
+    if (newEventIdProp) flag(newEventIdProp);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('sos:calendar:new-event', onNewEvent);
+    };
+  }, [newEventIdProp]);
 
   const sizeButtons = [
     { id: 'fullscreen', label: 'Full',   icon: '⛶' },
@@ -398,7 +417,15 @@ export default function CalendarWindow({
         </div>}
       </div>
 
-      {/* Event edit popover */}
+      {detail && (
+        <EventDetailModal
+          event={detail.event}
+          onClose={() => setDetail(null)}
+          onEdit={handleEditFromDetail}
+          onDelete={onEventDelete ? handleDeleteFromDetail : null}
+        />
+      )}
+
       {popover && (
         <EventEditPopover
           event={popover.event}

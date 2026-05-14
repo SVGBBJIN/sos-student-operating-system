@@ -37,5 +37,44 @@
       "should_clarify": false,
       "allowed_fields": ["type", "title"]
     }
+  },
+  {
+    "id": "implicit-statement-task",
+    "prompt_version": "v1.1",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "I have a chem project due Friday" }
+    ],
+    "expected": {
+      "tools": ["add_task"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "title", "task_name", "subject", "due_date", "due", "estimated_minutes", "priority", "description"]
+    }
+  },
+  {
+    "id": "implicit-statement-event",
+    "prompt_version": "v1.1",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "There's a calculus midterm next Tuesday" }
+    ],
+    "expected": {
+      "tools": ["add_event"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "title", "date", "subject", "event_type", "description", "location", "priority", "time"]
+    }
+  },
+  {
+    "id": "implicit-just-got-assigned",
+    "prompt_version": "v1.1",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "I just got assigned a 5-page essay due 2026-05-20" }
+    ],
+    "expected": {
+      "tools": ["add_task"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "title", "task_name", "subject", "due_date", "due", "estimated_minutes", "priority", "description"]
+    }
   }
 ]

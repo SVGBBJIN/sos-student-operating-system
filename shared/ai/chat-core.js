@@ -83,7 +83,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_event",
       description:
-        "Add an event to the student's calendar. Use for tests, exams, quizzes, practices, games, meets, appointments, deadlines, or any scheduled activity with a specific date. STRICT RULES: (1) `title` MUST be the actual name from the student's message — NEVER 'task', 'event', 'untitled', 'tbd', or any placeholder; if the student didn't name it, call ask_clarification with missing_fields:[\"title\"]. (2) `date` MUST be an explicit date from the message; if missing, call ask_clarification with missing_fields:[\"date\"] — NEVER guess. (3) `subject` MUST be a real subject name (e.g. 'mathematics', 'biology', 'history', 'spanish') — NEVER 'general', 'subject', 'class', 'school', or 'other'; if you can't infer it from the title (e.g. 'Calc Quiz' → 'calculus', 'Bio Test' → 'biology'), call ask_clarification with missing_fields:[\"subject\"]. (4) NEVER invent or guess any value — call ask_clarification instead.",
+        "Add a calendar event (tests, exams, quizzes, practices, games, appointments, deadlines). Use the title and date the student gave. If the title or date is missing or ambiguous, call ask_clarification — never invent values, never use placeholders. Infer subject from the title when you can (e.g. 'Calc Quiz' → 'calculus'); only ask if you genuinely can't tell.",
       parameters: {
         type: "object",
         properties: {
@@ -114,7 +114,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_task",
       description:
-        "Add a new task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). STRICT RULES: (1) `task_name` MUST be the actual task name from the student's message — NEVER 'task', 'homework', 'assignment', 'todo', 'untitled', or any placeholder; if unclear, call ask_clarification with missing_fields:[\"task_name\"]. (2) `due_date` is required — if the student said 'due X', 'by X', 'for X' use that; otherwise call ask_clarification with missing_fields:[\"due_date\"], never guess. (3) `subject` MUST be a specific subject when the task is academic (homework, essay, lab, project, paper, study, worksheet) — infer from name (e.g. 'Calc problem set' → 'calculus', 'AP Bio reading' → 'biology'); if you can't, call ask_clarification with missing_fields:[\"subject\"]. For non-academic tasks (chores, errands), use 'personal'. NEVER use 'general', 'subject', 'class', or 'other'.",
+        "Add a task to the student's to-do list (homework, assignments, chores, errands — anything without a fixed start time). Use the task name and due date the student gave. If task_name or due_date is missing or ambiguous, call ask_clarification — never invent values. Infer subject from the name (e.g. 'AP Bio reading' → 'biology'); use 'personal' for non-academic tasks.",
       parameters: {
         type: "object",
         properties: {
@@ -245,7 +245,7 @@ export const ACTION_TOOLS = [
     function: {
       name: "add_recurring_event",
       description:
-        "Add a recurring event that repeats on specific days of the week — e.g., swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays. STRICT RULES: (1) `title` MUST be the activity's actual name from the student — NEVER a placeholder. (2) `subject` MUST be a real subject (e.g. 'mathematics', 'biology') for academic recurrences, or the activity name (e.g. 'swim', 'debate', 'soccer') for non-academic. NEVER 'general', 'subject', 'class', or 'other'. (3) If the title, days, or subject are unclear, call ask_clarification before calling this tool. NEVER guess or fabricate values.",
+        "Add a recurring event that repeats on specific weekdays (e.g. swim practice every Mon/Wed/Fri, weekly tutoring on Thursdays). Use the activity name, days, and date range the student gave. If anything required is unclear, call ask_clarification — never invent values.",
       parameters: {
         type: "object",
         properties: {
@@ -299,15 +299,15 @@ export const ACTION_TOOLS = [
     function: {
       name: "ask_clarification",
       description:
-        "Ask the student for missing or ambiguous details before running another tool. Use this instead of calling action tools with blank, placeholder, or guessed titles/dates/subjects.",
+        "Ask the student for any missing or ambiguous detail BEFORE you run an action tool. Use this whenever a REQUIRED field (title + date for add_event, title + due_date for add_task) isn't clearly stated. ALWAYS prefer ask_clarification over (a) calling an action tool with placeholder/guessed/fabricated values, or (b) replying in plain text to ask for the value. RULES: (1) Always populate `missing_fields[]` precisely — list only fields the user actually has not given. (2) When the field has a small set of natural choices (event_type, subject, priority), provide up to 6 short single-word `options` — never more than 6, fewer is better. (3) Don't ask about fields the system can default (event_type defaults to 'other', subject can be empty, time is optional). (4) Greetings, small talk, or non-action messages → plain-text reply, no tool call.",
       parameters: {
         type: "object",
         properties: {
-          question: { type: "string", description: "A concise question asking for the missing detail." },
+          question: { type: "string", description: "One concise question asking for the missing detail. Keep it short — under 12 words when possible." },
           reason: { type: "string", description: "Briefly explain what is missing or ambiguous." },
           context_action: { type: "string", description: "The action tool that needs clarification, such as add_task or add_event." },
-          missing_fields: { type: "array", items: { type: "string" }, description: "Field names that need user input, such as task_name, title, due_date, date, or subject." },
-          options: { type: "array", items: { type: "string" }, description: "Optional short answer choices when helpful." },
+          missing_fields: { type: "array", items: { type: "string" }, description: "Required fields the user has not specified. Use exact names: title, task_name, date, due_date, subject, event_type, time. Do NOT include fields that already have a clear value." },
+          options: { type: "array", items: { type: "string" }, description: "Up to 6 short answer choices when helpful. Skip if the answer is free-form (title, date)." },
           multi_select: { type: "boolean", description: "Whether multiple options can be selected." },
         },
         required: ["question"],
@@ -896,13 +896,17 @@ export async function callGroq(
       }
     }
 
+    // temperature/reasoning_effort are tunable via options so chat (deterministic
+    // tool selection) and planning (deeper reasoning) can use different settings.
+    // Defaults: temperature 0.3 + reasoning_effort "medium" — low entropy on tool
+    // choice without giving up enough headroom to compose a sensible reply.
     const body = {
       model: mdl,
       messages: groqMessages,
       max_completion_tokens: 1000,
-      temperature: 1,
+      temperature: typeof options?.temperature === "number" ? options.temperature : 0.3,
       top_p: 1,
-      reasoning_effort: "high",
+      reasoning_effort: options?.reasoningEffort || "medium",
     };
 
     const rawTools = toolsOverride || (includeTools ? ACTION_TOOLS : null);
@@ -927,9 +931,12 @@ export async function callGroq(
       }
       metrics.attempt_count += 1;
       const controller = new AbortController();
+      // Per-attempt cap raised from 8s → 12s so reasoning_effort=high planning
+      // calls don't get aborted before they finish, while still leaving budget
+      // headroom for a single retry.
       const timeoutId = setTimeout(
         () => controller.abort(),
-        Math.max(700, Math.min(remaining - 250, 8000))
+        Math.max(700, Math.min(remaining - 250, 12000))
       );
       try {
         res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -1142,174 +1149,24 @@ function enrichActionSubject(action) {
   return action;
 }
 
-/**
- * Single-shot streaming call to Groq.
- * Calls `onTextDelta(chunk)` for each text token as it arrives.
- * Tool-call tokens are accumulated silently — they are never passed to onTextDelta,
- * so raw JSON is never shown in the chat window.
- * Returns a full ParsedLlmResponse when the stream ends.
- */
-export async function callGroqStream(
-  apiKey,
-  model,
-  systemPrompt,
-  messages,
-  maxTokens,
-  tools,
-  toolChoice,
-  onTextDelta,
-  options = {}
-) {
-  const backupModel = options?.backupModel || null;
-  try {
-    return await _callGroqStreamInner(apiKey, model, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, options);
-  } catch (err) {
-    if (backupModel && backupModel !== model) {
-      console.warn(`[callGroqStream] ${model} failed (${err.message}) — retrying with ${backupModel}`);
-      return _callGroqStreamInner(apiKey, backupModel, systemPrompt, messages, maxTokens, tools, toolChoice, onTextDelta, { ...options, backupModel: null });
-    }
-    throw err;
-  }
-}
-
-async function _callGroqStreamInner(
-  apiKey,
-  model,
-  systemPrompt,
-  messages,
-  maxTokens,
-  tools,
-  toolChoice,
-  onTextDelta,
-  options = {}
-) {
-  const staticPrompt = options?.staticSystemPrompt;
-  const dynamicContext = options?.dynamicContext;
-  const groqMessages = staticPrompt
-    ? [
-        { role: "system", content: staticPrompt },
-        { role: "system", content: dynamicContext || "" },
-      ]
-    : [{ role: "system", content: systemPrompt }];
-
-  for (const m of messages) {
-    const text = typeof m.content === "string" ? m.content.trim() : "";
-    if (text) groqMessages.push({ role: m.role, content: text });
-  }
-
-  const effectiveTools = tools
-    ? (tools === ACTION_TOOLS ? ACTION_TOOLS_NULLABLE
-      : tools === STUDIO_TOOLS ? STUDIO_TOOLS_NULLABLE
-      : withNullableOptionals(tools))
-    : null;
-  const body = {
-    model,
-    messages: groqMessages,
-    max_completion_tokens: 1000,
-    temperature: 1,
-    top_p: 1,
-    reasoning_effort: "high",
-    stream: true,
-  };
-  if (effectiveTools && effectiveTools.length > 0) {
-    body.tools = effectiveTools;
-    body.tool_choice = toolChoice || "auto";
-  }
-
-  const streamTimeoutMs = 25000;
-  const streamController = new AbortController();
-  const streamTimeoutId = setTimeout(() => streamController.abort(), streamTimeoutMs);
-  let res;
-  try {
-    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: streamController.signal,
-    });
-  } catch (err) {
-    clearTimeout(streamTimeoutId);
-    if (err.name === "AbortError") {
-      throw new Error(`Groq ${model} stream request timed out after ${streamTimeoutMs}ms`);
-    }
-    throw err;
-  }
-  clearTimeout(streamTimeoutId);
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Groq ${model} stream error ${res.status}: ${errText.slice(0, 200)}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let accumulatedText = "";
-  // tool_calls[index] → { id, name, argumentsRaw }
-  const toolCallMap = {};
-  let finishReason = null;
-
-  let buffer = "";
-  outer: while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop(); // keep incomplete last line
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data: ")) continue;
-      const payload = trimmed.slice(6);
-      if (payload === "[DONE]") break outer;
-      let chunk;
-      try { chunk = JSON.parse(payload); } catch (_) { continue; }
-      const choice = chunk.choices?.[0];
-      if (!choice) continue;
-      if (choice.finish_reason) finishReason = choice.finish_reason;
-      const delta = choice.delta;
-      if (!delta) continue;
-
-      // Text delta — send to caller for live rendering
-      if (typeof delta.content === "string" && delta.content) {
-        accumulatedText += delta.content;
-        if (typeof onTextDelta === "function") onTextDelta(delta.content);
-      }
-
-      // Tool-call delta — accumulate silently, never surfaced to onTextDelta
-      if (Array.isArray(delta.tool_calls)) {
-        for (const tcDelta of delta.tool_calls) {
-          const idx = tcDelta.index ?? 0;
-          if (!toolCallMap[idx]) {
-            toolCallMap[idx] = { id: tcDelta.id || `tc_${idx}`, name: "", argumentsRaw: "" };
-          }
-          if (tcDelta.function?.name) toolCallMap[idx].name += tcDelta.function.name;
-          if (tcDelta.function?.arguments) toolCallMap[idx].argumentsRaw += tcDelta.function.arguments;
-        }
-      }
-    }
-  }
-
-  // Reconstruct a Groq-compatible response object and parse it
-  const toolCalls = Object.values(toolCallMap).map((tc) => ({
-    id: tc.id,
-    type: "function",
-    function: { name: tc.name, arguments: tc.argumentsRaw },
-  }));
-  const syntheticData = {
-    choices: [{
-      message: {
-        content: accumulatedText || null,
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-      },
-      finish_reason: finishReason,
-    }],
-  };
-  return {
-    ...parseLlmResponse(syntheticData),
-    model_used: model,
-  };
+// Pre-validation enrichment: same idea as enrichActionSubject but applied to
+// raw tool-call args BEFORE validation runs. Lets a clear title like
+// "Biology Quiz" pass the required-subject check without an unnecessary
+// clarification round-trip.
+const SUBJECT_ENRICHED_TOOLS = new Set([
+  "add_event", "add_task", "add_recurring_event", "update_event",
+]);
+function preEnrichToolArgs(toolName, args) {
+  if (!args || typeof args !== "object") return args;
+  if (!SUBJECT_ENRICHED_TOOLS.has(toolName)) return args;
+  const titleField = args.title || args.task_name || args.activity || "";
+  if (!titleField) return args;
+  const current = String(args.subject || "").trim().toLowerCase();
+  const isGeneric = !current || PLACEHOLDER_SUBJECT_STRINGS.has(current);
+  if (!isGeneric) return args;
+  const inferred = inferSubjectFromTitle(titleField);
+  if (inferred) return { ...args, subject: inferred };
+  return args;
 }
 
 export function parseLlmResponse(data) {
@@ -1379,6 +1236,10 @@ export function parseLlmResponse(data) {
       return [];
     }
 
+    // Pre-validation enrichment: infer missing/generic subject from the title
+    // so a clear tool call (e.g. add_event title="Biology Quiz") doesn't get
+    // bounced into a clarification just because the model omitted subject.
+    parsedArgs = preEnrichToolArgs(toolName, parsedArgs);
     const { issues, missingFields } = validateToolArguments(tc.function.name, parsedArgs);
     if (issues.length > 0) {
       validationWarnings.push({

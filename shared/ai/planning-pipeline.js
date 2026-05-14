@@ -44,6 +44,9 @@ export async function runPlanningPipeline(opts) {
     isContentGen: true,
     staticSystemPrompt: staticSystemPrompt || null,
     budgetMs: 20000,
+    // Planning is a deeper, structured-output task — keep reasoning depth high
+    // even though normal chat now defaults to "medium" for tool-call determinism.
+    reasoningEffort: "high",
   };
 
   // ── Pass 1: Draft ──
