@@ -14,10 +14,14 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 
 | Need | Go to |
 |------|-------|
-| Add/change an AI tool | `shared/ai/chat-core.js` → `ACTION_TOOLS` (~line 80) |
-| AI model selection logic | `shared/ai/chat-core.js` lines 9–16, `resolveModel()` line 14 |
-| AI fallback chain | `shared/ai/chat-core.js` `callGroq()` lines ~1001–1030 (try MODEL_DEEP → fallback to MODEL_FAST) |
-| Planning pipeline (study plans) | `shared/ai/planning-pipeline.js` — 3-pass draft→critique→refine, each pass auto-falls-over |
+| Add/change an AI tool | `shared/ai/schemas/actions.ts` (Zod schema = tool def + JSON Schema + validator in one place) |
+| AI model selection logic | `shared/ai/router.ts` — intent → tier → model. Only file that references model strings. |
+| AI fallback chain | `shared/ai/chat-core.ts` `callModel()` — in-tier (Flash 3 → 2.5 Flash) + tier downgrade (2.5 Pro → Flash 3) |
+| Planning pipeline (study plans) | `shared/ai/pipelines/planning.ts` — 3-pass draft→critique→refine, Pro tier with thinkingBudget=4096 |
+| Proofread pipeline | `shared/ai/pipelines/proofread.ts` — Flash classifier → Pro specialists per bucket |
+| RAG / embeddings | `shared/ai/rag/` (`embeddings.ts`, `retrieve.ts`, `cache.ts`) + migration `20260514_add_pgvector.sql` |
+| Context assembly | `shared/ai/context/assembler.ts` (workspace + retrieved memories + recency weight) |
+| Streaming SSE consumer (frontend) | `src/lib/streamChat.js` |
 | System prompt construction | `src/App.jsx` `buildSystemPrompt()` ~line 647 |
 | Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 4730 |
 | Send message / streaming | `src/App.jsx` `sendMessage()` ~line 5970 |
@@ -33,40 +37,43 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Backlinks panel (always visible on notes) | `src/components/BacklinksList.jsx` |
 | Column resize + lock | `src/hooks/useColumnLayout.js`, `src/components/ColumnResizeHandles.jsx` |
 | Supabase client + constants | `src/lib/supabase.js` |
-| Vercel API handler | `api/chat.js` |
+| Vercel API handler | `api/chat.ts` (also `api/proofread.ts`, `api/embed.ts`) |
 | Supabase edge function | `supabase/functions/sos-chat/index.ts` |
-| Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` |
+| Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` — Gemini Flash audio input |
+| Web search / lesson lookup | `supabase/functions/search-lesson/index.ts` — Gemini Pro + googleSearch grounding |
+| Embedding worker | `supabase/functions/embed-batch/index.ts` |
 | Regression eval (planning fallback) | `scripts/eval-planning-fallback.mjs` |
 
 ---
 
 ## Architecture (one-liner per layer)
 
-- **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` owns state, chat, action execution.
-- **Serverless** — Vercel `/api/chat` (Node) or Supabase Edge `sos-chat` (Deno); both import from `shared/ai/chat-core.js`.
-- **AI** — Groq is the LLM provider. Heavy model handles planning + content gen + tool-heavy chat; fast model handles small content tasks AND auto-takes-over when the heavy model fails.
-- **Storage** — Supabase Postgres + Auth. Client writes directly via `sb` client after action execution.
-- **Shared core** — `shared/ai/chat-core.js` is the single source of truth for models, tools, and `callGroq()`.
+- **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` owns state, chat, action execution. SSE consumer in `src/lib/streamChat.js`.
+- **Serverless** — Vercel `/api/chat` (Node TS) or Supabase Edge `sos-chat` (Deno TS); both import from `shared/ai/index.js`.
+- **AI** — Google Gemini, native end-to-end. Tier 1 (`gemini-3-flash`) handles chat, action routing, summarization, voice. Tier 2 (`gemini-2.5-pro`) handles planning, studio, proofread specialists, grounded search. Tier 0 (`gemini-embedding-002`) handles all embeddings.
+- **Storage** — Supabase Postgres + Auth + pgvector. Client writes directly via `sb` client after action execution.
+- **Shared core** — `shared/ai/index.ts` exports `callModel()`. Router (`shared/ai/router.ts`) is the only place model strings appear.
 
 ---
 
 ## Models (current)
 
 ```
-MODEL_DEEP = "openai/gpt-oss-120b"   // heavy: planning, proofreading, step generation
-MODEL_FAST = "openai/gpt-oss-20b"    // fast: tagging, status updates, fallback
-PRIMARY_MODEL = MODEL_DEEP
+gemini-embedding-002   // Tier 0: embeddings (memory, semantic search, clustering)
+gemini-3-flash         // Tier 1: chat, action_routing, summarize, voice, classify
+gemini-2.5-flash       // Tier 1 in-tier fallback (5xx/timeout)
+gemini-2.5-pro         // Tier 2: planning, studio, proofread specialist, search_lesson
 ```
 
-`resolveModel()` (chat-core.js:14) normalizes the requested model. **Single source of truth** — all client-side model references import from `shared/ai/chat-core.js`. `src/lib/aiClient.js` re-exports for convenience; do not redeclare model strings elsewhere.
+Mapping is defined in `shared/ai/router.ts` (`TIER_BY_INTENT` + `MODEL_BY_TIER`). **Never reference model strings outside `router.ts`** — the only file aware of model names.
 
-**Reliability fallback** (chat-core.js `callGroq` ~line 1010): on any throw from MODEL_DEEP — timeout, rate limit, 5xx, network — the call retries once on MODEL_FAST. If both fail, throws an `Error` with `cause_code: "both_models_failed"`. The planning pipeline wraps each pass in a try/catch and re-throws `PlanningPipelineError` with `stage: 'draft'|'critique'|'refine'` so the UI can surface specific copy. The critique and refine passes degrade gracefully — if either fails, the pipeline still ships the draft plan.
+**Reliability fallback** (chat-core.ts `callModel()`): on a retryable failure of the primary tier model, the call retries once on the in-tier fallback (Flash 3 → 2.5 Flash; 2.5 Pro → Flash 3). If both fail, `callModel` records the failure in the circuit breaker and surfaces a graceful "having trouble" message. Planning wraps each pass in its own try/catch; critique/refine degrade to the draft on error. `PlanningPipelineError.stage` carries the failure point so the UI can surface specific copy.
 
 Run the regression eval with `npm run eval:planning`.
 
 ---
 
-## Action tools (`ACTION_TOOLS` in `shared/ai/chat-core.js`)
+## Action tools (Zod schemas in `shared/ai/schemas/actions.ts`)
 
 **Scheduling**
 - `add_event` · `update_event` · `delete_event` — calendar events. Now persists `time`, `description`, `location`, `priority` (migration `20260508_events_time_columns.sql`).

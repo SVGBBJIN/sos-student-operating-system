@@ -3,13 +3,19 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/chat.ts":      { "maxDuration": 60 },
+    "api/proofread.ts": { "maxDuration": 60 },
+    "api/embed.ts":     { "maxDuration": 30 }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Headers", "value": "authorization, x-client-info, apikey, content-type" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" }
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Headers", "value": "authorization, x-client-info, apikey, content-type, accept" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "X-Accel-Buffering",            "value": "no" }
       ]
     }
   ]

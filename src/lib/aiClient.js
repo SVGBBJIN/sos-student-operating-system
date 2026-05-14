@@ -1,33 +1,33 @@
 /**
  * aiClient — client-side abstraction over the SOS backend AI endpoint.
  *
- * Model identity is the single source of truth in `shared/ai/chat-core.js`.
- * If the user previously stored a preference in localStorage we honor it,
- * otherwise we forward MODEL_DEEP. The backend validates and falls back
- * to MODEL_DEEP if unrecognised, then auto-fails-over to MODEL_FAST inside
- * callGroq if the heavy model is unreachable.
+ * In the Gemini-native architecture the server picks the tier (Flash/Pro) based
+ * on intent. The client previously forwarded MODEL_DEEP/MODEL_FAST; that's gone.
+ * `getPreferredModel`/`setPreferredModel` are kept as no-op stubs so existing
+ * call sites keep compiling — they return tier hints ("flash" | "pro") that the
+ * server may honor as a `tierOverride`.
  */
 
 import { EDGE_FN_URL, SUPABASE_ANON_KEY } from "./supabase.js";
 import { retryAI } from "./retryAI.js";
-import { MODEL_DEEP, MODEL_FAST } from "../../shared/ai/chat-core.js";
 
-const MODEL_KEY = "sos_preferred_model";
-export { MODEL_DEEP, MODEL_FAST };
+const MODEL_KEY = "sos_preferred_tier";
+
+// Back-compat stubs. The client used to expose model strings; the new system
+// uses tier hints. These exports keep import sites green while the codebase
+// finishes migrating to tier-based routing.
+export const MODEL_DEEP = "pro";
+export const MODEL_FAST = "flash";
 
 export function getPreferredModel() {
-  try {
-    return localStorage.getItem(MODEL_KEY) || MODEL_DEEP;
-  } catch (_) {
-    return MODEL_DEEP;
-  }
+  try { return localStorage.getItem(MODEL_KEY) || MODEL_DEEP; }
+  catch (_) { return MODEL_DEEP; }
 }
 
-export function setPreferredModel(model) {
-  try { localStorage.setItem(MODEL_KEY, model); } catch (_) {}
+export function setPreferredModel(tier) {
+  try { localStorage.setItem(MODEL_KEY, tier); } catch (_) {}
 }
 
-/** @deprecated kept for back-compat. Returns the user's preferred model. */
 export function selectModel() { return getPreferredModel(); }
 export function clearModelLock() {
   try { localStorage.removeItem(MODEL_KEY); } catch (_) {}
@@ -48,7 +48,7 @@ export async function callAI(params) {
     preferredModel,
   } = params;
 
-  const model = preferredModel || getPreferredModel();
+  const tier = preferredModel || getPreferredModel();
 
   const body = {
     messages,
@@ -60,7 +60,7 @@ export async function callAI(params) {
     maxTokens,
     imageBase64,
     imageMimeType,
-    preferredModel: model,
+    tierOverride: tier === MODEL_DEEP || tier === MODEL_FAST ? tier : undefined,
   };
 
   const headers = {
@@ -97,7 +97,7 @@ export async function callAI(params) {
       actions: data.actions ?? [],
       clarification: data.clarification ?? null,
       clarifications: data.clarifications ?? [],
-      model: data.model_used ?? model,
+      model: data.model_used ?? null,
       usage: data.usage ?? null,
       throttled: data.throttled ?? false,
     };
