@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import ProofreadPanel from './ProofreadPanel.jsx';
 import BacklinksList from './BacklinksList.jsx';
 import ProjectsTree from './ProjectsTree.jsx';
+import DynamicIsland from './DynamicIsland.jsx';
 
 /* ── Focused note editor for the Projects tree ─────────────── */
 function ProjectNoteEditor({ note, notes, events, tasks, entityLinks, onBack, onUpdateNote, onDeleteNote }) {
@@ -94,6 +95,7 @@ export default function LofiLeftPanel({
   events, blocks, userId, onEventUpdate,
   notes, tasks, entityLinks,
   onCreateNote, onUpdateNote, onDeleteNote, onImportClick,
+  aiThinking = false,
 }) {
   const [activeView, setActiveView] = useState('calendar');
   const [openNoteId, setOpenNoteId] = useState(null);
@@ -120,6 +122,9 @@ export default function LofiLeftPanel({
 
   return (
     <div className="study-left study-glass" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {/* Dynamic Island */}
+      <DynamicIsland aiThinking={aiThinking} />
+
       {/* Content area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         {activeView === 'calendar' && (

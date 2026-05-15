@@ -14,6 +14,7 @@ import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
+import FocusWidget from './components/FocusWidget';
 import LofiRightPanel from './components/LofiRightPanel';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
@@ -4684,6 +4685,11 @@ function App() {
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
+  const [studioTheme, setStudioTheme] = useState(() => localStorage.getItem('sos_studio_theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', studioTheme);
+    localStorage.setItem('sos_studio_theme', studioTheme);
+  }, [studioTheme]);
   const [activePanel, setActivePanel] = useState('chat');
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
@@ -7726,6 +7732,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onUpdateNote={handleUpdateNote}
         onDeleteNote={handleDeleteNote}
         onImportClick={() => setShowGoogleModal(true)}
+        aiThinking={isLoading}
       />}
       <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
       {layoutMode === 'lofi' && (
@@ -7740,6 +7747,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onHome={() => setActivePanel('home')}
           homeEnabled={homePrefs.enabled}
           queueCount={pendingQueue ? pendingQueue.length : 0}
+          theme={studioTheme}
+          onTheme={setStudioTheme}
         />
       )}
       {layoutMode === 'topbar' && <div className="sos-header">
@@ -7759,6 +7768,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
+
+      {layoutMode === 'lofi' && activePanel === 'chat' && <FocusWidget />}
 
       {activePanel === 'home' ? (
         <HomeScreen
