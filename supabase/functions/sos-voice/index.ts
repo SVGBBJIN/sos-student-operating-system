@@ -1,75 +1,87 @@
+// sos-voice Edge Function — Gemini Flash audio transcription. Accepts either
+// multipart/form-data (legacy clients) or JSON { audioBase64, audioMimeType }.
+
+import { getProvider } from "../../../shared/ai/providers/index.js";
+import { getEnv } from "../../../shared/env.js";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req: Request) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+async function bytesToBase64(bytes: Uint8Array): Promise<string> {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)));
+  }
+  return btoa(binary);
+}
+
+interface VoiceJsonBody {
+  audioBase64?: string;
+  audioMimeType?: string;
+}
+
+serve(async (req: Request): Promise<Response> => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const apiKey = getEnv("GEMINI_API_KEY");
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not configured" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    if (!GROQ_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "GROQ_API_KEY not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    let base64: string;
+    let mimeType = "audio/webm";
+    const contentType = req.headers.get("content-type") ?? "";
 
-    // Expect multipart/form-data with an audio file
-    const formData = await req.formData();
-    const audioFile = formData.get("file");
-
-    if (!audioFile || !(audioFile instanceof File)) {
-      return new Response(
-        JSON.stringify({ error: "No audio file provided" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Forward to Groq Whisper API
-    const groqForm = new FormData();
-    groqForm.append("file", audioFile, audioFile.name || "audio.webm");
-    groqForm.append("model", "whisper-large-v3-turbo");
-    groqForm.append("response_format", "json");
-    groqForm.append("language", "en");
-
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
-        body: groqForm,
+    if (contentType.includes("multipart/form-data")) {
+      const fd = await req.formData();
+      const file = fd.get("file");
+      if (!(file instanceof File)) {
+        return new Response(JSON.stringify({ error: "No audio file provided" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-    );
-
-    if (!groqResponse.ok) {
-      const errText = await groqResponse.text();
-      console.error("Groq Whisper error:", groqResponse.status, errText);
-      return new Response(
-        JSON.stringify({ error: "Transcription failed", details: errText }),
-        { status: groqResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      base64 = await bytesToBase64(bytes);
+      mimeType = file.type || mimeType;
+    } else {
+      const body = (await req.json()) as VoiceJsonBody;
+      if (!body.audioBase64) {
+        return new Response(JSON.stringify({ error: "No audio data provided" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      base64 = body.audioBase64;
+      mimeType = body.audioMimeType ?? mimeType;
     }
 
-    const result = await groqResponse.json();
+    const provider = getProvider("gemini", apiKey);
+    const transcript = await provider.chat({
+      model: "gemini-3-flash",
+      systemPrompt: "Transcribe the attached audio to plain text. Return ONLY the transcript — no commentary, no markdown.",
+      messages: [{
+        role: "user",
+        content: "Transcribe this clip.",
+        attachments: [{ kind: "audio", mimeType, base64 }],
+      }],
+      temperature: 0.1,
+      maxOutputTokens: 1024,
+      thinkingBudget: 0,
+    });
 
-    return new Response(
-      JSON.stringify({ text: result.text || "" }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ text: transcript.content.trim() }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err) {
-    console.error("Voice transcription error:", err);
-    return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Voice transcription error:", message);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

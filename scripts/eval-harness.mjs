@@ -1,18 +1,31 @@
 #!/usr/bin/env node
+// Eval harness for the Gemini-native SOS chat surface.
+//
+// Modes:
+//   --live    Run each fixture against Gemini, write sample-runs.jsonl
+//   --shadow  Run twice (Pro + Flash tiers) and diff the predicted tool sets
+//   default   Score the cached sample-runs.jsonl against the fixtures
+//
+// Env: GEMINI_API_KEY
+
 import fs from "node:fs";
-import { callGroq, ACTION_TOOLS, MODEL_DEEP } from "../shared/ai/chat-core.js";
+import { callModel, route } from "../shared/ai/index.js";
 
 function parseArgs(argv) {
   const args = {
     fixtures: "eval/fixtures/conversations.json",
     runs: "eval/fixtures/sample-runs.jsonl",
     live: false,
+    shadow: false,
+    tier: null,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--fixtures") args.fixtures = argv[i + 1];
     if (token === "--runs") args.runs = argv[i + 1];
     if (token === "--live") args.live = true;
+    if (token === "--shadow") args.shadow = true;
+    if (token === "--tier") args.tier = argv[i + 1];
   }
   return args;
 }
@@ -75,10 +88,10 @@ function evaluate(fixtures, runs) {
 
   const aggregate = {
     total_runs: rows.length,
-    tool_precision: rows.length === 0 ? 0 : rows.reduce((sum, row) => sum + row.precision, 0) / rows.length,
-    tool_recall: rows.length === 0 ? 0 : rows.reduce((sum, row) => sum + row.recall, 0) / rows.length,
-    clarification_appropriateness: rows.length === 0 ? 0 : rows.reduce((sum, row) => sum + row.clarificationAppropriate, 0) / rows.length,
-    hallucinated_field_rate: rows.length === 0 ? 0 : rows.reduce((sum, row) => sum + row.hallucinatedFieldRate, 0) / rows.length,
+    tool_precision: rows.length === 0 ? 0 : rows.reduce((s, r) => s + r.precision, 0) / rows.length,
+    tool_recall: rows.length === 0 ? 0 : rows.reduce((s, r) => s + r.recall, 0) / rows.length,
+    clarification_appropriateness: rows.length === 0 ? 0 : rows.reduce((s, r) => s + r.clarificationAppropriate, 0) / rows.length,
+    hallucinated_field_rate: rows.length === 0 ? 0 : rows.reduce((s, r) => s + r.hallucinatedFieldRate, 0) / rows.length,
   };
 
   const byRevision = {};
@@ -98,9 +111,6 @@ function evaluate(fixtures, runs) {
   return { aggregate, latency };
 }
 
-// Minimal routing-focused system prompt — enough context for the model to exercise
-// all tool-selection paths without any real user data. The date anchor prevents
-// the model from hallucinating relative dates into the past.
 function buildEvalSystemPrompt() {
   const today = new Date().toISOString().slice(0, 10);
   return [
@@ -111,81 +121,106 @@ function buildEvalSystemPrompt() {
   ].join("\n");
 }
 
-async function runLive(fixtures, runsPath, apiKey) {
-  const systemPrompt = buildEvalSystemPrompt();
-  const promptVersion = "eval-live-v1";
-  const modelRevision = MODEL_DEEP;
-  const lines = [];
+async function runFixture(fixture, systemPrompt, tierOverride) {
+  const t0 = Date.now();
+  try {
+    const result = await callModel({
+      intent: "action_routing",
+      tierOverride,
+      systemPrompt,
+      messages: fixture.messages,
+      toolSet: "action",
+      maxOutputTokens: 512,
+      thinkingBudget: 0,
+    });
+    const latencyMs = Date.now() - t0;
+    const predictedTools = (result.actions || []).map((a) => a.type).filter(Boolean);
+    const clarification = (result.clarifications || [])[0] ?? null;
+    const actionFields = [...new Set((result.actions || []).flatMap((a) => Object.keys(a)))];
+    return {
+      ok: true,
+      record: {
+        fixture_id: fixture.id,
+        prompt_version: "eval-live-gemini",
+        model_revision: result.model_used,
+        predicted_tools: predictedTools,
+        clarification: clarification ? { question: clarification.question } : null,
+        action_fields: actionFields,
+        latency_ms: latencyMs,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err), fixtureId: fixture.id };
+  }
+}
 
+async function runLive(fixtures, runsPath, tier) {
+  const systemPrompt = buildEvalSystemPrompt();
+  const lines = [];
   for (const fixture of fixtures) {
-    const t0 = Date.now();
-    let result;
-    try {
-      result = await callGroq(
-        apiKey,
-        modelRevision,
-        systemPrompt,
-        fixture.messages,
-        512,
-        null,
-        null,
-        true,
-        ACTION_TOOLS,
-        "auto",
-        null,
-        { disableFallback: true }
-      );
-    } catch (err) {
-      process.stderr.write(`[eval] fixture ${fixture.id} failed: ${err.message}\n`);
+    const r = await runFixture(fixture, systemPrompt, tier);
+    if (!r.ok) {
+      process.stderr.write(`[eval] fixture ${r.fixtureId} failed: ${r.error}\n`);
       continue;
     }
-    const latencyMs = Date.now() - t0;
-
-    const predictedTools = [
-      ...(result.actions || []).map((a) => a.type),
-      ...(result.clarifications && result.clarifications.length > 0 ? [] : []),
-    ].filter(Boolean);
-
-    // ask_clarification shows up in clarifications, not actions
-    const clarification = result.clarifications && result.clarifications.length > 0
-      ? result.clarifications[0]
-      : null;
-
-    // Collect all unique field names across all actions
-    const actionFields = [...new Set(
-      (result.actions || []).flatMap((a) => Object.keys(a))
-    )];
-
-    const record = {
-      fixture_id: fixture.id,
-      prompt_version: promptVersion,
-      model_revision: modelRevision,
-      predicted_tools: predictedTools,
-      clarification: clarification ? { question: clarification.question } : null,
-      action_fields: actionFields,
-      latency_ms: latencyMs,
-    };
-    lines.push(JSON.stringify(record));
-    process.stderr.write(`[eval] ${fixture.id}: tools=${predictedTools.join(",") || "(none)"} latency=${latencyMs}ms\n`);
+    lines.push(JSON.stringify(r.record));
+    process.stderr.write(`[eval] ${r.record.fixture_id}: tools=${r.record.predicted_tools.join(",") || "(none)"} latency=${r.record.latency_ms}ms\n`);
   }
-
   fs.writeFileSync(runsPath, lines.join("\n") + (lines.length > 0 ? "\n" : ""), "utf8");
   process.stderr.write(`[eval] wrote ${lines.length} runs to ${runsPath}\n`);
 }
 
-const args = parseArgs(process.argv);
-
-if (args.live) {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    process.stderr.write("Error: GROQ_API_KEY env var is required for --live mode\n");
-    process.exit(1);
+async function runShadow(fixtures) {
+  const systemPrompt = buildEvalSystemPrompt();
+  const rows = [];
+  for (const fixture of fixtures) {
+    const [flash, pro] = await Promise.all([
+      runFixture(fixture, systemPrompt, "flash"),
+      runFixture(fixture, systemPrompt, "pro"),
+    ]);
+    rows.push({ fixture_id: fixture.id, flash, pro });
+    const flashTools = flash.ok ? flash.record.predicted_tools.join(",") : "(error)";
+    const proTools = pro.ok ? pro.record.predicted_tools.join(",") : "(error)";
+    const diff = flashTools !== proTools ? "DIFF" : "OK";
+    process.stderr.write(`[shadow] ${fixture.id} ${diff} flash=${flashTools} pro=${proTools}\n`);
   }
-  const fixtures = loadFixtures(args.fixtures);
-  await runLive(fixtures, args.runs, apiKey);
+  const flashTiers = rows.flatMap((r) => (r.flash.ok ? [{ model_revision: r.flash.record.model_revision, prompt_version: "shadow-flash", latency_ms: r.flash.record.latency_ms, precision: 1, recall: 1, clarificationAppropriate: 1, hallucinatedFieldRate: 0 }] : []));
+  const proTiers = rows.flatMap((r) => (r.pro.ok ? [{ model_revision: r.pro.record.model_revision, prompt_version: "shadow-pro", latency_ms: r.pro.record.latency_ms, precision: 1, recall: 1, clarificationAppropriate: 1, hallucinatedFieldRate: 0 }] : []));
+  const summary = {
+    pairs: rows.length,
+    flash_latency_p50: percentile(flashTiers.map((r) => r.latency_ms), 50),
+    pro_latency_p50: percentile(proTiers.map((r) => r.latency_ms), 50),
+    flash_latency_p95: percentile(flashTiers.map((r) => r.latency_ms), 95),
+    pro_latency_p95: percentile(proTiers.map((r) => r.latency_ms), 95),
+    diff_rate: rows.filter((r) => {
+      if (!r.flash.ok || !r.pro.ok) return true;
+      return r.flash.record.predicted_tools.join(",") !== r.pro.record.predicted_tools.join(",");
+    }).length / Math.max(1, rows.length),
+  };
+  console.log(JSON.stringify(summary, null, 2));
 }
 
-const fixtures = loadFixtures(args.fixtures);
-const runs = loadRuns(args.runs);
-const report = evaluate(fixtures, runs);
-console.log(JSON.stringify(report, null, 2));
+const args = parseArgs(process.argv);
+
+if (args.live || args.shadow) {
+  if (!process.env.GEMINI_API_KEY) {
+    process.stderr.write("Error: GEMINI_API_KEY env var is required\n");
+    process.exit(1);
+  }
+}
+
+if (args.live) {
+  const fixtures = loadFixtures(args.fixtures);
+  await runLive(fixtures, args.runs, args.tier ?? undefined);
+} else if (args.shadow) {
+  const fixtures = loadFixtures(args.fixtures);
+  await runShadow(fixtures);
+} else {
+  const fixtures = loadFixtures(args.fixtures);
+  const runs = loadRuns(args.runs);
+  const report = evaluate(fixtures, runs);
+  console.log(JSON.stringify(report, null, 2));
+}
+
+// Reference unused import so linters don't warn — used by --shadow.
+void route;

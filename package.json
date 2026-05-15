@@ -8,22 +8,30 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "eval:harness": "node scripts/eval-harness.mjs",
-    "eval:live": "node scripts/eval-harness.mjs --live",
-    "eval:planning": "node scripts/eval-planning-fallback.mjs"
+    "typecheck": "tsc --noEmit",
+    "eval:harness": "tsx scripts/eval-harness.mjs",
+    "eval:live": "tsx scripts/eval-harness.mjs --live",
+    "eval:shadow": "tsx scripts/eval-harness.mjs --shadow",
+    "eval:planning": "tsx scripts/eval-planning-fallback.mjs",
+    "eval:cost": "tsx scripts/eval-cost.mjs"
   },
   "dependencies": {
+    "@google/genai": "^1.4.0",
     "@supabase/supabase-js": "^2.49.1",
     "dompurify": "^3.2.4",
     "pdfjs-dist": "^3.11.174",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.14.1"
+    "react-router-dom": "^7.14.1",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/node": "^20.12.7",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
     "vite": "^6.2.0"
   }
 }

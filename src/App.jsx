@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, SEARCH_LESSON_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { streamChat } from './lib/streamChat';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -23,7 +24,7 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle } from '../shared/subjects.js';
-import { MODEL_DEEP, MODEL_FAST } from '../shared/ai/chat-core.js';
+import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
 import BacklinksList from './components/BacklinksList';
@@ -4676,6 +4677,7 @@ function App() {
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
   const [layoutMode, setLayoutMode] = useState('lofi');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
@@ -6290,8 +6292,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           systemPrompt: briefPrompt,
           messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
           maxTokens: 2048,
-          preferredModel: MODEL_FAST,
-          provider: 'groq',
+          tierOverride: MODEL_FAST,
           isContentGen: false
         })
       });
@@ -6729,31 +6730,52 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         chatBody.imageMimeType = photo.mimeType;
       }
 
-      const chatResponse = await fetch(EDGE_FN_URL, {
-        method:'POST',
-        headers: {
-          'Content-Type':'application/json',
-          'Authorization':'Bearer ' + (token || SUPABASE_ANON_KEY)
-        },
-        body: JSON.stringify(chatBody),
-        signal: abortSignal,
-      });
-
-      if (!chatResponse.ok) {
-        const errData = await chatResponse.json().catch(() => ({}));
-        if (chatResponse.status === 429 && errData?.rateLimited) {
+      // Streaming chat path: SSE for the default chat mode, JSON for planning/studio
+      // (server returns plain JSON for non-chat modes; streamChat detects content-type
+      // and falls back transparently). Token deltas hydrate setStreamingMessage so
+      // the chat bubble fills in live; the final payload arrives via the `done` frame.
+      let chatData;
+      try {
+        chatData = await streamChat({
+          url: EDGE_FN_URL,
+          body: chatBody,
+          token: token || SUPABASE_ANON_KEY,
+          signal: abortSignal,
+          onDelta: (_, aggregated) => setStreamingMessage(aggregated),
+        });
+      } catch (err) {
+        if (err?.status === 429 && err?.payload?.rpmExhausted) {
+          // Per-minute Gemini quota tripped. Push the current snapshot into
+          // state so the analytics indicator + queueOrExecute see the binding
+          // limit immediately, then surface a friendly retry message.
+          if (err.payload.rpm) {
+            rpmStateRef.current = err.payload.rpm;
+            setRpmSnapshot(err.payload.rpm);
+          }
+          const resetMs = Number(err.payload.resetAtMs || 0);
+          const waitSec = Math.max(1, Math.ceil((resetMs - Date.now()) / 1000));
+          const limitMsg = `traffic's heavy right now — give it about ${waitSec}s and try again. (the AI's per-minute quota refilled.)`;
+          const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
+          setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
+          setIsLoading(false);
+          setStreamingMessage('');
+          return;
+        }
+        if (err?.status === 429 && err?.payload?.rateLimited) {
           const limitMsg = "hey, you've used all 5 content generations for today — this resets at midnight EST. regular chat still works though, ask me anything else!";
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
-          setContentGenUsed(errData.used || DAILY_CONTENT_LIMIT);
+          setContentGenUsed(err.payload.used || DAILY_CONTENT_LIMIT);
           setIsLoading(false);
+          setStreamingMessage('');
           return;
         }
-        throw new Error(errData?.error || errData?.message || 'AI request failed: ' + chatResponse.status);
+        setStreamingMessage('');
+        throw err;
       }
-
-      const chatData = await chatResponse.json();
+      setStreamingMessage('');
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
       if (chatData?.model_used) {
@@ -7462,8 +7484,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         const data = await res.json();
         transcript = (data.text || '').trim();
       }
-    } catch (groqErr) {
-      console.warn('Groq transcription failed, checking browser fallback:', groqErr);
+    } catch (sttErr) {
+      console.warn('Server transcription failed, checking browser fallback:', sttErr);
     }
 
     // Fallback: use browser SpeechRecognition transcript collected during recording
