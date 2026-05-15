@@ -548,8 +548,8 @@ const LANDING_CSS = `
 /* ── 3D stage ────────────────────────────────────────────── */
 .ld-stage {
   position: absolute;
-  top: 40px; right: -120px;
-  width: 820px; height: 560px;
+  top: 40px; right: 0px;
+  width: 700px; height: 480px;
   perspective: 1600px;
   perspective-origin: 30% 50%;
   z-index: 4;
@@ -571,7 +571,7 @@ const LANDING_CSS = `
 }
 
 @media (max-width: 1180px) {
-  .ld-stage { right: -160px; width: 740px; height: 520px; opacity: 0.95; }
+  .ld-stage { right: 0; width: 620px; height: 440px; opacity: 0.95; }
 }
 @media (max-width: 980px) {
   .ld-hero { padding-bottom: 560px; }
