@@ -17,6 +17,7 @@ import LofiLeftPanel from './components/LofiLeftPanel';
 import FocusWidget from './components/FocusWidget';
 import LofiRightPanel from './components/LofiRightPanel';
 import DynamicTopBar from './components/DynamicTopBar';
+import StudioSidebar from './components/StudioSidebar';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -7643,7 +7644,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       ref={layoutMode === 'lofi' ? studyAppRef : undefined}
       className={
         layoutMode === 'lofi' ? 'study-app'
-        : layoutMode === 'studio' ? 'studio-app'
+        : layoutMode === 'studio' ? 'studio'
         : 'sos-app'
       }
       style={
@@ -7727,6 +7728,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
+      {layoutMode === 'studio' && (
+        <StudyTopBar
+          user={user}
+          syncStatus={syncStatus}
+          theme={studioTheme}
+          onTheme={setStudioTheme}
+          onNewChat={startNewChat}
+          onSettings={() => setActivePanel('settings')}
+          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+          onHome={() => setActivePanel('home')}
+          homeEnabled={homePrefs.enabled}
+          queueCount={pendingQueue ? pendingQueue.length : 0}
+        />
+      )}
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
         blocks={blocks}
@@ -7741,7 +7756,24 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onImportClick={() => setShowGoogleModal(true)}
         aiThinking={isLoading}
       />}
-      <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
+      {layoutMode === 'studio' && (
+        <div className="studio-sidebar-col">
+          <StudioSidebar
+            user={user}
+            savedChats={savedChats}
+            viewingSavedChatId={viewingSavedChatId}
+            onPick={loadSavedChat}
+            onNew={startNewChat}
+            aiThinking={isLoading}
+            syncStatus={syncStatus}
+          />
+        </div>
+      )}
+      <div className={
+        layoutMode === 'lofi' ? 'study-center study-glass'
+        : layoutMode === 'studio' ? 'studio-center-col'
+        : 'sos-main'
+      }>
       {layoutMode === 'lofi' && (
         <StudyTopBar
           user={user}
@@ -7776,7 +7808,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </div>}
 
-      {layoutMode === 'lofi' && activePanel === 'chat' && <FocusWidget />}
+      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && <FocusWidget />}
 
       {activePanel === 'home' ? (
         <HomeScreen
