@@ -14,7 +14,10 @@ import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
+import FocusWidget from './components/FocusWidget';
 import LofiRightPanel from './components/LofiRightPanel';
+import DynamicTopBar from './components/DynamicTopBar';
+import StudioSidebar from './components/StudioSidebar';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -4678,12 +4681,17 @@ function App() {
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [layoutMode, setLayoutMode] = useState('lofi');
+  const [layoutMode, setLayoutMode] = useState('studio');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
   const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
+  const [studioTheme, setStudioTheme] = useState(() => localStorage.getItem('sos_studio_theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', studioTheme);
+    localStorage.setItem('sos_studio_theme', studioTheme);
+  }, [studioTheme]);
   const [activePanel, setActivePanel] = useState('chat');
   const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
   const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
@@ -7634,17 +7642,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   return (
     <div
       ref={layoutMode === 'lofi' ? studyAppRef : undefined}
-      className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'}
+      className={
+        layoutMode === 'lofi' ? 'study-app'
+        : layoutMode === 'studio' ? 'studio'
+        : 'sos-app'
+      }
       style={
         layoutMode === 'lofi'
           ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
-          : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
+          : layoutMode === 'studio'
+            ? {}
+            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
       }
     >
       {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
       {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
       {/* Neon Lofi — corner targeting reticles (decorative) */}
-      {layoutMode !== 'lofi' && <>
+      {(layoutMode === 'sidebar' || layoutMode === 'topbar') && <>
         <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
         <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
         <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
@@ -7714,6 +7728,20 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
+      {layoutMode === 'studio' && (
+        <StudyTopBar
+          user={user}
+          syncStatus={syncStatus}
+          theme={studioTheme}
+          onTheme={setStudioTheme}
+          onNewChat={startNewChat}
+          onSettings={() => setActivePanel('settings')}
+          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+          onHome={() => setActivePanel('home')}
+          homeEnabled={homePrefs.enabled}
+          queueCount={pendingQueue ? pendingQueue.length : 0}
+        />
+      )}
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
         blocks={blocks}
@@ -7726,8 +7754,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onUpdateNote={handleUpdateNote}
         onDeleteNote={handleDeleteNote}
         onImportClick={() => setShowGoogleModal(true)}
+        aiThinking={isLoading}
       />}
-      <div className={layoutMode === 'lofi' ? 'study-center study-glass' : 'sos-main'}>
+      {layoutMode === 'studio' && (
+        <div className="studio-sidebar-col">
+          <StudioSidebar
+            user={user}
+            savedChats={savedChats}
+            viewingSavedChatId={viewingSavedChatId}
+            onPick={loadSavedChat}
+            onNew={startNewChat}
+            aiThinking={isLoading}
+            syncStatus={syncStatus}
+          />
+        </div>
+      )}
+      <div className={
+        layoutMode === 'lofi' ? 'study-center study-glass'
+        : layoutMode === 'studio' ? 'studio-center-col'
+        : 'sos-main'
+      }>
       {layoutMode === 'lofi' && (
         <StudyTopBar
           user={user}
@@ -7740,6 +7786,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onHome={() => setActivePanel('home')}
           homeEnabled={homePrefs.enabled}
           queueCount={pendingQueue ? pendingQueue.length : 0}
+          theme={studioTheme}
+          onTheme={setStudioTheme}
         />
       )}
       {layoutMode === 'topbar' && <div className="sos-header">
@@ -7759,6 +7807,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
+
+      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && <FocusWidget />}
 
       {activePanel === 'home' ? (
         <HomeScreen
