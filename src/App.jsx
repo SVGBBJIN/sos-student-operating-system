@@ -16,6 +16,7 @@ import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import FocusWidget from './components/FocusWidget';
 import LofiRightPanel from './components/LofiRightPanel';
+import DynamicTopBar from './components/DynamicTopBar';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -4679,7 +4680,7 @@ function App() {
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [layoutMode, setLayoutMode] = useState('lofi');
+  const [layoutMode, setLayoutMode] = useState('studio');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -7640,17 +7641,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   return (
     <div
       ref={layoutMode === 'lofi' ? studyAppRef : undefined}
-      className={layoutMode === 'lofi' ? 'study-app' : 'sos-app'}
+      className={
+        layoutMode === 'lofi' ? 'study-app'
+        : layoutMode === 'studio' ? 'studio-app'
+        : 'sos-app'
+      }
       style={
         layoutMode === 'lofi'
           ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
-          : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
+          : layoutMode === 'studio'
+            ? {}
+            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
       }
     >
       {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
       {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
       {/* Neon Lofi — corner targeting reticles (decorative) */}
-      {layoutMode !== 'lofi' && <>
+      {(layoutMode === 'sidebar' || layoutMode === 'topbar') && <>
         <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
         <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
         <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />

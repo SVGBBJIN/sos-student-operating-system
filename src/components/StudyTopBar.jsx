@@ -7,7 +7,6 @@ function Si({ name, size = 15 }) {
     plus:     <><path d="M12 5v14M5 12h14"/></>,
     sun:      <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
     moon:     <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></>,
-    panel:    <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></>,
     logout:   <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></>,
     home:     <><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>,
   };
@@ -23,16 +22,14 @@ function Si({ name, size = 15 }) {
 export default function StudyTopBar({
   user,
   syncStatus,
+  theme = 'dark',
+  onTheme,
   onNewChat,
-  onImport,
   onSettings,
   onAuthAction,
-  onSwitchLayout,
   onHome,
   homeEnabled = false,
   queueCount = 0,
-  theme = 'dark',
-  onTheme,
 }) {
   const [time, setTime] = useState('');
 
@@ -49,44 +46,40 @@ export default function StudyTopBar({
     syncStatus === 'saving' ? 'saving'
     : syncStatus === 'error' ? 'error'
     : user ? 'saved'
-    : 'offline';
+    : 'saved';
 
   return (
-    <div className="study-topbar study-glass stb-v2">
-      {/* Brand */}
-      <div className="stb-left">
-        <span className="stb-brand-img">
-          <img src="/brain-logo.svg" alt="SOS" style={{ width: 22, height: 22, display: 'block' }} />
+    <div className="topbar">
+      <div className="topbar-left">
+        <span className="brand-mark">
+          <img src="/brain-logo.svg" alt="SOS" />
         </span>
-        <span className="stb-brand-word">
-          S<em>O</em>S
-        </span>
+        <span className="brand-word">S<em>O</em>S</span>
       </div>
 
-      {/* Right cluster */}
-      <div className="stb-right">
+      <div className="topbar-right">
         {/* Sync pill */}
-        {user && (
-          <span className="stb-sync-pill">
-            <span className={'study-sync-dot ' + dotClass} />
-            <span className="stb-sync-label">
-              {syncStatus === 'saving' ? 'syncing'
-               : syncStatus === 'error' ? 'offline'
-               : 'saved'}
-            </span>
+        <span className="sync-pill" title="Sync status">
+          <span className={`sync-dot ${dotClass}`} />
+          <span>
+            {syncStatus === 'saving' ? 'syncing'
+             : syncStatus === 'error' ? 'offline'
+             : 'saved'}
+          </span>
+        </span>
+
+        {queueCount > 0 && (
+          <span className="sync-pill" style={{ color: 'var(--warning)' }}>
+            {queueCount} queued
           </span>
         )}
 
-        {queueCount > 0 && (
-          <span className="study-queue-badge">{queueCount} queued</span>
-        )}
-
         {/* Clock */}
-        <span className="stb-clock">{time}</span>
+        <span className="sync-pill" style={{ letterSpacing: '0.04em' }}>{time}</span>
 
         {/* Theme toggle */}
         {onTheme && (
-          <div className="stb-theme-toggle" role="tablist" aria-label="theme">
+          <div className="theme-toggle" role="tablist" aria-label="theme">
             <button
               className={theme === 'light' ? 'on' : ''}
               onClick={() => onTheme('light')}
@@ -106,30 +99,24 @@ export default function StudyTopBar({
 
         {/* Home */}
         {homeEnabled && onHome && (
-          <button className="stb-icon-btn" onClick={onHome} title="Home screen" aria-label="Home screen">
-            <Si name="home" />
+          <button className="icon-btn" onClick={onHome} title="Home screen" aria-label="Home screen">
+            <Si name="home" size={15} />
           </button>
         )}
 
         {/* Settings */}
-        <button className="stb-icon-btn" onClick={onSettings} title="Settings" aria-label="Settings">
-          <Si name="settings" />
+        <button className="icon-btn" onClick={onSettings} title="Settings" aria-label="Settings">
+          <Si name="settings" size={15} />
         </button>
 
-        {/* New chat — dashed ghost pill */}
-        <button className="stb-new-chat" onClick={onNewChat} title="New chat" aria-label="New chat">
-          <Si name="plus" size={13} />
-          <span>New chat</span>
-        </button>
-
-        {/* Layout toggle */}
-        <button className="stb-icon-btn" onClick={onSwitchLayout} title="Switch layout" aria-label="Switch to sidebar layout">
-          <Si name="panel" />
+        {/* New chat */}
+        <button className="icon-btn primary" onClick={onNewChat} title="New chat" aria-label="New chat">
+          <Si name="plus" size={15} />
         </button>
 
         {/* Auth */}
-        <button className="stb-icon-btn" onClick={onAuthAction} title={user ? 'Sign out' : 'Sign in'} aria-label={user ? 'Sign out' : 'Sign in'}>
-          <Si name="logout" />
+        <button className="icon-btn" onClick={onAuthAction} title={user ? 'Sign out' : 'Sign in'} aria-label={user ? 'Sign out' : 'Sign in'}>
+          <Si name="logout" size={15} />
         </button>
       </div>
     </div>
