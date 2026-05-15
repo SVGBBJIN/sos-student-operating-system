@@ -511,7 +511,7 @@ const LANDING_CSS = `
 }
 .ld-headline {
   font-family: var(--ld-font-display); font-weight: 700;
-  font-size: clamp(56px, 8.5vw, 124px); line-height: 0.96;
+  font-size: clamp(40px, 5.5vw, 84px); line-height: 1.02;
   letter-spacing: -0.04em; color: var(--ld-fg-1);
   margin: 18px 0 0;
 }
