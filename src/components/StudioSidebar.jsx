@@ -37,6 +37,7 @@ export default function StudioSidebar({
   viewingSavedChatId,
   onPick,
   onNew,
+  onAuthAction,
   aiThinking = false,
   syncStatus,
   nextEvent,
@@ -113,6 +114,7 @@ export default function StudioSidebar({
           style={{ width: 26, height: 26 }}
           title={user ? 'Sign out' : 'Sign in'}
           aria-label={user ? 'Sign out' : 'Sign in'}
+          onClick={onAuthAction}
         >
           <LogoutIcon />
         </button>
