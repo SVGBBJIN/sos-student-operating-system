@@ -1623,3 +1623,226 @@
   border-color: var(--studio-accent, #86efac);
 }
 .fw-btn.ghost { flex: 0 0 auto; }
+
+/* ── Floating close button for chat-summoned widgets ──────── */
+.fw-close, .sw-close {
+  position: absolute; top: 8px; right: 8px;
+  width: 18px; height: 18px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent;
+  color: var(--muted-foreground); font-size: 14px; line-height: 1;
+  cursor: pointer; padding: 0;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.fw-close:hover, .sw-close:hover {
+  background: var(--muted); color: var(--foreground); border-color: var(--border-subtle);
+}
+.sw-close { position: static; margin-left: auto; }
+
+/* ── Schedule Widget (sibling card under Pomodoro) ────────── */
+.schedule-widget {
+  position: absolute;
+  top: 184px; right: 18px;
+  width: 244px;
+  max-height: calc(100% - 220px);
+  display: flex; flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  overflow: hidden;
+  z-index: 5;
+  animation: fadeUp 360ms cubic-bezier(0.4,0,0.2,1) both;
+  animation-delay: 80ms;
+}
+.schedule-widget.solo-top { top: 18px; }
+.schedule-widget .sw-head {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 12px 14px 10px;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.12em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.schedule-widget .sw-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--studio-accent, #86efac);
+  box-shadow: 0 0 6px var(--studio-accent, #86efac);
+  animation: fw-pulse 1.6s ease-in-out infinite;
+}
+.schedule-widget .sw-label { flex: 1; color: var(--studio-accent, #86efac); }
+.schedule-widget .sw-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  background: var(--background); color: var(--muted-foreground);
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--border-subtle); letter-spacing: 0.06em;
+}
+.schedule-widget .sw-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.schedule-widget .sw-body::-webkit-scrollbar { width: 4px; }
+.schedule-widget .sw-body::-webkit-scrollbar-thumb { background: var(--border-subtle); }
+.schedule-widget .sw-timeline {
+  position: relative;
+  margin-left: 34px;
+  padding-right: 10px;
+}
+.schedule-widget .sw-hour { position: absolute; left: 0; right: 0; height: 0; }
+.schedule-widget .sw-hour-label {
+  position: absolute; left: -32px; top: -6px;
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  color: var(--muted-foreground); text-transform: lowercase;
+  letter-spacing: 0.04em;
+  width: 26px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.schedule-widget .sw-hour-line {
+  position: absolute; left: 0; right: 0; top: 0;
+  height: 1px; background: var(--border-subtle);
+}
+.schedule-widget .sw-event {
+  position: absolute; left: 0; right: 0;
+  padding: 5px 8px 5px 9px;
+  border-radius: 6px;
+  background: var(--ev-bg, rgba(255,255,255,0.03));
+  border-left: 3px solid var(--ev-line, var(--border-subtle));
+  cursor: pointer; overflow: hidden;
+  transition: transform 120ms, background 120ms, box-shadow 120ms;
+}
+.schedule-widget .sw-event:hover {
+  transform: translateX(2px);
+  background: var(--ev-hover, rgba(255,255,255,0.06));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+.schedule-widget .sw-event-title {
+  font-size: 11.5px; font-weight: 500; line-height: 1.25;
+  color: var(--foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.schedule-widget .sw-event-meta {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  color: var(--muted-foreground); margin-top: 2px;
+  text-transform: lowercase; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.schedule-widget .sw-event[data-tone="mint"]    { --ev-bg: rgba(134,239,172,0.10); --ev-hover: rgba(134,239,172,0.16); --ev-line: #86efac; }
+.schedule-widget .sw-event[data-tone="blue"]    { --ev-bg: rgba(143,168,255,0.10); --ev-hover: rgba(143,168,255,0.16); --ev-line: #8fa8ff; }
+.schedule-widget .sw-event[data-tone="purple"]  { --ev-bg: rgba(192,132,252,0.10); --ev-hover: rgba(192,132,252,0.16); --ev-line: #c084fc; }
+.schedule-widget .sw-event[data-tone="warning"] { --ev-bg: rgba(251,191,36,0.10);  --ev-hover: rgba(251,191,36,0.16);  --ev-line: #fbbf24; }
+.schedule-widget .sw-event[data-tone="danger"]  { --ev-bg: rgba(248,113,113,0.10); --ev-hover: rgba(248,113,113,0.16); --ev-line: #f87171; }
+.schedule-widget .sw-event[data-tone="idle"] .sw-event-title { color: var(--muted-foreground); }
+.schedule-widget .sw-event.live {
+  box-shadow: 0 0 0 1px rgba(134,239,172,0.45), 0 0 20px -4px rgba(134,239,172,0.18);
+}
+.schedule-widget .sw-event-pulse {
+  position: absolute; top: 6px; right: 6px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #86efac; box-shadow: 0 0 6px #86efac;
+  animation: fw-pulse 1.4s ease-in-out infinite;
+}
+.schedule-widget .sw-now {
+  position: absolute; left: -8px; right: 0; height: 0;
+  pointer-events: none; z-index: 3;
+}
+.schedule-widget .sw-now-line {
+  position: absolute; left: 8px; right: 0; top: 0;
+  height: 1px; background: #86efac; box-shadow: 0 0 6px #86efac;
+}
+.schedule-widget .sw-now-dot {
+  position: absolute; left: 4px; top: -3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #86efac; box-shadow: 0 0 8px #86efac;
+}
+.schedule-widget .sw-now-time {
+  position: absolute; right: 0; top: -14px;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px;
+  color: #86efac; font-weight: 600;
+  background: var(--card); padding: 1px 4px; border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.schedule-widget .sw-empty {
+  position: relative;
+  margin: 14px 4px 0; padding: 10px 12px;
+  border: 1px dashed var(--border-subtle); border-radius: 8px;
+  font-size: 11px; color: var(--muted-foreground); text-align: center;
+}
+
+/* ── SOS notification toast — mirrors the landing's float.notif ── */
+.sos-notif {
+  position: fixed;
+  top: 16px; right: 18px;
+  min-width: 240px; max-width: 320px;
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+  z-index: 240;
+  animation: sosNotifIn 320ms cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes sosNotifIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sos-notif .icon {
+  width: 32px; height: 32px; border-radius: 10px;
+  background: var(--studio-accent-bg, rgba(134,239,172,0.14));
+  border: 1px solid var(--studio-accent-line, rgba(134,239,172,0.45));
+  color: var(--studio-accent, #86efac);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sos-notif .stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sos-notif .top {
+  font-family: 'JetBrains Mono', monospace; font-size: 9px;
+  color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.12em;
+}
+.sos-notif .bot {
+  font-size: 12.5px; color: var(--foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sos-notif .bot strong { color: var(--studio-accent-strong, #a8f3c2); font-weight: 600; }
+.sos-notif .close {
+  background: transparent; border: none; color: var(--muted-foreground);
+  font-size: 16px; cursor: pointer; padding: 2px 4px; line-height: 1;
+}
+.sos-notif .close:hover { color: var(--foreground); }
+
+/* ── Projects bar — colored blob folder list (mirrors landing) ── */
+.projects-bar { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 10px; }
+.projects-bar .pb-label {
+  font-family: 'JetBrains Mono', monospace; font-size: 9px;
+  color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.12em;
+  padding: 0 4px 4px;
+}
+.pb-folder {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 12px; color: var(--muted-foreground); cursor: pointer;
+  background: transparent; border: none; text-align: left; width: 100%;
+  transition: background 150ms, color 150ms;
+}
+.pb-folder:hover { background: var(--muted); color: var(--foreground); }
+.pb-folder.active {
+  background: var(--studio-accent-bg, rgba(134,239,172,0.14));
+  color: var(--studio-accent-strong, #a8f3c2);
+}
+.pb-folder .blob {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--muted-foreground);
+}
+.pb-folder[data-tone="math"]    .blob { background: #a78bfa; }
+.pb-folder[data-tone="english"] .blob { background: #f9a8d4; }
+.pb-folder[data-tone="science"] .blob { background: #fbbf24; }
+.pb-folder[data-tone="history"] .blob { background: #f87171; }
+.pb-folder[data-tone="cs"]      .blob { background: #86efac; }
+.pb-folder[data-tone="review"]  .blob { background: var(--muted-foreground); }
+.pb-folder .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-folder .count {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  color: var(--muted-foreground);
+}
+.pb-folder.active .count { color: var(--studio-accent, #86efac); }

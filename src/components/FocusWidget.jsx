@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
    Compact floating pomodoro timer pinned to the top-right of the
    chat column. Mirrors the timer pop-up shown on the landing hero.
 */
-export default function FocusWidget() {
+export default function FocusWidget({ onClose }) {
   const [running, setRunning] = useState(false);
   const [secs, setSecs] = useState(25 * 60);
 
@@ -24,6 +24,9 @@ export default function FocusWidget() {
 
   return (
     <div className={'focus-widget' + (running ? ' live' : '')}>
+      {onClose && (
+        <button className="fw-close" onClick={onClose} aria-label="Close timer">×</button>
+      )}
       <div className="fw-head">
         <span className="fw-dot" />
         <span className="fw-label">{running ? 'focus' : 'pomodoro'}</span>
