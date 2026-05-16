@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Eval harness for the Gemini-native SOS chat surface.
+// Eval harness for the SOS chat surface (Groq primary + Gemini fallback).
 //
 // Modes:
-//   --live    Run each fixture against Gemini, write sample-runs.jsonl
+//   --live    Run each fixture against the live routing, write sample-runs.jsonl
 //   --shadow  Run twice (Pro + Flash tiers) and diff the predicted tool sets
 //   default   Score the cached sample-runs.jsonl against the fixtures
 //
-// Env: GEMINI_API_KEY
+// Env: GROQ_API_KEY + GEMINI_API_KEY (latter for embeddings + fallback).
+// Set AI_PROVIDER_OVERRIDE=gemini to bypass Groq for comparison runs.
 
 import fs from "node:fs";
 import { callModel, route } from "../shared/ai/index.js";
@@ -203,8 +204,12 @@ async function runShadow(fixtures) {
 const args = parseArgs(process.argv);
 
 if (args.live || args.shadow) {
+  if (!process.env.GROQ_API_KEY && process.env.AI_PROVIDER_OVERRIDE !== "gemini") {
+    process.stderr.write("Error: GROQ_API_KEY env var is required (or set AI_PROVIDER_OVERRIDE=gemini to skip)\n");
+    process.exit(1);
+  }
   if (!process.env.GEMINI_API_KEY) {
-    process.stderr.write("Error: GEMINI_API_KEY env var is required\n");
+    process.stderr.write("Error: GEMINI_API_KEY env var is required (embeddings + cross-provider fallback)\n");
     process.exit(1);
   }
 }

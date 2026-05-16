@@ -1,13 +1,17 @@
-// Vercel serverless handler — Gemini-native chat surface.
+// Vercel serverless handler — chat surface.
+//
+// Routing is driven by router.ts: chat/action_routing → Groq gpt-oss-20b, with
+// gemini-3-flash as cross-provider fallback. Voice transcription bypasses
+// callModel and goes directly to Groq Whisper via shared/ai/voice.ts.
 //
 // Three response modes:
 //   - SSE (default; Accept: text/event-stream) — streams delta/tool_call/done frames.
 //   - JSON (Accept: application/json or no Accept) — returns the final aggregated
-//     payload identical in shape to the previous Groq build, for legacy clients.
+//     payload for legacy clients.
 //
 // Routes:
-//   - mode === "voice"     → Gemini Flash audio transcription (returns JSON)
-//   - mode === "studio"    → STUDIO_TOOLS forced-call
+//   - mode === "voice"     → Groq Whisper transcription (returns JSON)
+//   - mode === "studio"    → STUDIO_TOOLS forced-call (gpt-oss-120b)
 //   - mode === "planning"  → 3-pass planning pipeline (non-streaming)
 //   - default              → chat with ACTION_TOOLS
 
@@ -18,11 +22,11 @@ function overLimitForIntent(intent: Intent): boolean {
   return overLimit(route(intent).tier);
 }
 import type { StreamChunk } from "../shared/ai/index.js";
-import { getEnv, requireEnv } from "../shared/env.js";
+import { getEnv } from "../shared/env.js";
 import { extractUserId } from "../shared/auth.js";
 import { checkContentRateLimit } from "../shared/rate-limit.js";
 import { createSSEWriterForNode, type NodeResponseLike } from "../shared/sse.js";
-import { getProvider } from "../shared/ai/providers/index.js";
+import { transcribeAudio } from "../shared/ai/voice.js";
 
 // Minimal request/response shapes — avoids the @vercel/node type dependency.
 interface VercelRequest {
@@ -79,8 +83,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const apiKey = getEnv("GEMINI_API_KEY");
-  if (!apiKey) {
+  // Cold-start env sanity check. GROQ_API_KEY is required for chat + voice;
+  // GEMINI_API_KEY is required for embeddings and cross-provider fallback.
+  if (!getEnv("GROQ_API_KEY")) {
+    res.status(500).json({ error: "GROQ_API_KEY is not configured" });
+    return;
+  }
+  if (!getEnv("GEMINI_API_KEY")) {
     res.status(500).json({ error: "GEMINI_API_KEY is not configured" });
     return;
   }
@@ -91,33 +100,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const workspaceContext = (body.workspaceContext ?? "chat").toLowerCase();
 
   try {
-    // ── Voice transcription path (Gemini Flash multimodal) ──
+    // ── Voice transcription (Groq Whisper) ──
     if (body.mode === "voice") {
       if (!body.audioBase64) {
         res.status(400).json({ error: "No audio data provided" });
         return;
       }
-      const provider = getProvider("gemini", apiKey);
-      const transcript = await provider.chat({
-        model: "gemini-3-flash",
-        systemPrompt:
-          "Transcribe the attached audio to plain text. Return ONLY the transcript — no commentary, no markdown.",
-        messages: [
-          {
-            role: "user",
-            content: "Transcribe this clip.",
-            attachments: [{
-              kind: "audio",
-              mimeType: body.audioMimeType ?? "audio/webm",
-              base64: body.audioBase64,
-            }],
-          },
-        ],
-        temperature: 0.1,
-        maxOutputTokens: 1024,
-        thinkingBudget: 0,
+      const transcript = await transcribeAudio({
+        audioBase64: body.audioBase64,
+        audioMimeType: body.audioMimeType ?? "audio/webm",
       });
-      res.status(200).json({ text: transcript.content.trim() });
+      res.status(200).json({ text: transcript.text });
       return;
     }
 
@@ -193,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         const retryAfterSec = Math.max(1, Math.ceil((snap.resetAtMs - Date.now()) / 1000));
         res.setHeader("Retry-After", String(retryAfterSec));
         res.status(429).json({
-          error: "Gemini RPM budget exhausted — try again shortly.",
+          error: "AI rate limit reached — try again shortly.",
           rateLimited: true,
           rpmExhausted: true,
           tier: snap.tier,
@@ -252,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       if (!res.headersSent) {
         res.setHeader("Retry-After", String(retryAfterSec));
         res.status(429).json({
-          error: "Gemini RPM budget exhausted — try again shortly.",
+          error: "AI rate limit reached — try again shortly.",
           rateLimited: true,
           rpmExhausted: true,
           tier: err.tier,
@@ -270,6 +263,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 }
 
-// Silence the unused-import warning in environments that strip types — the
-// requireEnv import is reserved for future strict-startup validation.
-void requireEnv;

@@ -6,7 +6,7 @@ const AUTO_DISMISS_MS = 60_000;
  * RateLimitBanner — "Charles is resting" toast.
  *
  * Listens for the custom "sos:rate-limited" event dispatched by retryAI.js
- * when Groq returns a 429. Shown fixed at the bottom centre of the screen.
+ * when the AI backend returns a 429. Shown fixed at the bottom centre of the screen.
  * Auto-dismisses after 60 seconds.
  */
 export default function RateLimitBanner() {

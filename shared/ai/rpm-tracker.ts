@@ -1,6 +1,6 @@
 // Per-model Requests-Per-Minute tracker. Process-local sliding window — good
 // enough for a single Vercel function or Supabase Edge instance. When the same
-// API key is shared across many instances, the upstream Gemini 429 + circuit
+// API key is shared across many instances, the upstream provider 429 + circuit
 // breaker in resilience.ts is the real safety net; this tracker exists to:
 //
 //   1. Tell the client how close it is to its share of the budget (so the UI
@@ -9,12 +9,15 @@
 //      win — most chat traffic doesn't need Pro).
 //   3. Reject obviously-over-limit calls before they hit the wire.
 //
-// Limits are tier-shaped (flash/pro/embed), overridable via env. Defaults
-// reflect Gemini paid-tier 1 quotas as of 2026-05; lower these via env if
-// running on the free tier.
+// Limits are tier-shaped (flash/pro/embed), overridable via env.
 //
-//   GEMINI_RPM_FLASH=1000     (gemini-3-flash, gemini-2.5-flash)
-//   GEMINI_RPM_PRO=360        (gemini-2.5-pro)
+// TODO(groq-migration): defaults below still reflect Gemini paid-tier quotas
+// (2026-05). After observing a week of real Groq traffic, recalibrate against
+// Groq's published gpt-oss-20b / gpt-oss-120b paid-tier limits and rename the
+// env vars to GROQ_RPM_FLASH / GROQ_RPM_PRO. Embed stays on Gemini.
+//
+//   GEMINI_RPM_FLASH=1000     (legacy name; applies to flash tier)
+//   GEMINI_RPM_PRO=360        (legacy name; applies to pro tier)
 //   GEMINI_RPM_EMBED=3000     (gemini-embedding-002)
 
 import { getEnv } from "../env.js";

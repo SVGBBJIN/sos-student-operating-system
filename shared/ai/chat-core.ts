@@ -11,7 +11,6 @@
 //   7. Emit telemetry and respect the per-key circuit breaker
 
 import { inferSubjectFromTitle } from "../subjects.js";
-import { getEnv } from "../env.js";
 import { route, type Intent, type Tier } from "./router.js";
 import { getProvider, type ProviderName } from "./providers/index.js";
 import type {
@@ -227,12 +226,10 @@ function enrichActionSubject(action: ChatAction): ChatAction {
 async function invokeProvider(
   req: CallModelRequest,
   modelOverride: string,
+  providerName: ProviderName,
   consumer?: (c: StreamChunk) => void
 ): Promise<{ response: ChatResponse; chunks: number }> {
-  const r = route(req.intent, req.tierOverride, req.providerOverride);
-  const apiKey = getEnv("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  const provider = getProvider(r.provider, apiKey);
+  const provider = getProvider(providerName);
   const tools = toolDefsForRequest(req);
 
   const chatReq: ChatRequest = {
@@ -303,17 +300,28 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     r = route(req.intent, "flash", req.providerOverride);
   }
 
+  // Image-attachment routing override: GPT-OSS is text-only, so any request
+  // carrying an image hops to Llama-4-Scout on Groq (vision-capable). Gemini
+  // remains the cross-provider fallback for vision failures.
+  const hasImage = (req.attachments?.some((a) => a.kind === "image") ?? false)
+    || req.messages.some((m) => m.attachments?.some((a) => a.kind === "image") ?? false);
+  if (hasImage && r.tier !== "embed") {
+    r = {
+      ...r,
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      provider: "groq",
+      fallbackModel: "gemini-3-flash",
+      fallbackProvider: "gemini",
+    };
+  }
+
   // Hard cap: if even Flash is exhausted, fail loud so the client can queue.
   if (overLimit(r.tier)) {
     const status = getRpmStatus(r.tier);
     throw new RpmExhaustedError(r.tier, status.resetAtMs);
   }
 
-  const circuitKey = `${r.provider}:${r.tier}`;
-  if (circuitOpen(circuitKey)) {
-    const f = circuitFallbackResponse();
-    return buildResponse(req, f, { fallbackUsed: false, attempts: 0, primaryModel: r.model, status: "error", causeCode: "circuit_open" });
-  }
+  const primaryCircuitKey = `${r.provider}:${r.tier}`;
 
   // Record the request against the tier window up-front. We do this before
   // dispatch (not after success) because: (a) a request in flight still counts
@@ -325,41 +333,60 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
   let attempts = 0;
   let response: ChatResponse | null = null;
   let fallbackUsed = false;
+  let successfulProvider: ProviderName = r.provider;
   let lastError: unknown;
 
-  // Always try the in-tier fallback once on any primary failure. The point of
-  // a fallback model is to recover from primary outages — we never have enough
-  // information at this layer to know whether retrying on the same model would
-  // help, so the cheap thing is to escalate to the fallback model immediately.
-  // 4xx errors that are user-fixable surface through the schema repair loop
-  // below, not here.
-  for (const candidateModel of [r.model, r.fallbackModel].filter((m): m is string => Boolean(m))) {
+  // Build the attempt ladder: primary (Groq) → cross-provider fallback (Gemini).
+  // If the primary circuit is open we skip straight to the fallback rather than
+  // erroring — the cross-provider hop is the point of having a fallback.
+  type Attempt = { model: string; provider: ProviderName };
+  const primaryOpen = circuitOpen(primaryCircuitKey);
+  const attemptsLadder: Attempt[] = [];
+  if (!primaryOpen) {
+    attemptsLadder.push({ model: r.model, provider: r.provider });
+  }
+  if (r.fallbackModel && r.fallbackProvider) {
+    attemptsLadder.push({ model: r.fallbackModel, provider: r.fallbackProvider });
+  }
+
+  if (attemptsLadder.length === 0) {
+    // Primary circuit open and no fallback configured.
+    const f = circuitFallbackResponse("circuit_open");
+    return buildResponse(req, f, { fallbackUsed: false, attempts: 0, primaryModel: r.model, status: "error", causeCode: "circuit_open" });
+  }
+
+  for (const attempt of attemptsLadder) {
     attempts += 1;
+    const circuitKey = `${attempt.provider}:${r.tier}`;
+    if (circuitOpen(circuitKey)) {
+      // Fallback's own circuit is also open — skip without counting as a failure.
+      continue;
+    }
     try {
-      const { response: res } = await invokeProvider(req, candidateModel, req.onChunk);
+      const { response: res } = await invokeProvider(req, attempt.model, attempt.provider, req.onChunk);
       response = res;
-      fallbackUsed = candidateModel !== r.model;
+      fallbackUsed = attempt.model !== r.model || attempt.provider !== r.provider;
+      successfulProvider = attempt.provider;
       recordSuccess(circuitKey);
       break;
     } catch (err) {
       lastError = err;
       recordFailure(circuitKey);
-      // Reference isRetryable so future per-attempt retry counts have access to
-      // the classifier — kept here for telemetry/observability hooks.
       void isRetryable(err);
-      // Continue to the fallback candidate in the next loop iteration.
+      // Continue to the next attempt in the ladder.
     }
   }
 
   if (!response) {
-    const f = circuitFallbackResponse();
+    const errMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    const f = circuitFallbackResponse(primaryOpen ? "circuit_open" : "provider_failed", errMsg);
     return buildResponse(req, f, {
       fallbackUsed,
       attempts,
       primaryModel: r.model,
       status: "error",
-      causeCode: "provider_failed",
-      error: lastError instanceof Error ? lastError.message : String(lastError),
+      causeCode: primaryOpen ? "circuit_open" : "provider_failed",
+      error: errMsg,
     });
   }
 
@@ -380,7 +407,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     };
     try {
       attempts += 1;
-      const { response: retryRes } = await invokeProvider(retryReq, response.modelUsed);
+      const { response: retryRes } = await invokeProvider(retryReq, response.modelUsed, successfulProvider);
       const retryParsed = parseResponse(retryReq, retryRes);
       if (retryParsed.actions.length > 0 || retryParsed.validation_warnings.length < result.validation_warnings.length) {
         result = retryParsed;
@@ -393,13 +420,18 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
   // Enrich any actions that have a generic subject we can infer.
   result.actions = result.actions.map(enrichActionSubject);
 
+  const proposedTools = result.tool_call_stats.proposed;
+  const validatedTools = result.tool_call_stats.validated;
   const telemetry: RequestTelemetry = {
     request_id: makeRequestId(),
     intent: req.intent,
     tier: r.tier,
+    provider: successfulProvider,
     model: response.modelUsed,
     fallback_used: fallbackUsed,
     attempt_count: attempts,
+    schema_repair_triggered: attempts > attemptsLadder.length,
+    tool_call_validation_rate: proposedTools > 0 ? validatedTools / proposedTools : 1,
     llm_ms: Date.now() - startedAt,
     total_ms: Date.now() - startedAt,
     prompt_tokens: response.usage.prompt_tokens,

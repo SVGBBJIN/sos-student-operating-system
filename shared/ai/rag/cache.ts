@@ -3,9 +3,9 @@
 //   L2: semantic cache stored in Supabase (response_cache table)
 //
 // L2 is read-through only — writes happen async after a successful call.
-// This module is intentionally narrow: only summarize / proofread_classify /
-// search_reference call it. Action routing must never hit a cache (it would
-// short-circuit ask_clarification).
+// This module is intentionally narrow: only summarize / proofread_classify
+// call it. Action routing must never hit a cache (it would short-circuit
+// ask_clarification).
 
 interface CacheEntry<T> {
   value: T;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
-import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, SEARCH_LESSON_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
@@ -633,7 +633,6 @@ const POLICY_MODULES = {
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
-  web_refs: 'For internet fact checks, citations, or direct quotes, call web_search_reference.',
   conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
@@ -956,14 +955,12 @@ NOTES: ${noteNames}`;
   ];
   const intentModules = intentType === 'chat'
     ? [
-        POLICY_MODULES.web_refs,
         POLICY_MODULES.conversational_capabilities,
       ]
     : [
         POLICY_MODULES.action_tools,
         POLICY_MODULES.planning_guardrails,
         POLICY_MODULES.corrections,
-        POLICY_MODULES.web_refs,
         POLICY_MODULES.date_resolution,
         POLICY_MODULES.vision,
       ];
@@ -5778,59 +5775,6 @@ function App() {
           recordExecution('clear_all', 'all data wiped');
           pushUndoToast('Undo: clear all data', undoSnap);
           break;
-        case 'web_search_reference': {
-          const query = String(action.query || '').trim();
-          if (!query) break;
-          (async () => {
-            try {
-              const session = await sb.auth.getSession();
-              const token = session?.data?.session?.access_token;
-              const res = await fetch(SEARCH_LESSON_URL, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY),
-                },
-                body: JSON.stringify({
-                  mode: 'reference',
-                  query,
-                  quote_count: Math.max(1, Math.min(6, Number(action.quote_count) || 3)),
-                }),
-              });
-              if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData?.error || 'Web reference search failed');
-              }
-              const data = await res.json();
-              const summary = typeof data?.summary === 'string' ? data.summary.trim() : '';
-              const quotes = Array.isArray(data?.quotes) ? data.quotes : [];
-              const sources = Array.isArray(data?.sources) ? data.sources : [];
-              const quoteText = quotes.slice(0, 6).map((q, i) => {
-                const sourceLabel = q?.source || q?.title || q?.url || 'source';
-                const quote = String(q?.quote || '').trim();
-                return quote ? `${i + 1}) "${quote}" — ${sourceLabel}` : null;
-              }).filter(Boolean).join('\n');
-              const sourceText = sources.slice(0, 6).map((s, i) => {
-                const title = s?.title || s?.url || `Source ${i + 1}`;
-                return `- ${title}${s?.url ? ` (${s.url})` : ''}`;
-              }).join('\n');
-              const content = [
-                summary || `Here’s what I found for "${query}".`,
-                quoteText ? `\nQuotes:\n${quoteText}` : '',
-                sourceText ? `\nSources:\n${sourceText}` : '',
-              ].filter(Boolean).join('\n');
-              if (content.trim()) {
-                const assistantMsg = { role:'assistant', content:content.trim(), timestamp:Date.now() };
-                setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-                if (user) dbInsertChatMsg('assistant', assistantMsg.content, user.id);
-              }
-            } catch (err) {
-              console.error('web_search_reference failed:', err);
-              setToastMsg('Couldn\'t fetch web references right now.');
-            }
-          })();
-          break;
-        }
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
@@ -6700,10 +6644,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
 
-      const preferredModel = (() => {
-        try { return localStorage.getItem('sos_preferred_model') || MODEL_DEEP; }
-        catch (_) { return MODEL_DEEP; }
-      })();
       // Build LINKED CONTEXT for any [[wikilinks]] or fuzzy entity mentions in the
       // user's message. Pulls 1-hop neighbors so the model can reason about the
       // mentioned project's surrounding work. Empty string when nothing matches.
@@ -6730,7 +6670,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
-        preferredModel,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
       };
       if (photo) {
@@ -6753,7 +6692,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         });
       } catch (err) {
         if (err?.status === 429 && err?.payload?.rpmExhausted) {
-          // Per-minute Gemini quota tripped. Push the current snapshot into
+          // Per-minute AI quota tripped. Push the current snapshot into
           // state so the analytics indicator + queueOrExecute see the binding
           // limit immediately, then surface a friendly retry message.
           if (err.payload.rpm) {
@@ -6884,7 +6823,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         complete_task: 'got it — I can mark that complete.',
         edit_note: 'got it — I can update that note.',
         delete_note: 'got it — I can delete that note.',
-        web_search_reference: 'got it — I can search the web and cite sources.',
       };
       const hasClarificationPrompt = clarificationsArr.some(c => c?.question && String(c.question).trim().length > 0);
       const displayContent = rawContent

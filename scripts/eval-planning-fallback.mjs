@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// Regression eval for the planning pipeline's tier-downgrade fallback.
+// Regression eval for the planning pipeline's cross-provider fallback.
 //
-// The new pipeline relies on callModel's in-tier fallback:
-//   - Primary tier (Pro / gemini-2.5-pro) succeeds  → 3 iterations
-//   - Pro fails → callModel transparently retries on Flash (gemini-3-flash)
-//   - Both fail on the draft pass → PlanningPipelineError(stage="draft")
+// The new pipeline relies on callModel's cross-provider fallback ladder:
+//   - Primary (Groq gpt-oss-120b) succeeds          → 3 iterations
+//   - Primary fails → callModel hops to Gemini 2.5 Pro fallback
+//   - Both providers fail on draft pass → PlanningPipelineError(stage="draft")
 //
-// We stub the Gemini SDK at provider level by replacing the GoogleGenAI module
-// in shared/ai/providers/gemini.* with a fake. Easier (and runtime-agnostic):
-// monkeypatch the LlmProvider instance returned by getProvider().
+// We force AI_PROVIDER_OVERRIDE=gemini so the test runs against a single
+// provider seam, then monkeypatch the LlmProvider instance returned by
+// getProvider() to deterministically simulate failures.
+
+process.env.AI_PROVIDER_OVERRIDE = "gemini";
 
 import { runPlanningPipeline, PlanningPipelineError, getProvider } from "../shared/ai/index.js";
 

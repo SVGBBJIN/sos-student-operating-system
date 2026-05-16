@@ -5,16 +5,22 @@
 
 import { getEnv } from "../env.js";
 import type { Intent, Tier } from "./router.js";
+import type { ProviderName } from "./providers/index.js";
 import type { TokenUsage } from "./providers/types.js";
 
 // Token pricing (USD per 1k tokens) — keep in lockstep with provider docs.
 // Numbers here are estimates used by eval:cost; production accounting still
 // reads the actual billing dashboard.
 const PRICING = {
-  "gemini-3-flash":      { in: 0.00010, out: 0.00040 },
-  "gemini-2.5-flash":    { in: 0.00007, out: 0.00030 },
-  "gemini-2.5-pro":      { in: 0.00125, out: 0.00500 },
-  "gemini-embedding-002":{ in: 0.00001, out: 0 },
+  // Groq — primary chat tier
+  "openai/gpt-oss-20b":                          { in: 0.00010, out: 0.00050 },
+  "openai/gpt-oss-120b":                         { in: 0.00075, out: 0.00300 },
+  "meta-llama/llama-4-scout-17b-16e-instruct":   { in: 0.00011, out: 0.00034 },
+  // Gemini — embeddings + cross-provider fallback
+  "gemini-3-flash":                              { in: 0.00010, out: 0.00040 },
+  "gemini-2.5-flash":                            { in: 0.00007, out: 0.00030 },
+  "gemini-2.5-pro":                              { in: 0.00125, out: 0.00500 },
+  "gemini-embedding-002":                        { in: 0.00001, out: 0 },
 } as const;
 
 type PricingKey = keyof typeof PRICING;
@@ -24,9 +30,12 @@ export interface RequestTelemetry {
   user_id?: string | null;
   intent: Intent;
   tier: Tier;
+  provider?: ProviderName;
   model: string;
   fallback_used: boolean;
   attempt_count: number;
+  schema_repair_triggered?: boolean;
+  tool_call_validation_rate?: number;
   llm_ms: number;
   total_ms: number;
   prompt_tokens?: number;

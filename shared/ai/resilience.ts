@@ -81,12 +81,22 @@ export function recordSuccess(key: string): void {
   s.failures = [];
 }
 
-export function circuitFallbackResponse(): { content: string; toolCalls: never[]; usage: Record<string, never>; modelUsed: string; finishReason: string } {
+export type FallbackReason = "circuit_open" | "provider_failed";
+
+export function circuitFallbackResponse(
+  reason: FallbackReason = "circuit_open",
+  lastErrorMessage?: string
+): { content: string; toolCalls: never[]; usage: Record<string, never>; modelUsed: string; finishReason: FallbackReason } {
+  const content = reason === "circuit_open"
+    ? "AI service is recovering — try again in about 30 seconds."
+    : lastErrorMessage
+      ? `AI request failed: ${lastErrorMessage.slice(0, 240)}`
+      : "AI request failed — give it a moment and try again.";
   return {
-    content: "I'm having trouble reaching the AI right now — give it a minute and try again.",
+    content,
     toolCalls: [],
     usage: {},
-    modelUsed: "circuit-open",
-    finishReason: "circuit_open",
+    modelUsed: reason === "circuit_open" ? "circuit-open" : "provider-failed",
+    finishReason: reason,
   };
 }
