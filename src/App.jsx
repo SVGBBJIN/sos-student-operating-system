@@ -6,8 +6,7 @@ import { streamChat } from './lib/streamChat';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
-import PresenceDetector from './components/PresenceDetector';
-import SfxToggle from './components/SfxToggle';
+
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
@@ -8445,8 +8444,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
-      <PresenceDetector />
-      {layoutMode !== 'lofi' && <SfxToggle />}
       <GooglePermissionSummary show={showGooglePermSummary} onDismiss={()=>setShowGooglePermSummary(false)} />
       <RateLimitBanner />
 
