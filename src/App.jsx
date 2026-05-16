@@ -15,6 +15,8 @@ import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
 import FocusWidget from './components/FocusWidget';
+import ScheduleWidget from './components/ScheduleWidget';
+import SosNotification from './components/SosNotification';
 import LofiRightPanel from './components/LofiRightPanel';
 import DynamicTopBar from './components/DynamicTopBar';
 import StudioSidebar from './components/StudioSidebar';
@@ -4620,6 +4622,10 @@ function App() {
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
   const [weatherData, setWeatherData] = useState(null);
   const [weatherCoords, setWeatherCoords] = useState({ lat:42.33, lon:-71.21 });
+  // Floating widgets summoned from chat ("set a timer", "what's my schedule").
+  // null = hidden. Each widget renders only when explicitly invoked.
+  const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false });
+  const [sosNotif, setSosNotif] = useState(null);
 
   // ── UI state ──
   const [input, setInput] = useState('');
@@ -5808,6 +5814,18 @@ function App() {
     const name = action.title||action.activity||'Action';
     const verb = action.type?.startsWith('delete') ? 'removed' : action.type === 'update_event' ? 'updated' : action.type === 'complete_task' ? 'completed' : 'added';
     setToastMsg('✓ ' + name + ' ' + verb);
+    // Landing-style "saved to Calc" notification when the action carries a subject.
+    const subj = action.subject || action.tab_name;
+    if (verb === 'added' && subj) {
+      const bodyByType = {
+        add_event: 'Event saved to',
+        add_task:  'Task saved to',
+        add_block: 'Block added to',
+        add_note:  'Note saved to',
+      };
+      const body = bodyByType[action.type] || `${name} saved to`;
+      setSosNotif({ label: 'just now', body, accent: subj });
+    }
     const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
     if (calendarActionTypes.includes(action.type)) {
       if (layoutMode === 'sidebar') {
@@ -6561,6 +6579,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       if (user) dbInsertChatMsg('assistant', assistantMsg.content, user.id);
       setPendingTemplateSelector({ context: msgContent });
       return;
+    }
+    // Summon floating widgets from chat keywords. Mirrors the landing
+    // page: "set a timer" pops the Pomodoro, "what's my schedule" pops
+    // the day timeline. Widgets render only when explicitly invoked.
+    const lower = msgContent.toLowerCase();
+    if (/(\b|^)(start|set|run|begin)\s+(a\s+)?(pomodoro|timer|focus)\b|\bpomodoro\b|\bfocus session\b/.test(lower)) {
+      setActiveWidgets(w => ({ ...w, pomodoro: true }));
+    }
+    if (/(my\s+)?schedule\b|today'?s\s+(schedule|agenda|calendar)|what'?s\s+on\s+(my|the)\s+(schedule|agenda|calendar|day)|show\s+(me\s+)?(my\s+)?(schedule|agenda|calendar)|look\s+at\s+(my\s+)?(schedule|agenda|calendar)|agenda\b/.test(lower)) {
+      setActiveWidgets(w => ({ ...w, schedule: true }));
     }
     const requestedCompanion = detectCompanionIntent(msgContent);
     if (requestedCompanion && layoutMode === 'sidebar') {
@@ -7607,7 +7635,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
+            <div className="sos-sidebar-brand">
+              <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
+                <img src="/brain-logo.svg" alt="SOS" width={sidebarCollapsed ? 22 : 26} height={sidebarCollapsed ? 22 : 26} />
+              </span>
+              {!sidebarCollapsed && <span className="sos-brand-word" style={{ fontSize: 15 }}>S<em>O</em>S</span>}
+            </div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
               {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -7747,7 +7780,26 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </div>}
 
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && <FocusWidget />}
+      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.pomodoro && (
+        <FocusWidget onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))} />
+      )}
+      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.schedule && (
+        <ScheduleWidget
+          events={events}
+          blocks={blocks}
+          solo={!activeWidgets.pomodoro}
+          onClose={() => setActiveWidgets(w => ({ ...w, schedule: false }))}
+        />
+      )}
+      {sosNotif && (
+        <SosNotification
+          label={sosNotif.label}
+          body={sosNotif.body}
+          accent={sosNotif.accent}
+          duration={sosNotif.duration}
+          onDismiss={() => setSosNotif(null)}
+        />
+      )}
 
       {activePanel === 'home' ? (
         <HomeScreen
@@ -7997,7 +8049,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
-      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
+      <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
           <button
             type="button"
             className="sos-chat-watermark"
@@ -8178,7 +8230,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
       {/* ── Input Area ── */}
-      <div className="sos-input-area">
+      <div className={"sos-input-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
         {contextTrimInfo&&(
           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
             showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context

@@ -327,8 +327,10 @@ export default function Landing() {
 
       <nav className="ld-nav ld-fade-up">
         <div className="ld-nav-brand">
-          <img src="/brain-logo.svg" alt="" />
-          <span className="word">S<em>O</em>S</span>
+          <span className="sos-brand-mark" style={{ borderRadius: 7, padding: 4, borderColor: 'rgba(255,255,255,0.16)' }}>
+            <img src="/brain-logo.svg" alt="" width="20" height="20" />
+          </span>
+          <span className="sos-brand-word" style={{ fontSize: 17, color: 'var(--ld-fg-1)' }}>S<em>O</em>S</span>
         </div>
         <div className="ld-nav-links">
           <a href="#features" onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }}>Features</a>
