@@ -187,10 +187,10 @@ function clarificationFromIssues(
     ? `I still need: ${remaining.map((f) => f.replace(/_/g, " ")).join(", ")}. Can you share them in one reply?`
     : `Can you clarify the details for ${toolName}?`;
   const TOOL_REQUIRED: Record<string, string[]> = {
-    add_event: ["title", "date", "subject"],
-    add_task: ["task_name", "due_date", "subject"],
+    add_event: ["title", "date"],
+    add_task: ["task_name", "due_date"],
     add_block: ["date", "start", "end", "activity"],
-    add_recurring_event: ["title", "subject", "days", "start_date", "end_date"],
+    add_recurring_event: ["title", "days", "start_date", "end_date"],
     update_event: ["title"],
     delete_event: ["title"],
     delete_task: ["title"],

@@ -24,7 +24,9 @@ function toY(hhmm) {
 }
 function fmtRange(a, b) {
   const conv = (s) => {
+    if (!s || typeof s !== 'string') return '?';
     const [h, m] = s.split(':').map(Number);
+    if (Number.isNaN(h)) return '?';
     const ap = h >= 12 ? 'p' : 'a';
     const hh = ((h + 11) % 12) + 1;
     return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;

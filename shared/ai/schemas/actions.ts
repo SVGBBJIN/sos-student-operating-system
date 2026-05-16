@@ -42,7 +42,7 @@ export const AddEventSchema = z.object({
   location: z.string().max(500).optional(),
   priority: priorityEnum.optional(),
   event_type: eventTypeEnum.optional(),
-  subject: subjectString,
+  subject: optionalSubjectString,
 });
 export type AddEventInput = z.infer<typeof AddEventSchema>;
 
@@ -50,7 +50,7 @@ export const AddTaskSchema = z.object({
   type: z.literal("add_task").optional(),
   task_name: titleLikeString("task_name"),
   due_date: dateString,
-  subject: subjectString,
+  subject: optionalSubjectString,
 });
 export type AddTaskInput = z.infer<typeof AddTaskSchema>;
 
