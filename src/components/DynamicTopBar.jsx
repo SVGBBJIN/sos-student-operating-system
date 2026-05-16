@@ -100,10 +100,10 @@ export default function DynamicTopBar({
     <div className="dtb-wrap">
       {/* Brand */}
       <div className="dtb-left">
-        <span className="dtb-brand-img">
-          <img src="/brain-logo.svg" alt="SOS" style={{ width: 20, height: 20, display: 'block' }} />
+        <span className="sos-brand-mark" style={{ borderRadius: 6, padding: 3 }}>
+          <img src="/brain-logo.svg" alt="SOS" width="20" height="20" />
         </span>
-        <span className="dtb-brand">S<em>O</em>S</span>
+        <span className="sos-brand-word" style={{ fontSize: 14 }}>S<em>O</em>S</span>
       </div>
 
       {/* Center: morphing island */}

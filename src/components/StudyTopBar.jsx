@@ -51,10 +51,10 @@ export default function StudyTopBar({
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <span className="brand-mark">
-          <img src="/brain-logo.svg" alt="SOS" />
+        <span className="sos-brand-mark" style={{ borderRadius: 7, padding: 4 }}>
+          <img src="/brain-logo.svg" alt="SOS" width="22" height="22" />
         </span>
-        <span className="brand-word">S<em>O</em>S</span>
+        <span className="sos-brand-word" style={{ fontSize: 15 }}>S<em>O</em>S</span>
       </div>
 
       <div className="topbar-right">

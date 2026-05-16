@@ -27,7 +27,7 @@
   --text-ghost:     rgba(232, 234, 240, 0.35);
 
   /* Fonts */
-  --font-display: 'Syne', sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
   --font-body:    'DM Sans', sans-serif;
   --font-mono:    'JetBrains Mono', monospace;
   --font-jp:      'Noto Sans JP', sans-serif;
@@ -864,11 +864,12 @@ button {
 
 /* Wordmark "SOS"                                                       */
 .idle-lock-wordmark {
-  font-family: var(--font-display);
+  font-family: 'Fraunces', Georgia, serif;
   font-size: clamp(5rem, 14vw, 10rem);
-  font-weight: 800;
+  font-weight: 900;
+  font-style: italic;
   color: var(--neon-cyan);
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
   line-height: 1;
   text-shadow: 0 0 40px rgba(0, 229, 204, 0.35), 0 0 80px rgba(0, 229, 204, 0.12);
   animation: neon-strike 220ms ease 900ms both;

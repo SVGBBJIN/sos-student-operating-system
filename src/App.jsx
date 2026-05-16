@@ -7635,7 +7635,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand"><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:sidebarCollapsed?24:30,height:sidebarCollapsed?24:30}}/></div>
+            <div className="sos-sidebar-brand">
+              <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
+                <img src="/brain-logo.svg" alt="SOS" width={sidebarCollapsed ? 22 : 26} height={sidebarCollapsed ? 22 : 26} />
+              </span>
+              {!sidebarCollapsed && <span className="sos-brand-word" style={{ fontSize: 15 }}>S<em>O</em>S</span>}
+            </div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
               {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}

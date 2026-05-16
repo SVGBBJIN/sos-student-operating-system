@@ -47,7 +47,7 @@ export default function IdleLockScreen() {
       aria-modal="true"
       aria-label="Session paused"
     >
-      <div className="idle-lock-wordmark" aria-hidden="true">SOS</div>
+      <div className="idle-lock-wordmark" aria-hidden="true">S<span style={{ color: '#f4714a' }}>O</span>S</div>
       <div className="idle-lock-sub">Ready when you are.</div>
       <button className="idle-lock-cta neon-primary" onClick={handleCTA}>
         Let&apos;s get to work

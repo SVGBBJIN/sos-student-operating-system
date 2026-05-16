@@ -28,7 +28,7 @@
   --danger-line: rgba(248,113,113,0.45);
   --warning: #fbbf24;
   --warning-bg: rgba(251,191,36,0.14);
-  --font-display: 'Syne', system-ui, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
   --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
   --r-sm: 6px;
@@ -123,15 +123,8 @@
 .studio .topbar-left { display: flex; align-items: center; gap: 12px; }
 .studio .topbar-right { display: flex; align-items: center; gap: 8px; }
 
-.studio .brand-mark img { width: 22px; height: 22px; display: block; }
-.studio .brand-word {
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 17px;
-  letter-spacing: -0.02em;
-  color: var(--fg-1);
-}
-.studio .brand-word em { color: var(--accent); font-style: normal; }
+.studio .sos-brand-mark { border-color: var(--line); background: var(--paper-2); }
+.studio .sos-brand-word { font-size: 16px; color: var(--fg-1); }
 
 /* ── Buttons ─────────────────────────────────────────────── */
 .studio .icon-btn {
