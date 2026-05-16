@@ -1,7 +1,7 @@
-// sos-voice Edge Function — Gemini Flash audio transcription. Accepts either
+// sos-voice Edge Function — Groq Whisper transcription. Accepts either
 // multipart/form-data (legacy clients) or JSON { audioBase64, audioMimeType }.
 
-import { getProvider } from "../../../shared/ai/providers/index.js";
+import { transcribeAudio } from "../../../shared/ai/voice.js";
 import { getEnv } from "../../../shared/env.js";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -26,9 +26,8 @@ interface VoiceJsonBody {
 serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const apiKey = getEnv("GEMINI_API_KEY");
-  if (!apiKey) {
-    return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not configured" }), {
+  if (!getEnv("GROQ_API_KEY")) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY is not configured" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
@@ -60,21 +59,9 @@ serve(async (req: Request): Promise<Response> => {
       mimeType = body.audioMimeType ?? mimeType;
     }
 
-    const provider = getProvider("gemini", apiKey);
-    const transcript = await provider.chat({
-      model: "gemini-3-flash",
-      systemPrompt: "Transcribe the attached audio to plain text. Return ONLY the transcript — no commentary, no markdown.",
-      messages: [{
-        role: "user",
-        content: "Transcribe this clip.",
-        attachments: [{ kind: "audio", mimeType, base64 }],
-      }],
-      temperature: 0.1,
-      maxOutputTokens: 1024,
-      thinkingBudget: 0,
-    });
+    const transcript = await transcribeAudio({ audioBase64: base64, audioMimeType: mimeType });
 
-    return new Response(JSON.stringify({ text: transcript.content.trim() }), {
+    return new Response(JSON.stringify({ text: transcript.text }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

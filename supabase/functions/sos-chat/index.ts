@@ -1,7 +1,12 @@
-// sos-chat Edge Function — Gemini-native. Mirrors api/chat.ts.
+// sos-chat Edge Function — chat surface. Mirrors api/chat.ts.
+//
+// Routing is driven by router.ts: chat/action_routing → Groq gpt-oss-20b, with
+// gemini-3-flash as cross-provider fallback. Voice transcription bypasses
+// callModel and goes directly to Groq Whisper via shared/ai/voice.ts.
 
-import { callModel, runPlanningPipeline, getProvider, SCHEMA_VERSIONS, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../../../shared/ai/index.js";
+import { callModel, runPlanningPipeline, SCHEMA_VERSIONS, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../../../shared/ai/index.js";
 import type { StreamChunk, Intent } from "../../../shared/ai/index.js";
+import { transcribeAudio } from "../../../shared/ai/voice.js";
 
 function overLimitForIntent(intent: Intent): boolean {
   return overLimit(route(intent).tier);
@@ -10,7 +15,7 @@ function overLimitForIntent(intent: Intent): boolean {
 function rpmExhaustedResponse(tier: string, resetAtMs: number, corsHeaders: Record<string, string>): Response {
   const retryAfterSec = Math.max(1, Math.ceil((resetAtMs - Date.now()) / 1000));
   return new Response(JSON.stringify({
-    error: "Gemini RPM budget exhausted — try again shortly.",
+    error: "AI rate limit reached — try again shortly.",
     rateLimited: true,
     rpmExhausted: true,
     tier,
@@ -27,7 +32,7 @@ import { checkContentRateLimit } from "../../../shared/rate-limit.js";
 import { createSSEStream } from "../../../shared/sse.js";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-console.log(`[sos-chat] adapter=supabase schema_version=${SCHEMA_VERSIONS.action_tools}`);
+console.log(`[sos-chat] adapter=supabase providers=groq+gemini-embed schema_version=${SCHEMA_VERSIONS.action_tools}`);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,8 +60,14 @@ function wantsSSE(req: Request): boolean {
 serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const apiKey = getEnv("GEMINI_API_KEY");
-  if (!apiKey) {
+  // Cold-start env sanity check.
+  if (!getEnv("GROQ_API_KEY")) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY is not configured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (!getEnv("GEMINI_API_KEY")) {
     return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -75,20 +86,11 @@ serve(async (req: Request): Promise<Response> => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const provider = getProvider("gemini", apiKey);
-      const transcript = await provider.chat({
-        model: "gemini-3-flash",
-        systemPrompt: "Transcribe the attached audio to plain text. Return ONLY the transcript — no commentary, no markdown.",
-        messages: [{
-          role: "user",
-          content: "Transcribe this clip.",
-          attachments: [{ kind: "audio", mimeType: body.audioMimeType ?? "audio/webm", base64: body.audioBase64 }],
-        }],
-        temperature: 0.1,
-        maxOutputTokens: 1024,
-        thinkingBudget: 0,
+      const transcript = await transcribeAudio({
+        audioBase64: body.audioBase64,
+        audioMimeType: body.audioMimeType ?? "audio/webm",
       });
-      return new Response(JSON.stringify({ text: transcript.content.trim() }), {
+      return new Response(JSON.stringify({ text: transcript.text }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

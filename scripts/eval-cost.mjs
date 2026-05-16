@@ -15,9 +15,12 @@ const FIXTURE_TEXTS = [
 ];
 
 const PRICING = {
-  "gemini-3-flash":   { in: 0.00010, out: 0.00040 },
-  "gemini-2.5-flash": { in: 0.00007, out: 0.00030 },
-  "gemini-2.5-pro":   { in: 0.00125, out: 0.00500 },
+  "openai/gpt-oss-20b":                          { in: 0.00010, out: 0.00050 },
+  "openai/gpt-oss-120b":                         { in: 0.00075, out: 0.00300 },
+  "meta-llama/llama-4-scout-17b-16e-instruct":   { in: 0.00011, out: 0.00034 },
+  "gemini-3-flash":                              { in: 0.00010, out: 0.00040 },
+  "gemini-2.5-flash":                            { in: 0.00007, out: 0.00030 },
+  "gemini-2.5-pro":                              { in: 0.00125, out: 0.00500 },
 };
 
 function cost(model, usage) {
@@ -28,8 +31,12 @@ function cost(model, usage) {
   return ipt * p.in + opt * p.out;
 }
 
+if (!process.env.GROQ_API_KEY) {
+  process.stderr.write("Error: GROQ_API_KEY required\n");
+  process.exit(1);
+}
 if (!process.env.GEMINI_API_KEY) {
-  process.stderr.write("Error: GEMINI_API_KEY required\n");
+  process.stderr.write("Error: GEMINI_API_KEY required (embeddings + cross-provider fallback)\n");
   process.exit(1);
 }
 
