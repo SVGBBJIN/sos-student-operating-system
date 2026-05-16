@@ -7,7 +7,6 @@ import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
 import PresenceDetector from './components/PresenceDetector';
-import IdleLockScreen from './components/IdleLockScreen';
 import SfxToggle from './components/SfxToggle';
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
@@ -4669,16 +4668,6 @@ function App() {
   }, []);
   const [toastMsg, setToastMsg] = useState(null);
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
-  useEffect(() => {
-    const onLock   = () => sfx.lock();
-    const onReturn = () => sfx.unlock();
-    window.addEventListener('sos:idle-lock',        onLock);
-    window.addEventListener('sos:presence-return',  onReturn);
-    return () => {
-      window.removeEventListener('sos:idle-lock',       onLock);
-      window.removeEventListener('sos:presence-return', onReturn);
-    };
-  }, []);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
@@ -8427,7 +8416,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
       <PresenceDetector />
-      <IdleLockScreen />
       {layoutMode !== 'lofi' && <SfxToggle />}
       <GooglePermissionSummary show={showGooglePermSummary} onDismiss={()=>setShowGooglePermSummary(false)} />
       <RateLimitBanner />
