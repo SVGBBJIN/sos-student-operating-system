@@ -7540,6 +7540,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
       }
     >
+      {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
+      <svg width="0" height="0" style={{position:'absolute',overflow:'hidden'}} aria-hidden="true">
+        <defs>
+          <symbol id="sos-bulb" viewBox="0 0 60 86">
+            <path d="M 30 2 C 13.5 2, 4 16, 4 32 C 4 44.5, 11.5 53.5, 18 60 C 20 62, 21 63, 21 65.5 L 21 68 L 39 68 L 39 65.5 C 39 63, 40 62, 42 60 C 48.5 53.5, 56 44.5, 56 32 C 56 16, 46.5 2, 30 2 Z" fill="currentColor"/>
+            <rect x="21" y="71" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="21" y="76" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="25" y="81" width="10" height="4" rx="1.4" fill="currentColor"/>
+          </symbol>
+        </defs>
+      </svg>
       {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
       {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
       {/* Neon Lofi — corner targeting reticles (decorative) */}
@@ -7556,9 +7567,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <div className="sos-sidebar-head-left">
             <div className="sos-sidebar-brand">
               <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
-                <img src="/brain-logo.svg" alt="SOS" width={sidebarCollapsed ? 22 : 26} height={sidebarCollapsed ? 22 : 26} />
+                <span className="sos-mark" style={{ fontSize: sidebarCollapsed ? 18 : 22 }}>
+                  <span className="sos-mark-s">S</span>
+                  <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+                  <span className="sos-mark-s">S</span>
+                </span>
               </span>
-              {!sidebarCollapsed && <span className="sos-brand-word" style={{ fontSize: 15 }}>S<em>O</em>S</span>}
             </div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
@@ -7684,7 +7698,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
+          <div className="sos-sidebar-brand" style={{width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <span className="sos-mark" style={{fontSize:20}}>
+              <span className="sos-mark-s">S</span>
+              <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+              <span className="sos-mark-s">S</span>
+            </span>
+          </div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -7969,34 +7989,44 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-          <button
-            type="button"
-            className="sos-chat-watermark"
-            onClick={() => setToastMsg('SOS quick access')}
-            title="SOS quick access"
-            aria-label="SOS quick access"
-          >
-            <img src="/brain-logo.svg" alt="SOS" />
-          </button>
           {messages.length === 0 && !pendingClarification && !pendingProposal && !isLoading && (
-            <div className="sos-empty-suggestions" role="group" aria-label="Try one of these">
-              <div className="sos-empty-suggestions-title">Try one of these to get started</div>
-              <div className="sos-empty-suggestions-grid">
-                {[
-                  'Add a task: physics problem set due Friday',
-                  "What's on my schedule this week?",
-                  'Make a new note for history lecture',
-                  'Block 3-5pm tomorrow for studying',
-                ].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="sos-empty-suggestion"
-                    onClick={() => sendMessage(prompt)}
-                  >
-                    {prompt}
-                  </button>
-                ))}
+            <div className="sos-chat-empty">
+              <div className="sos-chat-empty-stamp-wrap">
+                <div className="sos-stamp">
+                  <span className="sos-stamp-corner tl"/><span className="sos-stamp-corner tr"/>
+                  <span className="sos-stamp-corner bl"/><span className="sos-stamp-corner br"/>
+                  <div className="sos-stamp-strip sos-stamp-strip-top">
+                    <span>student</span><span className="sos-stamp-dot"/><span>operating</span><span className="sos-stamp-dot"/><span>system</span>
+                  </div>
+                  <span className="sos-mark" style={{fontSize:88}}>
+                    <span className="sos-mark-s">S</span>
+                    <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+                    <span className="sos-mark-s">S</span>
+                  </span>
+                  <div className="sos-stamp-strip sos-stamp-strip-bot">
+                    <span>est · 2025</span><span className="sos-stamp-dot"/><span>ver · 2.0</span><span className="sos-stamp-dot"/><span>notebook OS</span>
+                  </div>
+                </div>
+              </div>
+              <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
+                <div className="sos-chat-empty-suggestions-label">try one of these</div>
+                <div className="sos-chat-empty-grid">
+                  {[
+                    'Add a task: physics problem set due Friday',
+                    "What's on my schedule this week?",
+                    'Make a new note for history lecture',
+                    'Block 3-5pm tomorrow for studying',
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="sos-chat-empty-pill"
+                      onClick={() => sendMessage(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}

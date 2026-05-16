@@ -894,3 +894,150 @@ select option{background:#fffbeb;color:var(--text)}
     scroll-behavior: auto !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SOS MARK — brand logo primitive (Archivo Black + bulb SVG)
+   Control size by setting font-size on .sos-mark.
+   Color inherits via --sos-logo-color or currentColor.
+   ═══════════════════════════════════════════════════════════════ */
+.sos-mark {
+  --sos-logo-color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.04em;
+  color: var(--sos-logo-color);
+  font-family: 'Archivo Black', 'Arial Black', Impact, sans-serif;
+  line-height: 1;
+  font-size: 28px;
+}
+.sos-mark .sos-mark-s {
+  font-weight: 400;
+  font-size: 1em;
+  line-height: 0.86;
+  letter-spacing: -0.02em;
+}
+.sos-mark .sos-mark-bulb {
+  display: inline-block;
+  width: 0.72em;
+  height: 1em;
+  margin: 0 0.02em;
+  flex-shrink: 0;
+}
+.sos-mark .sos-mark-bulb svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+  color: currentColor;
+}
+
+/* ── Notebook stamp (chat empty state) ───────────────────────── */
+.sos-stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  border: 3px solid var(--primary);
+  padding: 14px 22px 17px;
+  border-radius: 8px;
+  box-shadow: 6px 6px 0 var(--primary);
+  transform: rotate(-1.8deg);
+  background: transparent;
+  position: relative;
+  opacity: 0.92;
+}
+.sos-stamp .sos-stamp-corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--primary);
+}
+.sos-stamp .sos-stamp-corner.tl { top: 5px; left: 5px; border-right: none; border-bottom: none; }
+.sos-stamp .sos-stamp-corner.tr { top: 5px; right: 5px; border-left: none; border-bottom: none; }
+.sos-stamp .sos-stamp-corner.bl { bottom: 5px; left: 5px; border-right: none; border-top: none; }
+.sos-stamp .sos-stamp-corner.br { bottom: 5px; right: 5px; border-left: none; border-top: none; }
+.sos-stamp .sos-stamp-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+.sos-stamp .sos-stamp-strip-top {
+  font-size: 9px;
+  margin-bottom: 5px;
+}
+.sos-stamp .sos-stamp-strip-bot {
+  font-size: 8px;
+  margin-top: 8px;
+  opacity: 0.6;
+  letter-spacing: 0.25em;
+}
+.sos-stamp .sos-stamp-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+}
+
+/* ── Chat empty state with stamp ─────────────────────────────── */
+.sos-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 48px 16px 24px;
+  min-height: 60vh;
+}
+.sos-chat-empty-stamp-wrap {
+  display: flex;
+  justify-content: center;
+}
+.sos-chat-empty-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 520px;
+}
+.sos-chat-empty-suggestions-label {
+  font-size: 0.78rem;
+  color: var(--muted-foreground, #888);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.sos-chat-empty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  width: 100%;
+}
+@media (max-width: 480px) {
+  .sos-chat-empty-grid { grid-template-columns: 1fr; }
+}
+.sos-chat-empty-pill {
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  background: var(--card, rgba(255,255,255,0.03));
+  color: var(--foreground, #e5e5e5);
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+  line-height: 1.35;
+  font-family: inherit;
+}
+.sos-chat-empty-pill:hover {
+  background: var(--muted, rgba(255,255,255,0.06));
+  border-color: var(--primary);
+}
+.sos-chat-empty-pill:active { transform: scale(0.985); }
