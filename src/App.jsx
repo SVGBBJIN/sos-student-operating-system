@@ -7764,6 +7764,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
+            onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
           />
