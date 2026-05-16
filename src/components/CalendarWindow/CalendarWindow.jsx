@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import './CalendarWindow.css';
 import { useCalendarSize } from './useCalendarSize.js';
 import { useDraggable }    from './useDraggable.js';
@@ -254,6 +254,70 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
   );
 }
 
+/* ─── Month Grid ────────────────────────────────────────────────── */
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function MonthGrid({ monthDate, events, onDayClick }) {
+  const today = toISODate(new Date());
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+
+  const firstOfMonth = new Date(year, month, 1);
+  const startDay = new Date(firstOfMonth);
+  startDay.setDate(1 - startDay.getDay());
+
+  const cells = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(startDay);
+    d.setDate(startDay.getDate() + i);
+    return d;
+  });
+
+  return (
+    <div className="cw-month">
+      <div className="cw-month-dow-row">
+        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+          <div key={d} className="cw-month-dow">{d}</div>
+        ))}
+      </div>
+      <div className="cw-month-cells">
+        {cells.map((d, i) => {
+          const dateStr = toISODate(d);
+          const isThisMonth = d.getMonth() === month;
+          const isToday = dateStr === today;
+          const dayEvs = events.filter(e => e.date === dateStr);
+          return (
+            <div
+              key={i}
+              className={[
+                'cw-month-cell',
+                isThisMonth ? '' : 'cw-month-cell-other',
+                isToday ? 'cw-month-cell-today' : '',
+              ].filter(Boolean).join(' ')}
+              onClick={() => onDayClick(d)}
+            >
+              <span className="cw-month-date-num">{d.getDate()}</span>
+              <div className="cw-month-event-list">
+                {dayEvs.slice(0, 3).map((ev, j) => (
+                  <div
+                    key={j}
+                    className="cw-month-event-pill"
+                    style={{ background: ev.color || 'var(--primary)' }}
+                  >
+                    {ev.title}
+                  </div>
+                ))}
+                {dayEvs.length > 3 && (
+                  <div className="cw-month-overflow">+{dayEvs.length - 3}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── CalendarWindow ─────────────────────────────────────────────── */
 export default function CalendarWindow({
   defaultSize = 'fullscreen',
@@ -276,6 +340,42 @@ export default function CalendarWindow({
   const [newEventId,   setNewEventId]   = useState(null);
   const [localEvents,  setLocalEvents]  = useState(events);
   const [nativeFS,     setNativeFS]     = useState(false);
+
+  const [viewMode, setViewMode] = useState('week');
+  const [monthOffset, setMonthOffset] = useState(0);
+
+  const monthDate = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + monthOffset, 1);
+  }, [monthOffset]);
+
+  const periodLabel = useMemo(() => {
+    if (viewMode === 'month') {
+      return `${MONTH_NAMES[monthDate.getMonth()]} ${monthDate.getFullYear()}`;
+    }
+    if (!weekDates.length) return 'Calendar';
+    const f = weekDates[0];
+    const l = weekDates[6];
+    const m1 = f.toLocaleString('en-US', { month: 'short' });
+    const m2 = l.toLocaleString('en-US', { month: 'short' });
+    return m1 === m2
+      ? `${m1} ${f.getDate()}–${l.getDate()}`
+      : `${m1} ${f.getDate()} – ${m2} ${l.getDate()}`;
+  }, [viewMode, monthDate, weekDates]);
+
+  function handleMonthDayClick(clickedDate) {
+    const now = new Date();
+    const todaySunday = new Date(now);
+    todaySunday.setDate(now.getDate() - now.getDay());
+    todaySunday.setHours(0, 0, 0, 0);
+    const clickedSunday = new Date(clickedDate);
+    clickedSunday.setDate(clickedDate.getDate() - clickedDate.getDay());
+    clickedSunday.setHours(0, 0, 0, 0);
+    const diffMs = clickedSunday.getTime() - todaySunday.getTime();
+    const offset = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+    setWeekOffset(offset);
+    setViewMode('week');
+  }
 
   useEffect(() => { setLocalEvents(events); }, [events]);
 
@@ -366,13 +466,31 @@ export default function CalendarWindow({
           {size !== 'fullscreen' && (
             <span className="cw-drag-handle" title="Drag to move">⠿</span>
           )}
-          <span className="cw-title">Calendar</span>
+          <span className="cw-title">{isWidget ? 'Calendar' : periodLabel}</span>
           {!isWidget && (
-            <div className="cw-nav">
-              <button className="cw-nav-btn" onClick={() => setWeekOffset(o => o - 1)}>‹</button>
-              <button className="cw-nav-btn" onClick={() => setWeekOffset(0)}>Today</button>
-              <button className="cw-nav-btn" onClick={() => setWeekOffset(o => o + 1)}>›</button>
-            </div>
+            <>
+              <div className="cw-view-toggle">
+                <button
+                  className={'cw-view-btn' + (viewMode === 'week' ? ' cw-view-btn-active' : '')}
+                  onClick={() => setViewMode('week')}
+                >Week</button>
+                <button
+                  className={'cw-view-btn' + (viewMode === 'month' ? ' cw-view-btn-active' : '')}
+                  onClick={() => setViewMode('month')}
+                >Month</button>
+              </div>
+              <div className="cw-nav">
+                <button className="cw-nav-btn" onClick={() => {
+                  if (viewMode === 'month') setMonthOffset(o => o - 1);
+                  else setWeekOffset(o => o - 1);
+                }}>‹</button>
+                <button className="cw-nav-btn" onClick={() => { setWeekOffset(0); setMonthOffset(0); }}>Today</button>
+                <button className="cw-nav-btn" onClick={() => {
+                  if (viewMode === 'month') setMonthOffset(o => o + 1);
+                  else setWeekOffset(o => o + 1);
+                }}>›</button>
+              </div>
+            </>
           )}
         </div>
 
@@ -382,6 +500,12 @@ export default function CalendarWindow({
             weekDates={weekDates}
             events={localEvents}
             onDayClick={() => setSize('half-left')}
+          />
+        ) : viewMode === 'month' ? (
+          <MonthGrid
+            monthDate={monthDate}
+            events={localEvents}
+            onDayClick={handleMonthDayClick}
           />
         ) : (
           <WeekGrid
