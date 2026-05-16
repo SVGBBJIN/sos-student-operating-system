@@ -8044,7 +8044,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
-      <div className="sos-chat-area" ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
+      <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
           <button
             type="button"
             className="sos-chat-watermark"
@@ -8225,7 +8225,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
       {/* ── Input Area ── */}
-      <div className="sos-input-area">
+      <div className={"sos-input-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
         {contextTrimInfo&&(
           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
             showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context
