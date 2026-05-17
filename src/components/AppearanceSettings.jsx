@@ -48,7 +48,9 @@ function applyAccent(hex) {
   document.documentElement.style.setProperty('--accent-dark', dark);
   document.documentElement.style.setProperty('--accent-muted', muted);
   document.documentElement.style.setProperty('--accent-dim', `rgba(${r}, ${g}, ${b}, 0.34)`);
-  document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.28)`);
+  document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.32)`);
+  document.documentElement.style.setProperty('--accent-tint', `rgba(${r}, ${g}, ${b}, 0.12)`);
+  document.documentElement.style.setProperty('--accent-tint-soft', `rgba(${r}, ${g}, ${b}, 0.06)`);
   document.documentElement.style.setProperty('--primary-glow', `rgba(${r}, ${g}, ${b}, 0.2)`);
   document.documentElement.style.setProperty('--soft-blue', `rgba(${clamp(r + 35, 0, 255)}, ${clamp(g + 20, 0, 255)}, ${clamp(b + 60, 0, 255)}, 0.2)`);
   document.documentElement.style.setProperty('--border', `rgba(${r}, ${g}, ${b}, 0.26)`);

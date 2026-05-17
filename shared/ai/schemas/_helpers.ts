@@ -79,6 +79,20 @@ export const timeString = z
   .string()
   .refine(isValidTime, "must be HH:MM (24h)");
 
+// Duration in seconds for set_timer. Capped at 24h because setTimeout becomes
+// unreliable beyond that, and a "timer" longer than a day is really a calendar
+// event — the model should route those to add_event.
+export const positiveDurationSeconds = z
+  .number()
+  .int("duration must be a whole number of seconds")
+  .positive("duration must be positive")
+  .max(86400, "duration too long (max 24h)");
+
+const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+export const isoDateTimeString = z
+  .string()
+  .refine((s) => ISO_DATETIME_RE.test(s) && !isNaN(new Date(s).getTime()), "must be an ISO 8601 datetime with timezone");
+
 // ── Gemini schema conversion ─────────────────────────────────────────────────
 // Gemini's responseSchema and function-declaration `parameters` accept a
 // strict subset of JSON Schema (OpenAPI 3.0 style). We can't pass the Zod
@@ -102,7 +116,7 @@ type JsonSchema = {
 
 function zodTypeToGeminiType(t: ZodTypeAny): JsonSchema {
   // Use Zod's _def discriminator. We handle the cases we actually use.
-  const def = (t as { _def: { typeName: string; values?: string[]; type?: ZodTypeAny; innerType?: ZodTypeAny; options?: ZodTypeAny[]; shape?: () => Record<string, ZodTypeAny> } })._def;
+  const def = (t as { _def: { typeName: string; values?: string[]; type?: ZodTypeAny; innerType?: ZodTypeAny; schema?: ZodTypeAny; options?: ZodTypeAny[]; shape?: () => Record<string, ZodTypeAny> } })._def;
   const typeName = def.typeName;
 
   switch (typeName) {
@@ -152,7 +166,9 @@ function zodTypeToGeminiType(t: ZodTypeAny): JsonSchema {
     case "ZodEffects":
     case "ZodPipeline":
     case "ZodReadonly": {
-      const inner = def.innerType ?? def.type;
+      // ZodEffects (from .refine/.transform) stores its inner schema on `def.schema`;
+      // Optional/Nullable/Default use `def.innerType`; Pipeline/Readonly use `def.type`.
+      const inner = def.schema ?? def.innerType ?? def.type;
       if (!inner) return { type: "string" };
       const sub = zodTypeToGeminiType(inner);
       if (typeName === "ZodNullable") sub.nullable = true;

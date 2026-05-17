@@ -1192,6 +1192,7 @@ body {
   border-radius: 18px;
   padding: 8px;
   box-shadow: none !important;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease !important;
 }
 
 .sos-chat-input {
@@ -1402,4 +1403,192 @@ body {
 [data-perf="low"] * {
   transition-duration: 0ms !important;
   animation-duration: 0ms !important;
+}
+
+/* ─── Accent expansion + hover polish (added in timer/UI pass) ───────────── */
+/* `--accent-glow` / `--accent-tint` mirror the accent so we don't repeat
+   color-mix() at every call site. AppearanceSettings.jsx writes --accent
+   and --accent-light; we derive the rest here as light tints. */
+:root {
+  --accent-glow: color-mix(in srgb, var(--accent, #f59e0b) 35%, transparent);
+  --accent-tint: color-mix(in srgb, var(--accent, #f59e0b) 12%, transparent);
+  --accent-tint-soft: color-mix(in srgb, var(--accent, #f59e0b) 6%, transparent);
+}
+
+/* Chat-pill — focus ring picks up the accent, send button uses the accent
+   gradient instead of a hardcoded purple. */
+.sos-chat-form:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-tint) !important;
+}
+.sos-chat-form .sos-send-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-light, var(--accent))) !important;
+  box-shadow: 0 2px 12px var(--accent-tint) !important;
+}
+.sos-chat-form .sos-send-btn:hover:not(:disabled) {
+  transform: scale(1.04);
+  box-shadow: 0 6px 22px var(--accent-glow) !important;
+}
+
+/* Attach-menu (the `+` dropdown above the chat pill) — class-based positioning
+   so we can adapt for narrow viewports without inline-style overrides. */
+.sos-attach-menu {
+  position: absolute;
+  bottom: 52px;
+  left: 0;
+  z-index: 200;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  max-width: calc(100vw - 24px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  animation: fadeIn .1s ease;
+}
+@media (max-width: 640px) {
+  .sos-attach-menu { left: 50%; transform: translateX(-50%); }
+}
+.sos-attach-menu button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background .15s, color .15s;
+}
+.sos-attach-menu button:hover {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* Hover animations across nav/sidebar/icon buttons — every one picks up the
+   current accent so changing the accent re-tints the whole UI. */
+.sos-side-btn,
+.chat-sidebar-item,
+.settings-toggle,
+.sos-input-icon-btn,
+.icon-btn,
+.g-hdr-btn {
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, color .15s ease, background .15s ease !important;
+}
+.icon-btn:hover,
+.g-hdr-btn:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  box-shadow: 0 4px 14px var(--accent-glow) !important;
+  transform: translateY(-1px);
+}
+.chat-sidebar-item:hover {
+  background: var(--accent-tint) !important;
+}
+
+/* Active timer pill — small chip used by the timer banner */
+.sos-active-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.sos-active-timer:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+
+/* Confirmation modal for delete saved chat */
+.g-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn .15s ease;
+}
+.g-confirm-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  max-width: 360px;
+  width: calc(100% - 32px);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.g-confirm-card h3 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.g-confirm-card p {
+  margin: 0 0 16px;
+  font-size: 0.86rem;
+  color: var(--text-dim);
+}
+.g-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.g-confirm-btn {
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.g-confirm-btn:hover { border-color: var(--accent); color: var(--accent); }
+.g-confirm-btn.danger {
+  background: rgba(255, 71, 87, 0.12);
+  border-color: rgba(255, 71, 87, 0.45);
+  color: #ff8090;
+}
+.g-confirm-btn.danger:hover {
+  background: rgba(255, 71, 87, 0.22);
+  border-color: #ff4757;
+  color: #ff4757;
+}
+
+/* Studio surface gets a subtle gradient kin to the landing animated card */
+.studio-glass-card {
+  position: relative;
+  background:
+    radial-gradient(circle at 30% 20%, var(--accent-tint-soft), transparent 55%),
+    radial-gradient(circle at 75% 80%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
+    var(--bg, #0a0c18);
+  isolation: isolate;
+}
+.studio-glass-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.04), transparent 50%);
+  z-index: 0;
+}
+.studio-glass-card > * {
+  position: relative;
+  z-index: 1;
 }

@@ -5,7 +5,9 @@
 import { z } from "zod";
 import {
   dateString,
+  isoDateTimeString,
   optionalSubjectString,
+  positiveDurationSeconds,
   subjectString,
   timeString,
   titleLikeString,
@@ -130,6 +132,31 @@ export const ReadCalendarSchema = z.object({
   end_date: dateString.optional(),
 });
 
+const timerPresetEnum = z.enum(["pomodoro", "short_break", "long_break"]);
+
+export const SetTimerSchema = z
+  .object({
+    type: z.literal("set_timer").optional(),
+    label: titleLikeString("label"),
+    duration_seconds: positiveDurationSeconds.optional(),
+    fire_at: isoDateTimeString.optional(),
+    preset: timerPresetEnum.optional(),
+  })
+  .refine(
+    (v) => Boolean(v.duration_seconds || v.fire_at || v.preset),
+    { message: "Provide duration_seconds, fire_at, or preset", path: ["duration_seconds"] }
+  );
+
+const noteSourceEnum = z.enum(["user", "ai_generated", "imported"]);
+
+export const AddNoteSchema = z.object({
+  type: z.literal("add_note").optional(),
+  title: titleLikeString("title"),
+  content: z.string().max(50000).optional(),
+  subject: optionalSubjectString,
+  source: noteSourceEnum.optional(),
+});
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -143,6 +170,8 @@ export const ACTION_SCHEMAS = {
   clear_all: ClearAllSchema,
   ask_clarification: AskClarificationSchema,
   read_calendar: ReadCalendarSchema,
+  set_timer: SetTimerSchema,
+  add_note: AddNoteSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -163,6 +192,8 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
   ask_clarification: "Ask the student for a missing/ambiguous detail BEFORE running any action tool. Populate missing_fields precisely. Use up to 6 short options when natural; omit options for free-form fields.",
   read_calendar: "Read-only lookup of the schedule for the given date range. Never combine with mutating tools unless the student explicitly asked.",
+  set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
+  add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {

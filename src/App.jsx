@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import * as pdfjsLib from 'pdfjs-dist';
 import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
@@ -22,11 +23,12 @@ import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
+import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
-import { inferSubjectFromTitle } from '../shared/subjects.js';
+import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
@@ -636,6 +638,8 @@ const POLICY_MODULES = {
   conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
+  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, call ask_clarification with missing_fields=['duration_seconds']. Anything longer than 24h belongs as an event, not a timer.",
+  notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
 };
 
 function estimateInputTokens(text = '') {
@@ -963,6 +967,8 @@ NOTES: ${noteNames}`;
         POLICY_MODULES.corrections,
         POLICY_MODULES.date_resolution,
         POLICY_MODULES.vision,
+        POLICY_MODULES.timers,
+        POLICY_MODULES.notes_flow,
       ];
   const stablePolicyTier2 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
@@ -1559,6 +1565,16 @@ const ACTION_SCHEMAS = {
     required: ['title', 'due_date'],
     recommended: ['subject'],
     optional: ['est_time', 'priority', 'description'],
+  },
+  add_note: {
+    required: ['title', 'subject', 'source'],
+    recommended: [],
+    optional: ['content'],
+  },
+  set_timer: {
+    required: ['label'],
+    recommended: ['duration_seconds'],
+    optional: ['fire_at', 'preset'],
   },
 };
 
@@ -4531,9 +4547,33 @@ const AutoApproveIndicator = ({ status }) => {
 };
 
 /* ═══════════════════════════════════════════════
+   ACTIVE TIMER PILL — small floating chip rendered per active timer
+   ═══════════════════════════════════════════════ */
+function ActiveTimerPill({ timer, onDismiss }) {
+  const [remaining, setRemaining] = useState(() => Math.max(0, timer.fireAt - Date.now()));
+  useEffect(() => {
+    const id = setInterval(() => setRemaining(Math.max(0, timer.fireAt - Date.now())), 1000);
+    return () => clearInterval(id);
+  }, [timer.fireAt]);
+  const secs = Math.floor(remaining / 1000);
+  const mm = Math.floor(secs / 60);
+  const ss = secs % 60;
+  const display = mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : `${ss}s`;
+  return (
+    <button type="button" className="sos-active-timer" onClick={onDismiss} title="Dismiss timer">
+      <span style={{fontSize:'0.85rem'}}>⏱</span>
+      <span>{timer.label}</span>
+      <span style={{opacity:0.8}}>{display}</span>
+    </button>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { agenticMode, setAgenticMode } = useAgenticMode();
   const [user, setUser] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -4844,6 +4884,16 @@ function App() {
       setEntityLinks(data.entityLinks || []);
     }
 
+    // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
+    // whose fire_at is already past (laptop slept, tab closed, etc.).
+    try {
+      const { data: timerRows } = await sb.from('timers').select('*').eq('user_id', authUser.id).eq('fired', false);
+      const rows = timerRows || [];
+      const restored = rows.map(r => ({ id: r.id, label: r.label, fireAt: new Date(r.fire_at).getTime(), userId: authUser.id }));
+      setActiveTimers(restored);
+      restored.forEach(t => scheduleTimerFire(t));
+    } catch(e) { console.error('Failed to load timers:', e); }
+
     // Fetch today's content generation count
     try {
       const now = new Date();
@@ -4867,6 +4917,16 @@ function App() {
       document.documentElement.style.setProperty('--primary-glow', savedAccent + '26');
     }
   }, []);
+
+  // ── Honor ?panel= / ?focus= so Landing "Learn more" cards can deep-link ──
+  useEffect(() => {
+    const panel = searchParams.get('panel');
+    const focus = searchParams.get('focus');
+    const target = panel || focus;
+    if (!target) return;
+    if (['chat', 'home', 'settings', 'proofread'].includes(target)) setActivePanel(target);
+    else if (target === 'tasks' || target === 'calendar') setActivePanel('chat');
+  }, [searchParams]);
 
   // ── Check for existing session on mount ──
   useEffect(() => {
@@ -5148,6 +5208,50 @@ function App() {
     postAssistantNote("Done — I've undone that action.");
   }
 
+  // ── Confirm-delete modal for saved chats ──
+  const [confirmDeleteChat, setConfirmDeleteChat] = useState(null);
+
+  // ── Timers (set_timer tool) ──
+  // activeTimers mirrors public.timers rows that haven't fired yet. The
+  // setTimeout handle for each lives in timerTimeoutsRef so we can clear it
+  // on dismiss/undo. Persisted so timers survive a reload.
+  const [activeTimers, setActiveTimers] = useState([]);
+  const timerTimeoutsRef = useRef(new Map());
+
+  const scheduleTimerFire = useCallback((timer) => {
+    const existing = timerTimeoutsRef.current.get(timer.id);
+    if (existing) clearTimeout(existing);
+    const ms = Math.max(0, timer.fireAt - Date.now());
+    const h = setTimeout(() => {
+      try { sfx.chime(); } catch(_) {}
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try { new Notification('Timer done', { body: timer.label, tag: `sos-timer-${timer.id}` }); } catch(_) {}
+      }
+      setSosNotif({ label: 'Timer done', body: timer.label, accent: 'var(--accent)', duration: 8000 });
+      if (timer.userId) {
+        syncOp(() => sb.from('timers').update({ fired: true, dismissed_at: new Date().toISOString() }).eq('id', timer.id));
+      }
+      setActiveTimers(prev => prev.filter(t => t.id !== timer.id));
+      timerTimeoutsRef.current.delete(timer.id);
+    }, ms);
+    timerTimeoutsRef.current.set(timer.id, h);
+  }, []);
+
+  // Cleanup pending timeouts on unmount so HMR doesn't double-fire.
+  useEffect(() => {
+    return () => {
+      for (const h of timerTimeoutsRef.current.values()) clearTimeout(h);
+      timerTimeoutsRef.current.clear();
+    };
+  }, []);
+
+  function dismissActiveTimer(id) {
+    const h = timerTimeoutsRef.current.get(id);
+    if (h) { clearTimeout(h); timerTimeoutsRef.current.delete(id); }
+    setActiveTimers(prev => prev.filter(t => t.id !== id));
+    if (user) syncOp(() => sb.from('timers').update({ fired: true, dismissed_at: new Date().toISOString() }).eq('id', id).eq('user_id', user.id));
+  }
+
   // ── Update a single task and sync ──
   function updateTask(taskId, updates) {
     setTasks(prev => {
@@ -5407,21 +5511,64 @@ function App() {
         }
         case 'add_note': {
           const tabName = (action.title || action.tab_name || '').trim();
+          const subjectRaw = (action.subject || '').trim();
+          // Tolerate either the enum value or the human label the clarification
+          // card surfaces (e.g. "AI write" → "ai_generated").
+          const sourceRaw = (action.source || '').toString().toLowerCase();
+          const source = ['user','imported','ai_generated'].includes(sourceRaw)
+            ? sourceRaw
+            : sourceRaw.includes('ai') ? 'ai_generated'
+            : sourceRaw.includes('paste') || sourceRaw.includes('import') ? 'imported'
+            : sourceRaw.includes('write') || sourceRaw.includes('myself') ? 'user'
+            : '';
+          // Three-step clarification chain: subject → source → title.
+          if (!subjectRaw) {
+            setPendingClarification({
+              question: "Which subject is this note under?",
+              context_action: 'add_note',
+              missing_fields: ['subject'],
+              options: SUBJECT_LIST.slice(0, 6),
+            });
+            return;
+          }
+          if (!source) {
+            setPendingClarification({
+              question: "Should I write it, do you want to paste/import, or are you writing it yourself?",
+              context_action: 'add_note',
+              missing_fields: ['source'],
+              options: ["I'll write it", "Paste/import", "AI write"],
+            });
+            return;
+          }
           if (!tabName || tabName.length < 2) {
             setPendingClarification({ question: "What should I name this note?", context_action: 'add_note', missing_fields: ['title'] });
             return;
           }
+          // Resolve/create the subject folder so this note lives under it.
+          const folderName = normalize(subjectRaw); // canonical subject name
+          let folderId = null;
+          if (folderName) {
+            const existingFolder = notes.find(n => n.is_folder && (n.name || '').toLowerCase() === folderName.toLowerCase());
+            if (existingFolder) {
+              folderId = existingFolder.id;
+            } else {
+              const folder = { id: uid(), name: folderName, content: '', updatedAt: new Date().toISOString(), is_folder: true, parent_id: null };
+              setNotes(prev => [...prev, folder]);
+              if (user) syncOp(() => dbUpsertNote(folder, user.id));
+              folderId = folder.id;
+            }
+          }
           const content = action.content || '';
           let savedNote = null;
           setNotes(prev => {
-            const existing = prev.findIndex(n => n.name.toLowerCase() === tabName.toLowerCase());
+            const existing = prev.findIndex(n => !n.is_folder && n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {
-              const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString() } : n);
+              const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString(), parent_id: folderId || n.parent_id } : n);
               if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
               savedNote = updated[existing];
               return updated;
             }
-            const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString() };
+            const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString(), is_folder: false, parent_id: folderId };
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
             savedNote = newNote;
             return [...prev, newNote];
@@ -5431,10 +5578,51 @@ function App() {
             syncWikilinksForEntity(noteEntity, savedNote.content || '');
             maybeSuggestLink(noteEntity);
           }
-          if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note' });
-          recordExecution('add_note', `note "${tabName}"`);
-          window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName } }));
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note', source });
+          recordExecution('add_note', `note "${tabName}"${folderName ? ` in ${folderName}` : ''}`);
+          window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName, subject: folderName } }));
           pushUndoToast(`Undo: created note "${tabName}"`, undoSnap);
+          break;
+        }
+        case 'set_timer': {
+          const PRESETS = { pomodoro: 25 * 60, short_break: 5 * 60, long_break: 15 * 60 };
+          const label = (action.label || action.title || '').trim();
+          let durationSeconds = Number(action.duration_seconds) || 0;
+          if (!durationSeconds && action.preset && PRESETS[action.preset]) durationSeconds = PRESETS[action.preset];
+          const fireAt = action.fire_at
+            ? new Date(action.fire_at).getTime()
+            : (durationSeconds > 0 ? Date.now() + durationSeconds * 1000 : 0);
+          if (!label) {
+            setPendingClarification({ question: "What should I call this timer?", context_action: 'set_timer', missing_fields: ['label'] });
+            return;
+          }
+          if (!fireAt || isNaN(fireAt) || fireAt <= Date.now()) {
+            setPendingClarification({
+              question: "How long should I run the timer?",
+              context_action: 'set_timer',
+              missing_fields: ['duration_seconds'],
+              options: ["5 min", "10 min", "20 min", "25 min (pomodoro)", "45 min", "1 hour"],
+            });
+            return;
+          }
+          if (fireAt - Date.now() > 86400 * 1000) {
+            postAssistantNote("That's more than 24 hours away — try adding it as an event instead.");
+            return;
+          }
+          // Request notification permission lazily on first timer (best effort).
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+            try { Notification.requestPermission(); } catch(_) {}
+          }
+          const timer = { id: uid(), label, fireAt, userId: user?.id };
+          setActiveTimers(prev => [...prev, timer]);
+          scheduleTimerFire(timer);
+          if (user) syncOp(() => sb.from('timers').insert({ id: timer.id, user_id: user.id, label, fire_at: new Date(fireAt).toISOString() }));
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'set_timer' });
+          const remaining = Math.round((fireAt - Date.now()) / 1000);
+          const human = remaining >= 60 ? `${Math.round(remaining/60)} min` : `${remaining}s`;
+          recordExecution('set_timer', `timer "${label}" for ${human}`);
+          setSosNotif({ label: 'Timer started', body: `${label} · ${human}`, accent: 'var(--accent)', duration: 3000 });
+          pushUndoToast(`Undo: started "${label}" timer`, undoSnap);
           break;
         }
         case 'edit_note': {
@@ -7626,7 +7814,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
                     <span style={{display:'flex',gap:4}}>
                       <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
-                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); setConfirmDeleteChat(chat); }}>Delete</button>
                     </span>
                   </div>
                 </div>
@@ -7653,8 +7841,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onNewChat={startNewChat}
           onSettings={() => setActivePanel('settings')}
           onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onHome={() => setActivePanel('home')}
-          homeEnabled={homePrefs.enabled}
+          onHome={() => navigate('/')}
+          onChat={() => {
+            setActivePanel('chat');
+            if (typeof window !== 'undefined' && window.location.hash) {
+              history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+          }}
+          onProofread={() => setActivePanel('proofread')}
+          homeEnabled={true}
           queueCount={pendingQueue ? pendingQueue.length : 0}
         />
       )}
@@ -7680,7 +7875,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
-            onHome={() => setLayoutMode('lofi')}
+            onHome={() => navigate('/')}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
@@ -7689,7 +7884,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       )}
       <div className={
         layoutMode === 'lofi' ? 'study-center study-glass'
-        : layoutMode === 'studio' ? 'studio-center-col'
+        : layoutMode === 'studio' ? 'studio-center-col studio-glass-card'
         : 'sos-main'
       }>
       {layoutMode === 'lofi' && (
@@ -7701,8 +7896,15 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           onSettings={() => setActivePanel('settings')}
           onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onSwitchLayout={() => setLayoutMode('sidebar')}
-          onHome={() => setActivePanel('home')}
-          homeEnabled={homePrefs.enabled}
+          onHome={() => navigate('/')}
+          onChat={() => {
+            setActivePanel('chat');
+            if (typeof window !== 'undefined' && window.location.hash) {
+              history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+          }}
+          onProofread={() => setActivePanel('proofread')}
+          homeEnabled={true}
           queueCount={pendingQueue ? pendingQueue.length : 0}
           theme={studioTheme}
           onTheme={setStudioTheme}
@@ -7727,7 +7929,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
-          <button onClick={startNewChat} className="g-hdr-btn">{Icon.plus(14)} <span>New chat</span></button>
+          <button onClick={()=>setActivePanel('proofread')} className="g-hdr-btn">{Icon.fileText(14)} <span>Proofread</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
         </div>
       </div>}
@@ -7751,6 +7953,28 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           duration={sosNotif.duration}
           onDismiss={() => setSosNotif(null)}
         />
+      )}
+
+      {confirmDeleteChat && (
+        <div className="g-confirm-overlay" onClick={() => setConfirmDeleteChat(null)}>
+          <div className="g-confirm-card" onClick={e => e.stopPropagation()}>
+            <h3>Delete saved chat?</h3>
+            <p>"{confirmDeleteChat.title}" will be removed. You'll have 8 seconds to undo.</p>
+            <div className="g-confirm-actions">
+              <button className="g-confirm-btn" onClick={() => setConfirmDeleteChat(null)}>Cancel</button>
+              <button className="g-confirm-btn danger" onClick={() => { deleteSavedChat(confirmDeleteChat.id); setConfirmDeleteChat(null); }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active timer banner — clicking dismisses + persists the dismissal */}
+      {activeTimers.length > 0 && activePanel === 'chat' && (
+        <div style={{position:'fixed',bottom:96,right:24,display:'flex',flexDirection:'column',gap:6,zIndex:90,alignItems:'flex-end'}}>
+          {activeTimers.map(t => (
+            <ActiveTimerPill key={t.id} timer={t} onDismiss={() => dismissActiveTimer(t.id)} />
+          ))}
+        </div>
       )}
 
       {activePanel === 'home' ? (
@@ -7993,6 +8217,19 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               <span style={{color:'var(--border)'}}>|</span>
               <a href="/terms" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
             </div>
+          </div>
+        </div>
+      ) : activePanel === 'proofread' ? (
+        <div className="settings-fullscreen">
+          <div className="settings-fullscreen-inner">
+            <div className="settings-fullscreen-header">
+              <div>
+                <div className="settings-title">Proofread</div>
+                <div className="settings-sub">Drop an essay, math worksheet, or PDF. The AI flags issues and suggests fixes.</div>
+              </div>
+              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
+            </div>
+            <ProofreadPanel />
           </div>
         </div>
       ) : (
@@ -8296,17 +8533,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               {showAttachMenu && (
                 <>
                   <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAttachMenu(false)}/>
-                  <div style={{position:'absolute',bottom:52,left:0,zIndex:200,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'6px',display:'flex',flexDirection:'column',gap:4,minWidth:140,boxShadow:'0 4px 20px rgba(0,0,0,0.4)',animation:'fadeIn .1s ease'}}>
-                    <button type="button" onClick={()=>{photoInputRef.current?.click();setShowAttachMenu(false);}}
-                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
-                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
-                    >📎 File</button>
-                    <button type="button" onClick={()=>{setShowGoogleModal(true);setShowAttachMenu(false);}}
-                      style={{background:'transparent',border:'none',color:'var(--text)',fontSize:'0.84rem',padding:'7px 12px',borderRadius:8,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:8}}
-                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
-                    >🔗 Google</button>
+                  <div className="sos-attach-menu">
+                    <button type="button" onClick={()=>{photoInputRef.current?.click();setShowAttachMenu(false);}}>📎 File</button>
+                    <button type="button" onClick={()=>{setShowGoogleModal(true);setShowAttachMenu(false);}}>🔗 Google</button>
                   </div>
                 </>
               )}
@@ -8337,7 +8566,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
               />
               {wikilinkChatHook.popover}
               </div>
-              <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,background:'linear-gradient(135deg,var(--accent),#5a54d4)',color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1,boxShadow:'0 2px 12px rgba(245,158,11,0.3)'}}>{Icon.send(18)}</button>
+              <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
             </form>
             {input.length > 0 && !isLoading && (
               <div className="sos-enter-hint">Enter to send · Shift+Enter for new line</div>
@@ -8448,7 +8677,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                       <span>{chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''} · {fmt(chat.savedAt)}</span>
                       <span style={{display:'flex',gap:4}}>
                         <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
-                        <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); deleteSavedChat(chat.id); }}>Delete</button>
+                        <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); setConfirmDeleteChat(chat); }}>Delete</button>
                       </span>
                     </div>
                   </div>

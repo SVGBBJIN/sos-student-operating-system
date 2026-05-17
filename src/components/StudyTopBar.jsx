@@ -9,6 +9,8 @@ function Si({ name, size = 15 }) {
     moon:     <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></>,
     logout:   <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></>,
     home:     <><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>,
+    message:  <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
+    proofread:<><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z"/></>,
   };
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
@@ -28,6 +30,8 @@ export default function StudyTopBar({
   onSettings,
   onAuthAction,
   onHome,
+  onChat,
+  onProofread,
   homeEnabled = false,
   queueCount = 0,
 }) {
@@ -100,10 +104,23 @@ export default function StudyTopBar({
           </div>
         )}
 
-        {/* Home */}
-        {homeEnabled && onHome && (
-          <button className="icon-btn" onClick={onHome} title="Home screen" aria-label="Home screen">
+        {/* Nav: Home (above) then Chat (below) — kept as siblings in source order
+            so Home renders first in the topbar's flex flow. */}
+        {onHome && (
+          <button className="icon-btn" onClick={onHome} title="Home" aria-label="Home">
             <Si name="home" size={15} />
+          </button>
+        )}
+        {onChat && (
+          <button className="icon-btn" onClick={onChat} title="Chat" aria-label="Chat">
+            <Si name="message" size={15} />
+          </button>
+        )}
+
+        {/* Proofread */}
+        {onProofread && (
+          <button className="icon-btn" onClick={onProofread} title="Proofread" aria-label="Proofread">
+            <Si name="proofread" size={15} />
           </button>
         )}
 

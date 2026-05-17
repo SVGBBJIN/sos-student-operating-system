@@ -386,24 +386,24 @@ export default function Landing() {
         <h2>Everything you need in one place.</h2>
         <p className="ld-lede">No more tab-juggling between Notion, Calendar, and a flashcard app. SOS unifies the surfaces that matter — the AI does the busywork.</p>
         <div className="ld-feat-grid">
-          <div className="ld-feat">
+          <button type="button" className="ld-feat" onClick={go('/calendar')}>
             <div className="ico"><Icon name="calendar" /></div>
             <h3>Smart calendar</h3>
             <p>Imports from Google. Suggests study blocks. Quietly keeps you on track.</p>
             <span className="more">Learn more →</span>
-          </div>
-          <div className="ld-feat">
+          </button>
+          <button type="button" className="ld-feat" onClick={go('/library')}>
             <div className="ico"><Icon name="book" /></div>
             <h3>One library</h3>
             <p>Notes, lessons, flashcards, and AI podcasts — searchable, in one place.</p>
             <span className="more">Learn more →</span>
-          </div>
-          <div className="ld-feat">
+          </button>
+          <button type="button" className="ld-feat" onClick={go('/studio?focus=tasks')}>
             <div className="ico"><Icon name="check" /></div>
             <h3>Task manager</h3>
             <p>Natural language in, structured deadlines out. "Pset due friday" just works.</p>
             <span className="more">Learn more →</span>
-          </div>
+          </button>
         </div>
       </section>
 
@@ -888,8 +888,9 @@ const LANDING_CSS = `
 .ld-lede { color: var(--ld-fg-2); font-size: 15px; max-width: 52ch; margin: 0 0 48px; }
 .ld-feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--ld-line); border: 1px solid var(--ld-line); border-radius: 14px; overflow: hidden; }
 @media (max-width: 820px) { .ld-feat-grid { grid-template-columns: 1fr; } }
-.ld-feat { background: var(--ld-bg); padding: 28px; display: flex; flex-direction: column; gap: 12px; transition: background 200ms var(--ld-ease-out); cursor: default; }
-.ld-feat:hover { background: rgba(255,255,255,0.02); }
+.ld-feat { background: var(--ld-bg); padding: 28px; display: flex; flex-direction: column; gap: 12px; transition: background 200ms var(--ld-ease-out), transform 200ms var(--ld-ease-out), box-shadow 200ms var(--ld-ease-out); cursor: pointer; text-align: left; border: 0; font: inherit; color: inherit; appearance: none; }
+.ld-feat:hover { background: rgba(255,255,255,0.02); transform: translateY(-2px); }
+.ld-feat:focus-visible { outline: 2px solid var(--ld-mint); outline-offset: -2px; }
 .ld-feat .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--ld-bg-3); border: 1px solid var(--ld-line); display: inline-flex; align-items: center; justify-content: center; color: var(--ld-mint); transition: border-color 200ms var(--ld-ease-out); }
 .ld-feat:hover .ico { border-color: var(--ld-mint-line); }
 .ld-feat .ico svg { width: 18px; height: 18px; }
