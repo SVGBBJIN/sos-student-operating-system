@@ -5910,21 +5910,134 @@ function App() {
         case 'read_calendar': {
           const startD = action.start_date || today();
           const endD = action.end_date || startD;
-          const rangeEvents = events.filter(e => e.date >= startD && e.date <= endD);
-          const rangeTasks = tasks.filter(t => t.dueDate >= startD && t.dueDate <= endD && t.status !== 'done');
+          const isSingleDay = startD === endD;
+          const isMonthRange = !isSingleDay && (() => {
+            const diffDays = Math.round((new Date(endD + 'T00:00:00') - new Date(startD + 'T00:00:00')) / 86400000);
+            return diffDays >= 20;
+          })();
           const lines = [];
-          if (rangeEvents.length === 0 && rangeTasks.length === 0) {
-            lines.push(`Nothing scheduled from ${fmt(startD)}${endD !== startD ? ` to ${fmt(endD)}` : ''}.`);
-          } else {
-            if (rangeEvents.length > 0) {
-              lines.push('**Events:**');
-              rangeEvents.forEach(e => lines.push(`- ${e.title} on ${fmt(e.date)}${e.start_time ? ' at ' + e.start_time : ''}`));
+
+          // ── Helper: build merged block map for a given date ──
+          function buildBlocksForDate(ds) {
+            const dow = new Date(ds + 'T12:00:00').getDay();
+            const slots = {};
+            (blocks.recurring || []).forEach(rb => {
+              if (rb.days.includes(dow)) {
+                const [sh, sm] = rb.start.split(':').map(Number);
+                const [eh, em] = rb.end.split(':').map(Number);
+                let ch = sh, cm = sm;
+                while (ch < eh || (ch === eh && cm < em)) {
+                  slots[String(ch).padStart(2,'0') + ':' + String(cm).padStart(2,'0')] = { name: rb.name, category: rb.category };
+                  cm += 30; if (cm >= 60) { ch++; cm = 0; }
+                }
+              }
+            });
+            Object.entries(blocks.dates?.[ds] || {}).forEach(([k, v]) => {
+              if (v === null) delete slots[k]; else slots[k] = v;
+            });
+            return slots;
+          }
+
+          if (isSingleDay) {
+            // ── Single-day view: full schedule with blocks ──
+            const dow = new Date(startD + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+            lines.push(`**Schedule for ${dow}, ${fmtFull(startD)}**`);
+
+            const daySlots = buildBlocksForDate(startD);
+            const blockRanges = summarizeBlockSlots(daySlots);
+
+            const dayEvents = events
+              .filter(e => e.date === startD)
+              .sort((a, b) => (a.time || a.start_time || '23:59').localeCompare(b.time || b.start_time || '23:59'));
+            const dayTasks = tasks.filter(t => t.dueDate === startD && t.status !== 'done');
+
+            if (blockRanges.length === 0 && dayEvents.length === 0 && dayTasks.length === 0) {
+              lines.push('Nothing scheduled — free day.');
+            } else {
+              if (blockRanges.length > 0) {
+                lines.push('\n**Time blocks:**');
+                blockRanges.forEach(b => lines.push(`- ${b}`));
+              }
+              if (dayEvents.length > 0) {
+                lines.push('\n**Events:**');
+                dayEvents.forEach(e => {
+                  const timeStr = e.time || e.start_time ? ` at ${e.time || e.start_time}` : '';
+                  const typeStr = e.event_type && e.event_type !== 'event' ? ` [${e.event_type}]` : '';
+                  lines.push(`- ${e.title}${timeStr}${typeStr}`);
+                });
+              }
+              if (dayTasks.length > 0) {
+                lines.push('\n**Tasks due today:**');
+                dayTasks.forEach(t => {
+                  const sub = t.subject ? ` (${t.subject})` : '';
+                  lines.push(`- ${t.title}${sub}`);
+                });
+              }
             }
-            if (rangeTasks.length > 0) {
-              lines.push('**Tasks due:**');
-              rangeTasks.forEach(t => lines.push(`- ${t.title} (due ${fmt(t.dueDate)})`));
+          } else {
+            // ── Multi-day / month view ──
+            const rangeLabel = `${fmt(startD)} – ${fmt(endD)}`;
+            lines.push(`**Calendar: ${rangeLabel}**`);
+
+            // Important events: tests, exams, quizzes, high-priority, or sport events
+            const importantTypes = new Set(['test','exam','quiz','game','match','meet','tournament']);
+            const rangeEvents = events
+              .filter(e => e.date >= startD && e.date <= endD)
+              .sort((a, b) => a.date.localeCompare(b.date));
+            const importantEvents = rangeEvents.filter(e =>
+              importantTypes.has(e.event_type) || e.priority === 'high'
+            );
+            const otherEvents = rangeEvents.filter(e =>
+              !importantTypes.has(e.event_type) && e.priority !== 'high'
+            );
+
+            const rangeTasks = tasks
+              .filter(t => t.dueDate >= startD && t.dueDate <= endD && t.status !== 'done')
+              .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+            if (rangeEvents.length === 0 && rangeTasks.length === 0) {
+              lines.push(`Nothing scheduled in this period.`);
+            } else {
+              if (importantEvents.length > 0) {
+                lines.push('\n**Important events:**');
+                importantEvents.forEach(e => {
+                  const dStr = fmtFull(e.date);
+                  const typeStr = e.event_type ? ` [${e.event_type}]` : '';
+                  const sub = e.subject ? ` — ${e.subject}` : '';
+                  lines.push(`- ${e.title}${typeStr} · ${dStr}${sub}`);
+                });
+              }
+              if (otherEvents.length > 0) {
+                lines.push('\n**Other events:**');
+                otherEvents.forEach(e => {
+                  const dStr = fmt(e.date);
+                  const timeStr = e.time || e.start_time ? ` at ${e.time || e.start_time}` : '';
+                  lines.push(`- ${e.title} · ${dStr}${timeStr}`);
+                });
+              }
+              if (rangeTasks.length > 0) {
+                lines.push('\n**Tasks due:**');
+                rangeTasks.forEach(t => {
+                  const sub = t.subject ? ` (${t.subject})` : '';
+                  const d = daysUntil(t.dueDate);
+                  const urgency = d < 0 ? ' ⚠️ overdue' : d === 0 ? ' — today' : d === 1 ? ' — tomorrow' : '';
+                  lines.push(`- ${t.title}${sub} · due ${fmt(t.dueDate)}${urgency}`);
+                });
+              }
+
+              // Monthly digest: count by type
+              if (isMonthRange && (importantEvents.length > 0 || rangeEvents.length > 3)) {
+                const typeCounts = {};
+                rangeEvents.forEach(e => {
+                  const k = e.event_type || 'event';
+                  typeCounts[k] = (typeCounts[k] || 0) + 1;
+                });
+                const summary = Object.entries(typeCounts).map(([k, n]) => `${n} ${k}${n > 1 ? 's' : ''}`).join(', ');
+                lines.push(`\n_Summary: ${summary}; ${rangeTasks.length} task${rangeTasks.length !== 1 ? 's' : ''} due_`);
+              }
             }
           }
+
           const calContent = lines.join('\n');
           const calMsg = { role: 'assistant', content: calContent, timestamp: Date.now() };
           setMessages(prev => { const n = [...prev, calMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
