@@ -1093,15 +1093,6 @@ body {
   background: transparent;
 }
 
-/* Remove ambient overlays / scanlines / grid */
-#root::before,
-#root::after,
-.sos-app::before,
-.corner-bracket,
-.sos-loading-scan,
-.sos-main::after {
-  display: none !important;
-}
 
 .sos-app {
   background: #0f1115 !important;
@@ -1390,154 +1381,6 @@ body {
   background: #13161f !important;
 }
 
-/* ─── SFX Toggle ──────────────────────────────────────────────────── */
-.sfx-toggle {
-  position: fixed;
-  bottom: 18px;
-  right: 56px;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: rgba(14, 18, 28, 0.72);
-  border: 1px solid rgba(144, 151, 168, 0.18);
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 2px;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
-  backdrop-filter: blur(8px);
-}
-.sfx-toggle:hover {
-  color: #8fa8ff;
-  border-color: rgba(143, 168, 255, 0.35);
-  background: rgba(143, 168, 255, 0.07);
-}
-.sfx-toggle[aria-pressed="false"] {
-  color: rgba(240, 242, 246, 0.35);
-  border-color: rgba(144, 151, 168, 0.1);
-}
-
-/* ─── Idle Lock Screen ────────────────────────────────────────────── */
-@keyframes idle-lock-enter {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes idle-lock-exit {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(40px); }
-}
-@keyframes neon-strike {
-  0%   { opacity: 1; }
-  15%  { opacity: 0.6; }
-  20%  { opacity: 1; }
-  35%  { opacity: 0.75; }
-  40%  { opacity: 1; }
-}
-
-.idle-lock-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10001;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  backdrop-filter: blur(22px) saturate(1.1);
-  -webkit-backdrop-filter: blur(22px) saturate(1.1);
-  background: rgba(5, 8, 16, 0.72);
-  animation: idle-lock-enter 1000ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.idle-lock-overlay.exiting {
-  animation: idle-lock-exit 600ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.idle-lock-overlay::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, #8fa8ff 50%, transparent 100%);
-  opacity: 0.2;
-  animation: scan-sweep 5s ease-in-out infinite;
-  pointer-events: none;
-}
-
-.idle-lock-wordmark {
-  font-family: var(--font-display);
-  font-size: clamp(5rem, 14vw, 10rem);
-  font-weight: 800;
-  color: #8fa8ff;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  text-shadow: 0 0 40px rgba(143, 168, 255, 0.35), 0 0 80px rgba(143, 168, 255, 0.12);
-  animation: neon-strike 220ms ease 900ms both;
-  user-select: none;
-}
-.idle-lock-sub {
-  font-family: var(--font-body);
-  font-size: 0.85rem;
-  font-weight: 300;
-  color: var(--text-secondary);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  margin-top: -4px;
-  margin-bottom: 16px;
-  user-select: none;
-}
-.idle-lock-cta {
-  font-family: var(--font-display);
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: #8fa8ff;
-  background: transparent;
-  border: 1px solid rgba(143, 168, 255, 0.32);
-  padding: 11px 36px;
-  cursor: pointer;
-  letter-spacing: 0.08em;
-  transition: background 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
-}
-.idle-lock-cta:hover {
-  background: rgba(143, 168, 255, 0.09);
-  border-color: #8fa8ff;
-  box-shadow: 0 0 8px rgba(143, 168, 255, 0.3);
-}
-.idle-lock-cta:active {
-  background: rgba(143, 168, 255, 0.16);
-  transform: translateY(1px);
-}
-
-/* Low/mid perf — strip heavy blur from lock screen */
-[data-perf="low"] .idle-lock-overlay,
-[data-perf="mid"] .idle-lock-overlay {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background: rgba(5, 8, 16, 0.96) !important;
-}
-
-/* ─── Presence State — blur app UI when idle ──────────────────────── */
-[data-presence="absent"] .sos-sidebar,
-[data-presence="absent"] .sos-main,
-[data-presence="absent"] .sos-header {
-  filter: blur(1px);
-  transition: filter 2s ease;
-}
-[data-presence="locked"] .sos-sidebar,
-[data-presence="locked"] .sos-main,
-[data-presence="locked"] .sos-header {
-  filter: blur(4px);
-  opacity: 0.4;
-  transition: filter 1.2s ease, opacity 1.2s ease;
-  pointer-events: none;
-}
-
-/* .neon-primary — targeted by PresenceDetector for flicker animation */
-.neon-striking {
-  animation: neon-strike 220ms ease forwards;
-}
-
 /* ─── Low-perf overrides ──────────────────────────────────────────── */
 [data-perf="low"] #root::before,
 [data-perf="low"] #root::after,
@@ -1558,11 +1401,4 @@ body {
 [data-perf="low"] * {
   transition-duration: 0ms !important;
   animation-duration: 0ms !important;
-}
-[data-perf="low"] [data-presence="locked"] .sky-layer {
-  animation: none !important;
-}
-[data-perf="mid"] .sky-rain,
-[data-perf="mid"] #root::before {
-  display: none !important;
 }
