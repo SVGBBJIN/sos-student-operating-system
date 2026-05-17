@@ -23,8 +23,10 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Context assembly | `shared/ai/context/assembler.ts` (workspace + retrieved memories + recency weight) |
 | Streaming SSE consumer (frontend) | `src/lib/streamChat.js` |
 | System prompt construction | `src/App.jsx` `buildSystemPrompt()` ~line 647 |
-| Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 4730 |
-| Send message / streaming | `src/App.jsx` `sendMessage()` ~line 5970 |
+| Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 5273 |
+| Send message / streaming | `src/App.jsx` `sendMessage()` ~line 6900 |
+| Timer state + scheduler | `src/App.jsx` `activeTimers`, `scheduleTimerFire()`, `dismissActiveTimer()` ~line 5220 |
+| Timer widget (Pomodoro + AI timers) | `src/components/PomodoroTimer.jsx` |
 | RPM tracking + queue drain | `src/App.jsx` `pendingQueue` state + `queueOrExecute()` |
 | Lofi left panel (Calendar / Projects / Proofread tabs) | `src/components/LofiLeftPanel.jsx` |
 | Projects tree (folders + notes) | `src/components/ProjectsTree.jsx` |
@@ -50,7 +52,7 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 
 - **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` owns state, chat, action execution. SSE consumer in `src/lib/streamChat.js`.
 - **Serverless** — Vercel `/api/chat` (Node TS) or Supabase Edge `sos-chat` (Deno TS); both import from `shared/ai/index.js`.
-- **AI** — Google Gemini, native end-to-end. Tier 1 (`gemini-3-flash`) handles chat, action routing, summarization, voice. Tier 2 (`gemini-2.5-pro`) handles planning, studio, proofread specialists, grounded search. Tier 0 (`gemini-embedding-002`) handles all embeddings.
+- **AI** — Hybrid Groq + Gemini. Tier 1 (`openai/gpt-oss-20b` on Groq, fallback `gemini-2.5-flash`) handles chat, action routing, summarization, voice. Tier 2 (`openai/gpt-oss-120b` on Groq, fallback `gemini-2.5-pro`) handles planning, studio, proofread specialists. Tier 0 (`gemini-embedding-002` on Gemini) handles all embeddings.
 - **Storage** — Supabase Postgres + Auth + pgvector. Client writes directly via `sb` client after action execution.
 - **Shared core** — `shared/ai/index.ts` exports `callModel()`. Router (`shared/ai/router.ts`) is the only place model strings appear.
 
@@ -59,15 +61,17 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 ## Models (current)
 
 ```
-gemini-embedding-002   // Tier 0: embeddings (memory, semantic search, clustering)
-gemini-3-flash         // Tier 1: chat, action_routing, summarize, voice, classify
-gemini-2.5-flash       // Tier 1 in-tier fallback (5xx/timeout)
-gemini-2.5-pro         // Tier 2: planning, studio, proofread specialist, search_lesson
+gemini-embedding-002          // Tier 0: embeddings only (Gemini — Groq has no embedding model)
+openai/gpt-oss-20b            // Tier 1 primary (Groq): chat, action_routing, summarize, classify
+gemini-2.5-flash              // Tier 1 cross-provider fallback (Gemini)
+openai/gpt-oss-120b           // Tier 2 primary (Groq): planning, studio, proofread specialist
+gemini-2.5-pro                // Tier 2 cross-provider fallback (Gemini)
+meta-llama/llama-4-scout-...  // Vision override in chat-core.ts (image-bearing messages)
 ```
 
-Mapping is defined in `shared/ai/router.ts` (`TIER_BY_INTENT` + `MODEL_BY_TIER`). **Never reference model strings outside `router.ts`** — the only file aware of model names.
+Mapping is defined in `shared/ai/router.ts` (`TIER_BY_INTENT` + `MODEL_BY_TIER`). **Never reference model strings outside `router.ts`** — the only file aware of model names. Set `AI_PROVIDER_OVERRIDE=gemini` env var to roll everything back to Gemini without a redeploy.
 
-**Reliability fallback** (chat-core.ts `callModel()`): on a retryable failure of the primary tier model, the call retries once on the in-tier fallback (Flash 3 → 2.5 Flash; 2.5 Pro → Flash 3). If both fail, `callModel` records the failure in the circuit breaker and surfaces a graceful "having trouble" message. Planning wraps each pass in its own try/catch; critique/refine degrade to the draft on error. `PlanningPipelineError.stage` carries the failure point so the UI can surface specific copy.
+**Reliability fallback** (chat-core.ts `callModel()`): on a retryable failure of the primary tier, the call retries once on the cross-provider fallback (Groq flash → Gemini 2.5 Flash; Groq pro → Gemini 2.5 Pro). If both fail, `callModel` records the failure in the circuit breaker and surfaces a graceful "having trouble" message. Planning wraps each pass in its own try/catch; critique/refine degrade to the draft on error. `PlanningPipelineError.stage` carries the failure point so the UI can surface specific copy.
 
 Run the regression eval with `npm run eval:planning`.
 
@@ -80,10 +84,15 @@ Run the regression eval with `npm run eval:planning`.
 - `add_block` · `delete_block` — time blocks (recurring or date-specific). Render as translucent bands behind events in `CalendarWindow`.
 - `convert_event_to_block` · `convert_block_to_event`
 - `add_recurring_event`
+- `read_calendar` — read-only schedule lookup; single-day shows blocks + events + tasks, multi-day separates important events (test/exam/game) with urgency flags.
 - `view_schedule` — no-op; redirects AI away from `add_task` when user asks what's on calendar
 
 **Tasks**
 - `add_task` · `update_task` · `delete_task` · `complete_task` · `break_task`
+
+**Timers** (Supabase `timers` table, migration `20260517_timers.sql`)
+- `set_timer` — starts a countdown; persists to DB, fires browser Notification + chime + `SosNotification` toast. Active timers shown in the unified `PomodoroTimer` widget (`src/components/PomodoroTimer.jsx`). Active timer labels are injected into the system prompt as `ACTIVE TIMERS` so the AI can reference them.
+- `cancel_timer` — cancels a running timer by label (fuzzy match: exact → startsWith → includes). Marks row `fired=true, dismissed_at=now` in DB.
 
 **Notes & projects** (notes table now has `parent_id` + `is_folder`; folders == projects)
 - `add_note` · `edit_note` · `delete_note`
@@ -93,10 +102,10 @@ Run the regression eval with `npm run eval:planning`.
 - `create_study_plan` · `create_project_breakdown` · `make_plan`
 
 **Meta**
-- `ask_clarification` — always available; triggers `ClarificationCard` on client
+- `ask_clarification` — always available; triggers `MultiFieldClarificationCard` (direct merge, no AI roundtrip) when `multi_field=true` + `known_fields` populated; falls back to legacy `ClarificationCard` (AI roundtrip) otherwise.
 - `propose_action` — surfaces yes/no confirmation card
 
-To add a new tool: add to `ACTION_TOOLS` array + validator in `validateToolArguments()` (both in `chat-core.js`) + case in `executeAction()` switch (`App.jsx`).
+To add a new tool: add `ZodSchema` + entry in `ACTION_SCHEMAS` + description in `ACTION_DESCRIPTIONS` (all in `shared/ai/schemas/actions.ts`) → add a `case` in `executeAction()` switch (`App.jsx`).
 
 ---
 
@@ -199,13 +208,16 @@ Persisted in `sos_home_*` localStorage keys; not in Supabase.
 | `rpmSnapshot` | reactive RPM snapshot for UI |
 | `currentModel` | last model string reported by backend (note `fallback_used` flag in response) |
 | `homePrefs` | mirror of `sos_home_*` localStorage |
-| `pendingClarification` | renders `ClarificationCard` |
+| `activeTimers` | array of `{ id, label, fireAt, startedAt, userId }` — live countdown timers |
+| `pendingClarification` | renders `ClarificationCard` or `MultiFieldClarificationCard` |
 | `pendingProposal` | renders yes/no card |
 | `savedChats` | array for saved chat sidebar |
+| `pomodoroSession` | `'pomodoro'|'short_break'|'long_break'` — preset tab for PomodoroTimer |
 
 **Refs** (no re-render):
 - `rpmStateRef` — raw RPM data, updated from response headers
 - `recentlyExecutedActionsRef` — last 10 actions, injected as RECENTLY COMPLETED ACTIONS
+- `timerTimeoutsRef` — Map of `timer.id → setTimeout handle`; cleared on cancel/fire
 
 ---
 
@@ -216,12 +228,13 @@ Client:  src/lib/supabase.js  →  sb
 CHAT_MAX_MESSAGES = 60
 ```
 
-**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`.
+**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`, `timers`.
 
 **Active migrations**:
 - `20260507_entity_links.sql` — bidirectional link graph for backlinks/suggestions.
 - `20260508_events_time_columns.sql` — adds `start_time`, `end_time`, `description`, `location`, `priority` to `events`.
 - `20260508_notes_hierarchy.sql` — adds `parent_id` (self-FK, cascade delete) and `is_folder` to `notes`.
+- `20260517_timers.sql` — `timers` table (`id`, `user_id`, `label`, `fire_at`, `fired`, `dismissed_at`); RLS owner-only policy; index on `(user_id, fire_at) where fired = false`.
 
 **Field mapping (JS ↔ DB)**:
 - `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`, `completedAt` ↔ `completed_at`

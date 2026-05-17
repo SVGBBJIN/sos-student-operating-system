@@ -638,7 +638,7 @@ const POLICY_MODULES = {
   conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
   date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
-  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, call ask_clarification with missing_fields=['duration_seconds']. Anything longer than 24h belongs as an event, not a timer.",
+  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, call ask_clarification with missing_fields=['duration_seconds']. Anything longer than 24h belongs as an event, not a timer. To stop/cancel a running timer use cancel_timer with the label shown in ACTIVE TIMERS. If no timers are running and the student asks to cancel, say so — don't call cancel_timer.",
   notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
 };
 
@@ -896,6 +896,19 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     taskCapInfo.text || '(none)',
     (overdueTasks.length > 0 ? ('OVERDUE: ' + overdueTasks.map(t => truncateWithEllipsis(t.title, 80) + ' (' + Math.abs(daysUntil(t.dueDate)) + 'd late)').join(', ')) : ''),
     ...(recentActionsLines.length > 0 ? ['', 'RECENTLY COMPLETED ACTIONS (do not re-ask about these):', recentActionsLines.join('\n')] : []),
+    ...(() => {
+      const timers = options.activeTimers || [];
+      if (!timers.length) return [];
+      const now = Date.now();
+      const lines = timers.map(t => {
+        const secsLeft = Math.max(0, Math.round((t.fireAt - now) / 1000));
+        const human = secsLeft >= 3600 ? `${Math.floor(secsLeft/3600)}h ${Math.round((secsLeft%3600)/60)}m left`
+          : secsLeft >= 60 ? `${Math.round(secsLeft/60)} min left`
+          : `${secsLeft}s left`;
+        return `- "${t.label}" (${human})`;
+      });
+      return ['', 'ACTIVE TIMERS (use cancel_timer to stop one):', ...lines];
+    })(),
     '',
     'THIS WEEK (budgeted):',
     capLines(weekSummary, CONTEXT_SECTION_BUDGETS.week, 'weekly entries') || '(no scheduled activities)',
@@ -5675,6 +5688,28 @@ function App() {
           pushUndoToast(`Undo: started "${label}" timer`, undoSnap);
           break;
         }
+        case 'cancel_timer': {
+          const raw = (action.label || '').trim().toLowerCase();
+          if (!raw) { postAssistantNote("Which timer should I cancel?"); return; }
+          // Find best match: exact → startsWith → includes (case-insensitive)
+          const snapshot = activeTimers;
+          const exact   = snapshot.find(t => t.label.toLowerCase() === raw);
+          const starts  = snapshot.find(t => t.label.toLowerCase().startsWith(raw));
+          const includes = snapshot.find(t => t.label.toLowerCase().includes(raw));
+          const match = exact || starts || includes;
+          if (!match) {
+            const running = snapshot.length > 0
+              ? `Running timers: ${snapshot.map(t => `"${t.label}"`).join(', ')}.`
+              : 'No timers are currently running.';
+            postAssistantNote(`Couldn't find a timer matching "${action.label}". ${running}`);
+            return;
+          }
+          dismissActiveTimer(match.id);
+          if (user) trackEvent(user.id, 'action_confirmed', { type: 'cancel_timer' });
+          recordExecution('cancel_timer', `cancelled "${match.label}"`);
+          setSosNotif({ label: 'Timer cancelled', body: match.label, accent: 'var(--accent)', duration: 3000 });
+          break;
+        }
         case 'edit_note': {
           const noteId = action.note_id;
           const newContent = action.new_content || '';
@@ -6953,6 +6988,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         recentlyExecutedActions: recentlyExecutedActionsRef.current,
         responseStyle,
         entityLinks,
+        activeTimers,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 

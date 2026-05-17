@@ -160,6 +160,12 @@ export const AddNoteSchema = z.object({
   source: noteSourceEnum.optional(),
 });
 
+export const CancelTimerSchema = z.object({
+  type: z.literal("cancel_timer").optional(),
+  label: z.string().min(1).max(200),
+});
+export type CancelTimerInput = z.infer<typeof CancelTimerSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -174,6 +180,7 @@ export const ACTION_SCHEMAS = {
   ask_clarification: AskClarificationSchema,
   read_calendar: ReadCalendarSchema,
   set_timer: SetTimerSchema,
+  cancel_timer: CancelTimerSchema,
   add_note: AddNoteSchema,
 } as const;
 
@@ -196,6 +203,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   ask_clarification: "Ask the student for ONE missing or ambiguous detail before running an action. Set context_action to the target tool name (e.g. 'add_event'), missing_fields to the exact field(s) you need, and known_fields to every value already extracted from the student's message (e.g. {title:'Chem test', date:'2026-05-20'}). This lets the frontend merge the answer without a second AI roundtrip. Use up to 6 short options when helpful; omit for free-form answers.",
   read_calendar: "Read-only lookup of the schedule for the given date range. Never combine with mutating tools unless the student explicitly asked.",
   set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
+  cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
   add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
 };
 
