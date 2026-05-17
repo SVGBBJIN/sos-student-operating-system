@@ -42,6 +42,30 @@ function isToday(dateVal) {
     && d.getDate() === now.getDate();
 }
 
+function SavedChatRow({ chat, isActive, onPick, onDelete }) {
+  return (
+    <div className={'sb-item-wrap' + (isActive ? ' active' : '')} style={{ position: 'relative' }}>
+      <button
+        className={'sb-item' + (isActive ? ' active' : '')}
+        onClick={() => onPick?.(chat.id)}
+        style={{ width: '100%' }}
+      >
+        <span className="sb-item-title">{chat.title || 'Untitled chat'}</span>
+        <span className="sb-item-meta">{chat.messageCount ? `${chat.messageCount}m` : ''}</span>
+      </button>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete(chat); }}
+          className="sb-item-delete"
+          title="Delete saved chat"
+          aria-label="Delete saved chat"
+        >×</button>
+      )}
+    </div>
+  );
+}
+
 export default function StudioSidebar({
   user,
   savedChats = [],
@@ -50,6 +74,7 @@ export default function StudioSidebar({
   onNew,
   onAuthAction,
   onHome,
+  onDelete,
   aiThinking = false,
   syncStatus,
   nextEvent,
@@ -97,14 +122,13 @@ export default function StudioSidebar({
               <>
                 <div className="sb-group-label">Today</div>
                 {today.map(chat => (
-                  <button
+                  <SavedChatRow
                     key={chat.id}
-                    className={'sb-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
-                    onClick={() => onPick(chat.id)}
-                  >
-                    <span className="sb-item-title">{chat.title || 'Untitled chat'}</span>
-                    <span className="sb-item-meta">{chat.messageCount ? `${chat.messageCount}m` : ''}</span>
-                  </button>
+                    chat={chat}
+                    isActive={viewingSavedChatId === chat.id}
+                    onPick={onPick}
+                    onDelete={onDelete}
+                  />
                 ))}
               </>
             )}
@@ -112,14 +136,13 @@ export default function StudioSidebar({
               <>
                 <div className="sb-group-label">Earlier</div>
                 {earlier.map(chat => (
-                  <button
+                  <SavedChatRow
                     key={chat.id}
-                    className={'sb-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
-                    onClick={() => onPick(chat.id)}
-                  >
-                    <span className="sb-item-title">{chat.title || 'Untitled chat'}</span>
-                    <span className="sb-item-meta">{chat.messageCount ? `${chat.messageCount}m` : ''}</span>
-                  </button>
+                    chat={chat}
+                    isActive={viewingSavedChatId === chat.id}
+                    onPick={onPick}
+                    onDelete={onDelete}
+                  />
                 ))}
               </>
             )}

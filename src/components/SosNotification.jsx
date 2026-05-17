@@ -9,9 +9,13 @@ export default function SosNotification({ label = 'just now', body, accent, dura
     return () => clearTimeout(t);
   }, [duration, onDismiss]);
 
+  const iconStyle = accent
+    ? { color: accent, background: `color-mix(in srgb, ${accent} 14%, transparent)`, borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }
+    : {};
+
   return (
     <div className="sos-notif" role="status" aria-live="polite">
-      <div className="icon" aria-hidden="true">
+      <div className="icon" style={iconStyle} aria-hidden="true">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
@@ -19,9 +23,7 @@ export default function SosNotification({ label = 'just now', body, accent, dura
       </div>
       <div className="stack">
         <div className="top">{label}</div>
-        <div className="bot">
-          {accent ? <>{body} <strong>{accent}</strong></> : body}
-        </div>
+        <div className="bot">{body}</div>
       </div>
       <button className="close" onClick={() => onDismiss?.()} aria-label="Dismiss">×</button>
     </div>

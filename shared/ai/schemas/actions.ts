@@ -5,7 +5,9 @@
 import { z } from "zod";
 import {
   dateString,
+  isoDateTimeString,
   optionalSubjectString,
+  positiveDurationSeconds,
   subjectString,
   timeString,
   titleLikeString,
@@ -120,6 +122,9 @@ export const AskClarificationSchema = z.object({
   reason: z.string().max(5000).optional(),
   context_action: z.string().max(100).optional(),
   missing_fields: z.array(z.string()).optional(),
+  // Fields already extracted from the student's message — the frontend merges
+  // these with the user's clarification answer so nothing gets lost on re-ask.
+  known_fields: z.record(z.string(), z.unknown()).optional(),
   options: z.array(z.string()).max(6).optional(),
   multi_select: z.boolean().optional(),
 });
@@ -129,6 +134,37 @@ export const ReadCalendarSchema = z.object({
   start_date: dateString,
   end_date: dateString.optional(),
 });
+
+const timerPresetEnum = z.enum(["pomodoro", "short_break", "long_break"]);
+
+export const SetTimerSchema = z
+  .object({
+    type: z.literal("set_timer").optional(),
+    label: titleLikeString("label"),
+    duration_seconds: positiveDurationSeconds.optional(),
+    fire_at: isoDateTimeString.optional(),
+    preset: timerPresetEnum.optional(),
+  })
+  .refine(
+    (v) => Boolean(v.duration_seconds || v.fire_at || v.preset),
+    { message: "Provide duration_seconds, fire_at, or preset", path: ["duration_seconds"] }
+  );
+
+const noteSourceEnum = z.enum(["user", "ai_generated", "imported"]);
+
+export const AddNoteSchema = z.object({
+  type: z.literal("add_note").optional(),
+  title: titleLikeString("title"),
+  content: z.string().max(50000).optional(),
+  subject: optionalSubjectString,
+  source: noteSourceEnum.optional(),
+});
+
+export const CancelTimerSchema = z.object({
+  type: z.literal("cancel_timer").optional(),
+  label: z.string().min(1).max(200),
+});
+export type CancelTimerInput = z.infer<typeof CancelTimerSchema>;
 
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
@@ -143,6 +179,9 @@ export const ACTION_SCHEMAS = {
   clear_all: ClearAllSchema,
   ask_clarification: AskClarificationSchema,
   read_calendar: ReadCalendarSchema,
+  set_timer: SetTimerSchema,
+  cancel_timer: CancelTimerSchema,
+  add_note: AddNoteSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -161,8 +200,11 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   delete_block: "Remove a time block from the schedule.",
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
-  ask_clarification: "Ask the student for a missing/ambiguous detail BEFORE running any action tool. Populate missing_fields precisely. Use up to 6 short options when natural; omit options for free-form fields.",
+  ask_clarification: "Ask the student for ONE missing or ambiguous detail before running an action. Set context_action to the target tool name (e.g. 'add_event'), missing_fields to the exact field(s) you need, and known_fields to every value already extracted from the student's message (e.g. {title:'Chem test', date:'2026-05-20'}). This lets the frontend merge the answer without a second AI roundtrip. Use up to 6 short options when helpful; omit for free-form answers.",
   read_calendar: "Read-only lookup of the schedule for the given date range. Never combine with mutating tools unless the student explicitly asked.",
+  set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
+  cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
+  add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
