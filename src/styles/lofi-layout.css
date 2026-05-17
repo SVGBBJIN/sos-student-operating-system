@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
    LOFI STUDY LAYOUT — 3-column grid layout system
-   Loaded after neon-lofi.css. Only affects .study-app and children.
+   Loaded after index.css. Only affects .study-app and children.
    ═══════════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=Gochi+Hand&family=DM+Mono:wght@300;400&display=swap');
