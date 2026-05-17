@@ -668,3 +668,30 @@
   letter-spacing: 0.06em;
   text-transform: lowercase;
 }
+
+/* ── Light mode — chat bar overrides (must be LAST: beats neon-lofi.css !important) ── */
+[data-theme="light"] .sos-input-area {
+  background: linear-gradient(180deg, rgba(245,242,236,0.97) 0%, rgba(237,234,228,0.99) 100%) !important;
+  border-top-color: rgba(0,0,0,0.08) !important;
+  backdrop-filter: blur(18px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(120%) !important;
+}
+[data-theme="light"] .sos-chat-input {
+  background: #faf9f6 !important;
+  color: #1a1814 !important;
+  border-color: rgba(0,0,0,0.14) !important;
+}
+[data-theme="light"] .sos-chat-input::placeholder { color: rgba(26,24,20,0.38) !important; }
+[data-theme="light"] .sos-chat-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06) !important;
+}
+[data-theme="light"] .sos-input-icon-btn {
+  color: rgba(26,24,20,0.55) !important;
+  border-color: rgba(0,0,0,0.14) !important;
+  background: transparent !important;
+}
+[data-theme="light"] .sos-input-icon-btn:hover {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
