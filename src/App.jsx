@@ -13,7 +13,7 @@ import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
 import StudyBottomBar from './components/StudyBottomBar';
 import LofiLeftPanel from './components/LofiLeftPanel';
-import FocusWidget from './components/FocusWidget';
+import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import LofiRightPanel from './components/LofiRightPanel';
@@ -4594,6 +4594,7 @@ function App() {
   // Floating widgets summoned from chat ("set a timer", "what's my schedule").
   // null = hidden. Each widget renders only when explicitly invoked.
   const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false });
+  const [pomodoroSession, setPomodoroSession] = useState('pomodoro');
   const [sosNotif, setSosNotif] = useState(null);
 
   // ── UI state ──
@@ -4889,7 +4890,7 @@ function App() {
     try {
       const { data: timerRows } = await sb.from('timers').select('*').eq('user_id', authUser.id).eq('fired', false);
       const rows = timerRows || [];
-      const restored = rows.map(r => ({ id: r.id, label: r.label, fireAt: new Date(r.fire_at).getTime(), userId: authUser.id }));
+      const restored = rows.map(r => ({ id: r.id, label: r.label, fireAt: new Date(r.fire_at).getTime(), startedAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(), userId: authUser.id }));
       setActiveTimers(restored);
       restored.forEach(t => scheduleTimerFire(t));
     } catch(e) { console.error('Failed to load timers:', e); }
@@ -5655,9 +5656,11 @@ function App() {
           if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
             try { Notification.requestPermission(); } catch(_) {}
           }
-          const timer = { id: uid(), label, fireAt, userId: user?.id };
+          const timer = { id: uid(), label, fireAt, startedAt: Date.now(), userId: user?.id };
           setActiveTimers(prev => [...prev, timer]);
           scheduleTimerFire(timer);
+          // Auto-open the timer widget so the user sees the countdown ring
+          setActiveWidgets(w => ({ ...w, pomodoro: true }));
           if (user) syncOp(() => sb.from('timers').insert({ id: timer.id, user_id: user.id, label, fire_at: new Date(fireAt).toISOString() }));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'set_timer' });
           const remaining = Math.round((fireAt - Date.now()) / 1000);
@@ -7990,8 +7993,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </div>}
 
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.pomodoro && (
-        <FocusWidget onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))} />
+      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
+        <PomodoroTimer
+          sessionType={pomodoroSession}
+          onSessionType={setPomodoroSession}
+          aiTimers={activeTimers}
+          onDismissAiTimer={dismissActiveTimer}
+          onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))}
+        />
       )}
       {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.schedule && (
         <ScheduleWidget
@@ -8024,14 +8033,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
 
-      {/* Active timer banner — clicking dismisses + persists the dismissal */}
-      {activeTimers.length > 0 && activePanel === 'chat' && (
-        <div style={{position:'fixed',bottom:96,right:24,display:'flex',flexDirection:'column',gap:6,zIndex:90,alignItems:'flex-end'}}>
-          {activeTimers.map(t => (
-            <ActiveTimerPill key={t.id} timer={t} onDismiss={() => dismissActiveTimer(t.id)} />
-          ))}
-        </div>
-      )}
 
       {activePanel === 'home' ? (
         <HomeScreen

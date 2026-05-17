@@ -586,6 +586,183 @@
 .studio .focus-widget .fw-btn.primary:hover { background: var(--accent-bg); border-color: var(--accent); }
 .studio .focus-widget .fw-btn.ghost { flex: 0 0 auto; }
 
+/* ── Merged Pomodoro + AI-timer widget ───────────────────────── */
+.study-pomodoro {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 240px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  z-index: 5;
+  overflow: hidden;
+  animation: fadeUp 360ms var(--ease-out) both;
+  animation-delay: 200ms;
+  transition: border-color 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
+}
+.study-pomodoro.collapsed { width: 200px; border-radius: 12px; }
+.study-pomodoro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.study-pomodoro-mini {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-1);
+}
+.study-pomodoro-mini-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.study-pomodoro-mini-dot.paused {
+  background: var(--fg-3);
+  box-shadow: none;
+  animation: none;
+}
+.study-pomodoro-expand-btn {
+  background: none;
+  border: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1;
+  transition: color 140ms, background 140ms;
+}
+.study-pomodoro-expand-btn:hover { color: var(--fg-1); background: var(--bg-4); }
+.study-pomodoro-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 16px;
+  border-top: 1px solid var(--line);
+}
+/* Session tabs */
+.study-session-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 12px;
+  justify-content: center;
+  width: 100%;
+}
+.study-session-tab {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 4px 9px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: background 140ms, color 140ms, border-color 140ms;
+}
+.study-session-tab:hover { color: var(--fg-1); border-color: var(--line-2); }
+.study-session-tab.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+/* AI timer tabs get a subtle tint to distinguish from presets */
+.study-session-tab.ai-timer-tab { border-style: dashed; }
+.study-session-tab.ai-timer-tab.active { border-style: solid; }
+/* Ring */
+.study-timer-ring {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
+.study-timer-ring-track { stroke: var(--line-2); }
+.study-timer-ring-fill {
+  stroke: var(--accent);
+  transform-origin: center;
+  transform: rotate(-90deg);
+  transition: stroke-dashoffset 1s linear;
+}
+.study-timer-ring-fill.ai-timer-fill { stroke: var(--accent-light, var(--accent)); }
+.study-timer-digits {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.study-timer-time {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--fg-1);
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.study-timer-session-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+/* Controls */
+.study-timer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+.study-timer-btn {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: background 140ms, color 140ms, border-color 140ms;
+}
+.study-timer-btn:hover { background: var(--bg-4); color: var(--fg-1); border-color: var(--line-2); }
+.study-timer-btn.primary {
+  background: var(--accent-bg);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+  padding: 7px 20px;
+}
+.study-timer-btn.primary:hover { border-color: var(--accent); }
+.study-timer-btn.danger {
+  border-color: var(--line);
+  color: var(--fg-3);
+  width: 100%;
+  font-size: 12px;
+}
+.study-timer-btn.danger:hover {
+  background: rgba(239,68,68,0.08);
+  border-color: rgba(239,68,68,0.4);
+  color: #f87171;
+}
+
 /* ── Studio entrance animations ──────────────────────────────── */
 @keyframes sb-item-in {
   from { opacity: 0; transform: translateX(-6px); }
