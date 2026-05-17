@@ -1571,6 +1571,27 @@ body {
   color: #ff4757;
 }
 
+/* Studio-sidebar saved-chat row delete affordance */
+.sb-item-wrap { position: relative; }
+.sb-item-wrap .sb-item-delete {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0;
+  font-size: 16px;
+  line-height: 1;
+  transition: opacity .15s ease, color .15s ease, background .15s ease;
+}
+.sb-item-wrap:hover .sb-item-delete { opacity: 0.8; }
+.sb-item-wrap .sb-item-delete:hover { color: #ff4757; background: rgba(255,71,87,0.12); opacity: 1; }
+
 /* Studio surface gets a subtle gradient kin to the landing animated card */
 .studio-glass-card {
   position: relative;

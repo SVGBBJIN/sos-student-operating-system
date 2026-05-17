@@ -7876,6 +7876,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             onPick={loadSavedChat}
             onNew={startNewChat}
             onHome={() => navigate('/')}
+            onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
