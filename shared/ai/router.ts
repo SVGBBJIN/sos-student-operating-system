@@ -3,7 +3,7 @@
 // Tier 0 (embed) → Gemini Embedding 2 (semantic search, memory, clustering).
 //                  Stays on Gemini; Groq does not offer hosted embeddings.
 // Tier 1 (flash) → Groq GPT-OSS-20B (chat, action routing, classification,
-//                  summarization). Cross-provider fallback: Gemini 3 Flash.
+//                  summarization). Cross-provider fallback: Gemini 2.5 Flash.
 // Tier 2 (pro)   → Groq GPT-OSS-120B (studio, planning, deep reasoning).
 //                  Cross-provider fallback: Gemini 2.5 Pro.
 //
@@ -52,7 +52,7 @@ const MODEL_BY_TIER: Record<Tier, string> = {
 // equivalent Gemini model. Embed has no fallback (single provider).
 const FALLBACK_BY_TIER: Record<Tier, string | null> = {
   embed: null,
-  flash: "gemini-3-flash",
+  flash: "gemini-2.5-flash",
   pro: "gemini-2.5-pro",
 };
 
@@ -74,12 +74,12 @@ const FALLBACK_PROVIDER_BY_TIER: Record<Tier, ProviderName | null> = {
 function applyOverride(): { provider: Record<Tier, ProviderName>; fallback: Record<Tier, ProviderName | null>; model: Record<Tier, string>; fallbackModel: Record<Tier, string | null> } {
   if (getEnv("AI_PROVIDER_OVERRIDE") === "gemini") {
     // Rollback: route everything to Gemini, restore the original intra-Gemini
-    // model fallback (pro → 3-flash, flash → 2.5-flash).
+    // model fallback (pro → 2.5-flash, flash → 2.5-flash).
     return {
       provider: { embed: "gemini", flash: "gemini", pro: "gemini" },
       fallback: { embed: null, flash: "gemini", pro: "gemini" },
-      model:    { embed: "gemini-embedding-002", flash: "gemini-3-flash", pro: "gemini-2.5-pro" },
-      fallbackModel: { embed: null, flash: "gemini-2.5-flash", pro: "gemini-3-flash" },
+      model:    { embed: "gemini-embedding-002", flash: "gemini-2.5-flash", pro: "gemini-2.5-pro" },
+      fallbackModel: { embed: null, flash: "gemini-2.5-flash", pro: "gemini-2.5-flash" },
     };
   }
   return {

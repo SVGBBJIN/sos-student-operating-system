@@ -310,7 +310,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
       ...r,
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       provider: "groq",
-      fallbackModel: "gemini-3-flash",
+      fallbackModel: "gemini-2.5-flash",
       fallbackProvider: "gemini",
     };
   }
