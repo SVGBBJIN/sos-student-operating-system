@@ -6,9 +6,7 @@ import { streamChat } from './lib/streamChat';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import ErrorBoundary from './components/ErrorBoundary';
-import PresenceDetector from './components/PresenceDetector';
-import IdleLockScreen from './components/IdleLockScreen';
-import SfxToggle from './components/SfxToggle';
+
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
@@ -630,7 +628,7 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
+  clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For add_block specifically: NEVER generate or infer start/end times — the student must state exact times; if either is absent, call ask_clarification with missing_fields containing the absent fields. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
   clarification_style: 'Execute when the student\'s message clearly contains all required fields. Use ask_clarification whenever a required field is missing, ambiguous, or only partially given.',
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
@@ -2010,26 +2008,23 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
   const clarifications = Array.isArray(clarification) ? clarification : [clarification];
   const questionCount = clarifications.length;
 
-  // Which question is currently displayed
-  const [currentQIdx, setCurrentQIdx] = useState(0);
+  // 'form' = answering all questions at once; 'review' = confirming before submit
+  const [phase, setPhase] = useState('form');
 
   // Per-question state: selected options and free-form text
-  // Initialize from savedAnswers if available (preserves state across panel navigation)
   const [answers, setAnswers] = useState(() =>
     savedAnswers && savedAnswers.length === clarifications.length
       ? savedAnswers
-      : clarifications.map(() => ({ selected: [], otherText: '' }))
+      : clarifications.map(() => ({ selected: [], otherText: '', dateValue: '', subjectValue: '' }))
   );
 
-  // Stable string key based on question content — immune to object re-references.
-  // Only changes when the AI sends genuinely different questions.
   const clarificationKey = clarifications.map(c => c.question).join('|||');
 
   useEffect(() => {
     if (!savedAnswers || savedAnswers.length !== clarifications.length) {
-      setAnswers(clarifications.map(() => ({ selected: [], otherText: '' })));
+      setAnswers(clarifications.map(() => ({ selected: [], otherText: '', dateValue: '', subjectValue: '' })));
     }
-    setCurrentQIdx(0);
+    setPhase('form');
   }, [clarificationKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function normalizeOption(option, idx) {
@@ -2088,72 +2083,92 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
     });
   }
 
-  function handleSubmit() {
-    onSubmit(buildPayloads(answers));
+  function getAnswerLabel(qIdx) {
+    const a = answers[qIdx] || {};
+    const c = clarifications[qIdx] || {};
+    const opts = Array.isArray(c?.options) ? c.options.map(normalizeOption) : [];
+    const selectedLabels = (a.selected || []).map(id => (opts.find(o => o.id === id) || {}).label).filter(Boolean);
+    if (selectedLabels.length > 0) return selectedLabels.join(', ');
+    if (a.subjectValue && a.subjectValue !== 'other') return a.subjectValue;
+    if (a.dateValue) return a.dateValue;
+    if (a.otherText && a.otherText.trim()) return a.otherText.trim();
+    return null;
   }
 
-  function advance(updatedAnswers) {
-    const ans = updatedAnswers || answers;
-    if (currentQIdx < questionCount - 1) {
-      setCurrentQIdx(i => i + 1);
-    } else {
-      onSubmit(buildPayloads(ans));
-    }
-  }
+  function isAnswered(qIdx) { return !!getAnswerLabel(qIdx); }
 
-  function handleOptionClick(optId, multiSelect) {
-    let nextAnswers;
-    setAnswers(prev => {
-      const next = [...prev];
-      const cur = { ...next[currentQIdx] };
-      if (!multiSelect) {
-        cur.selected = [optId];
-      } else {
-        cur.selected = cur.selected.includes(optId)
-          ? cur.selected.filter(v => v !== optId)
-          : [...cur.selected, optId];
-      }
-      next[currentQIdx] = cur;
-      nextAnswers = next;
-      if (onAnswersChange) onAnswersChange(next);
-      return next;
-    });
-    // Auto-advance for single-select after brief highlight
-    if (!multiSelect) {
-      setTimeout(() => advance(nextAnswers), 160);
-    }
-  }
+  const anyAnswered = answers.some((_, i) => isAnswered(i));
+  const allAnswered = answers.every((_, i) => isAnswered(i));
 
-  function handleSkipQuestion() {
-    if (currentQIdx < questionCount - 1) {
-      setCurrentQIdx(i => i + 1);
-    } else {
-      // Last question — submit with whatever we have (skipped = empty)
+  function handleProceed() {
+    if (questionCount === 1) {
       onSubmit(buildPayloads(answers));
+    } else {
+      setPhase('review');
     }
+  }
+
+  function handleSubmitFinal() {
+    onSubmit(buildPayloads(answers));
   }
 
   function handleClose() {
     if (onSkip) onSkip();
-    else onSubmit(buildPayloads(answers));
   }
 
-  const c = clarifications[currentQIdx] || {};
-  const options = Array.isArray(c?.options) ? c.options : [];
-  const multiSelect = !!c?.multiSelect || !!c?.multi_select;
-  const inputType = (c?.inputType || c?.input_type || '').toLowerCase();
-  const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
-  const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
   const subjectOptions = ['Mathematics', 'English', 'Biology', 'Chemistry', 'Physics', 'History', 'Language Arts', 'Spanish', 'French', 'Economics', 'Psychology', 'Government', 'Computer Science', 'Calculus', 'Literature', 'Physical Education', 'Other'];
-  const normalizedOptionsAll = options.map(normalizeOption).filter(
-    opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
-  );
-  const [optionsExpanded, setOptionsExpanded] = useState(false);
-  const normalizedOptions = optionsExpanded ? normalizedOptionsAll : normalizedOptionsAll.slice(0, 6);
-  const hasMoreOptions = normalizedOptionsAll.length > normalizedOptions.length;
-  const answer = answers[currentQIdx] || { selected: [], otherText: '', dateValue: '', subjectValue: '' };
-  const currentAnswered = answer.selected.length > 0 || !!answer.otherText.trim() || !!answer.dateValue || !!answer.subjectValue;
 
+  // ── Review phase ──────────────────────────────────────────────────────────
+  if (phase === 'review') {
+    return (
+      <div className="sos-clarification-card" role="dialog" style={{
+        background:'rgba(22,22,36,0.98)', border:'1px solid rgba(255,255,255,0.08)',
+        borderRadius:18, padding:0, maxWidth:440, width:'100%',
+        boxShadow:'0 8px 32px rgba(0,0,0,0.4)', overflow:'hidden',
+      }}>
+        <div style={{padding:'18px 20px 12px', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          <div style={{fontSize:'0.7rem', color:'var(--text-dim)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px'}}>Review your answers</div>
+          <button onClick={handleClose} style={{background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1}}>×</button>
+        </div>
+        <div style={{borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+          {clarifications.map((c, i) => {
+            const label = getAnswerLabel(i);
+            return (
+              <div key={i} style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', alignItems:'flex-start', gap:12}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:'0.75rem', color:'var(--text-dim)', marginBottom:3}}>{c?.question}</div>
+                  <div style={{fontSize:'0.9rem', color: label ? 'var(--text)' : 'rgba(255,255,255,0.25)', fontWeight: label ? 600 : 400}}>
+                    {label || '(skipped)'}
+                  </div>
+                </div>
+                <button onClick={() => setPhase('form')} style={{
+                  background:'none', border:'none', cursor:'pointer',
+                  fontSize:'0.72rem', color:'var(--accent)', fontWeight:600, padding:'2px 6px', flexShrink:0, marginTop:1,
+                }}>Edit</button>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{padding:'12px 16px', display:'flex', gap:8}}>
+          <button onClick={() => setPhase('form')} style={{
+            background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)',
+            borderRadius:8, padding:'7px 14px', color:'var(--text-dim)',
+            fontSize:'0.82rem', fontWeight:600, cursor:'pointer', flex:1,
+          }}>← Back</button>
+          <button onClick={handleSubmitFinal} disabled={!anyAnswered} style={{
+            background: anyAnswered ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+            border: anyAnswered ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+            borderRadius:8, padding:'7px 14px',
+            color: anyAnswered ? '#fff' : 'rgba(255,255,255,0.25)',
+            fontSize:'0.82rem', fontWeight:700, cursor: anyAnswered ? 'pointer' : 'default', flex:2,
+            transition:'all .12s',
+          }}>Submit all answers</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Form phase: all questions at once ────────────────────────────────────
   return (
     <div className="sos-clarification-card" role="dialog" aria-label="A few quick details" style={{
       background:'rgba(22,22,36,0.98)',
@@ -2165,212 +2180,126 @@ function ClarificationCard({ clarification, onSubmit, onSkip, savedAnswers, onAn
       boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
       overflow:'hidden',
     }}>
-      {/* Header: question title + nav + close */}
-      <div style={{
-        padding:'20px 20px 16px',
-        display:'flex',
-        alignItems:'flex-start',
-        gap:12,
-      }}>
-        {/* Question text */}
-        <div style={{
-          flex:1,
-          fontSize:'1.05rem',
-          fontWeight:700,
-          color:'var(--text)',
-          lineHeight:1.4,
-          letterSpacing:'-0.2px',
-        }}>
-          {c?.question || 'Can you clarify?'}
+      {/* Header */}
+      <div style={{padding:'18px 20px 12px', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+        <div style={{fontSize:'1rem', fontWeight:700, color:'var(--text)'}}>
+          {questionCount === 1 ? (clarifications[0]?.question || 'Can you clarify?') : 'A few quick details'}
         </div>
-        {/* Nav + close */}
-        <div style={{display:'flex', alignItems:'center', gap:4, flexShrink:0, marginTop:2}}>
-          {questionCount > 1 && (
-            <>
-              <button
-                onClick={() => setCurrentQIdx(i => Math.max(0, i - 1))}
-                disabled={currentQIdx === 0}
-                style={{
-                  background:'none', border:'none', cursor: currentQIdx === 0 ? 'default' : 'pointer',
-                  color: currentQIdx === 0 ? 'rgba(255,255,255,0.2)' : 'var(--text-dim)',
-                  padding:'2px 4px', fontSize:'1rem', lineHeight:1,
-                }}
-              >‹</button>
-              <span style={{fontSize:'0.78rem', color:'var(--text-dim)', whiteSpace:'nowrap', padding:'0 2px'}}>
-                {currentQIdx + 1} of {questionCount}
-              </span>
-              <button
-                onClick={() => advance()}
-                disabled={currentQIdx === questionCount - 1 && !currentAnswered}
-                style={{
-                  background:'none', border:'none',
-                  cursor:(currentQIdx === questionCount - 1 && !currentAnswered) ? 'default' : 'pointer',
-                  color:(currentQIdx === questionCount - 1 && !currentAnswered) ? 'rgba(255,255,255,0.2)' : 'var(--text-dim)',
-                  padding:'2px 4px', fontSize:'1rem', lineHeight:1,
-                }}
-              >›</button>
-            </>
-          )}
-          <button
-            onClick={handleClose}
-            style={{
-              background:'none', border:'none', cursor:'pointer',
-              color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1,
-              marginLeft:4,
-            }}
-          >×</button>
-        </div>
+        <button onClick={handleClose} style={{background:'none', border:'none', cursor:'pointer', color:'var(--text-dim)', padding:'2px 6px', fontSize:'1.1rem', lineHeight:1}}>×</button>
       </div>
 
-      {/* Suggested defaults — one-click accept */}
-      {c?.suggested_defaults && Object.keys(c.suggested_defaults).length > 0 && (
-        <div style={{padding:'8px 20px', borderTop:'1px solid rgba(255,255,255,0.04)', display:'flex', flexWrap:'wrap', gap:6, alignItems:'center'}}>
-          <span style={{fontSize:'0.72rem', color:'var(--text-dim)', marginRight:2}}>suggested:</span>
-          {Object.entries(c.suggested_defaults).map(([field, val]) => (
-            <button key={field} onClick={() => {
-              setOtherText(currentQIdx, String(val));
-              advance();
-            }} style={{
-              background:'rgba(43,203,186,0.1)', border:'1px solid rgba(43,203,186,0.25)',
-              borderRadius:20, padding:'3px 10px', fontSize:'0.74rem', fontWeight:600,
-              color:'var(--teal)', cursor:'pointer',
+      {/* All questions */}
+      <div style={{borderTop:'1px solid rgba(255,255,255,0.06)', maxHeight:400, overflowY:'auto'}}>
+        {clarifications.map((c, qIdx) => {
+          const options = Array.isArray(c?.options) ? c.options : [];
+          const multiSelect = !!c?.multiSelect || !!c?.multi_select;
+          const inputType = (c?.inputType || c?.input_type || '').toLowerCase();
+          const isDateInput = inputType === 'date' || /date|due|when/i.test(c?.question || '');
+          const isSubjectInput = inputType === 'subject' || !!c?.subjectSelect || /subject|class/i.test(c?.question || '');
+          const normalizedOpts = options.map(normalizeOption).filter(
+            opt => !/^(other|something else|other\.\.\.|\.\.\.)$/i.test(opt.label.trim())
+          );
+          const answer = answers[qIdx] || { selected: [], otherText: '', dateValue: '', subjectValue: '' };
+          const answered = isAnswered(qIdx);
+
+          return (
+            <div key={qIdx} style={{
+              borderBottom: qIdx < questionCount - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+              padding:'14px 20px',
             }}>
-              {field}: {String(val)} ↵
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Options */}
-      {normalizedOptions.length > 0 && (
-        <div style={{borderTop:'1px solid rgba(255,255,255,0.06)'}}>
-          {normalizedOptions.map((opt, i) => {
-            const isSelected = answer.selected.includes(opt.id);
-            return (
-              <div
-                key={opt.id}
-                onClick={() => handleOptionClick(opt.id, multiSelect)}
-                style={{
-                  display:'flex', alignItems:'center', gap:14,
-                  padding:'14px 20px',
-                  borderBottom:'1px solid rgba(255,255,255,0.05)',
-                  cursor:'pointer',
-                  background: isSelected ? 'rgba(255,255,255,0.06)' : 'transparent',
-                  transition:'background .12s',
-                }}
-                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background='rgba(255,255,255,0.03)'; }}
-                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background='transparent'; }}
-              >
-                {/* Number badge */}
+              {/* Question label (shown above for multi-question forms) */}
+              {questionCount > 1 && (
                 <div style={{
-                  width:32, height:32, borderRadius:8, flexShrink:0,
-                  background: isSelected ? 'rgba(43,203,186,0.2)' : 'rgba(255,255,255,0.07)',
-                  border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.08)',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                  fontSize:'0.82rem', fontWeight:700,
-                  color: isSelected ? 'var(--teal)' : 'var(--text-dim)',
-                  transition:'all .12s',
+                  fontSize:'0.78rem', color: answered ? 'var(--teal)' : 'var(--text-dim)',
+                  fontWeight:600, marginBottom:10, display:'flex', alignItems:'center', gap:6,
                 }}>
-                  {i + 1}
+                  {answered && <span style={{fontSize:'0.9rem'}}>✓</span>}
+                  {c?.question || `Question ${qIdx + 1}`}
                 </div>
-                {/* Label */}
-                <div style={{flex:1}}>
-                  <div style={{fontSize:'0.88rem', color:'var(--text)', fontWeight:500, lineHeight:1.4}}>{opt.label}</div>
-                  {opt.description && (
-                    <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginTop:2, lineHeight:1.4}}>{opt.description}</div>
-                  )}
-                </div>
-                {/* Chevron when selected */}
-                {isSelected && (
-                  <div style={{color:'var(--teal)', fontSize:'1rem', flexShrink:0}}>›</div>
-                )}
-              </div>
-            );
-          })}
-          {hasMoreOptions && (
-            <div onClick={() => setOptionsExpanded(true)} style={{
-              padding:'10px 20px', cursor:'pointer', textAlign:'center',
-              fontSize:'0.78rem', color:'var(--text-dim)', fontWeight:600,
-            }}>Show {normalizedOptionsAll.length - normalizedOptions.length} more…</div>
-          )}
-        </div>
-      )}
+              )}
 
-      {/* Footer: text input + Skip */}
-      <div style={{
-        display:'flex', alignItems:'center', gap:10,
-        padding:'10px 16px 12px',
-        borderTop: normalizedOptions.length > 0 ? 'none' : '1px solid rgba(255,255,255,0.06)',
-      }}>
-        {/* Pencil icon */}
-        <div style={{color:'var(--text-dim)', flexShrink:0, opacity:0.6, display:'flex', alignItems:'center'}}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </div>
-        {isSubjectInput ? (
-          <SubjectChipGroup
-            subjects={subjectOptions}
-            value={answer.subjectValue}
-            otherText={answer.otherText}
-            onPick={(v) => setSubjectValue(currentQIdx, v)}
-            onOtherText={(t) => setOtherText(currentQIdx, t)}
-          />
-        ) : (
-          <input
-            type={isDateInput ? 'date' : 'text'}
-            value={isDateInput ? (answer.dateValue || '') : answer.otherText}
-            onChange={(e) => {
-              if (isDateInput) setDateValue(currentQIdx, e.target.value);
-              else setOtherText(currentQIdx, e.target.value);
-            }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && currentAnswered) advance(); }}
-            placeholder={isDateInput ? 'Select a date' : (c?.otherPlaceholder || 'Something else…')}
-            style={{
-              flex:1,
-              background:'transparent',
-              border:'none',
-              color:'var(--text-dim)',
-              fontSize:'0.84rem',
-              outline:'none',
-              padding:'4px 0',
-            }}
-          />
-        )}
-        {/* Submit / Next button */}
+              {/* Option chips */}
+              {normalizedOpts.length > 0 && (
+                <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom: (isDateInput || isSubjectInput || c?.otherPlaceholder) ? 10 : 0}}>
+                  {normalizedOpts.slice(0, 6).map(opt => {
+                    const isSelected = answer.selected.includes(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => toggleOption(qIdx, opt.id, multiSelect)}
+                        style={{
+                          background: isSelected ? 'rgba(43,203,186,0.15)' : 'rgba(255,255,255,0.06)',
+                          border: isSelected ? '1px solid rgba(43,203,186,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                          borderRadius:20, padding:'5px 12px',
+                          fontSize:'0.82rem', fontWeight: isSelected ? 700 : 500,
+                          color: isSelected ? 'var(--teal)' : 'var(--text-dim)',
+                          cursor:'pointer', transition:'all .12s',
+                        }}
+                      >
+                        {isSelected && '✓ '}{opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Text / date / subject input */}
+              {isSubjectInput ? (
+                <SubjectChipGroup
+                  subjects={subjectOptions}
+                  value={answer.subjectValue}
+                  otherText={answer.otherText}
+                  onPick={(v) => setSubjectValue(qIdx, v)}
+                  onOtherText={(t) => setOtherText(qIdx, t)}
+                />
+              ) : (
+                <input
+                  type={isDateInput ? 'date' : 'text'}
+                  value={isDateInput ? (answer.dateValue || '') : answer.otherText}
+                  onChange={(e) => {
+                    if (isDateInput) setDateValue(qIdx, e.target.value);
+                    else setOtherText(qIdx, e.target.value);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && allAnswered) handleProceed(); }}
+                  placeholder={isDateInput ? 'Select a date' : (c?.otherPlaceholder || (normalizedOpts.length > 0 ? 'Other…' : 'Type your answer…'))}
+                  style={{
+                    width:'100%', boxSizing:'border-box',
+                    background:'rgba(255,255,255,0.04)',
+                    border:'1px solid rgba(255,255,255,0.08)',
+                    borderRadius:8, color:'var(--text-dim)',
+                    fontSize:'0.84rem', outline:'none',
+                    padding:'7px 10px', marginTop: normalizedOpts.length > 0 ? 0 : 0,
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div style={{padding:'10px 16px 12px', borderTop:'1px solid rgba(255,255,255,0.06)', display:'flex', gap:8}}>
         <button
-          onClick={() => advance()}
-          disabled={!currentAnswered}
+          onClick={handleProceed}
+          disabled={!anyAnswered}
           style={{
-            background: currentAnswered ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-            border: currentAnswered ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
-            borderRadius:8,
-            padding:'6px 14px',
-            color: currentAnswered ? '#fff' : 'rgba(255,255,255,0.25)',
-            fontSize:'0.82rem',
-            fontWeight:600,
-            cursor: currentAnswered ? 'pointer' : 'default',
-            flexShrink:0,
-            transition:'all .12s',
+            background: anyAnswered ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+            border: anyAnswered ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+            borderRadius:8, padding:'7px 16px',
+            color: anyAnswered ? '#fff' : 'rgba(255,255,255,0.25)',
+            fontSize:'0.82rem', fontWeight:700,
+            cursor: anyAnswered ? 'pointer' : 'default',
+            flex:2, transition:'all .12s',
           }}
         >
-          {currentQIdx < questionCount - 1 ? 'Next →' : 'Submit'}
+          {questionCount === 1 ? 'Submit' : (allAnswered ? 'Review answers →' : `Continue (${answers.filter((_,i) => isAnswered(i)).length}/${questionCount} answered)`)}
         </button>
-        {/* Skip button */}
         <button
-          onClick={handleSkipQuestion}
+          onClick={handleClose}
           style={{
-            background:'rgba(255,255,255,0.07)',
-            border:'1px solid rgba(255,255,255,0.1)',
-            borderRadius:8,
-            padding:'6px 14px',
-            color:'var(--text-dim)',
-            fontSize:'0.82rem',
-            fontWeight:600,
-            cursor:'pointer',
-            flexShrink:0,
-            transition:'all .12s',
+            background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)',
+            borderRadius:8, padding:'7px 14px', color:'var(--text-dim)',
+            fontSize:'0.82rem', fontWeight:600, cursor:'pointer', flex:1,
           }}
           onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.12)'; e.currentTarget.style.color='var(--text)'; }}
           onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.07)'; e.currentTarget.style.color='var(--text-dim)'; }}
@@ -4738,16 +4667,6 @@ function App() {
   }, []);
   const [toastMsg, setToastMsg] = useState(null);
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
-  useEffect(() => {
-    const onLock   = () => sfx.lock();
-    const onReturn = () => sfx.unlock();
-    window.addEventListener('sos:idle-lock',        onLock);
-    window.addEventListener('sos:presence-return',  onReturn);
-    return () => {
-      window.removeEventListener('sos:idle-lock',       onLock);
-      window.removeEventListener('sos:presence-return', onReturn);
-    };
-  }, []);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const [contentGenUsed, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
@@ -4881,7 +4800,20 @@ function App() {
   const welcomeIdx = 0; // Pinned to first variant for a stable, consistent first impression
 
   // ── Auth handler ──
-  async function handleAuth(authUser) {
+  async function handleAuth(authUser, showWelcome = false) {
+    if (showWelcome) {
+      const name = authUser?.user_metadata?.full_name?.split(' ')[0] || authUser?.email?.split('@')[0] || 'there';
+      const greetings = [
+        `welcome back, ${name} ✦`,
+        `good to see you, ${name} ✦`,
+        `hey ${name} — ready to focus? ✦`,
+        `back at it, ${name} ✦`,
+        `let's get things done, ${name} ✦`,
+        `great to have you, ${name} ✦`,
+      ];
+      const g = greetings[Math.floor(Math.random() * greetings.length)];
+      setTimeout(() => setToastMsg(g), 600);
+    }
     setUser(authUser);
     // Migrate any existing localStorage data to Supabase
     const didMigrate = await migrateLocalStorage(authUser.id);
@@ -4955,7 +4887,7 @@ function App() {
         setPendingClarification(null); setPendingClarificationAnswers(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
-        handleAuth(session.user);
+        handleAuth(session.user, event === 'SIGNED_IN');
         setShowAuthModal(false);
         trackEvent(session.user.id, 'session_started'); // P4.2
       }
@@ -5866,7 +5798,7 @@ function App() {
   function handleDismissContent(idx) { setPendingContent(prev => prev.filter((_,i) => i !== idx)); }
   function handleApplyPlan(idx, steps) {
     steps.forEach(step => {
-      executeAction({ type:'add_task', title:step.title, subject:'', due:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
+      executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     setToastMsg('Added ' + steps.length + ' tasks from plan');
@@ -7359,7 +7291,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
   }
 
   async function startRecording() {
-    if (!user) { setAuthModalInitialMode('signup'); setShowAuthModal(true); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
@@ -7621,6 +7552,17 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
       }
     >
+      {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
+      <svg width="0" height="0" style={{position:'absolute',overflow:'hidden'}} aria-hidden="true">
+        <defs>
+          <symbol id="sos-bulb" viewBox="0 0 60 86">
+            <path d="M 30 2 C 13.5 2, 4 16, 4 32 C 4 44.5, 11.5 53.5, 18 60 C 20 62, 21 63, 21 65.5 L 21 68 L 39 68 L 39 65.5 C 39 63, 40 62, 42 60 C 48.5 53.5, 56 44.5, 56 32 C 56 16, 46.5 2, 30 2 Z" fill="currentColor"/>
+            <rect x="21" y="71" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="21" y="76" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="25" y="81" width="10" height="4" rx="1.4" fill="currentColor"/>
+          </symbol>
+        </defs>
+      </svg>
       {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
       {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
       {/* Neon Lofi — corner targeting reticles (decorative) */}
@@ -7637,9 +7579,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           <div className="sos-sidebar-head-left">
             <div className="sos-sidebar-brand">
               <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
-                <img src="/brain-logo.svg" alt="SOS" width={sidebarCollapsed ? 22 : 26} height={sidebarCollapsed ? 22 : 26} />
+                <span className="sos-mark" style={{ fontSize: sidebarCollapsed ? 18 : 22 }}>
+                  <span className="sos-mark-s">S</span>
+                  <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+                  <span className="sos-mark-s">S</span>
+                </span>
               </span>
-              {!sidebarCollapsed && <span className="sos-brand-word" style={{ fontSize: 15 }}>S<em>O</em>S</span>}
             </div>
             {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
               <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
@@ -7735,6 +7680,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
+            onHome={() => setLayoutMode('lofi')}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
@@ -7765,7 +7711,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {layoutMode === 'topbar' && <div className="sos-header">
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34}}><img className="sos-brand-logo" src="/brain-logo.svg" alt="SOS" style={{width:30,height:30}}/></div>
+          <div className="sos-sidebar-brand" style={{width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <span className="sos-mark" style={{fontSize:20}}>
+              <span className="sos-mark-s">S</span>
+              <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+              <span className="sos-mark-s">S</span>
+            </span>
+          </div>
           {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
             <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
             {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
@@ -8050,35 +8002,73 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
-          <button
-            type="button"
-            className="sos-chat-watermark"
-            onClick={() => setToastMsg('SOS quick access')}
-            title="SOS quick access"
-            aria-label="SOS quick access"
-          >
-            <img src="/brain-logo.svg" alt="SOS" />
-          </button>
           {messages.length === 0 && !pendingClarification && !pendingProposal && !isLoading && (
-            <div className="sos-empty-suggestions" role="group" aria-label="Try one of these">
-              <div className="sos-empty-suggestions-title">Try one of these to get started</div>
-              <div className="sos-empty-suggestions-grid">
-                {[
-                  'Add a task: physics problem set due Friday',
-                  "What's on my schedule this week?",
-                  'Make a new note for history lecture',
-                  'Block 3-5pm tomorrow for studying',
-                ].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="sos-empty-suggestion"
-                    onClick={() => sendMessage(prompt)}
-                  >
-                    {prompt}
-                  </button>
-                ))}
+            <div className="sos-chat-empty">
+              <div className="sos-chat-empty-stamp-wrap">
+                <div className="sos-stamp">
+                  <span className="sos-stamp-corner tl"/><span className="sos-stamp-corner tr"/>
+                  <span className="sos-stamp-corner bl"/><span className="sos-stamp-corner br"/>
+                  <div className="sos-stamp-strip sos-stamp-strip-top">
+                    <span>student</span><span className="sos-stamp-dot"/><span>operating</span><span className="sos-stamp-dot"/><span>system</span>
+                  </div>
+                  <span className="sos-mark" style={{fontSize:88}}>
+                    <span className="sos-mark-s">S</span>
+                    <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+                    <span className="sos-mark-s">S</span>
+                  </span>
+                  <div className="sos-stamp-strip sos-stamp-strip-bot">
+                    <span>est · 2025</span><span className="sos-stamp-dot"/><span>ver · 2.0</span><span className="sos-stamp-dot"/><span>notebook OS</span>
+                  </div>
+                </div>
               </div>
+              {user ? (
+                <div className="sos-chat-empty-welcome">
+                  <div className="sos-chat-empty-welcome-line">
+                    {(() => {
+                      const h = new Date().getHours();
+                      const name = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
+                      if (h < 5)  return `burning the midnight oil, ${name}`;
+                      if (h < 12) return `good morning, ${name}`;
+                      if (h < 17) return `good afternoon, ${name}`;
+                      if (h < 21) return `good evening, ${name}`;
+                      return `late night session, ${name}`;
+                    })()}
+                  </div>
+                  <div className="sos-chat-empty-welcome-sub">
+                    {(() => {
+                      const subs = [
+                        "what's on your mind today?",
+                        "what do you need help with?",
+                        "what are we working on?",
+                        "ready when you are.",
+                        "let's get something done.",
+                      ];
+                      return subs[Math.floor(Date.now() / 60000) % subs.length];
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
+                  <div className="sos-chat-empty-suggestions-label">try one of these</div>
+                  <div className="sos-chat-empty-grid">
+                    {[
+                      'Add a task: physics problem set due Friday',
+                      "What's on my schedule this week?",
+                      'Make a new note for history lecture',
+                      'Block 3-5pm tomorrow for studying',
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="sos-chat-empty-pill"
+                        onClick={() => sendMessage(prompt)}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {messages.map((msg,i)=>(
@@ -8496,9 +8486,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       )}
       {toastMsg&&<Toast message={toastMsg} onDone={()=>setToastMsg(null)}/>}
-      <PresenceDetector />
-      <IdleLockScreen />
-      {layoutMode !== 'lofi' && <SfxToggle />}
       <GooglePermissionSummary show={showGooglePermSummary} onDismiss={()=>setShowGooglePermSummary(false)} />
       <RateLimitBanner />
 

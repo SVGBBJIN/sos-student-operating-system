@@ -255,8 +255,26 @@
 
 [data-theme="light"] .studio .di {
   background: #15171c;
-  border-color: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.15);
   color: #f0f2f6;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.20), 0 1px 4px rgba(0,0,0,0.12);
+}
+
+[data-theme="light"] .studio .di-clock { color: #e8eaf0; }
+[data-theme="light"] .studio .di-sep   { background: rgba(255,255,255,0.18); }
+[data-theme="light"] .studio .di-chev  { color: rgba(255,255,255,0.55); }
+[data-theme="light"] .studio .di-status { color: rgba(255,255,255,0.65); }
+[data-theme="light"] .studio .di-title { color: #e8eaf0; }
+[data-theme="light"] .studio .di-sub   { color: rgba(255,255,255,0.55); }
+[data-theme="light"] .studio .di-expanded { border-top-color: rgba(255,255,255,0.10); }
+[data-theme="light"] .studio .di-actions button {
+  background: rgba(255,255,255,0.07);
+  color: #e8eaf0;
+  border-color: rgba(255,255,255,0.12);
+}
+[data-theme="light"] .studio .di-actions button:hover {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.22);
 }
 
 .studio .di:hover { border-color: rgba(255,255,255,0.15); }
@@ -567,3 +585,113 @@
 }
 .studio .focus-widget .fw-btn.primary:hover { background: var(--accent-bg); border-color: var(--accent); }
 .studio .focus-widget .fw-btn.ghost { flex: 0 0 auto; }
+
+/* ── Studio entrance animations ──────────────────────────────── */
+@keyframes sb-item-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sb-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes studio-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.studio .sb-item {
+  animation: sb-item-in 220ms var(--ease-out) both;
+}
+/* Stagger first 8 items so the list slides in */
+.studio .sb-item:nth-child(1) { animation-delay:  20ms; }
+.studio .sb-item:nth-child(2) { animation-delay:  50ms; }
+.studio .sb-item:nth-child(3) { animation-delay:  80ms; }
+.studio .sb-item:nth-child(4) { animation-delay: 110ms; }
+.studio .sb-item:nth-child(5) { animation-delay: 140ms; }
+.studio .sb-item:nth-child(6) { animation-delay: 170ms; }
+.studio .sb-item:nth-child(7) { animation-delay: 200ms; }
+.studio .sb-item:nth-child(8) { animation-delay: 230ms; }
+
+.studio .sb-new {
+  animation: sb-in 260ms var(--ease-out) 10ms both;
+}
+.studio .sb-foot {
+  animation: sb-in 260ms var(--ease-out) 60ms both;
+}
+
+/* ── Home button ─────────────────────────────────────────────── */
+.studio .sb-home {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  cursor: pointer;
+  font-family: inherit;
+}
+.studio .sb-home:hover { background: var(--bg-4); color: var(--fg-1); border-color: var(--line); }
+.studio .sb-home svg { opacity: 0.7; }
+.studio .sb-home:hover svg { opacity: 1; }
+
+/* ── Welcome greeting in chat empty state ───────────────────── */
+.sos-chat-empty-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  animation: chat-welcome-in 400ms cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes chat-welcome-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.sos-chat-empty-welcome-line {
+  font-family: var(--font-body, 'DM Sans', sans-serif);
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--fg-1, var(--text));
+  letter-spacing: 0.01em;
+}
+.sos-chat-empty-welcome-sub {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.72rem;
+  color: var(--fg-3, var(--text-dim));
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+
+/* ── Light mode — chat bar overrides (must be LAST: beats neon-lofi.css !important) ── */
+[data-theme="light"] .sos-input-area {
+  background: linear-gradient(180deg, rgba(245,242,236,0.97) 0%, rgba(237,234,228,0.99) 100%) !important;
+  border-top-color: rgba(0,0,0,0.08) !important;
+  backdrop-filter: blur(18px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(120%) !important;
+}
+[data-theme="light"] .sos-chat-input {
+  background: #faf9f6 !important;
+  color: #1a1814 !important;
+  border-color: rgba(0,0,0,0.14) !important;
+}
+[data-theme="light"] .sos-chat-input::placeholder { color: rgba(26,24,20,0.38) !important; }
+[data-theme="light"] .sos-chat-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06) !important;
+}
+[data-theme="light"] .sos-input-icon-btn {
+  color: rgba(26,24,20,0.55) !important;
+  border-color: rgba(0,0,0,0.14) !important;
+  background: transparent !important;
+}
+[data-theme="light"] .sos-input-icon-btn:hover {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}

@@ -101,9 +101,12 @@ export default function DynamicTopBar({
       {/* Brand */}
       <div className="dtb-left">
         <span className="sos-brand-mark" style={{ borderRadius: 6, padding: 3 }}>
-          <img src="/brain-logo.svg" alt="SOS" width="20" height="20" />
+          <span className="sos-mark" style={{fontSize:20}}>
+            <span className="sos-mark-s">S</span>
+            <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
+            <span className="sos-mark-s">S</span>
+          </span>
         </span>
-        <span className="sos-brand-word" style={{ fontSize: 14 }}>S<em>O</em>S</span>
       </div>
 
       {/* Center: morphing island */}

@@ -42,7 +42,7 @@ export const AddEventSchema = z.object({
   location: z.string().max(500).optional(),
   priority: priorityEnum.optional(),
   event_type: eventTypeEnum.optional(),
-  subject: subjectString,
+  subject: optionalSubjectString,
 });
 export type AddEventInput = z.infer<typeof AddEventSchema>;
 
@@ -50,7 +50,7 @@ export const AddTaskSchema = z.object({
   type: z.literal("add_task").optional(),
   task_name: titleLikeString("task_name"),
   due_date: dateString,
-  subject: subjectString,
+  subject: optionalSubjectString,
 });
 export type AddTaskInput = z.infer<typeof AddTaskSchema>;
 
@@ -157,7 +157,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   delete_task: "Remove a task from the to-do list by title.",
   update_event: "Update an existing event — change new_title, date, event_type, or subject. `title` must match an event already on the calendar.",
   complete_task: "Mark a task done.",
-  add_block: "Add a time block to the schedule. All fields (date, start, end, activity) must come from the student's message — otherwise call ask_clarification.",
+  add_block: "Add a time block to the schedule. NEVER infer, estimate, or generate start/end times. If the student did not state exact start and end times, call ask_clarification with missing_fields=['start','end']. All four fields (date, start, end, activity) must appear verbatim in the student's message.",
   delete_block: "Remove a time block from the schedule.",
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",

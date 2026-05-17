@@ -24,7 +24,9 @@ function toY(hhmm) {
 }
 function fmtRange(a, b) {
   const conv = (s) => {
+    if (!s || typeof s !== 'string') return '?';
     const [h, m] = s.split(':').map(Number);
+    if (Number.isNaN(h)) return '?';
     const ap = h >= 12 ? 'p' : 'a';
     const hh = ((h + 11) % 12) + 1;
     return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;
@@ -55,6 +57,46 @@ function toneForEvent(ev) {
   return 'idle';
 }
 
+function blockBandsForToday(blocks, dateStr) {
+  if (!blocks) return [];
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  const slots = {};
+  (blocks.recurring || []).forEach(rb => {
+    if (!Array.isArray(rb?.days) || !rb.days.includes(dow)) return;
+    const [sh, sm] = (rb.start || '00:00').split(':').map(Number);
+    const [eh, em] = (rb.end || '00:00').split(':').map(Number);
+    let ch = sh, cm = sm;
+    while (ch < eh || (ch === eh && cm < em)) {
+      const k = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+      slots[k] = { name: rb.name, category: rb.category };
+      cm += 30; if (cm >= 60) { ch++; cm = 0; }
+    }
+  });
+  const overrides = blocks.dates?.[dateStr] || {};
+  Object.entries(overrides).forEach(([k, v]) => {
+    if (v === null) delete slots[k];
+    else slots[k] = v;
+  });
+  const sorted = Object.entries(slots).sort(([a], [b]) => a.localeCompare(b));
+  const bands = [];
+  let cur = null;
+  sorted.forEach(([time, data]) => {
+    if (cur && cur.name === data.name && cur.category === data.category) {
+      cur.end = time;
+    } else {
+      if (cur) bands.push(cur);
+      cur = { start: time, end: time, name: data.name, category: data.category };
+    }
+  });
+  if (cur) bands.push(cur);
+  return bands.map(b => {
+    const [eh, em] = b.end.split(':').map(Number);
+    let nh = eh, nm = em + 30;
+    if (nm >= 60) { nh++; nm = 0; }
+    return { ...b, end: String(nh).padStart(2, '0') + ':' + String(nm).padStart(2, '0') };
+  });
+}
+
 export default function ScheduleWidget({ events = [], blocks = null, solo = false, onClose }) {
   const bodyRef = useRef(null);
   const [now, setNow] = useState(nowHHMM());
@@ -79,10 +121,10 @@ export default function ScheduleWidget({ events = [], blocks = null, solo = fals
           tone: toneForEvent(e),
         };
       });
-    const fromBlocks = (blocks?.dates?.[todayKey] || []).map((b, i) => ({
+    const fromBlocks = blockBandsForToday(blocks, todayKey).map((b, i) => ({
       id: `b-${i}-${b.start}`,
       start: b.start, end: b.end,
-      title: b.activity || 'block',
+      title: b.name || 'block',
       meta: b.category || fmtRange(b.start, b.end),
       tone: 'idle',
     }));
