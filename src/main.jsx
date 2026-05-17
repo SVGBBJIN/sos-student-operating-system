@@ -5,7 +5,6 @@ import AppRouter from './AppRouter';
 import './styles/index.css';
 import './styles/lofi-layout.css'; // lofi 3-column grid layout
 import './styles/studio.css';      // studio two-column layout
-import { PresenceProvider } from './context/PresenceContext';
 import { startPerfAdjuster } from './lib/perfAdjuster';
 
 // Register service worker for push notifications
@@ -18,13 +17,9 @@ if ('serviceWorker' in navigator) {
 try {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
-    <>
-      <PresenceProvider>
-        <BrowserRouter>
-          <AppRouter />
-        </BrowserRouter>
-      </PresenceProvider>
-    </>
+    <BrowserRouter>
+      <AppRouter />
+    </BrowserRouter>
   );
   startPerfAdjuster();
 } catch (e) {
