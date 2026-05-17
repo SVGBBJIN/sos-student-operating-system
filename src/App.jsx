@@ -4800,12 +4800,19 @@ function App() {
   const welcomeIdx = 0; // Pinned to first variant for a stable, consistent first impression
 
   // ── Auth handler ──
-  async function handleAuth(authUser) {
-    if (!dataLoaded) {
-      const name = authUser?.user_metadata?.full_name?.split(' ')[0] || authUser?.email?.split('@')[0] || 'back';
-      const greetings = ['welcome back', 'good to see you', 'hey there'];
+  async function handleAuth(authUser, showWelcome = false) {
+    if (showWelcome) {
+      const name = authUser?.user_metadata?.full_name?.split(' ')[0] || authUser?.email?.split('@')[0] || 'there';
+      const greetings = [
+        `welcome back, ${name} ✦`,
+        `good to see you, ${name} ✦`,
+        `hey ${name} — ready to focus? ✦`,
+        `back at it, ${name} ✦`,
+        `let's get things done, ${name} ✦`,
+        `great to have you, ${name} ✦`,
+      ];
       const g = greetings[Math.floor(Math.random() * greetings.length)];
-      setTimeout(() => setToastMsg(`${g}, ${name} ✦`), 800);
+      setTimeout(() => setToastMsg(g), 600);
     }
     setUser(authUser);
     // Migrate any existing localStorage data to Supabase
@@ -4880,7 +4887,7 @@ function App() {
         setPendingClarification(null); setPendingClarificationAnswers(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
-        handleAuth(session.user);
+        handleAuth(session.user, event === 'SIGNED_IN');
         setShowAuthModal(false);
         trackEvent(session.user.id, 'session_started'); // P4.2
       }
@@ -8020,11 +8027,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                     {(() => {
                       const h = new Date().getHours();
                       const name = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
-                      const greeting = h < 12 ? 'good morning' : h < 17 ? 'good afternoon' : 'good evening';
-                      return `${greeting}, ${name}`;
+                      if (h < 5)  return `burning the midnight oil, ${name}`;
+                      if (h < 12) return `good morning, ${name}`;
+                      if (h < 17) return `good afternoon, ${name}`;
+                      if (h < 21) return `good evening, ${name}`;
+                      return `late night session, ${name}`;
                     })()}
                   </div>
-                  <div className="sos-chat-empty-welcome-sub">what's on your mind today?</div>
+                  <div className="sos-chat-empty-welcome-sub">
+                    {(() => {
+                      const subs = [
+                        "what's on your mind today?",
+                        "what do you need help with?",
+                        "what are we working on?",
+                        "ready when you are.",
+                        "let's get something done.",
+                      ];
+                      return subs[Math.floor(Date.now() / 60000) % subs.length];
+                    })()}
+                  </div>
                 </div>
               ) : (
                 <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
