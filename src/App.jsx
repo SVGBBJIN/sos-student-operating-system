@@ -5522,26 +5522,41 @@ function App() {
             : sourceRaw.includes('write') || sourceRaw.includes('myself') ? 'user'
             : '';
           // Three-step clarification chain: subject → source → title.
+          // Use buildLocalClarification so known fields ride along — otherwise
+          // each step would round-trip through the AI and previously-extracted
+          // fields could get dropped.
+          const knownNoteFields = {};
+          if (tabName) knownNoteFields.title = tabName;
+          if (subjectRaw) knownNoteFields.subject = subjectRaw;
+          if (source) knownNoteFields.source = source;
+          if (action.content) knownNoteFields.content = action.content;
           if (!subjectRaw) {
-            setPendingClarification({
-              question: "Which subject is this note under?",
-              context_action: 'add_note',
-              missing_fields: ['subject'],
-              options: SUBJECT_LIST.slice(0, 6),
-            });
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'add_note',
+              knownFields: knownNoteFields,
+              missingFields: ['subject'],
+              message: "Which subject is this note under?",
+              optionsByField: { subject: SUBJECT_LIST.slice(0, 6) },
+            }));
             return;
           }
           if (!source) {
-            setPendingClarification({
-              question: "Should I write it, do you want to paste/import, or are you writing it yourself?",
-              context_action: 'add_note',
-              missing_fields: ['source'],
-              options: ["I'll write it", "Paste/import", "AI write"],
-            });
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'add_note',
+              knownFields: knownNoteFields,
+              missingFields: ['source'],
+              message: "Should I write it, do you want to paste/import, or are you writing it yourself?",
+              optionsByField: { source: ["I'll write it", "Paste/import", "AI write"] },
+            }));
             return;
           }
           if (!tabName || tabName.length < 2) {
-            setPendingClarification({ question: "What should I name this note?", context_action: 'add_note', missing_fields: ['title'] });
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'add_note',
+              knownFields: knownNoteFields,
+              missingFields: ['title'],
+              message: "What should I name this note?",
+            }));
             return;
           }
           // Resolve/create the subject folder so this note lives under it.
@@ -5587,22 +5602,49 @@ function App() {
         case 'set_timer': {
           const PRESETS = { pomodoro: 25 * 60, short_break: 5 * 60, long_break: 15 * 60 };
           const label = (action.label || action.title || '').trim();
-          let durationSeconds = Number(action.duration_seconds) || 0;
+          // Accept either a number (1200) or a natural phrase ("20 min", "1 hour",
+          // "25 min (pomodoro)") — the clarification chip values arrive as strings.
+          const parseDurationToSeconds = (val) => {
+            if (val === undefined || val === null || val === '') return 0;
+            if (typeof val === 'number' && Number.isFinite(val)) return Math.max(0, Math.floor(val));
+            const s = String(val).toLowerCase().trim();
+            if (/pomodoro/.test(s)) return PRESETS.pomodoro;
+            if (/short[\s_-]?break/.test(s)) return PRESETS.short_break;
+            if (/long[\s_-]?break/.test(s)) return PRESETS.long_break;
+            const n = parseFloat(s);
+            if (!Number.isFinite(n) || n <= 0) return 0;
+            if (/sec/.test(s)) return Math.floor(n);
+            if (/hour|hr\b/.test(s)) return Math.floor(n * 3600);
+            if (/min/.test(s)) return Math.floor(n * 60);
+            return Math.floor(n);
+          };
+          let durationSeconds = parseDurationToSeconds(action.duration_seconds);
           if (!durationSeconds && action.preset && PRESETS[action.preset]) durationSeconds = PRESETS[action.preset];
           const fireAt = action.fire_at
             ? new Date(action.fire_at).getTime()
             : (durationSeconds > 0 ? Date.now() + durationSeconds * 1000 : 0);
+          const knownTimerFields = {};
+          if (label) knownTimerFields.label = label;
+          if (durationSeconds > 0) knownTimerFields.duration_seconds = durationSeconds;
+          if (action.fire_at) knownTimerFields.fire_at = action.fire_at;
+          if (action.preset) knownTimerFields.preset = action.preset;
           if (!label) {
-            setPendingClarification({ question: "What should I call this timer?", context_action: 'set_timer', missing_fields: ['label'] });
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'set_timer',
+              knownFields: knownTimerFields,
+              missingFields: ['label'],
+              message: "What should I call this timer?",
+            }));
             return;
           }
           if (!fireAt || isNaN(fireAt) || fireAt <= Date.now()) {
-            setPendingClarification({
-              question: "How long should I run the timer?",
-              context_action: 'set_timer',
-              missing_fields: ['duration_seconds'],
-              options: ["5 min", "10 min", "20 min", "25 min (pomodoro)", "45 min", "1 hour"],
-            });
+            setPendingClarification(buildLocalClarification({
+              contextAction: 'set_timer',
+              knownFields: knownTimerFields,
+              missingFields: ['duration_seconds'],
+              message: "How long should I run the timer?",
+              optionsByField: { duration_seconds: ["5 min", "10 min", "20 min", "25 min (pomodoro)", "45 min", "1 hour"] },
+            }));
             return;
           }
           if (fireAt - Date.now() > 86400 * 1000) {
@@ -7268,12 +7310,25 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         // Re-ask only the still-missing required fields. Preserve everything we have.
         const known = { ...known_fields, ...field_values };
         delete known.endTime; // endTime is internal to the wizard, not a known field
+        // Carry forward per-field options from the prior clarification's checklist
+        // so the next step still shows chips (e.g. source: ["I'll write it", ...]).
+        const priorChecklist = Array.isArray(pendingClarification?.checklist) ? pendingClarification.checklist : [];
+        const carriedOptions = {};
+        for (const f of missing_required) {
+          const opts = priorChecklist.find(c => c.field === f)?.options;
+          if (Array.isArray(opts) && opts.length > 0) carriedOptions[f] = opts;
+        }
+        // Source-specific defaults so add_note's source step always shows options.
+        if (context_action === 'add_note' && missing_required.includes('source') && !carriedOptions.source) {
+          carriedOptions.source = ["I'll write it", "Paste/import", "AI write"];
+        }
         setPendingClarification(buildLocalClarification({
           contextAction: context_action,
           knownFields: known,
           missingFields: missing_required,
           message: 'Just one more thing —',
           suggestedDefaults: pendingClarification?.suggested_defaults || {},
+          optionsByField: carriedOptions,
         }));
         setPendingClarificationAnswers(null);
         return;

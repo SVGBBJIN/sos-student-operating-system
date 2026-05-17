@@ -135,9 +135,15 @@ function zodTypeToGeminiType(t: ZodTypeAny): JsonSchema {
     case "ZodBoolean":
       return { type: "boolean" };
     case "ZodLiteral": {
+      // Gemini's function-declaration schema only accepts `enum` on string types.
+      // For boolean/number literals (e.g. `z.literal(true)` on clear_all.confirm)
+      // we emit the bare type — Zod's safeParse still enforces the exact value
+      // server-side, so functionally `confirm:false` is still rejected.
       const value = (def as unknown as { value: unknown }).value;
       const t = typeof value;
-      return { type: t === "number" ? "number" : t === "boolean" ? "boolean" : "string", enum: [value] };
+      if (t === "boolean") return { type: "boolean" };
+      if (t === "number") return { type: "number" };
+      return { type: "string", enum: [value] };
     }
     case "ZodEnum":
       return { type: "string", enum: def.values ?? [] };
