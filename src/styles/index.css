@@ -1094,6 +1094,9 @@ body {
 }
 
 
+/* SkyBackground (cityscape) is mounted globally but not used in the current UI */
+.sky-layer { opacity: 0 !important; pointer-events: none !important; }
+
 .sos-app {
   background: #0f1115 !important;
 }
