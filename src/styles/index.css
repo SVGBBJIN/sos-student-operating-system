@@ -1041,3 +1041,19 @@ select option{background:#fffbeb;color:var(--text)}
   border-color: var(--primary);
 }
 .sos-chat-empty-pill:active { transform: scale(0.985); }
+
+[data-theme="light"] .sos-input-area {
+  background: linear-gradient(180deg, rgba(245,242,236,0.95) 0%, rgba(237,234,228,0.98) 100%);
+  border-top-color: rgba(0,0,0,0.08);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+[data-theme="light"] .sos-chat-input {
+  background: #fff;
+  color: #1a1814;
+  border-color: rgba(0,0,0,0.12);
+}
+[data-theme="light"] .sos-chat-input::placeholder { color: rgba(26,24,20,0.38); }
+[data-theme="light"] .sos-chat-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,0,0,0.06); }
+[data-theme="light"] .sos-input-icon-btn { color: rgba(26,24,20,0.55) !important; border-color: rgba(0,0,0,0.12) !important; }
+[data-theme="light"] .sos-input-icon-btn:hover { color: var(--primary) !important; border-color: var(--primary) !important; }

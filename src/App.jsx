@@ -4801,6 +4801,12 @@ function App() {
 
   // ── Auth handler ──
   async function handleAuth(authUser) {
+    if (!dataLoaded) {
+      const name = authUser?.user_metadata?.full_name?.split(' ')[0] || authUser?.email?.split('@')[0] || 'back';
+      const greetings = ['welcome back', 'good to see you', 'hey there'];
+      const g = greetings[Math.floor(Math.random() * greetings.length)];
+      setTimeout(() => setToastMsg(`${g}, ${name} ✦`), 800);
+    }
     setUser(authUser);
     // Migrate any existing localStorage data to Supabase
     const didMigrate = await migrateLocalStorage(authUser.id);
@@ -7667,6 +7673,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
+            onHome={() => setLayoutMode('lofi')}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
@@ -8007,26 +8014,40 @@ If there are no events, base the brief on the student's tasks and suggest a prod
                   </div>
                 </div>
               </div>
-              <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
-                <div className="sos-chat-empty-suggestions-label">try one of these</div>
-                <div className="sos-chat-empty-grid">
-                  {[
-                    'Add a task: physics problem set due Friday',
-                    "What's on my schedule this week?",
-                    'Make a new note for history lecture',
-                    'Block 3-5pm tomorrow for studying',
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      className="sos-chat-empty-pill"
-                      onClick={() => sendMessage(prompt)}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+              {user ? (
+                <div className="sos-chat-empty-welcome">
+                  <div className="sos-chat-empty-welcome-line">
+                    {(() => {
+                      const h = new Date().getHours();
+                      const name = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there';
+                      const greeting = h < 12 ? 'good morning' : h < 17 ? 'good afternoon' : 'good evening';
+                      return `${greeting}, ${name}`;
+                    })()}
+                  </div>
+                  <div className="sos-chat-empty-welcome-sub">what's on your mind today?</div>
                 </div>
-              </div>
+              ) : (
+                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
+                  <div className="sos-chat-empty-suggestions-label">try one of these</div>
+                  <div className="sos-chat-empty-grid">
+                    {[
+                      'Add a task: physics problem set due Friday',
+                      "What's on my schedule this week?",
+                      'Make a new note for history lecture',
+                      'Block 3-5pm tomorrow for studying',
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="sos-chat-empty-pill"
+                        onClick={() => sendMessage(prompt)}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {messages.map((msg,i)=>(
