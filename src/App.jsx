@@ -5212,6 +5212,11 @@ function App() {
   // ── Confirm-delete modal for saved chats ──
   const [confirmDeleteChat, setConfirmDeleteChat] = useState(null);
 
+  // Counts consecutive AI-generated clarifications so we can break loops.
+  // Reset to 0 on every new user message; incremented each time the AI
+  // responds with ask_clarification while fromClarification=true.
+  const clarificationRoundtripCount = useRef(0);
+
   // ── Timers (set_timer tool) ──
   // activeTimers mirrors public.timers rows that haven't fired yet. The
   // setTimeout handle for each lives in timerTimeoutsRef so we can clear it
@@ -6718,7 +6723,11 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     setPendingPhoto(null);
 
     if ((!text?.trim() && !photo) || isLoading) return;
-    if (!fromClarification) { autoConfirmPending(); setPendingProposal(null); }
+    if (!fromClarification) {
+      autoConfirmPending();
+      setPendingProposal(null);
+      clarificationRoundtripCount.current = 0; // fresh user message resets the loop guard
+    }
     setChatError(null);
     // Abort any in-flight request before starting a new one so the old stream
     // can't keep writing into messages state after we've moved on.
@@ -6965,6 +6974,21 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         }));
 
       if (validClarifications.length > 0) {
+        // Loop-break guard: if the AI keeps asking while we're replying from
+        // a clarification answer, we're in an infinite loop — abort after 3
+        // consecutive roundtrips so the student isn't stuck forever.
+        if (fromClarification) {
+          clarificationRoundtripCount.current += 1;
+          if (clarificationRoundtripCount.current >= 3) {
+            clarificationRoundtripCount.current = 0;
+            setPendingClarification(null);
+            setPendingClarificationAnswers(null);
+            setChatError("I seem to be going in circles — please try rephrasing or give me all the details in one message.");
+            setTimeout(() => setChatError(null), 6000);
+            return;
+          }
+        }
+
         // Build assistant message summarizing all questions
         const questionTexts = validClarifications.map((c, i) => {
           const prefix = validClarifications.length > 1 ? `${i + 1}. ` : '';
@@ -6976,7 +7000,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) dbInsertChatMsg('assistant', assistantPrompt, user.id);
 
-        // Store all clarifications — ClarificationCard handles arrays
+        // Carry context_action, missing_fields, and known_fields through so
+        // the UI can use the direct-merge (multi-field) path instead of
+        // sending the answer back to the AI for another roundtrip.
+        // Previously these fields were silently dropped here, which forced
+        // every AI-generated clarification through the legacy ClarificationCard
+        // → sendMessage path, causing repeat-question loops.
         const mapped = validClarifications.map(c => ({
           reason: c.reason || null,
           question: c.question,
@@ -6986,6 +7015,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           allowOther: true,
           otherPlaceholder: c.otherPlaceholder,
           suggested_defaults: c.suggested_defaults || null,
+          context_action: c.context_action || null,
+          missing_fields: Array.isArray(c.missing_fields) ? c.missing_fields : [],
+          known_fields: (c.known_fields && typeof c.known_fields === 'object') ? c.known_fields : {},
         }));
         setPendingClarification(mapped.length === 1 ? mapped[0] : mapped);
         return;
