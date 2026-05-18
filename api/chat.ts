@@ -15,8 +15,9 @@
 //   - mode === "planning"  → 3-pass planning pipeline (non-streaming)
 //   - default              → chat with ACTION_TOOLS
 
-import { callModel, runPlanningPipeline, PlanningPipelineError, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../shared/ai/index.js";
+import { callModel, runPlanningPipeline, PlanningPipelineError, runIntentPlanPipeline, IntentPlanPipelineError, RpmExhaustedError, aggregateRpmStatus, overLimit, route, getBehavioralSignals, assembleContext } from "../shared/ai/index.js";
 import type { Intent } from "../shared/ai/index.js";
+import type { TaskForScoring, CalendarDensity } from "../shared/scheduling/priority.js";
 
 function overLimitForIntent(intent: Intent): boolean {
   return overLimit(route(intent).tier);
@@ -70,6 +71,8 @@ interface ChatBody {
   audioMimeType?: string;
   workspaceContext?: string;
   prompt_version?: string;
+  clientTasks?: TaskForScoring[];
+  clientCalendarDensity?: CalendarDensity;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -115,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning") && userId) {
+    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         res.status(429).json({ error: "Rate limited", rateLimited: true, used: rl.used });
@@ -147,8 +150,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    // ── Intent-plan pipeline (non-streaming) ──
+    if (body.mode === "intent_plan") {
+      try {
+        // Enrich dynamicContext with behavioral signals + priority if available.
+        let enrichedContext = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
+        if (userId && body.clientTasks && body.clientTasks.length > 0) {
+          const signals = await getBehavioralSignals(userId).catch(() => undefined);
+          const assembled = await assembleContext({
+            userId,
+            workspaceContext,
+            intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
+            behavioralSignals: signals,
+            clientTasks: body.clientTasks,
+            clientCalendarDensity: body.clientCalendarDensity,
+          });
+          if (assembled.contextText) enrichedContext += "\n\n" + assembled.contextText;
+        }
+        const result = await runIntentPlanPipeline({
+          systemPrompt: body.systemPrompt ?? "",
+          staticSystemPrompt: body.staticSystemPrompt ?? null,
+          dynamicContext: enrichedContext,
+          messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
+        });
+        res.status(200).json({
+          content: "",
+          actions: [result.proposal],
+          clarifications: [],
+          executed_actions: [],
+          orchestration: { mode: "intent_plan", iterations: result.iterations, executed_on: "client" },
+          intent_plan_critique: result.critiqueText,
+        });
+      } catch (err) {
+        const e = err as IntentPlanPipelineError;
+        res.status(500).json({ error: e.message, stage: e.stage, cause_code: e.cause_code });
+      }
+      return;
+    }
+
     const contextSuffix = `\n\nWORKSPACE_CONTEXT: ${workspaceContext}. Prioritize this context when relevant. When any required field for an action is missing or ambiguous, call ask_clarification — never call action tools with placeholder/guessed values.`;
-    const dynamicContext = (body.dynamicContext ?? "") + contextSuffix;
+    let dynamicContext = (body.dynamicContext ?? "") + contextSuffix;
+
+    // Inject priority ranking and behavioral signals for schedule-aware chat.
+    if (userId && body.clientTasks && body.clientTasks.length > 0) {
+      try {
+        const signals = await getBehavioralSignals(userId).catch(() => undefined);
+        const assembled = await assembleContext({
+          userId,
+          workspaceContext,
+          intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
+          behavioralSignals: signals,
+          clientTasks: body.clientTasks.filter((t) => t.status !== "done").slice(0, 50),
+          clientCalendarDensity: body.clientCalendarDensity,
+        });
+        if (assembled.contextText) dynamicContext += "\n\n" + assembled.contextText;
+      } catch {
+        // Priority enrichment is best-effort; never block the chat response.
+      }
+    }
 
     // ── Studio (forced tool call, content generation) ──
     if (body.mode === "studio") {

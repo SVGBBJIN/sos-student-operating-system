@@ -29,6 +29,7 @@ import {
   type ActionName,
 } from "./schemas/actions.js";
 import { buildStudioToolDefs, validateStudio, type StudioToolName } from "./schemas/studio.js";
+import { buildIntentPlanToolDefs, validateIntentPlan } from "./schemas/intent_plan.js";
 import { formatZodIssuesForModel, PLACEHOLDER_SUBJECT_STRINGS } from "./schemas/_helpers.js";
 import { SCHEMA_VERSIONS } from "./schemas/versions.js";
 import {
@@ -74,7 +75,7 @@ export interface CallModelRequest {
   dynamicContext?: string;
   messages: Message[];
   attachments?: Attachment[];
-  toolSet?: "action" | "studio" | "none" | "custom";
+  toolSet?: "action" | "studio" | "intent_plan" | "none" | "custom";
   customTools?: ToolDef[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
@@ -126,6 +127,8 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
       return buildActionToolDefs();
     case "studio":
       return buildStudioToolDefs();
+    case "intent_plan":
+      return buildIntentPlanToolDefs();
     case "custom":
       return req.customTools ?? [];
     case "none":
@@ -519,13 +522,18 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
       continue;
     }
 
-    // Studio tools vs action tools — pick the validator from the active tool set.
+    // Studio / intent_plan / action tools — pick the validator from the active tool set.
     const isStudioTool = req.toolSet === "studio";
-    const enriched = isStudioTool ? tc.args : preEnrichSubject(name, tc.args);
-    const v = isStudioTool ? validateStudio(name, enriched) : validateAction(name as ActionName, enriched);
+    const isIntentPlanTool = req.toolSet === "intent_plan";
+    const enriched = (isStudioTool || isIntentPlanTool) ? tc.args : preEnrichSubject(name, tc.args);
+    const v = isStudioTool
+      ? validateStudio(name, enriched)
+      : isIntentPlanTool
+        ? validateIntentPlan(enriched)
+        : validateAction(name as ActionName, enriched);
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
-      if (!isStudioTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
+      if (!isStudioTool && !isIntentPlanTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
       continue;
     }
     const actionType = (v.data as { type?: string }).type ?? name;

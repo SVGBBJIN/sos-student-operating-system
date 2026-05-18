@@ -6,6 +6,7 @@ import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } f
 import { streamChat } from './lib/streamChat';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
+import { dbInsertTaskEvent } from './lib/dataHandlers';
 import ErrorBoundary from './components/ErrorBoundary';
 
 import * as sfx from './lib/sfx';
@@ -29,6 +30,7 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
+import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
@@ -1036,9 +1038,10 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan'];
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan','make_intent_plan'];
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
+const INTENT_PLAN_REGEX = /\b(survive\s+finals|finals\s+week|help\s+me\s+(survive|balance|prepare|get\s+through)|improve\s+(my\s+)?(?:chinese|mandarin|spanish|french|korean|japanese|german|language|speaking|math|coding|programming)|build\s+a\s+routine|create\s+a\s+routine|set\s+up\s+(?:a\s+)?routine|balance\s+(?:my\s+)?(?:life|school|work|coding)|plan\s+(?:my\s+)?(?:week|month|semester)|semester\s+plan|weekly\s+(?:routine|schedule|plan))\b/i;
 
 function isStringArray(value, min = 0) {
   return Array.isArray(value) && value.length >= min && value.every(v => typeof v === 'string' && v.trim().length > 0);
@@ -3176,7 +3179,67 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
+function IntentPlanCard({ data, onApply, onDismiss }) {
+  const blocks = data.recurring_blocks || [];
+  const tasks = data.milestone_tasks || [];
+  const reviewBlock = data.review_cadence?.review_block;
+  const totalBlocks = blocks.length + (reviewBlock ? 1 : 0);
+  const dayMap = { Monday:'M', Tuesday:'Tu', Wednesday:'W', Thursday:'Th', Friday:'F', Saturday:'Sa', Sunday:'Su' };
+  const fmtDays = (days) => (days || []).map(d => dayMap[d] || d).join('/');
+  return (
+    <div style={{background:'rgba(108,99,255,0.06)', border:'1px solid rgba(108,99,255,0.18)', borderRadius:14, overflow:'hidden', marginBottom:8}}>
+      <div style={{padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:6}}>
+          <span style={{color:'var(--accent)', display:'flex'}}>{Icon.zap(14)}</span>
+          <span style={{fontWeight:700, fontSize:'0.88rem', color:'var(--text)'}}>Intent Plan</span>
+          <span style={{fontSize:'0.72rem', color:'var(--text-dim)', marginLeft:'auto'}}>{totalBlocks} block{totalBlocks!==1?'s':''} · {tasks.length} task{tasks.length!==1?'s':''}</span>
+        </div>
+        {data.summary && <p style={{fontSize:'0.82rem', color:'var(--text-dim)', margin:0, lineHeight:1.5}}>{data.summary}</p>}
+      </div>
+      {blocks.length > 0 && (
+        <div style={{padding:'8px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em'}}>Recurring Blocks</div>
+          {blocks.map((b, i) => (
+            <div key={i} style={{display:'flex', gap:8, fontSize:'0.8rem', color:'var(--text)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.03)'}}>
+              <span style={{fontWeight:600, flex:1}}>{b.activity}</span>
+              <span style={{color:'var(--text-dim)'}}>{fmtDays(b.days)}</span>
+              <span style={{color:'var(--teal)'}}>{b.start}–{b.end}</span>
+            </div>
+          ))}
+          {reviewBlock && (
+            <div style={{display:'flex', gap:8, fontSize:'0.8rem', color:'var(--text)', padding:'3px 0'}}>
+              <span style={{fontWeight:600, flex:1}}>{reviewBlock.activity} (review)</span>
+              <span style={{color:'var(--text-dim)'}}>{fmtDays(reviewBlock.days)}</span>
+              <span style={{color:'var(--teal)'}}>{reviewBlock.start}–{reviewBlock.end}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {tasks.length > 0 && (
+        <div style={{padding:'8px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)', maxHeight:160, overflowY:'auto'}}>
+          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--teal)', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em'}}>Milestones</div>
+          {tasks.slice(0,10).map((t, i) => (
+            <div key={i} style={{display:'flex', gap:8, fontSize:'0.8rem', color:'var(--text)', padding:'2px 0'}}>
+              <span style={{flex:1}}>{t.task_name}</span>
+              {t.due_date && <span style={{color:'var(--text-dim)', fontSize:'0.73rem'}}>{t.due_date}</span>}
+            </div>
+          ))}
+          {tasks.length > 10 && <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2}}>+{tasks.length-10} more…</div>}
+        </div>
+      )}
+      <div style={{display:'flex', gap:8, padding:'10px 16px'}}>
+        <button onClick={() => onApply(data)} style={{flex:1, background:'rgba(43,203,186,0.15)', border:'1px solid rgba(43,203,186,0.3)', color:'var(--teal)', borderRadius:8, padding:'8px 0', fontSize:'0.82rem', fontWeight:700, cursor:'pointer'}}>
+          Apply Plan
+        </button>
+        <button onClick={onDismiss} style={{padding:'8px 14px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'var(--text-dim)', borderRadius:8, fontSize:'0.82rem', cursor:'pointer'}}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyIntentPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
   switch (content.type) {
     case 'make_plan':
       return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
@@ -3191,6 +3254,8 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onStartPla
     // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
+    case 'make_intent_plan':
+      return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onDismiss={onDismiss} />;
     default:
       return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
   }
@@ -5370,6 +5435,7 @@ function App() {
             return updated;
           });
           if (user) syncOp(() => dbUpsertTask(task, user.id));
+          if (user) dbInsertTaskEvent({ taskId: task.id, eventType: 'create', toStatus: task.status, metadata: { title: task.title, subject: task.subject, due_date: task.dueDate } }, user.id);
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_task' });
           recordExecution('add_task', `"${task.title}" due ${task.dueDate}`);
           pushUndoToast(`Undo: added "${task.title}"`, undoSnap);
@@ -5383,9 +5449,11 @@ function App() {
             postAssistantNote("I couldn't find that task to mark complete — the name didn't match anything on your list. Want me to show what's there?");
             break;
           }
-          updateTask(target.id, { status:'done', completedAt:new Date().toISOString() });
+          const completedAt = new Date().toISOString();
+          updateTask(target.id, { status:'done', completedAt });
           setRecentlyCompleted(prev => { const n = new Set(prev); n.add(target.id); return n; });
           setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(target.id); return n; }), 900);
+          if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'complete', fromStatus: target.status, toStatus: 'done', metadata: { title: target.title, subject: target.subject } }, user.id);
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
           recordExecution('complete_task', `"${target.title}"`);
           pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
@@ -5412,7 +5480,14 @@ function App() {
             if (isNaN(d.getTime())) {
               postAssistantNote(`I couldn't read "${action.due}" as a date, so I kept the current due date. Say something like "set the due date for ${target.title} to next Monday" to change it.`);
             } else {
-              upd.dueDate = toDateStr(d);
+              const newDue = toDateStr(d);
+              upd.dueDate = newDue;
+              // Emit postpone event when the new due date is later and task isn't done.
+              if (user && target.status !== 'done' && newDue > target.dueDate) {
+                const daysDiff = Math.round((d.getTime() - new Date(target.dueDate + 'T12:00:00').getTime()) / 86400000);
+                upd.postponeCount = (target.postponeCount || 0) + 1;
+                dbInsertTaskEvent({ taskId: target.id, eventType: 'postpone', fromStatus: target.status, toStatus: target.status, metadata: { title: target.title, subject: target.subject, from_due: target.dueDate, to_due: newDue, days_diff: daysDiff } }, user.id);
+              }
             }
           }
           if (action.estimated_minutes) upd.estTime = action.estimated_minutes;
@@ -5769,6 +5844,10 @@ function App() {
             orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
             setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
           }
+          if (user && match.status !== 'done') {
+            const ageDays = match.createdAt ? Math.round((Date.now() - new Date(match.createdAt).getTime()) / 86400000) : 0;
+            dbInsertTaskEvent({ taskId: match.id, eventType: 'abandon', fromStatus: match.status, metadata: { title: match.title, subject: match.subject, age_days: ageDays, prior_postpones: match.postponeCount || 0 } }, user.id);
+          }
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'delete_task' });
           recordExecution('delete_task', `"${match.title}"`);
           pushUndoToast(`Undo: deleted "${match.title}"`, undoSnap);
@@ -5807,6 +5886,7 @@ function App() {
             setPendingClarification({ question: "What should I rename this event to?", context_action: 'update_event', missing_fields: ['new_title'] });
             return;
           }
+          const eventDateChanged = action.date && action.date !== match.date;
           setEvents(prev => {
             const next = prev.map(ev => ev.id === match.id ? {
               ...ev,
@@ -5828,6 +5908,9 @@ function App() {
             }
             return next;
           });
+          if (user && eventDateChanged) {
+            dbInsertTaskEvent({ eventId: match.id, eventType: 'postpone', metadata: { title: match.title, from_date: match.date, to_date: action.date } }, user.id);
+          }
           recordExecution('update_event', `"${match.title}"`);
           pushUndoToast(`Undo: updated "${match.title}"`, undoSnap);
           break;
@@ -6099,6 +6182,77 @@ function App() {
           recordExecution('clear_all', 'all data wiped');
           pushUndoToast('Undo: clear all data', undoSnap);
           break;
+        case 'prioritize_tasks': {
+          const horizonDays = Number(action.horizon_days) || 7;
+          const limit = Number(action.limit) || 5;
+          const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + horizonDays);
+          const cutoffStr = cutoff.toISOString().slice(0, 10);
+          const active = tasks
+            .filter(t => t.status !== 'done' && t.dueDate <= cutoffStr)
+            .slice(0, 50);
+          if (active.length === 0) {
+            postAssistantNote(`No tasks due in the next ${horizonDays} days — you're clear!`);
+            break;
+          }
+          const density = buildCalendarDensity(active, blocks.dates || {});
+          const ranked = rankTasks(active, new Date(), density, undefined, limit);
+          const taskById = Object.fromEntries(active.map(t => [t.id, t]));
+          const lines = ranked.map((r, i) => {
+            const t = taskById[r.taskId];
+            if (!t) return null;
+            const isPast = t.dueDate < today();
+            const dayLabel = isPast ? `(overdue — was due ${t.dueDate})` : `due ${t.dueDate}`;
+            return `${i + 1}. **${t.title}** ${dayLabel}${t.subject ? ' · ' + t.subject : ''} — ${r.explanation}`;
+          }).filter(Boolean);
+          const msg = `here's what matters most right now:\n\n${lines.join('\n')}`;
+          postAssistantNote(msg);
+          recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
+          break;
+        }
+        case 'plan_intent': {
+          const goal = String(action.goal || '').trim();
+          if (!goal) {
+            setPendingClarification({ question: "What's the goal you want to plan for?", context_action: 'plan_intent', missing_fields: ['goal'] });
+            return;
+          }
+          recordExecution('plan_intent', `"${goal}"`);
+          // Trigger the intent_plan pipeline asynchronously; postAssistantNote on completion.
+          (async () => {
+            try {
+              const session2 = await sb.auth.getSession();
+              const token2 = session2?.data?.session?.access_token;
+              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, entityLinks, activeTimers });
+              const activeTasks = tasks.filter(t => t.status !== 'done' && t.dueDate >= today()).slice(0, 50);
+              const activeTasksMapped = activeTasks.map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
+              const intentData = await streamChat({
+                url: EDGE_FN_URL,
+                body: {
+                  mode: 'intent_plan',
+                  systemPrompt: promptPayload2.prompt,
+                  staticSystemPrompt: promptPayload2.stablePrompt,
+                  dynamicContext: promptPayload2.dynamicContext,
+                  messages: [{ role: 'user', content: `Goal: ${goal}${action.horizon ? ` (horizon: ${action.horizon})` : ''}${action.subject ? `, subject: ${action.subject}` : ''}${action.deadline ? `, deadline: ${action.deadline}` : ''}` }],
+                  maxTokens: 3000,
+                  workspaceContext: 'schedule',
+                  clientTasks: activeTasksMapped,
+                  clientCalendarDensity: buildCalendarDensity(activeTasksMapped, blocks.dates || {}),
+                },
+                token: token2 || SUPABASE_ANON_KEY,
+              });
+              const proposal = intentData?.actions?.[0];
+              if (proposal && proposal.type === 'make_intent_plan') {
+                const critique = typeof intentData.intent_plan_critique === 'string' ? intentData.intent_plan_critique : '';
+                postAssistantNote(`here's a plan for "${goal}" — review it and hit Apply to add the blocks and tasks, or Dismiss to skip:`);
+                setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critique, _goal: goal }]);
+              } else {
+                postAssistantNote(`I had trouble building a plan for "${goal}" — try again or phrase it differently.`);
+              }
+            } catch (err) {
+              postAssistantNote(`Couldn't build the plan right now — ${err?.message || 'try again in a moment'}.`);
+            }
+          })();
+          break;
+        }
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
@@ -6169,6 +6323,11 @@ function App() {
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
         case 'make_plan':
           return '# ' + (c.title||'Plan') + '\n\n' + (c.summary ? c.summary + '\n\n' : '') + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
+        case 'make_intent_plan': {
+          const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
+          const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
+          return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
+        }
         default: return JSON.stringify(c, null, 2);
       }
     } catch(e) { return JSON.stringify(c, null, 2); }
@@ -6188,6 +6347,28 @@ function App() {
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     setToastMsg('Added ' + steps.length + ' tasks from plan');
+  }
+
+  function handleApplyIntentPlan(idx, plan) {
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
+    let taskCount = 0;
+    let blockCount = 0;
+    (plan.recurring_blocks || []).forEach(b => {
+      executeAction({ type:'add_recurring_event', title:b.activity, event_type:'other', subject:b.category||'school', days:b.days, start_date:b.start_date, end_date:b.end_date });
+      blockCount++;
+    });
+    if (plan.review_cadence?.review_block) {
+      const rb = plan.review_cadence.review_block;
+      executeAction({ type:'add_recurring_event', title:rb.activity, event_type:'other', subject:rb.category||'school', days:rb.days, start_date:rb.start_date, end_date:rb.end_date });
+      blockCount++;
+    }
+    (plan.milestone_tasks || []).forEach(t => {
+      executeAction({ type:'add_task', task_name:t.task_name, subject:t.subject||'', due_date:t.due_date, estimated_minutes:t.estimated_minutes||30 });
+      taskCount++;
+    });
+    setPendingContent(prev => prev.filter((_,i) => i !== idx));
+    pushUndoToast(`Undo: applied intent plan (${taskCount} tasks, ${blockCount} blocks)`, undoSnap);
+    setToastMsg(`Applied plan — added ${taskCount} tasks and ${blockCount} recurring blocks`);
   }
 
   function handleStartPlanTask(step) {
@@ -6982,6 +7163,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       );
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isPlanningRequest = PLANNING_REGEX.test(text || '');
+      const isIntentPlanRequest = !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
@@ -7010,18 +7192,30 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ? `${promptPayload.dynamicContext || ''}${promptPayload.dynamicContext ? '\n\n' : ''}${isPlanningRequest ? 'GROUNDED SOURCES (use these as the basis for the plan; do not invent material outside them):\n' : ''}${linkedContextBlock}`
         : promptPayload.dynamicContext;
 
+      // Build clientTasks payload for priority engine (non-done, due within 30 days).
+      const thirtyDaysOut = new Date(); thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
+      const thirtyDaysStr = thirtyDaysOut.toISOString().slice(0, 10);
+      const clientTasksPayload = tasks
+        .filter(t => t.status !== 'done' && t.dueDate <= thirtyDaysStr)
+        .slice(0, 50)
+        .map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
+      const clientCalendarDensityPayload = buildCalendarDensity(clientTasksPayload, blocks.dates || {});
+
       const chatBody = {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: groundedDynamic,
         messages: historyForApi,
-        maxTokens: isPlanningRequest ? 3000 : 1024,
+        maxTokens: (isPlanningRequest || isIntentPlanRequest) ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
         input_tokens_est: promptPayload.estimatedInputTokens,
+        clientTasks: clientTasksPayload,
+        clientCalendarDensity: clientCalendarDensityPayload,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
+        ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -7097,6 +7291,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
           setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
+          return;
+        }
+      }
+
+      // ── Intent-plan pipeline response: show proposed routine in propose mode ──
+      if (chatData?.orchestration?.mode === 'intent_plan') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_intent_plan') {
+          const critiqueText = typeof chatData.intent_plan_critique === 'string' ? chatData.intent_plan_critique : '';
+          const blockCount = (proposal.recurring_blocks?.length || 0) + (proposal.review_cadence?.review_block ? 1 : 0);
+          const taskCount = proposal.milestone_tasks?.length || 0;
+          const introMsg = { role: 'assistant', content: `here's a structured plan — ${blockCount} recurring block${blockCount !== 1 ? 's' : ''}, ${taskCount} milestone task${taskCount !== 1 ? 's' : ''}. hit Apply to add everything, or Dismiss to skip:`, timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critiqueText }]);
           return;
         }
       }
@@ -8662,7 +8872,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onApplyIntentPlan={(plan)=>handleApplyIntentPlan(idx,plan)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
           </div>
         ))}
         {pendingLinkSuggestions.map((sug)=>(

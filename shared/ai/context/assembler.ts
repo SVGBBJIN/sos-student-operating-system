@@ -13,6 +13,9 @@
 
 import { retrieve, type RetrievedChunk } from "../rag/retrieve.js";
 import { estimateTokens, trimToBudget } from "./ranker.js";
+import type { BehavioralSignals } from "../signals/behavioral.js";
+import { formatSignalsForContext } from "../signals/behavioral.js";
+import { rankTasks, buildCalendarDensity, type TaskForScoring, type CalendarDensity } from "../../scheduling/priority.js";
 
 export interface AssembleOptions {
   userId: string | null;
@@ -21,6 +24,9 @@ export interface AssembleOptions {
   injectedFacts?: string[];
   budgetTokens?: number;
   sources?: string[];
+  behavioralSignals?: BehavioralSignals;
+  clientTasks?: TaskForScoring[];
+  clientCalendarDensity?: CalendarDensity;
 }
 
 export interface AssembledContext {
@@ -68,6 +74,31 @@ export async function assembleContext(opts: AssembleOptions): Promise<AssembledC
       heading: "Retrieved memories",
       lines: trimmed.kept.map((t) => `- ${t.text}`),
     });
+  }
+
+  // Priority ranking: top tasks right now, injected as a pinned hint.
+  if (opts.clientTasks && opts.clientTasks.length > 0) {
+    const density = opts.clientCalendarDensity ?? buildCalendarDensity(opts.clientTasks, {});
+    const ranked = rankTasks(opts.clientTasks, new Date(), density, opts.behavioralSignals, 3);
+    if (ranked.length > 0) {
+      sections.push({
+        heading: "Top tasks right now",
+        lines: ranked.map((r) => `- ${r.explanation}`),
+        pinned: true,
+      });
+    }
+  }
+
+  // Behavioral signals: compact summary injected as a pinned hint.
+  if (opts.behavioralSignals && opts.behavioralSignals.total_events_30d > 0) {
+    const summary = formatSignalsForContext(opts.behavioralSignals);
+    if (summary) {
+      sections.push({
+        heading: "Behavioral patterns",
+        lines: [summary],
+        pinned: true,
+      });
+    }
   }
 
   const contextText = sections

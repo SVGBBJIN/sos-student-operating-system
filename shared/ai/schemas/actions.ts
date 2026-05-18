@@ -166,6 +166,22 @@ export const CancelTimerSchema = z.object({
 });
 export type CancelTimerInput = z.infer<typeof CancelTimerSchema>;
 
+export const PrioritizeTasksSchema = z.object({
+  type: z.literal("prioritize_tasks").optional(),
+  horizon_days: z.number().int().min(1).max(30).optional(),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+export type PrioritizeTasksInput = z.infer<typeof PrioritizeTasksSchema>;
+
+export const PlanIntentSchema = z.object({
+  type: z.literal("plan_intent").optional(),
+  goal: z.string().min(4).max(500),
+  horizon: z.enum(["week", "month", "semester"]),
+  subject: optionalSubjectString,
+  deadline: dateString.optional(),
+});
+export type PlanIntentInput = z.infer<typeof PlanIntentSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -182,6 +198,8 @@ export const ACTION_SCHEMAS = {
   set_timer: SetTimerSchema,
   cancel_timer: CancelTimerSchema,
   add_note: AddNoteSchema,
+  prioritize_tasks: PrioritizeTasksSchema,
+  plan_intent: PlanIntentSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -205,6 +223,8 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
   cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
   add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
+  prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Only call this when the student explicitly asks what to do next, what matters most, or which task to prioritize. Never combine with mutating tools.",
+  plan_intent: "Convert a student goal or intent into a structured multi-week plan with recurring blocks, milestone tasks, and a review cadence. Use for goals like 'survive finals week', 'improve Chinese speaking', or 'balance coding and school'. `horizon` must be one of: week, month, semester. If no deadline or subject is stated, omit those fields — do not guess.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
