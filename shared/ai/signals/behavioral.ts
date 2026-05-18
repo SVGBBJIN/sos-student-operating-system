@@ -192,6 +192,15 @@ export function formatSignalsForContext(signals: BehavioralSignals): string {
     lines.push(`Subjects with high postpone rate: ${topPostpone.join(", ")}`);
   }
 
+  const notableSubjects = Object.entries(signals.median_hours_to_complete)
+    .filter(([, h]) => h >= 0.5)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 2)
+    .map(([subj, h]) => `${subj} (~${h < 2 ? Math.round(h * 60) + "min" : Math.round(h) + "h"})`);
+  if (notableSubjects.length > 0) {
+    lines.push(`Typical task duration: ${notableSubjects.join(", ")}`);
+  }
+
   // Peak completion hour
   const peakHour = signals.time_of_day_histogram.indexOf(
     Math.max(...signals.time_of_day_histogram)

@@ -40,19 +40,23 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   providers/index.ts              — Provider registry.
   voice.ts                        — Groq Whisper transcription helper.
   router.ts                       — Tier routing (embed / flash / pro). ONLY place model strings appear.
-  schemas/                        — Zod schemas (actions, studio, plan, proofread, _helpers).
-  schemas/versions.ts             — Schema version pins per surface.
-  context/                        — assembleContext, compressor, ranker.
+  schemas/                        — Zod schemas (actions, studio, plan, intent_plan, proofread, _helpers).
+  schemas/versions.ts             — Schema version pins per surface (action_tools=v5-2026-05).
+  schemas/intent_plan.ts          — MakeIntentPlanSchema + buildIntentPlanToolDefs + validateIntentPlan.
+  context/                        — assembleContext (injects ranked tasks + behavioral signals), compressor, ranker.
+  signals/behavioral.ts           — getBehavioralSignals, formatSignalsForContext (Supabase REST, hour-bucket cache).
   rag/                            — embeddings, retrieve, cache.
-  pipelines/                      — planning.ts, proofread.ts.
+  pipelines/                      — planning.ts, proofread.ts, intent_plan.ts.
   telemetry.ts                    — Token counter, cost estimator, request log.
   resilience.ts                   — Retry, timeout, circuit breaker.
   chat-core.ts                    — callModel(): the single entry point for inference.
   index.ts                        — Public exports.
 
+shared/scheduling/priority.ts     — computePriority, rankTasks, buildCalendarDensity (pure functions, no I/O).
 shared/{env,auth,rate-limit,sse}.ts — Cross-runtime helpers.
 
 supabase/migrations/20260514_add_pgvector.sql — pgvector + memory_embeddings + match_memories RPC.
+supabase/migrations/20260518_task_events.sql  — task_events table + analytics_events + tasks columns (completed_at, postpone_count, last_attempted_at).
 
 scripts/eval-harness.mjs          — Routing precision/recall + shadow eval.
 scripts/eval-cost.mjs             — Per-tier cost projection.
@@ -86,7 +90,13 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 
 **Planning pipeline** (`shared/ai/pipelines/planning.ts`): three-pass agentic pipeline on Pro tier with `thinkingBudget: 4096`. Critique and refine degrade gracefully — if either fails, the draft ships. Errors surface as `PlanningPipelineError` with `.stage`.
 
-**RAG**: `assembleContext({ userId, intentQuery, workspaceContext })` returns a context blob that mixes retrieved memories (cosine + recency weighted) with workspace facts. Persisted in `memory_embeddings` (pgvector). The `match_memories` RPC backs vector search.
+**Intent-plan pipeline** (`shared/ai/pipelines/intent_plan.ts`): same 3-pass pattern as planning, but produces `make_intent_plan` — recurring blocks + milestone tasks + review cadence. Triggered when the user says something like "help me survive finals week". Mode `"intent_plan"` in `api/chat.ts` / `sos-chat`. Surfaces as `IntentPlanCard` in the chat; "Apply" batch-creates blocks and tasks in one undoable snapshot.
+
+**Priority engine** (`shared/scheduling/priority.ts`): pure-function, sync, no I/O. `computePriority(task, now, density, signals)` returns a score 0–1 from five weighted factors (urgency 35%, importance 25%, momentum 15%, deadline_density 15%, friction 10%). `rankTasks` runs it over a task list; `buildCalendarDensity` builds the density map from tasks + calendar blocks. Runs server-side inside `assembleContext` (top-3 snippet injected into AI context) and client-side for the `prioritize_tasks` action display.
+
+**Behavioral signals** (`shared/ai/signals/behavioral.ts`): `getBehavioralSignals(userId)` queries `task_events` via Supabase REST and returns `BehavioralSignals` (completion rate, median hours by subject, postpone rate by subject, 24-bucket time histogram, recent abandons). Hour-bucket in-process cache. `formatSignalsForContext` renders it as a ≤5-line string for the AI context. Both runtimes safe (fetch-only).
+
+**RAG**: `assembleContext({ userId, intentQuery, workspaceContext, clientTasks, clientCalendarDensity, behavioralSignals })` returns a context blob that mixes retrieved memories (cosine + recency weighted), ranked priority tasks, behavioral patterns, and workspace facts. Persisted in `memory_embeddings` (pgvector). The `match_memories` RPC backs vector search.
 
 ## What NOT to do
 

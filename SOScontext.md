@@ -18,9 +18,13 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | AI model selection logic | `shared/ai/router.ts` — intent → tier → model. Only file that references model strings. |
 | AI fallback chain | `shared/ai/chat-core.ts` `callModel()` — in-tier (Flash 3 → 2.5 Flash) + tier downgrade (2.5 Pro → Flash 3) |
 | Planning pipeline (study plans) | `shared/ai/pipelines/planning.ts` — 3-pass draft→critique→refine, Pro tier with thinkingBudget=4096 |
+| Intent-plan pipeline | `shared/ai/pipelines/intent_plan.ts` — same 3-pass pattern; produces `make_intent_plan` (blocks + tasks + review cadence) |
 | Proofread pipeline | `shared/ai/pipelines/proofread.ts` — Flash classifier → Pro specialists per bucket |
 | RAG / embeddings | `shared/ai/rag/` (`embeddings.ts`, `retrieve.ts`, `cache.ts`) + migration `20260514_add_pgvector.sql` |
-| Context assembly | `shared/ai/context/assembler.ts` (workspace + retrieved memories + recency weight) |
+| Context assembly | `shared/ai/context/assembler.ts` (workspace + retrieved memories + ranked tasks + behavioral signals) |
+| Priority engine | `shared/scheduling/priority.ts` — `computePriority`, `rankTasks`, `buildCalendarDensity` (pure, sync, no I/O) |
+| Behavioral signals | `shared/ai/signals/behavioral.ts` — `getBehavioralSignals(userId)`, hour-bucket cache, `formatSignalsForContext` |
+| Behavioral telemetry writes | `src/lib/dataHandlers.js` `dbInsertTaskEvent()` — fire-and-forget writes to `task_events` |
 | Streaming SSE consumer (frontend) | `src/lib/streamChat.js` |
 | System prompt construction | `src/App.jsx` `buildSystemPrompt()` ~line 647 |
 | Action execution (client-side) | `src/App.jsx` `executeAction()` ~line 5273 |
@@ -89,6 +93,11 @@ Run the regression eval with `npm run eval:planning`.
 
 **Tasks**
 - `add_task` · `update_task` · `delete_task` · `complete_task` · `break_task`
+- Each mutating task action fires `dbInsertTaskEvent` (fire-and-forget) writing to `task_events`: `add_task→create`, `complete_task→complete`, `update_task→postpone` (when new due > old due), `delete_task→abandon`.
+
+**Priority & intent planning**
+- `prioritize_tasks` — read-only; returns top-N tasks ranked by `rankTasks()` (priority engine). No DB writes. Use when user asks "what should I do now?". Client uses `buildCalendarDensity(tasks, blocks.dates)` to compute real blocked-minutes density.
+- `plan_intent` — triggers `intent_plan` pipeline (Pro tier, 3-pass). Accepts `goal`, `horizon` (week/month/semester), optional `subject`/`deadline`. Returns `make_intent_plan` proposal displayed as `IntentPlanCard`; user hits Apply to batch-create recurring blocks + milestone tasks in one undoable snapshot.
 
 **Timers** (Supabase `timers` table, migration `20260517_timers.sql`)
 - `set_timer` — starts a countdown; persists to DB, fires browser Notification + chime + `SosNotification` toast. Active timers shown in the unified `PomodoroTimer` widget (`src/components/PomodoroTimer.jsx`). Active timer labels are injected into the system prompt as `ACTIVE TIMERS` so the AI can reference them.
@@ -228,16 +237,17 @@ Client:  src/lib/supabase.js  →  sb
 CHAT_MAX_MESSAGES = 60
 ```
 
-**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`, `timers`.
+**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`, `timers`, `task_events`.
 
 **Active migrations**:
 - `20260507_entity_links.sql` — bidirectional link graph for backlinks/suggestions.
 - `20260508_events_time_columns.sql` — adds `start_time`, `end_time`, `description`, `location`, `priority` to `events`.
 - `20260508_notes_hierarchy.sql` — adds `parent_id` (self-FK, cascade delete) and `is_folder` to `notes`.
 - `20260517_timers.sql` — `timers` table (`id`, `user_id`, `label`, `fire_at`, `fired`, `dismissed_at`); RLS owner-only policy; index on `(user_id, fire_at) where fired = false`.
+- `20260518_task_events.sql` — `task_events` table (`id`, `user_id`, `task_id|event_id` xor-check, `event_type` enum, `from_status`, `to_status`, `occurred_at`, `metadata` jsonb); RLS owner-only; `analytics_events` table; adds `completed_at`, `postpone_count`, `last_attempted_at` to `tasks`. **Must be applied to production before behavioral signals or priority engine have real data.**
 
 **Field mapping (JS ↔ DB)**:
-- `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`, `completedAt` ↔ `completed_at`
+- `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`, `completedAt` ↔ `completed_at`, `postponeCount` ↔ `postpone_count`, `lastAttemptedAt` ↔ `last_attempted_at`
 - Events: JS `date` ↔ DB `event_date`; JS `time` ↔ DB `start_time`; JS `end_time` ↔ DB `end_time`
 - Notes: JS `parent_id`/`is_folder` ↔ DB `parent_id`/`is_folder`
 - Blocks: recurring templates → `recurring_blocks`; per-date overrides → `date_blocks`

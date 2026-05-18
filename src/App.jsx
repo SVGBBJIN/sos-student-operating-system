@@ -30,6 +30,7 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
+import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
@@ -6193,25 +6194,19 @@ function App() {
             postAssistantNote(`No tasks due in the next ${horizonDays} days — you're clear!`);
             break;
           }
-          const tasksByDate = {};
-          active.forEach(t => { tasksByDate[t.dueDate] = (tasksByDate[t.dueDate] || 0) + 1; });
-          // Simple urgency sort: overdue first, then nearest deadline, then by postpone count
-          const sorted = [...active].sort((a, b) => {
-            const todayStr = today();
-            const aOverdue = a.dueDate < todayStr;
-            const bOverdue = b.dueDate < todayStr;
-            if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
-            if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
-            return (b.postponeCount || 0) - (a.postponeCount || 0);
-          }).slice(0, limit);
-          const lines = sorted.map((t, i) => {
+          const density = buildCalendarDensity(active, blocks.dates || {});
+          const ranked = rankTasks(active, new Date(), density, undefined, limit);
+          const taskById = Object.fromEntries(active.map(t => [t.id, t]));
+          const lines = ranked.map((r, i) => {
+            const t = taskById[r.taskId];
+            if (!t) return null;
             const isPast = t.dueDate < today();
             const dayLabel = isPast ? `(overdue — was due ${t.dueDate})` : `due ${t.dueDate}`;
-            return `${i + 1}. **${t.title}** ${dayLabel}${t.subject ? ' · ' + t.subject : ''}`;
-          });
+            return `${i + 1}. **${t.title}** ${dayLabel}${t.subject ? ' · ' + t.subject : ''} — ${r.explanation}`;
+          }).filter(Boolean);
           const msg = `here's what matters most right now:\n\n${lines.join('\n')}`;
           postAssistantNote(msg);
-          recordExecution('prioritize_tasks', `top ${sorted.length} tasks`);
+          recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
         }
         case 'plan_intent': {
@@ -6228,8 +6223,7 @@ function App() {
               const token2 = session2?.data?.session?.access_token;
               const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, entityLinks, activeTimers });
               const activeTasks = tasks.filter(t => t.status !== 'done' && t.dueDate >= today()).slice(0, 50);
-              const tasksDueOnDate = {};
-              activeTasks.forEach(t => { tasksDueOnDate[t.dueDate] = (tasksDueOnDate[t.dueDate] || 0) + 1; });
+              const activeTasksMapped = activeTasks.map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
                 body: {
@@ -6240,8 +6234,8 @@ function App() {
                   messages: [{ role: 'user', content: `Goal: ${goal}${action.horizon ? ` (horizon: ${action.horizon})` : ''}${action.subject ? `, subject: ${action.subject}` : ''}${action.deadline ? `, deadline: ${action.deadline}` : ''}` }],
                   maxTokens: 3000,
                   workspaceContext: 'schedule',
-                  clientTasks: activeTasks.map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 })),
-                  clientCalendarDensity: { tasksDueOnDate, blockedMinutesOnDate: {} },
+                  clientTasks: activeTasksMapped,
+                  clientCalendarDensity: buildCalendarDensity(activeTasksMapped, blocks.dates || {}),
                 },
                 token: token2 || SUPABASE_ANON_KEY,
               });
@@ -7205,9 +7199,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         .filter(t => t.status !== 'done' && t.dueDate <= thirtyDaysStr)
         .slice(0, 50)
         .map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
-      const tasksDueOnDate = {};
-      clientTasksPayload.forEach(t => { tasksDueOnDate[t.dueDate] = (tasksDueOnDate[t.dueDate] || 0) + 1; });
-      const clientCalendarDensityPayload = { tasksDueOnDate, blockedMinutesOnDate: {} };
+      const clientCalendarDensityPayload = buildCalendarDensity(clientTasksPayload, blocks.dates || {});
 
       const chatBody = {
         systemPrompt: promptPayload.prompt,
