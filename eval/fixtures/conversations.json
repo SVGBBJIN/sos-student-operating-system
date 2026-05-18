@@ -76,5 +76,45 @@
       "should_clarify": false,
       "allowed_fields": ["type", "title", "task_name", "subject", "due_date", "due", "estimated_minutes", "priority", "description"]
     }
+  },
+  {
+    "id": "intent-plan-finals-week",
+    "prompt_version": "v5-2026-05",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "Help me survive finals week" }
+    ],
+    "expected": {
+      "tools": ["plan_intent"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "goal", "horizon", "subject", "deadline"]
+    }
+  },
+  {
+    "id": "intent-plan-chinese-speaking",
+    "prompt_version": "v5-2026-05",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "Help me improve my Chinese speaking" }
+    ],
+    "expected": {
+      "tools": ["plan_intent"],
+      "should_clarify": false,
+      "allowed_fields": ["type", "goal", "horizon", "subject", "deadline"]
+    }
+  },
+  {
+    "id": "prioritize-readonly",
+    "prompt_version": "v5-2026-05",
+    "model_revision": "openai/gpt-oss-120b",
+    "messages": [
+      { "role": "user", "content": "What should I do right now?" }
+    ],
+    "expected": {
+      "tools": ["prioritize_tasks"],
+      "should_clarify": false,
+      "mutating_tools_forbidden": true,
+      "allowed_fields": ["type", "horizon_days", "limit"]
+    }
   }
 ]

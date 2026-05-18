@@ -4,8 +4,9 @@
 // gemini-3-flash as cross-provider fallback. Voice transcription bypasses
 // callModel and goes directly to Groq Whisper via shared/ai/voice.ts.
 
-import { callModel, runPlanningPipeline, SCHEMA_VERSIONS, RpmExhaustedError, aggregateRpmStatus, overLimit, route } from "../../../shared/ai/index.js";
+import { callModel, runPlanningPipeline, runIntentPlanPipeline, IntentPlanPipelineError, SCHEMA_VERSIONS, RpmExhaustedError, aggregateRpmStatus, overLimit, route, getBehavioralSignals, assembleContext } from "../../../shared/ai/index.js";
 import type { StreamChunk, Intent } from "../../../shared/ai/index.js";
+import type { TaskForScoring, CalendarDensity } from "../../../shared/scheduling/priority.js";
 import { transcribeAudio } from "../../../shared/ai/voice.js";
 
 function overLimitForIntent(intent: Intent): boolean {
@@ -51,6 +52,8 @@ interface ChatBody {
   audioBase64?: string;
   audioMimeType?: string;
   workspaceContext?: string;
+  clientTasks?: TaskForScoring[];
+  clientCalendarDensity?: CalendarDensity;
 }
 
 function wantsSSE(req: Request): boolean {
@@ -95,7 +98,7 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    if ((body.mode === "studio" || body.mode === "planning") && userId) {
+    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return new Response(JSON.stringify({ error: "Rate limited", rateLimited: true, used: rl.used }), {
@@ -122,8 +125,64 @@ serve(async (req: Request): Promise<Response> => {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (body.mode === "intent_plan") {
+      try {
+        let enrichedContext = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
+        if (userId && body.clientTasks && body.clientTasks.length > 0) {
+          const signals = await getBehavioralSignals(userId).catch(() => undefined);
+          const assembled = await assembleContext({
+            userId,
+            workspaceContext,
+            intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
+            behavioralSignals: signals,
+            clientTasks: body.clientTasks,
+            clientCalendarDensity: body.clientCalendarDensity,
+          });
+          if (assembled.contextText) enrichedContext += "\n\n" + assembled.contextText;
+        }
+        const result = await runIntentPlanPipeline({
+          systemPrompt: body.systemPrompt ?? "",
+          staticSystemPrompt: body.staticSystemPrompt ?? null,
+          dynamicContext: enrichedContext,
+          messages: body.messages ?? [],
+        });
+        return new Response(JSON.stringify({
+          content: "",
+          actions: [result.proposal],
+          clarifications: [],
+          executed_actions: [],
+          orchestration: { mode: "intent_plan", iterations: result.iterations, executed_on: "client" },
+          intent_plan_critique: result.critiqueText,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } catch (err) {
+        const e = err as IntentPlanPipelineError;
+        return new Response(JSON.stringify({ error: e.message, stage: e.stage, cause_code: e.cause_code }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const contextSuffix = `\n\nWORKSPACE_CONTEXT: ${workspaceContext}. Prioritize this context when relevant. When any required field for an action is missing or ambiguous, call ask_clarification — never call action tools with placeholder/guessed values.`;
-    const dynamicContext = (body.dynamicContext ?? "") + contextSuffix;
+    let dynamicContext = (body.dynamicContext ?? "") + contextSuffix;
+
+    // Inject priority ranking and behavioral signals for schedule-aware chat.
+    if (userId && body.clientTasks && body.clientTasks.length > 0) {
+      try {
+        const signals = await getBehavioralSignals(userId).catch(() => undefined);
+        const assembled = await assembleContext({
+          userId,
+          workspaceContext,
+          intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
+          behavioralSignals: signals,
+          clientTasks: body.clientTasks.filter((t) => t.status !== "done").slice(0, 50),
+          clientCalendarDensity: body.clientCalendarDensity,
+        });
+        if (assembled.contextText) dynamicContext += "\n\n" + assembled.contextText;
+      } catch {
+        // Priority enrichment is best-effort; never block the chat response.
+      }
+    }
 
     if (body.mode === "studio") {
       const result = await callModel({
