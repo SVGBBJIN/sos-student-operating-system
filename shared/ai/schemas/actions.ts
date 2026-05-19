@@ -182,6 +182,13 @@ export const PlanIntentSchema = z.object({
 });
 export type PlanIntentInput = z.infer<typeof PlanIntentSchema>;
 
+export const RevisePlanSchema = z.object({
+  type: z.literal("revise_plan").optional(),
+  plan_id: z.string().uuid("plan_id must be a valid UUID"),
+  instructions: z.string().min(4).max(800),
+});
+export type RevisePlanInput = z.infer<typeof RevisePlanSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -200,6 +207,7 @@ export const ACTION_SCHEMAS = {
   add_note: AddNoteSchema,
   prioritize_tasks: PrioritizeTasksSchema,
   plan_intent: PlanIntentSchema,
+  revise_plan: RevisePlanSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -225,6 +233,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
   prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Only call this when the student explicitly asks what to do next, what matters most, or which task to prioritize. Never combine with mutating tools.",
   plan_intent: "Convert a student goal or intent into a structured multi-week plan with recurring blocks, milestone tasks, and a review cadence. Use for goals like 'survive finals week', 'improve Chinese speaking', or 'balance coding and school'. `horizon` must be one of: week, month, semester. If no deadline or subject is stated, omit those fields — do not guess.",
+  revise_plan: "Revise an existing saved study plan by re-running the intent plan pipeline with the student's correction instructions. Requires plan_id (UUID of the saved plan) and instructions (what to change, e.g. 'make the plan lighter' or 'add 2 more study sessions per week'). Only call this when the student explicitly asks to revise, adjust, or change a saved plan.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
