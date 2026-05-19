@@ -5,7 +5,7 @@
 //
 // Uses Pro tier throughout; gracefully degrades if critique or refine fails.
 
-import { callModel, type ChatAction } from "../chat-core.js";
+import { callModel, type ChatAction, type CallModelResponse } from "../chat-core.js";
 import type { Message } from "../providers/types.js";
 
 export class IntentPlanPipelineError extends Error {
@@ -51,15 +51,33 @@ export interface IntentPlanOutput {
   iterations: number;
 }
 
+// Turns an empty-action draft into an accurate error. callModel does not throw
+// on provider failure — it returns a graceful fallback with no actions — so the
+// pipeline must inspect finish_reason / validation warnings to report the real
+// cause instead of a misleading "model returned no intent plan action".
+function describeEmptyDraft(draft: CallModelResponse): string {
+  if (draft.finish_reason === "provider_failed" || draft.finish_reason === "circuit_open") {
+    return draft.content || "AI provider unavailable";
+  }
+  if (draft.validation_warnings.length > 0) {
+    const detail = draft.validation_warnings
+      .flatMap((w) => w.issues.map((i) => `${i.field}: ${i.message}`))
+      .slice(0, 6)
+      .join("; ");
+    return `intent plan failed schema validation — ${detail}`;
+  }
+  return "model returned no intent plan action";
+}
+
 export async function runIntentPlanPipeline(
   input: IntentPlanInput
 ): Promise<IntentPlanOutput> {
   const { systemPrompt, staticSystemPrompt, dynamicContext, messages } = input;
 
   // ── Pass 1: Draft ──
-  let draftAction: ChatAction | undefined;
+  let draft: CallModelResponse;
   try {
-    const draft = await callModel({
+    draft = await callModel({
       intent: "intent_plan",
       systemPrompt,
       staticSystemPrompt: staticSystemPrompt ?? undefined,
@@ -73,12 +91,12 @@ export async function runIntentPlanPipeline(
       thinkingBudget: 4096,
       budgetMs: 20000,
     });
-    draftAction = draft.actions.find((a) => a.type === "make_intent_plan") ?? draft.actions[0];
   } catch (err) {
     throw new IntentPlanPipelineError("draft", err);
   }
+  const draftAction = draft.actions.find((a) => a.type === "make_intent_plan") ?? draft.actions[0];
   if (!draftAction) {
-    throw new IntentPlanPipelineError("draft", new Error("model returned no intent plan action"));
+    throw new IntentPlanPipelineError("draft", new Error(describeEmptyDraft(draft)));
   }
 
   // ── Pass 2: Critique ──
@@ -110,6 +128,7 @@ export async function runIntentPlanPipeline(
       maxOutputTokens: 600,
       temperature: 0.3,
       thinkingBudget: 1024,
+      budgetMs: 12000,
     });
     critiqueText = critique.content.trim();
   } catch (err) {
@@ -141,6 +160,7 @@ export async function runIntentPlanPipeline(
       maxOutputTokens: 3000,
       temperature: 0.4,
       thinkingBudget: 4096,
+      budgetMs: 20000,
     });
     proposal = refine.actions.find((a) => a.type === "make_intent_plan") ?? draftAction;
     iterations = 3;

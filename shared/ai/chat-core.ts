@@ -226,6 +226,11 @@ function enrichActionSubject(action: ChatAction): ChatAction {
 
 // ── Provider invocation with tier fallback ───────────────────────────────────
 
+// Per-attempt wall-clock budget when the caller doesn't specify one. Generous
+// on purpose: it is a hang guard, not a latency target. Pipeline passes set
+// their own (tighter) budgetMs.
+const DEFAULT_BUDGET_MS = 45_000;
+
 async function invokeProvider(
   req: CallModelRequest,
   modelOverride: string,
@@ -234,6 +239,16 @@ async function invokeProvider(
 ): Promise<{ response: ChatResponse; chunks: number }> {
   const provider = getProvider(providerName);
   const tools = toolDefsForRequest(req);
+
+  // Per-attempt timeout. budgetMs is turned into an AbortController whose
+  // signal the providers forward to fetch / the Gemini SDK. Without this a
+  // provider call can hang indefinitely — budgetMs used to be inert config.
+  const budgetMs = req.budgetMs ?? DEFAULT_BUDGET_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`provider timeout after ${budgetMs}ms`)),
+    budgetMs
+  );
 
   const chatReq: ChatRequest = {
     model: modelOverride,
@@ -249,44 +264,49 @@ async function invokeProvider(
     temperature: req.temperature,
     maxOutputTokens: req.maxOutputTokens,
     thinkingBudget: req.thinkingBudget,
-    budgetMs: req.budgetMs,
+    budgetMs,
     grounding: req.grounding,
+    signal: controller.signal,
   };
 
-  if (!consumer) {
-    const response = await provider.chat(chatReq);
-    return { response, chunks: 0 };
-  }
-
-  // Stream consumer path — accumulate deltas + tool calls, then synthesize a
-  // ChatResponse compatible with the non-streaming branch.
-  let aggregatedText = "";
-  let aggregatedUsage: TokenUsage = {};
-  let aggregatedGrounding: object | undefined;
-  let finishReason: string | undefined;
-  const toolCalls: ToolCall[] = [];
-  let chunkCount = 0;
-  for await (const chunk of provider.stream(chatReq)) {
-    chunkCount += 1;
-    consumer(chunk);
-    if (chunk.type === "delta") aggregatedText += chunk.text;
-    else if (chunk.type === "tool_call") toolCalls.push(chunk.toolCall);
-    else if (chunk.type === "usage") aggregatedUsage = chunk.usage;
-    else if (chunk.type === "grounding") aggregatedGrounding = chunk.metadata;
-    else if (chunk.type === "done") finishReason = chunk.finishReason;
-    else if (chunk.type === "error") {
-      throw new Error(chunk.message);
+  try {
+    if (!consumer) {
+      const response = await provider.chat(chatReq);
+      return { response, chunks: 0 };
     }
+
+    // Stream consumer path — accumulate deltas + tool calls, then synthesize a
+    // ChatResponse compatible with the non-streaming branch.
+    let aggregatedText = "";
+    let aggregatedUsage: TokenUsage = {};
+    let aggregatedGrounding: object | undefined;
+    let finishReason: string | undefined;
+    const toolCalls: ToolCall[] = [];
+    let chunkCount = 0;
+    for await (const chunk of provider.stream(chatReq)) {
+      chunkCount += 1;
+      consumer(chunk);
+      if (chunk.type === "delta") aggregatedText += chunk.text;
+      else if (chunk.type === "tool_call") toolCalls.push(chunk.toolCall);
+      else if (chunk.type === "usage") aggregatedUsage = chunk.usage;
+      else if (chunk.type === "grounding") aggregatedGrounding = chunk.metadata;
+      else if (chunk.type === "done") finishReason = chunk.finishReason;
+      else if (chunk.type === "error") {
+        throw new Error(chunk.message);
+      }
+    }
+    const response: ChatResponse = {
+      content: aggregatedText.trim(),
+      toolCalls,
+      usage: aggregatedUsage,
+      modelUsed: modelOverride,
+      groundingMetadata: aggregatedGrounding,
+      finishReason,
+    };
+    return { response, chunks: chunkCount };
+  } finally {
+    clearTimeout(timer);
   }
-  const response: ChatResponse = {
-    content: aggregatedText.trim(),
-    toolCalls,
-    usage: aggregatedUsage,
-    modelUsed: modelOverride,
-    groundingMetadata: aggregatedGrounding,
-    finishReason,
-  };
-  return { response, chunks: chunkCount };
 }
 
 // ── Top-level entrypoint ─────────────────────────────────────────────────────
@@ -297,8 +317,9 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 
   // Preemptive tier downgrade: if Pro is near-limit and the intent isn't one
   // that absolutely requires Pro reasoning, route to Flash instead. Planning
-  // stays on Pro — its critique/refine passes degrade visibly when downgraded.
-  const PRO_REQUIRED: Intent[] = ["planning"];
+  // and intent-plan stay on Pro — their multi-pass draft/critique/refine
+  // pipelines produce schema-invalid output on the weaker Flash model.
+  const PRO_REQUIRED: Intent[] = ["planning", "intent_plan"];
   if (r.tier === "pro" && !PRO_REQUIRED.includes(req.intent) && nearLimit("pro")) {
     r = route(req.intent, "flash", req.providerOverride);
   }
@@ -395,8 +416,8 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 
   let result = parseResponse(req, response);
 
-  // Schema repair retry — single shot, on action/studio tool sets only.
-  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === undefined || req.toolSet === "studio")) {
+  // Schema repair retry — single shot, on action/studio/intent_plan tool sets.
+  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan")) {
     const feedback = result.validation_warnings.flatMap((w) =>
       formatZodIssuesForModel(w.tool, w.issues.map((i) => ({
         code: "custom",

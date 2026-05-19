@@ -155,6 +155,7 @@ function buildConfig(req: ChatRequest): Record<string, unknown> {
   if (typeof req.thinkingBudget === "number") {
     cfg.thinkingConfig = { thinkingBudget: req.thinkingBudget };
   }
+  if (req.signal) cfg.abortSignal = req.signal;
   return cfg;
 }
 

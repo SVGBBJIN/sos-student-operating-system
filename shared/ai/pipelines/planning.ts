@@ -88,6 +88,7 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
       maxOutputTokens: 600,
       temperature: 0.3,
       thinkingBudget: 1024,
+      budgetMs: 12000,
     });
     critiqueText = critique.content.trim();
   } catch (err) {
@@ -114,6 +115,7 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
       maxOutputTokens: 3000,
       temperature: 0.4,
       thinkingBudget: 4096,
+      budgetMs: 20000,
     });
     proposal = refine.actions.find((a) => a.type === "make_plan") ?? draftAction;
     iterations = 3;
