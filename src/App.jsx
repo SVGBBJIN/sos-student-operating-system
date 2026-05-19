@@ -244,7 +244,8 @@ function dbTaskToApp(row) {
     id: row.id, title: row.title, subject: row.subject || '',
     dueDate: row.due_date, estTime: row.est_time || 30,
     status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0,
-    completedAt: row.completed_at, createdAt: row.created_at
+    completedAt: row.completed_at, createdAt: row.created_at,
+    study_plan_id: row.study_plan_id || null,
   };
 }
 function appTaskToDb(t, userId) {
@@ -252,7 +253,8 @@ function appTaskToDb(t, userId) {
     id: t.id, user_id: userId, title: t.title, subject: t.subject || '',
     due_date: t.dueDate, est_time: t.estTime || 30,
     status: t.status || 'not_started', focus_minutes: t.focusMinutes || 0,
-    completed_at: t.completedAt || null, created_at: t.createdAt || new Date().toISOString()
+    completed_at: t.completedAt || null, created_at: t.createdAt || new Date().toISOString(),
+    study_plan_id: t.study_plan_id || null,
   };
 }
 // Delegate to shared shape helpers — single source of truth for event ↔ DB conversion.
@@ -283,7 +285,7 @@ function appNoteToDb(n, userId) {
 /* Full load from Supabase */
 async function loadAllFromSupabase(userId) {
   try {
-    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes, linksRes] = await Promise.all([
+    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes, linksRes, studyPlansRes] = await Promise.all([
       sb.from('tasks').select('*').eq('user_id', userId),
       sb.from('events').select('*').eq('user_id', userId),
       sb.from('notes').select('*').eq('user_id', userId),
@@ -291,7 +293,8 @@ async function loadAllFromSupabase(userId) {
       sb.from('recurring_blocks').select('*').eq('user_id', userId),
       sb.from('date_blocks').select('*').eq('user_id', userId),
       sb.from('profiles').select('*').eq('id', userId).single(),
-      sb.from('entity_links').select('*').eq('user_id', userId)
+      sb.from('entity_links').select('*').eq('user_id', userId),
+      sb.from('study_plans').select('id,title,created_at,applied_at,status,plan_json,total_tasks,review_cadence_days').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
     ]);
 
     const tasks = (tasksRes.data || []).map(dbTaskToApp);
@@ -318,8 +321,9 @@ async function loadAllFromSupabase(userId) {
       : { lat: 42.33, lon: -71.21 };
 
     const entityLinks = linksRes.error ? [] : (linksRes.data || []);
+    const studyPlans = studyPlansRes.error ? [] : (studyPlansRes.data || []);
 
-    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks };
+    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks, studyPlans };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -540,6 +544,20 @@ async function dbUpsertDateBlock(date, timeSlot, data, userId) {
   };
   const { error } = await sb.from('date_blocks').upsert(row, { onConflict: 'user_id,block_date,time_slot' });
   if (error) console.error('Date block upsert error:', error);
+}
+async function dbSaveStudyPlan(plan, userId) {
+  const title = (plan.summary || '').slice(0, 120) || 'Study Plan';
+  const { data, error } = await sb.from('study_plans').insert({
+    user_id: userId, title, applied_at: new Date().toISOString(), status: 'active',
+    plan_json: plan, total_tasks: (plan.milestone_tasks || []).length,
+    review_cadence_days: plan.review_cadence?.every_n_days || null,
+  }).select('id').single();
+  if (error) { console.error('study_plans insert error:', error); return null; }
+  return data?.id || null;
+}
+async function dbUpdateStudyPlan(planId, patch, userId) {
+  const { error } = await sb.from('study_plans').update(patch).eq('id', planId).eq('user_id', userId);
+  if (error) console.error('study_plans update error:', error);
 }
 
 /* ── Migrate localStorage → Supabase (first login) ── */
@@ -3179,19 +3197,40 @@ function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExportGoogl
   );
 }
 
-function IntentPlanCard({ data, onApply, onDismiss }) {
+function detectPlanConflicts(proposedBlocks, existingRecurring) {
+  const dayIdx = { Sunday:0, Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6 };
+  const toMins = hhmm => { const [h,m] = (hhmm||'00:00').split(':').map(Number); return h*60+m; };
+  const overlaps = (as, ae, bs, be) => as < be && bs < ae;
+  const conflicts = [];
+  for (const proposed of proposedBlocks) {
+    const propDays = new Set((proposed.days||[]).map(d => dayIdx[d]));
+    const ps = toMins(proposed.start), pe = toMins(proposed.end);
+    for (const existing of existingRecurring) {
+      const existDays = new Set((existing.days||[]).map(d => (typeof d === 'number' ? d : dayIdx[d])));
+      const es = toMins(existing.start), ee = toMins(existing.end);
+      if ([...propDays].some(d => existDays.has(d)) && overlaps(ps, pe, es, ee)) {
+        conflicts.push({ activity: proposed.activity, conflictsWith: existing.name, time: `${existing.start}–${existing.end}` });
+        break;
+      }
+    }
+  }
+  return conflicts;
+}
+
+function IntentPlanCard({ data, onApply, onApplyWithoutConflicts, onDismiss, conflicts = [] }) {
   const blocks = data.recurring_blocks || [];
   const tasks = data.milestone_tasks || [];
   const reviewBlock = data.review_cadence?.review_block;
   const totalBlocks = blocks.length + (reviewBlock ? 1 : 0);
   const dayMap = { Monday:'M', Tuesday:'Tu', Wednesday:'W', Thursday:'Th', Friday:'F', Saturday:'Sa', Sunday:'Su' };
   const fmtDays = (days) => (days || []).map(d => dayMap[d] || d).join('/');
+  const conflictSet = new Set(conflicts.map(c => c.activity));
   return (
     <div style={{background:'rgba(108,99,255,0.06)', border:'1px solid rgba(108,99,255,0.18)', borderRadius:14, overflow:'hidden', marginBottom:8}}>
       <div style={{padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
         <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:6}}>
           <span style={{color:'var(--accent)', display:'flex'}}>{Icon.zap(14)}</span>
-          <span style={{fontWeight:700, fontSize:'0.88rem', color:'var(--text)'}}>Intent Plan</span>
+          <span style={{fontWeight:700, fontSize:'0.88rem', color:'var(--text)'}}>Study Plan</span>
           <span style={{fontSize:'0.72rem', color:'var(--text-dim)', marginLeft:'auto'}}>{totalBlocks} block{totalBlocks!==1?'s':''} · {tasks.length} task{tasks.length!==1?'s':''}</span>
         </div>
         {data.summary && <p style={{fontSize:'0.82rem', color:'var(--text-dim)', margin:0, lineHeight:1.5}}>{data.summary}</p>}
@@ -3200,10 +3239,10 @@ function IntentPlanCard({ data, onApply, onDismiss }) {
         <div style={{padding:'8px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
           <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em'}}>Recurring Blocks</div>
           {blocks.map((b, i) => (
-            <div key={i} style={{display:'flex', gap:8, fontSize:'0.8rem', color:'var(--text)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.03)'}}>
-              <span style={{fontWeight:600, flex:1}}>{b.activity}</span>
+            <div key={i} style={{display:'flex', gap:8, fontSize:'0.8rem', color: conflictSet.has(b.activity) ? 'var(--orange)' : 'var(--text)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.03)'}}>
+              <span style={{fontWeight:600, flex:1}}>{b.activity}{conflictSet.has(b.activity) ? ' ⚠' : ''}</span>
               <span style={{color:'var(--text-dim)'}}>{fmtDays(b.days)}</span>
-              <span style={{color:'var(--teal)'}}>{b.start}–{b.end}</span>
+              <span style={{color: conflictSet.has(b.activity) ? 'var(--orange)' : 'var(--teal)'}}>{b.start}–{b.end}</span>
             </div>
           ))}
           {reviewBlock && (
@@ -3227,10 +3266,33 @@ function IntentPlanCard({ data, onApply, onDismiss }) {
           {tasks.length > 10 && <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2}}>+{tasks.length-10} more…</div>}
         </div>
       )}
-      <div style={{display:'flex', gap:8, padding:'10px 16px'}}>
-        <button onClick={() => onApply(data)} style={{flex:1, background:'rgba(43,203,186,0.15)', border:'1px solid rgba(43,203,186,0.3)', color:'var(--teal)', borderRadius:8, padding:'8px 0', fontSize:'0.82rem', fontWeight:700, cursor:'pointer'}}>
-          Apply Plan
-        </button>
+      {conflicts.length > 0 && (
+        <div style={{padding:'8px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)', background:'rgba(255,140,0,0.06)'}}>
+          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--orange)', marginBottom:4, textTransform:'uppercase', letterSpacing:'0.05em'}}>
+            {conflicts.length} scheduling conflict{conflicts.length!==1?'s':''} detected
+          </div>
+          {conflicts.map((c, i) => (
+            <div key={i} style={{fontSize:'0.78rem', color:'var(--text-dim)', padding:'2px 0'}}>
+              "{c.activity}" overlaps with "{c.conflictsWith}" ({c.time})
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{display:'flex', gap:8, padding:'10px 16px', flexWrap:'wrap'}}>
+        {conflicts.length === 0 ? (
+          <button onClick={() => onApply(data)} style={{flex:1, background:'rgba(43,203,186,0.15)', border:'1px solid rgba(43,203,186,0.3)', color:'var(--teal)', borderRadius:8, padding:'8px 0', fontSize:'0.82rem', fontWeight:700, cursor:'pointer'}}>
+            Apply Plan
+          </button>
+        ) : (
+          <>
+            <button onClick={() => onApply(data)} style={{flex:1, background:'rgba(43,203,186,0.12)', border:'1px solid rgba(43,203,186,0.25)', color:'var(--teal)', borderRadius:8, padding:'8px 0', fontSize:'0.82rem', fontWeight:600, cursor:'pointer'}}>
+              Apply Anyway
+            </button>
+            <button onClick={() => onApplyWithoutConflicts(data)} style={{flex:1, background:'rgba(43,203,186,0.18)', border:'1px solid rgba(43,203,186,0.4)', color:'var(--teal)', borderRadius:8, padding:'8px 0', fontSize:'0.82rem', fontWeight:700, cursor:'pointer'}}>
+              Skip Conflicts
+            </button>
+          </>
+        )}
         <button onClick={onDismiss} style={{padding:'8px 14px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'var(--text-dim)', borderRadius:8, fontSize:'0.82rem', cursor:'pointer'}}>
           Dismiss
         </button>
@@ -3239,7 +3301,110 @@ function IntentPlanCard({ data, onApply, onDismiss }) {
   );
 }
 
-function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyIntentPlan, onStartPlanTask, onExportGoogleDocs, googleConnected }) {
+function MyPlansPanel({ plans, tasks, onClose, onRevise, onArchive }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const activePlans = plans.filter(p => p.status === 'active');
+  const archivedPlans = plans.filter(p => p.status === 'archived');
+  const getPlanProgress = (plan) => {
+    const planTasks = tasks.filter(t => t.study_plan_id === plan.id);
+    const total = plan.total_tasks || planTasks.length;
+    const completed = planTasks.filter(t => t.completedAt).length;
+    return { total, completed };
+  };
+  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
+  const renderPlanCard = (plan) => {
+    const { total, completed } = getPlanProgress(plan);
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const isExpanded = expandedId === plan.id;
+    const planData = plan.plan_json || {};
+    return (
+      <div key={plan.id} style={{background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:10, marginBottom:8, overflow:'hidden'}}>
+        <div onClick={() => setExpandedId(isExpanded ? null : plan.id)} style={{padding:'10px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:10}}>
+          <div style={{flex:1, minWidth:0}}>
+            <div style={{fontWeight:600, fontSize:'0.85rem', color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{plan.title}</div>
+            <div style={{fontSize:'0.73rem', color:'var(--text-dim)', marginTop:2}}>Applied {fmtDate(plan.applied_at)} · {completed}/{total} tasks done</div>
+          </div>
+          <div style={{display:'flex', alignItems:'center', gap:8, flexShrink:0}}>
+            <div style={{fontSize:'0.75rem', fontWeight:700, color: pct === 100 ? 'var(--teal)' : 'var(--accent)'}}>{pct}%</div>
+            <span style={{color:'var(--text-dim)', fontSize:'0.75rem'}}>{isExpanded ? '▲' : '▼'}</span>
+          </div>
+        </div>
+        {total > 0 && (
+          <div style={{height:3, background:'rgba(255,255,255,0.06)', margin:'0 14px 0'}}>
+            <div style={{height:'100%', width:`${pct}%`, background: pct === 100 ? 'var(--teal)' : 'var(--accent)', borderRadius:2, transition:'width .3s ease'}}/>
+          </div>
+        )}
+        {isExpanded && (
+          <div style={{padding:'10px 14px', borderTop:'1px solid rgba(255,255,255,0.04)'}}>
+            {planData.summary && <p style={{fontSize:'0.8rem', color:'var(--text-dim)', margin:'0 0 8px', lineHeight:1.5}}>{planData.summary}</p>}
+            {(planData.recurring_blocks||[]).length > 0 && (
+              <div style={{marginBottom:8}}>
+                <div style={{fontSize:'0.7rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4}}>Blocks</div>
+                {(planData.recurring_blocks||[]).map((b,i) => (
+                  <div key={i} style={{fontSize:'0.78rem', color:'var(--text-dim)', padding:'1px 0'}}>{b.activity} — {(b.days||[]).join('/')} {b.start}–{b.end}</div>
+                ))}
+              </div>
+            )}
+            {(planData.milestone_tasks||[]).length > 0 && (
+              <div style={{marginBottom:8}}>
+                <div style={{fontSize:'0.7rem', fontWeight:700, color:'var(--teal)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4}}>Milestones</div>
+                {(planData.milestone_tasks||[]).slice(0,8).map((t,i) => {
+                  const done = tasks.find(task => task.study_plan_id === plan.id && task.title === t.task_name && task.completedAt);
+                  return (
+                    <div key={i} style={{fontSize:'0.78rem', color: done ? 'var(--teal)' : 'var(--text-dim)', padding:'1px 0', textDecoration: done ? 'line-through' : 'none'}}>{t.task_name} — {t.due_date}</div>
+                  );
+                })}
+                {(planData.milestone_tasks||[]).length > 8 && <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:2}}>+{(planData.milestone_tasks||[]).length-8} more…</div>}
+              </div>
+            )}
+            <div style={{display:'flex', gap:8, marginTop:8}}>
+              <button onClick={() => onRevise(plan.id)} style={{flex:1, background:'rgba(108,99,255,0.12)', border:'1px solid rgba(108,99,255,0.25)', color:'var(--accent)', borderRadius:7, padding:'6px 0', fontSize:'0.78rem', fontWeight:600, cursor:'pointer'}}>
+                Revise Plan
+              </button>
+              {plan.status === 'active' && (
+                <button onClick={() => onArchive(plan.id)} style={{padding:'6px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'var(--text-dim)', borderRadius:7, fontSize:'0.78rem', cursor:'pointer'}}>
+                  Archive
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div style={{position:'fixed', inset:0, zIndex:200, display:'flex', alignItems:'flex-start', justifyContent:'flex-end'}} onClick={e => { if(e.target === e.currentTarget) onClose(); }}>
+      <div style={{width:360, maxWidth:'95vw', height:'100vh', background:'var(--surface)', borderLeft:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', boxShadow:'-8px 0 32px rgba(0,0,0,0.4)'}}>
+        <div style={{padding:'16px 16px 12px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', gap:10}}>
+          <span style={{color:'var(--accent)', display:'flex'}}>{Icon.zap(16)}</span>
+          <span style={{fontWeight:700, fontSize:'0.95rem', color:'var(--text)', flex:1}}>My Study Plans</span>
+          <button onClick={onClose} style={{background:'none', border:'none', color:'var(--text-dim)', cursor:'pointer', padding:4}}>{Icon.x(16)}</button>
+        </div>
+        <div style={{flex:1, overflowY:'auto', padding:12}}>
+          {plans.length === 0 && (
+            <div style={{textAlign:'center', padding:'40px 20px', color:'var(--text-dim)', fontSize:'0.85rem'}}>
+              No study plans yet. Ask the AI to help you plan for a goal like "survive finals week" or "improve my GPA".
+            </div>
+          )}
+          {activePlans.length > 0 && (
+            <>
+              <div style={{fontSize:'0.7rem', fontWeight:700, color:'var(--teal)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:8}}>Active</div>
+              {activePlans.map(renderPlanCard)}
+            </>
+          )}
+          {archivedPlans.length > 0 && (
+            <>
+              <div style={{fontSize:'0.7rem', fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em', margin:'16px 0 8px'}}>Archived</div>
+              {archivedPlans.map(renderPlanCard)}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyIntentPlan, onApplyIntentPlanSkipConflicts, onStartPlanTask, onExportGoogleDocs, googleConnected, existingRecurring }) {
   switch (content.type) {
     case 'make_plan':
       return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
@@ -3254,8 +3419,10 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyInt
     // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
-    case 'make_intent_plan':
-      return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onDismiss={onDismiss} />;
+    case 'make_intent_plan': {
+      const conflicts = detectPlanConflicts(content.recurring_blocks || [], existingRecurring || []);
+      return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onApplyWithoutConflicts={onApplyIntentPlanSkipConflicts} onDismiss={onDismiss} conflicts={conflicts} />;
+    }
     default:
       return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
   }
@@ -4665,6 +4832,9 @@ function App() {
   const [blocks, setBlocks] = useState({ recurring: [], dates: {} });
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
+  const [studyPlans, setStudyPlans] = useState([]);
+  const [showMyPlans, setShowMyPlans] = useState(false);
+  const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
   const [weatherData, setWeatherData] = useState(null);
@@ -4961,6 +5131,7 @@ function App() {
       setDbMessageCount(data.messages.length); // P1.4
       setWeatherCoords(data.weatherCoords);
       setEntityLinks(data.entityLinks || []);
+      setStudyPlans(data.studyPlans || []);
     }
 
     // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
@@ -6253,6 +6424,55 @@ function App() {
           })();
           break;
         }
+        case 'revise_plan': {
+          const planId = String(action.plan_id || '').trim();
+          const instructions = String(action.instructions || '').trim();
+          if (!planId) {
+            setPendingClarification({ question: "Which plan should I revise? Open My Plans and click Revise on the one you want.", context_action: 'revise_plan', missing_fields: ['plan_id'] });
+            return;
+          }
+          if (!instructions) {
+            setPendingClarification({ question: "What changes should I make to the plan?", context_action: 'revise_plan', missing_fields: ['instructions'] });
+            return;
+          }
+          const existingPlan = studyPlans.find(p => p.id === planId);
+          if (!existingPlan) {
+            postAssistantNote(`I couldn't find that plan. Try opening My Plans and clicking Revise on the one you want to change.`);
+            break;
+          }
+          recordExecution('revise_plan', `"${existingPlan.title}" — ${instructions}`);
+          (async () => {
+            try {
+              const session2 = await sb.auth.getSession();
+              const token2 = session2?.data?.session?.access_token;
+              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, entityLinks, activeTimers });
+              const existingPlanSummary = JSON.stringify(existingPlan.plan_json, null, 2);
+              const intentData = await streamChat({
+                url: EDGE_FN_URL,
+                body: {
+                  mode: 'intent_plan',
+                  systemPrompt: promptPayload2.prompt,
+                  staticSystemPrompt: promptPayload2.stablePrompt,
+                  dynamicContext: promptPayload2.dynamicContext,
+                  messages: [{ role: 'user', content: `EXISTING PLAN:\n${existingPlanSummary}\n\nREVISION INSTRUCTIONS: ${instructions}\n\nProduce a revised version of this plan incorporating the instructions above.` }],
+                  maxTokens: 3000,
+                  workspaceContext: 'schedule',
+                },
+                token: token2 || SUPABASE_ANON_KEY,
+              });
+              const proposal = intentData?.actions?.[0];
+              if (proposal && proposal.type === 'make_intent_plan') {
+                postAssistantNote(`here's a revised plan — review it and hit Apply to replace the old version:`);
+                setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _revision_of_plan_id: planId }]);
+              } else {
+                postAssistantNote(`Couldn't revise the plan right now — try again or rephrase your instructions.`);
+              }
+            } catch (err) {
+              postAssistantNote(`Couldn't revise the plan — ${err?.message || 'try again in a moment'}.`);
+            }
+          })();
+          break;
+        }
         default: console.warn('Unknown action type:', action.type);
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
@@ -6349,11 +6569,17 @@ function App() {
     setToastMsg('Added ' + steps.length + ' tasks from plan');
   }
 
-  function handleApplyIntentPlan(idx, plan) {
+  async function handleApplyIntentPlan(idx, plan, skipConflicts = false) {
     const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
-    let taskCount = 0;
-    let blockCount = 0;
+    let taskCount = 0, blockCount = 0;
+    const createdTaskIds = [];
+
+    const conflictSet = skipConflicts
+      ? new Set(detectPlanConflicts(plan.recurring_blocks || [], blocks.recurring || []).map(c => c.activity))
+      : new Set();
+
     (plan.recurring_blocks || []).forEach(b => {
+      if (skipConflicts && conflictSet.has(b.activity)) return;
       executeAction({ type:'add_recurring_event', title:b.activity, event_type:'other', subject:b.category||'school', days:b.days, start_date:b.start_date, end_date:b.end_date });
       blockCount++;
     });
@@ -6363,12 +6589,48 @@ function App() {
       blockCount++;
     }
     (plan.milestone_tasks || []).forEach(t => {
-      executeAction({ type:'add_task', task_name:t.task_name, subject:t.subject||'', due_date:t.due_date, estimated_minutes:t.estimated_minutes||30 });
+      const taskId = uid();
+      const task = { id:taskId, title:t.task_name, subject:t.subject||'', dueDate:t.due_date, estTime:t.estimated_minutes||30, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+      setTasks(prev => [...prev, task]);
+      if (user) syncOp(() => dbUpsertTask(task, user.id));
+      createdTaskIds.push(taskId);
       taskCount++;
     });
+
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
-    pushUndoToast(`Undo: applied intent plan (${taskCount} tasks, ${blockCount} blocks)`, undoSnap);
+    pushUndoToast(`Undo: applied study plan (${taskCount} tasks, ${blockCount} blocks)`, undoSnap);
     setToastMsg(`Applied plan — added ${taskCount} tasks and ${blockCount} recurring blocks`);
+
+    if (user) {
+      const isRevision = !!plan._revision_of_plan_id;
+      if (isRevision) {
+        const patch = { plan_json: plan, applied_at: new Date().toISOString(), total_tasks: (plan.milestone_tasks||[]).length };
+        syncOp(() => dbUpdateStudyPlan(plan._revision_of_plan_id, patch, user.id));
+        setStudyPlans(prev => prev.map(p => p.id === plan._revision_of_plan_id ? { ...p, ...patch } : p));
+        if (createdTaskIds.length > 0) {
+          await sb.from('tasks').update({ study_plan_id: plan._revision_of_plan_id }).in('id', createdTaskIds).eq('user_id', user.id);
+        }
+      } else {
+        const planId = await dbSaveStudyPlan(plan, user.id);
+        if (planId) {
+          if (createdTaskIds.length > 0) {
+            await sb.from('tasks').update({ study_plan_id: planId }).in('id', createdTaskIds).eq('user_id', user.id);
+          }
+          const newPlan = {
+            id: planId, title: (plan.summary||'').slice(0,120)||'Study Plan',
+            created_at: new Date().toISOString(), applied_at: new Date().toISOString(),
+            status: 'active', plan_json: plan,
+            total_tasks: (plan.milestone_tasks||[]).length,
+            review_cadence_days: plan.review_cadence?.every_n_days || null,
+          };
+          setStudyPlans(prev => [newPlan, ...prev]);
+        }
+      }
+    }
+  }
+
+  function handleApplyIntentPlanSkipConflicts(idx, plan) {
+    return handleApplyIntentPlan(idx, plan, true);
   }
 
   function handleStartPlanTask(step) {
@@ -7067,6 +7329,18 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) trackEvent(user.id, 'message_sent'); // P4.2
 
     const msgContent = text?.trim() || '';
+
+    // Intercept revision instructions when the user just responded to a "Revise Plan" prompt
+    if (pendingRevisionPlanId && msgContent && !fromClarification) {
+      const capturedPlanId = pendingRevisionPlanId;
+      setPendingRevisionPlanId(null);
+      const userMsg = { role:'user', content:msgContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,userMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      setInput('');
+      if (user) dbInsertChatMsg('user', msgContent, user.id);
+      executeAction({ type:'revise_plan', plan_id: capturedPlanId, instructions: msgContent });
+      return;
+    }
 
     // Intercept vague plan requests and show template selector
     const isPlanRequest = /^(make|create|build|give)\s*(me\s*)?(a\s*)?(study\s*)?plan$/i.test(msgContent)
@@ -8235,6 +8509,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div className="sos-side-actions">
           <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
           <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowMyPlans(true); }} title="My Study Plans">{Icon.zap(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>My Plans{studyPlans.filter(p=>p.status==='active').length > 0 ? ` (${studyPlans.filter(p=>p.status==='active').length})` : ''}</span></button>}
           <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
           <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
@@ -8872,7 +9147,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         ))}
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onApplyIntentPlan={(plan)=>handleApplyIntentPlan(idx,plan)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()}/>
+            <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onApplyIntentPlan={(plan)=>handleApplyIntentPlan(idx,plan)} onApplyIntentPlanSkipConflicts={(plan)=>handleApplyIntentPlanSkipConflicts(idx,plan)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()} existingRecurring={blocks.recurring}/>
           </div>
         ))}
         {pendingLinkSuggestions.map((sug)=>(
@@ -9081,6 +9356,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         onRenameSavedChat={renameSavedChat}
       />}
       {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
+      {showMyPlans && user && <MyPlansPanel plans={studyPlans} tasks={tasks} onClose={()=>setShowMyPlans(false)} onRevise={(planId)=>{ const plan = studyPlans.find(p=>p.id===planId); setShowMyPlans(false); setPendingRevisionPlanId(planId); postAssistantNote(`What changes should I make to "${plan?.title||'your plan'}"? (e.g. "make the schedule lighter", "add 2 more study sessions per week")`); }} onArchive={(planId)=>{ syncOp(()=>dbUpdateStudyPlan(planId,{status:'archived'},user.id)); setStudyPlans(prev=>prev.map(p=>p.id===planId?{...p,status:'archived'}:p)); }}/>}
       {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}
