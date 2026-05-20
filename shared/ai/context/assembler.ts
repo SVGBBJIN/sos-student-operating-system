@@ -27,6 +27,10 @@ export interface AssembleOptions {
   behavioralSignals?: BehavioralSignals;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
+  // Pre-fetched retrieval results. When supplied, assembleContext skips its own
+  // retrieve() call — used by enrichDynamicContext to run retrieval in parallel
+  // with the behavioral-signals fetch.
+  retrieved?: RetrievedChunk[];
 }
 
 export interface AssembledContext {
@@ -49,8 +53,8 @@ export async function assembleContext(opts: AssembleOptions): Promise<AssembledC
     sections.push({ heading: "Facts", lines: opts.injectedFacts, pinned: true });
   }
 
-  let retrieved: RetrievedChunk[] = [];
-  if (opts.userId && opts.intentQuery && opts.intentQuery.trim().length > 0) {
+  let retrieved: RetrievedChunk[] = opts.retrieved ?? [];
+  if (!opts.retrieved && opts.userId && opts.intentQuery && opts.intentQuery.trim().length > 0) {
     try {
       retrieved = await retrieve({
         userId: opts.userId,

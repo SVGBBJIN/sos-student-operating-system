@@ -24,11 +24,11 @@ Build must pass before pushing. Run `npm run build` and `npm run typecheck`.
 src/App.jsx                       — Single 7800-line React component: state, chat, action execution
 src/lib/streamChat.js             — SSE consumer for the chat endpoint
 
-api/chat.ts                       — Vercel handler. SSE (default) or JSON.
+api/chat.ts                       — Vercel transport adapter over handleChatRequest. SSE (default) or JSON.
 api/proofread.ts                  — Vercel handler for the proofread surface.
 api/embed.ts                      — Vercel handler for batched embeddings.
 
-supabase/functions/sos-chat/      — Edge Function (Deno) mirror of api/chat.ts.
+supabase/functions/sos-chat/      — Edge Function (Deno) adapter over the same handleChatRequest.
 supabase/functions/sos-proofread/ — Edge Function mirror of api/proofread.ts.
 supabase/functions/sos-voice/     — Edge Function: Groq Whisper audio → text.
 supabase/functions/embed-batch/   — Server-side embedding upserter.
@@ -43,13 +43,15 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   schemas/                        — Zod schemas (actions, studio, plan, intent_plan, proofread, _helpers).
   schemas/versions.ts             — Schema version pins per surface (action_tools=v5-2026-05).
   schemas/intent_plan.ts          — MakeIntentPlanSchema + buildIntentPlanToolDefs + validateIntentPlan.
-  context/                        — assembleContext (injects ranked tasks + behavioral signals), compressor, ranker.
+  context/                        — assembleContext (ranked tasks + behavioral signals), enrich.ts, ranker.
+  context/enrich.ts               — enrichDynamicContext: parallel, best-effort, bounded context build.
   signals/behavioral.ts           — getBehavioralSignals, formatSignalsForContext (Supabase REST, hour-bucket cache).
-  rag/                            — embeddings, retrieve, cache.
-  pipelines/                      — planning.ts, proofread.ts, intent_plan.ts.
+  rag/                            — embeddings, retrieve (both abort-bounded).
+  pipelines/                      — planning.ts, proofread.ts, intent_plan.ts (each deadline-bounded).
   telemetry.ts                    — Token counter, cost estimator, request log.
-  resilience.ts                   — Retry, timeout, circuit breaker.
+  resilience.ts                   — Retry classification + circuit breaker.
   chat-core.ts                    — callModel(): the single entry point for inference.
+  chat-handler.ts                 — handleChatRequest(): transport-agnostic chat orchestrator.
   index.ts                        — Public exports.
 
 shared/scheduling/priority.ts     — computePriority, rankTasks, buildCalendarDensity (pure functions, no I/O).
@@ -65,7 +67,7 @@ scripts/eval-planning-fallback.mjs — Planning tier-downgrade fallback test.
 eval/fixtures/                    — conversations.json (fixtures) + sample-runs.jsonl (results).
 ```
 
-**Dual deployment**: `api/chat.ts` (Vercel/Node) and `supabase/functions/sos-chat/index.ts` (Deno) both import from `shared/ai/index.js`. Any AI logic change must work in both runtimes — use Web APIs only in `shared/`. Deno consumes the `.ts` sources through `supabase/functions/deno.json` (sloppy-imports + npm specifiers for `zod` and `@google/genai`). The Groq provider is a plain `fetch`-based REST client; no SDK dependency.
+**Dual deployment**: `api/chat.ts` (Vercel/Node) and `supabase/functions/sos-chat/index.ts` (Deno) are thin transport adapters — each normalizes its runtime's request, calls `handleChatRequest` from `shared/ai/chat-handler.ts`, and serializes the outcome. All mode dispatch, enrichment, budgeting and error shaping live in `chat-handler.ts` so the two runtimes cannot drift. Any AI logic change must work in both runtimes — use Web APIs only in `shared/`. Deno consumes the `.ts` sources through `supabase/functions/deno.json` (sloppy-imports + npm specifiers for `zod` and `@google/genai`). The Groq provider is a plain `fetch`-based REST client; no SDK dependency.
 
 ## Key patterns
 

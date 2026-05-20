@@ -221,13 +221,15 @@ export class GeminiProvider implements LlmProvider {
 
   async embed(req: EmbedRequest): Promise<EmbedResponse> {
     const dim = req.dim ?? 1536;
+    const config: Record<string, unknown> = {
+      taskType: req.taskType ?? "RETRIEVAL_DOCUMENT",
+      outputDimensionality: dim,
+    };
+    if (req.signal) config.abortSignal = req.signal;
     const res = await this.client.models.embedContent({
       model: EMBED_MODEL,
       contents: req.inputs,
-      config: {
-        taskType: req.taskType ?? "RETRIEVAL_DOCUMENT",
-        outputDimensionality: dim,
-      },
+      config,
     });
     const embeddings = (res as { embeddings?: Array<{ values: number[] }> }).embeddings ?? [];
     return {

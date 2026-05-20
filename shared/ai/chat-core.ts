@@ -226,28 +226,35 @@ function enrichActionSubject(action: ChatAction): ChatAction {
 
 // ── Provider invocation with tier fallback ───────────────────────────────────
 
-// Per-attempt wall-clock budget when the caller doesn't specify one. Generous
-// on purpose: it is a hang guard, not a latency target. Pipeline passes set
-// their own (tighter) budgetMs.
-const DEFAULT_BUDGET_MS = 45_000;
+// Default TOTAL wall-clock budget for a callModel invocation — covers the
+// primary attempt, the cross-provider fallback, and any schema-repair retry.
+// Kept safely under the platform function ceiling (vercel.json maxDuration=60).
+const DEFAULT_BUDGET_MS = 46_000;
+
+// A provider attempt needs at least this much runway left to be worth starting.
+const MIN_ATTEMPT_MS = 1_500;
 
 async function invokeProvider(
   req: CallModelRequest,
   modelOverride: string,
   providerName: ProviderName,
+  deadline: number,
   consumer?: (c: StreamChunk) => void
 ): Promise<{ response: ChatResponse; chunks: number }> {
   const provider = getProvider(providerName);
   const tools = toolDefsForRequest(req);
 
-  // Per-attempt timeout. budgetMs is turned into an AbortController whose
-  // signal the providers forward to fetch / the Gemini SDK. Without this a
-  // provider call can hang indefinitely — budgetMs used to be inert config.
-  const budgetMs = req.budgetMs ?? DEFAULT_BUDGET_MS;
+  // Per-attempt timeout derived from the shared call deadline. The primary
+  // attempt, the cross-provider fallback, and the repair retry all race the
+  // same wall clock, so the whole callModel can never exceed its budget.
+  const remaining = deadline - Date.now();
+  if (remaining < MIN_ATTEMPT_MS) {
+    throw new Error(`call budget exhausted — ${remaining}ms left`);
+  }
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(new Error(`provider timeout after ${budgetMs}ms`)),
-    budgetMs
+    () => controller.abort(new Error(`provider timeout after ${remaining}ms`)),
+    remaining
   );
 
   const chatReq: ChatRequest = {
@@ -264,7 +271,7 @@ async function invokeProvider(
     temperature: req.temperature,
     maxOutputTokens: req.maxOutputTokens,
     thinkingBudget: req.thinkingBudget,
-    budgetMs,
+    budgetMs: remaining,
     grounding: req.grounding,
     signal: controller.signal,
   };
@@ -313,6 +320,9 @@ async function invokeProvider(
 
 export async function callModel(req: CallModelRequest): Promise<CallModelResponse> {
   const startedAt = Date.now();
+  // One wall-clock deadline shared by every provider attempt and the repair
+  // retry — guarantees callModel returns within budgetMs of being called.
+  const deadline = startedAt + (req.budgetMs ?? DEFAULT_BUDGET_MS);
   let r = route(req.intent, req.tierOverride, req.providerOverride);
 
   // Preemptive tier downgrade: if Pro is near-limit and the intent isn't one
@@ -387,7 +397,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
       continue;
     }
     try {
-      const { response: res } = await invokeProvider(req, attempt.model, attempt.provider, req.onChunk);
+      const { response: res } = await invokeProvider(req, attempt.model, attempt.provider, deadline, req.onChunk);
       response = res;
       fallbackUsed = attempt.model !== r.model || attempt.provider !== r.provider;
       successfulProvider = attempt.provider;
@@ -431,7 +441,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     };
     try {
       attempts += 1;
-      const { response: retryRes } = await invokeProvider(retryReq, response.modelUsed, successfulProvider);
+      const { response: retryRes } = await invokeProvider(retryReq, response.modelUsed, successfulProvider, deadline);
       const retryParsed = parseResponse(retryReq, retryRes);
       if (retryParsed.actions.length > 0 || retryParsed.validation_warnings.length < result.validation_warnings.length) {
         result = retryParsed;

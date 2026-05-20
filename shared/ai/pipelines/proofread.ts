@@ -22,6 +22,12 @@ import type { Attachment, Message } from "../providers/types.js";
 
 const FLOW_ANALYSIS_WORD_THRESHOLD = 300;
 
+// Wall-clock budget for classify + parallel specialists. Stays under the
+// platform function ceiling (vercel.json maxDuration=60 for api/proofread.ts).
+const PROOFREAD_BUDGET_MS = 50_000;
+const CLASSIFY_CAP_MS = 16_000;
+const SPECIALIST_CAP_MS = 32_000;
+
 const NO_SOLUTIONS_DIRECTIVE =
   "Your goal is NEVER to give the answer directly. You proofread; you do not solve. " +
   "Point at where to look without supplying the correction. Preserve the student's voice. " +
@@ -92,7 +98,7 @@ export interface ProofreadOutput {
   results: SpecialistResult[];
 }
 
-async function runClassifier(input: ProofreadInput): Promise<Classification> {
+async function runClassifier(input: ProofreadInput, budgetMs: number): Promise<Classification> {
   const userBlocks: string[] = [];
   if (input.prompt && input.prompt.trim()) userBlocks.push(`Prompt the student was given:\n${input.prompt.trim()}`);
   if (input.text && input.text.trim()) userBlocks.push(`Student work:\n${input.text.trim()}`);
@@ -114,7 +120,7 @@ async function runClassifier(input: ProofreadInput): Promise<Classification> {
     maxOutputTokens: 1500,
     temperature: 0.2,
     thinkingBudget: 512,
-    budgetMs: 20000,
+    budgetMs,
   });
 
   try {
@@ -127,7 +133,7 @@ async function runClassifier(input: ProofreadInput): Promise<Classification> {
   }
 }
 
-async function runSpecialist(bucket: ProofreadBucket, content: string, promptText?: string): Promise<SpecialistResult> {
+async function runSpecialist(bucket: ProofreadBucket, content: string, promptText: string | undefined, budgetMs: number): Promise<SpecialistResult> {
   const wc = wordCount(content);
   const includeFlowNotes = bucket === "essay" && wc >= FLOW_ANALYSIS_WORD_THRESHOLD;
   const sys = specialistSystem(bucket, includeFlowNotes);
@@ -148,7 +154,7 @@ async function runSpecialist(bucket: ProofreadBucket, content: string, promptTex
     maxOutputTokens: 1500,
     temperature: 0.2,
     thinkingBudget: 1024,
-    budgetMs: 20000,
+    budgetMs,
   });
 
   try {
@@ -180,11 +186,13 @@ export async function runProofread(input: ProofreadInput): Promise<ProofreadOutp
   if (!input.text && !input.imageBase64) {
     throw new Error("runProofread: text or imageBase64 is required");
   }
-  const classification = await runClassifier(input);
+  const deadline = Date.now() + PROOFREAD_BUDGET_MS;
+  const classification = await runClassifier(input, Math.min(CLASSIFY_CAP_MS, deadline - Date.now()));
   const segments = "segments" in classification ? classification.segments : [classification.unified];
+  const specialistBudget = Math.min(SPECIALIST_CAP_MS, deadline - Date.now());
   const results = await Promise.all(
     segments.map((s) =>
-      runSpecialist(s.bucket, s.content, input.prompt).catch((err): SpecialistResult => ({
+      runSpecialist(s.bucket, s.content, input.prompt, specialistBudget).catch((err): SpecialistResult => ({
         bucket: s.bucket,
         content: s.content,
         summary: "",

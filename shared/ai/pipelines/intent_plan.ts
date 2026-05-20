@@ -69,10 +69,22 @@ function describeEmptyDraft(draft: CallModelResponse): string {
   return "model returned no intent plan action";
 }
 
+// Wall-clock budget for the whole 3-pass pipeline. Stays under the platform
+// function ceiling (vercel.json maxDuration=60) with headroom for the
+// pre-pipeline context enrichment and response serialization. Each pass is
+// capped; the degradable critique/refine passes are skipped outright when the
+// budget is nearly spent — the pipeline still ships the draft.
+const PIPELINE_BUDGET_MS = 50_000;
+const DRAFT_CAP_MS = 22_000;
+const CRITIQUE_CAP_MS = 10_000;
+const REFINE_CAP_MS = 22_000;
+const PASS_FLOOR_MS = 6_000;
+
 export async function runIntentPlanPipeline(
   input: IntentPlanInput
 ): Promise<IntentPlanOutput> {
   const { systemPrompt, staticSystemPrompt, dynamicContext, messages } = input;
+  const deadline = Date.now() + PIPELINE_BUDGET_MS;
 
   // ── Pass 1: Draft ──
   let draft: CallModelResponse;
@@ -89,7 +101,7 @@ export async function runIntentPlanPipeline(
       maxOutputTokens: 3000,
       temperature: 0.4,
       thinkingBudget: 4096,
-      budgetMs: 20000,
+      budgetMs: Math.min(DRAFT_CAP_MS, deadline - Date.now()),
     });
   } catch (err) {
     throw new IntentPlanPipelineError("draft", err);
@@ -113,61 +125,69 @@ export async function runIntentPlanPipeline(
   const draftSummary = `Goal plan summary: ${String(draftAction.summary ?? "")}\nBlocks: ${blocksArr}\nTasks: ${tasksArr}`;
 
   let critiqueText = "";
-  try {
-    const critique = await callModel({
-      intent: "intent_plan",
-      systemPrompt,
-      staticSystemPrompt: staticSystemPrompt ?? undefined,
-      dynamicContext: (dynamicContext ?? "") + CRITIQUE_HINT,
-      messages: [
-        ...messages,
-        { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
-        { role: "user", content: "Critique the draft plan above. Is it realistic and complete?" },
-      ],
-      toolSet: "none",
-      maxOutputTokens: 600,
-      temperature: 0.3,
-      thinkingBudget: 1024,
-      budgetMs: 12000,
-    });
-    critiqueText = critique.content.trim();
-  } catch (err) {
-    console.warn(
-      `[intent-plan-pipeline] critique pass failed (${err instanceof Error ? err.message : err}) — proceeding with draft`
-    );
+  if (deadline - Date.now() >= PASS_FLOOR_MS) {
+    try {
+      const critique = await callModel({
+        intent: "intent_plan",
+        systemPrompt,
+        staticSystemPrompt: staticSystemPrompt ?? undefined,
+        dynamicContext: (dynamicContext ?? "") + CRITIQUE_HINT,
+        messages: [
+          ...messages,
+          { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
+          { role: "user", content: "Critique the draft plan above. Is it realistic and complete?" },
+        ],
+        toolSet: "none",
+        maxOutputTokens: 600,
+        temperature: 0.3,
+        thinkingBudget: 1024,
+        budgetMs: Math.min(CRITIQUE_CAP_MS, deadline - Date.now()),
+      });
+      critiqueText = critique.content.trim();
+    } catch (err) {
+      console.warn(
+        `[intent-plan-pipeline] critique pass failed (${err instanceof Error ? err.message : err}) — proceeding with draft`
+      );
+    }
+  } else {
+    console.warn("[intent-plan-pipeline] skipping critique — pipeline budget nearly spent");
   }
 
   // ── Pass 3: Refine ──
   let proposal: ChatAction = draftAction;
   let iterations = critiqueText ? 2 : 1;
-  try {
-    const refine = await callModel({
-      intent: "intent_plan",
-      systemPrompt,
-      staticSystemPrompt: staticSystemPrompt ?? undefined,
-      dynamicContext: (dynamicContext ?? "") + REFINE_HINT,
-      messages: [
-        ...messages,
-        { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
-        {
-          role: "user",
-          content: `Critique:\n${critiqueText || "No major issues found."}\n\nNow produce the final, improved intent plan.`,
-        },
-      ],
-      toolSet: "intent_plan",
-      customTools: [],
-      toolChoice: "required",
-      maxOutputTokens: 3000,
-      temperature: 0.4,
-      thinkingBudget: 4096,
-      budgetMs: 20000,
-    });
-    proposal = refine.actions.find((a) => a.type === "make_intent_plan") ?? draftAction;
-    iterations = 3;
-  } catch (err) {
-    console.warn(
-      `[intent-plan-pipeline] refine pass failed (${err instanceof Error ? err.message : err}) — returning draft`
-    );
+  if (deadline - Date.now() >= PASS_FLOOR_MS) {
+    try {
+      const refine = await callModel({
+        intent: "intent_plan",
+        systemPrompt,
+        staticSystemPrompt: staticSystemPrompt ?? undefined,
+        dynamicContext: (dynamicContext ?? "") + REFINE_HINT,
+        messages: [
+          ...messages,
+          { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
+          {
+            role: "user",
+            content: `Critique:\n${critiqueText || "No major issues found."}\n\nNow produce the final, improved intent plan.`,
+          },
+        ],
+        toolSet: "intent_plan",
+        customTools: [],
+        toolChoice: "required",
+        maxOutputTokens: 3000,
+        temperature: 0.4,
+        thinkingBudget: 4096,
+        budgetMs: Math.min(REFINE_CAP_MS, deadline - Date.now()),
+      });
+      proposal = refine.actions.find((a) => a.type === "make_intent_plan") ?? draftAction;
+      iterations = 3;
+    } catch (err) {
+      console.warn(
+        `[intent-plan-pipeline] refine pass failed (${err instanceof Error ? err.message : err}) — returning draft`
+      );
+    }
+  } else {
+    console.warn("[intent-plan-pipeline] skipping refine — pipeline budget nearly spent");
   }
 
   return { proposal, critiqueText, iterations };

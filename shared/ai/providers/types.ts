@@ -82,6 +82,7 @@ export interface EmbedRequest {
     | "CLASSIFICATION"
     | "CLUSTERING";
   dim?: number;
+  signal?: AbortSignal;
 }
 
 export interface EmbedResponse {

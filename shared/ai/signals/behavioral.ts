@@ -23,6 +23,10 @@ const EMPTY: BehavioralSignals = {
 // In-process cache: key = "userId:hourBucket", value = signals + expiry.
 const cache = new Map<string, { signals: BehavioralSignals; expiresAt: number }>();
 
+// Wall-clock cap on the task_events fetch — this runs before every
+// schedule-aware chat turn, so a slow REST call must never stall the request.
+const BEHAVIORAL_BUDGET_MS = 3000;
+
 function hourBucket(): number {
   return Math.floor(Date.now() / 3_600_000);
 }
@@ -32,7 +36,7 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0
-    ? ((sorted[mid - 1] + sorted[mid]) / 2)
+    ? ((sorted[mid - 1]! + sorted[mid]!) / 2)
     : (sorted[mid] ?? 0);
 }
 
@@ -60,6 +64,11 @@ export async function getBehavioralSignals(
   const windowDays = opts?.windowDays ?? 30;
   const since = new Date(Date.now() - windowDays * 86_400_000).toISOString();
 
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`behavioral signals timeout after ${BEHAVIORAL_BUDGET_MS}ms`)),
+    BEHAVIORAL_BUDGET_MS
+  );
   try {
     const res = await fetch(
       `${supabaseUrl}/rest/v1/task_events?user_id=eq.${encodeURIComponent(userId)}&occurred_at=gte.${encodeURIComponent(since)}&select=event_type,occurred_at,from_status,to_status,metadata,task_id`,
@@ -69,6 +78,7 @@ export async function getBehavioralSignals(
           Authorization: `Bearer ${serviceKey}`,
           Accept: "application/json",
         },
+        signal: controller.signal,
       }
     );
 
@@ -135,7 +145,7 @@ export async function getBehavioralSignals(
     const postpone_rate_by_subject: Record<string, number> = {};
     for (const subj of Object.keys(postponeCountBySubject)) {
       const total = createCountBySubject[subj] ?? 1;
-      postpone_rate_by_subject[subj] = postponeCountBySubject[subj] / total;
+      postpone_rate_by_subject[subj] = postponeCountBySubject[subj]! / total;
     }
 
     // Completion time-of-day histogram
@@ -171,6 +181,8 @@ export async function getBehavioralSignals(
     return signals;
   } catch {
     return EMPTY;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
