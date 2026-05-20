@@ -36,7 +36,10 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Projects tree (folders + notes) | `src/components/ProjectsTree.jsx` |
 | Lofi right panel (widgets) | `src/components/LofiRightPanel.jsx` |
 | Lofi top bar | `src/components/StudyTopBar.jsx` |
-| Calendar window (events + block bands) | `src/components/CalendarWindow/CalendarWindow.jsx` |
+| Calendar window (events + block bands; Week/Month/Year views) | `src/components/CalendarWindow/CalendarWindow.jsx` |
+| Library hub (Notes / Study Plans / Flashcards / Schedule / Proofread) | `src/pages/Library.jsx` |
+| Flashcard schema + persistence | `shared/ai/schemas/library.ts`, `flashcard_decks` table, `dbSaveFlashcardDeck()` in `App.jsx` |
+| Unified brand mark (S·bulb·S, inlined SVG) | `src/components/BrandMark.jsx` — used by `DynamicTopBar` + `Landing` |
 | Settings UI (all toggles) | `src/App.jsx` activePanel `'settings'` block |
 | Home screen (opt-in) | `src/components/HomeScreen.jsx` |
 | Wikilink autocomplete + popover | `src/components/WikilinkAutocomplete.jsx`, `src/lib/wikilinkSearch.js` |
@@ -88,7 +91,7 @@ Run the regression eval with `npm run eval:planning`.
 - `add_block` · `delete_block` — time blocks (recurring or date-specific). Render as translucent bands behind events in `CalendarWindow`.
 - `convert_event_to_block` · `convert_block_to_event`
 - `add_recurring_event`
-- `read_calendar` — read-only schedule lookup; single-day shows blocks + events + tasks, multi-day separates important events (test/exam/game) with urgency flags.
+- `read_calendar` — read-only schedule lookup; single-day shows blocks + events + tasks, multi-day separates important events (test/exam/game) with urgency flags. Defaults to a **one-week window** when no `end_date` is given; the schema description steers the model to set `end_date` to match a user-stated timeframe ("next month", "this week").
 - `view_schedule` — no-op; redirects AI away from `add_task` when user asks what's on calendar
 
 **Tasks**
@@ -109,6 +112,7 @@ Run the regression eval with `npm run eval:planning`.
 **Content generation** (only available when `isContentGen: true`)
 - `create_flashcards` · `create_quiz` · `create_outline` · `create_summary`
 - `create_study_plan` · `create_project_breakdown` · `make_plan`
+- A saved `create_flashcards` result is persisted to `flashcard_decks` (`source: 'ai'`) via `dbSaveFlashcardDeck()` and surfaces in the Library "Flashcards" view. Applied study/intent plans persist to `study_plans`.
 
 **Meta**
 - `ask_clarification` — always available; triggers `MultiFieldClarificationCard` (direct merge, no AI roundtrip) when `multi_field=true` + `known_fields` populated; falls back to legacy `ClarificationCard` (AI roundtrip) otherwise.
@@ -160,6 +164,8 @@ Field mapping for notes:
 ## Calendar + blocks
 
 `CalendarWindow` accepts `events` and `blocks={ recurring, dates }`. Events render as positioned cards using `start_time`/`end_time` (or `time` as a fallback). Blocks render as translucent striped bands behind events via `blockBandsForDate()` (CalendarWindow.jsx).
+
+`viewMode` supports `week`, `month`, and `year`. The Year view (`YearGrid`) is a 3×4 grid of mini-month cells with event-density dots; clicking a month switches `viewMode` to `month` at that month.
 
 Events table now has `start_time`, `end_time`, `description`, `location`, `priority` (migration `20260508_events_time_columns.sql`); shape converters live in `src/lib/eventShape.js`.
 
@@ -213,6 +219,8 @@ Persisted in `sos_home_*` localStorage keys; not in Supabase.
 | `layoutMode` | `'lofi'` (current default; sidebar/topbar branches dormant) |
 | `activePanel` | `'chat'|'settings'|'home'` |
 | `isLoading` | true while awaiting AI response |
+| `pipelineProgress` | latest `ProgressEvent` from a streaming planning/intent_plan pipeline; drives `PipelineProgressIndicator` |
+| `previewPlanEntry` | pass-1 draft plan shown as a "preview · refining…" card until the refined plan arrives |
 | `pendingQueue` | actions queued when RPM near limit |
 | `rpmSnapshot` | reactive RPM snapshot for UI |
 | `currentModel` | last model string reported by backend (note `fallback_used` flag in response) |
@@ -237,7 +245,7 @@ Client:  src/lib/supabase.js  →  sb
 CHAT_MAX_MESSAGES = 60
 ```
 
-**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`, `timers`, `task_events`.
+**Tables**: `profiles`, `tasks`, `events`, `recurring_blocks`, `date_blocks`, `notes`, `chat_messages`, `analytics_events`, `content_generations`, `entity_links`, `timers`, `task_events`, `memory_embeddings`, `study_plans`, `flashcard_decks`.
 
 **Active migrations**:
 - `20260507_entity_links.sql` — bidirectional link graph for backlinks/suggestions.
@@ -245,6 +253,8 @@ CHAT_MAX_MESSAGES = 60
 - `20260508_notes_hierarchy.sql` — adds `parent_id` (self-FK, cascade delete) and `is_folder` to `notes`.
 - `20260517_timers.sql` — `timers` table (`id`, `user_id`, `label`, `fire_at`, `fired`, `dismissed_at`); RLS owner-only policy; index on `(user_id, fire_at) where fired = false`.
 - `20260518_task_events.sql` — `task_events` table (`id`, `user_id`, `task_id|event_id` xor-check, `event_type` enum, `from_status`, `to_status`, `occurred_at`, `metadata` jsonb); RLS owner-only; `analytics_events` table; adds `completed_at`, `postpone_count`, `last_attempted_at` to `tasks`. **Must be applied to production before behavioral signals or priority engine have real data.**
+- `20260519_study_plans.sql` — `study_plans` table (`id`, `user_id`, `title`, `applied_at`, `status`, `plan_json` jsonb, `total_tasks`, `review_cadence_days`); RLS owner-only. Backs the Library "Study Plans" view.
+- `20260520_flashcard_decks.sql` — `flashcard_decks` table (`id`, `user_id`, `title`, `summary`, `cards` jsonb `[{q,a}]`, `source` `'ai'|'manual'`, `card_count`, `created_at`); `(user_id, created_at desc)` index; RLS owner-only. Backs the Library "Flashcards" view.
 
 **Field mapping (JS ↔ DB)**:
 - `dueDate` ↔ `due_date`, `estTime` ↔ `est_time`, `focusMinutes` ↔ `focus_minutes`, `completedAt` ↔ `completed_at`, `postponeCount` ↔ `postpone_count`, `lastAttemptedAt` ↔ `last_attempted_at`
@@ -283,5 +293,6 @@ Removed (tutor mode is gone): `sos_tutor_mode`, `sos_skill_hub_mode`, `sos_tutor
 - **Field name conflicts**: AI sees camelCase; Supabase gets snake_case. Conversion happens in load/save functions in App.jsx and in `src/lib/eventShape.js`.
 - **Layout guard**: realtime subscriptions use the shared `dbEventToApp` / `dbNoteToApp` so all event/note metadata flows through one place.
 - **Content generation**: set `isContentGen: true` in the chat payload to constrain available tools to `CONTENT_ACTION_TOOLS` and enforce rate limits via `content_generations` table.
-- **Streaming**: backend sends SSE `data: {...}` lines; client accumulates in `streamedText`; final `data: [DONE]` line carries `chatData` with actions/clarifications.
+- **Streaming**: backend emits named SSE frames — `delta` (token text), `tool_call`, `usage`, `progress`, `done` (final `chatData` with actions/clarifications), `error`. `src/lib/streamChat.js` consumes them and transparently falls back to JSON for non-streaming responses. The `progress` frame carries a `ProgressEvent` and drives the live pipeline stepper for `planning`/`intent_plan` modes.
+- **Pipeline progress**: `planning.ts` / `intent_plan.ts` accept an optional `onProgress` callback emitting a `ProgressEvent` (`{phase, label, step, totalSteps, draft?}`) per pass. `chat-handler.ts` wires it into the SSE `progress` frame. The frontend (`App.jsx`) renders `PipelineProgressIndicator` (4-step stepper + moving slider) and shows the `reviewing` event's `draft` as a "preview · refining…" `IntentPlanCard` that swaps for the refined plan on `done`.
 - **Wikilinks never auto-commit** — `LinkSuggestionCard` is approval-first, one tap to confirm or dismiss.

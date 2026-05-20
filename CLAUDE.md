@@ -40,8 +40,9 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   providers/index.ts              — Provider registry.
   voice.ts                        — Groq Whisper transcription helper.
   router.ts                       — Tier routing (embed / flash / pro). ONLY place model strings appear.
-  schemas/                        — Zod schemas (actions, studio, plan, intent_plan, proofread, _helpers).
-  schemas/versions.ts             — Schema version pins per surface (action_tools=v5-2026-05).
+  schemas/                        — Zod schemas (actions, studio, plan, intent_plan, proofread, library, _helpers).
+  schemas/versions.ts             — Schema version pins per surface (action_tools=v6-2026-05).
+  schemas/library.ts              — FlashcardDeckSchema + FlashcardSchema (persisted flashcard decks).
   schemas/intent_plan.ts          — MakeIntentPlanSchema + buildIntentPlanToolDefs + validateIntentPlan.
   context/                        — assembleContext (ranked tasks + behavioral signals), enrich.ts, ranker.
   context/enrich.ts               — enrichDynamicContext: parallel, best-effort, bounded context build.
@@ -59,6 +60,7 @@ shared/{env,auth,rate-limit,sse}.ts — Cross-runtime helpers.
 
 supabase/migrations/20260514_add_pgvector.sql — pgvector + memory_embeddings + match_memories RPC.
 supabase/migrations/20260518_task_events.sql  — task_events table + analytics_events + tasks columns (completed_at, postpone_count, last_attempted_at).
+supabase/migrations/20260520_flashcard_decks.sql — flashcard_decks table (AI-generated + manual decks) + owner RLS.
 
 scripts/eval-harness.mjs          — Routing precision/recall + shadow eval.
 scripts/eval-cost.mjs             — Per-tier cost projection.
@@ -84,15 +86,15 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 
 **callModel()** in `chat-core.ts` takes `{ intent, messages, ... }`, routes the intent through `router.ts`, dispatches to the provider, applies retry/circuit breaker, validates tool outputs against the Zod schemas, and (when streaming) yields chunks through `onChunk`.
 
-**Streaming**: `api/chat.ts` and `sos-chat` honor `Accept: text/event-stream` and emit `delta`/`tool_call`/`usage`/`done`/`error` SSE frames. The frontend uses `src/lib/streamChat.js` which transparently falls back to JSON for non-streaming responses (planning, studio).
+**Streaming**: `api/chat.ts` and `sos-chat` honor `Accept: text/event-stream` and emit `delta`/`tool_call`/`usage`/`progress`/`done`/`error` SSE frames. The frontend uses `src/lib/streamChat.js` which transparently falls back to JSON for non-streaming responses. The `progress` frame carries `ProgressEvent` (`{phase, label, step, totalSteps, draft?}`) — the planning/intent_plan pipelines stream it so the UI shows a live stepper + an early draft instead of a silent 30-50s wait.
 
 **Pending state** (`src/App.jsx`): unchanged from before. AI-response state lives in one `pending` object; `streamingMessage` holds the live delta text during streaming.
 
 **Clarification flow**: AI calls `ask_clarification` → `callModel` converts it to a `ClarificationCard` → frontend renders it → `handleClarificationSubmit` sends a follow-up message.
 
-**Planning pipeline** (`shared/ai/pipelines/planning.ts`): three-pass agentic pipeline on Pro tier with `thinkingBudget: 4096`. Critique and refine degrade gracefully — if either fails, the draft ships. Errors surface as `PlanningPipelineError` with `.stage`.
+**Planning pipeline** (`shared/ai/pipelines/planning.ts`): three-pass agentic pipeline on Pro tier with `thinkingBudget: 4096`. Critique and refine degrade gracefully — if either fails, the draft ships. Errors surface as `PlanningPipelineError` with `.stage`. Accepts an optional `onProgress` callback that emits a `ProgressEvent` per pass (`analyzing`/`drafting`/`reviewing`/`finalizing`); the `reviewing` event carries the pass-1 `draft` so the UI can show an early preview.
 
-**Intent-plan pipeline** (`shared/ai/pipelines/intent_plan.ts`): same 3-pass pattern as planning, but produces `make_intent_plan` — recurring blocks + milestone tasks + review cadence. Triggered when the user says something like "help me survive finals week". Mode `"intent_plan"` in `api/chat.ts` / `sos-chat`. Surfaces as `IntentPlanCard` in the chat; "Apply" batch-creates blocks and tasks in one undoable snapshot.
+**Intent-plan pipeline** (`shared/ai/pipelines/intent_plan.ts`): same 3-pass pattern as planning, but produces `make_intent_plan` — recurring blocks + milestone tasks + review cadence. Triggered when the user says something like "help me survive finals week". Mode `"intent_plan"` in `api/chat.ts` / `sos-chat`. Surfaces as `IntentPlanCard` in the chat; "Apply" batch-creates blocks and tasks in one undoable snapshot. Also supports `onProgress` — the `reviewing` event's `draft` renders as a "preview · refining…" `IntentPlanCard` (~15s) that swaps for the refined plan on `done`.
 
 **Priority engine** (`shared/scheduling/priority.ts`): pure-function, sync, no I/O. `computePriority(task, now, density, signals)` returns a score 0–1 from five weighted factors (urgency 35%, importance 25%, momentum 15%, deadline_density 15%, friction 10%). `rankTasks` runs it over a task list; `buildCalendarDensity` builds the density map from tasks + calendar blocks. Runs server-side inside `assembleContext` (top-3 snippet injected into AI context) and client-side for the `prioritize_tasks` action display.
 
