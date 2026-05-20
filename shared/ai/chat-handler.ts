@@ -13,7 +13,7 @@ import { aggregateRpmStatus, overLimit } from "./rpm-tracker.js";
 import { route, type Intent } from "./router.js";
 import { enrichDynamicContext } from "./context/enrich.js";
 import { transcribeAudio } from "./voice.js";
-import type { StreamChunk } from "./providers/types.js";
+import type { StreamChunk, ProgressEvent } from "./providers/types.js";
 import { getEnv } from "../env.js";
 import { checkContentRateLimit } from "../rate-limit.js";
 import type { TaskForScoring, CalendarDensity } from "../scheduling/priority.js";
@@ -108,62 +108,87 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
       }
     }
 
-    // ── Planning pipeline (non-streaming) ──
+    // ── Planning pipeline ──
     if (body.mode === "planning") {
+      const planningCtx = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
+      const buildPlanningJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
+        content: "",
+        actions: [result.proposal],
+        clarifications: [],
+        executed_actions: [],
+        orchestration: { mode: "planning", iterations: result.iterations, ...CLIENT_ORCH },
+        planning_critique: result.critiqueText,
+      });
+      if (wantsSSE) {
+        return {
+          kind: "stream",
+          run: async (onChunk) => {
+            const result = await runPlanningPipeline({
+              systemPrompt: body.systemPrompt ?? "",
+              staticSystemPrompt: body.staticSystemPrompt ?? null,
+              dynamicContext: planningCtx,
+              messages,
+              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
+            });
+            return buildPlanningJson(result);
+          },
+        };
+      }
       try {
         const result = await runPlanningPipeline({
           systemPrompt: body.systemPrompt ?? "",
           staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
+          dynamicContext: planningCtx,
           messages,
         });
-        return {
-          kind: "json",
-          status: 200,
-          json: {
-            content: "",
-            actions: [result.proposal],
-            clarifications: [],
-            executed_actions: [],
-            orchestration: { mode: "planning", iterations: result.iterations, ...CLIENT_ORCH },
-            planning_critique: result.critiqueText,
-          },
-        };
+        return { kind: "json", status: 200, json: buildPlanningJson(result) };
       } catch (err) {
         const e = err as PlanningPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
       }
     }
 
-    // ── Intent-plan pipeline (non-streaming) ──
+    // ── Intent-plan pipeline ──
     if (body.mode === "intent_plan") {
+      const intentCtx = await enrichDynamicContext({
+        userId,
+        workspaceContext,
+        intentQuery,
+        baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
+        clientTasks: body.clientTasks,
+        clientCalendarDensity: body.clientCalendarDensity,
+      });
+      const buildIntentJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
+        content: "",
+        actions: [result.proposal],
+        clarifications: [],
+        executed_actions: [],
+        orchestration: { mode: "intent_plan", iterations: result.iterations, ...CLIENT_ORCH },
+        intent_plan_critique: result.critiqueText,
+      });
+      if (wantsSSE) {
+        return {
+          kind: "stream",
+          run: async (onChunk) => {
+            const result = await runIntentPlanPipeline({
+              systemPrompt: body.systemPrompt ?? "",
+              staticSystemPrompt: body.staticSystemPrompt ?? null,
+              dynamicContext: intentCtx,
+              messages,
+              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
+            });
+            return buildIntentJson(result);
+          },
+        };
+      }
       try {
-        const dynamicContext = await enrichDynamicContext({
-          userId,
-          workspaceContext,
-          intentQuery,
-          baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
-          clientTasks: body.clientTasks,
-          clientCalendarDensity: body.clientCalendarDensity,
-        });
         const result = await runIntentPlanPipeline({
           systemPrompt: body.systemPrompt ?? "",
           staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext,
+          dynamicContext: intentCtx,
           messages,
         });
-        return {
-          kind: "json",
-          status: 200,
-          json: {
-            content: "",
-            actions: [result.proposal],
-            clarifications: [],
-            executed_actions: [],
-            orchestration: { mode: "intent_plan", iterations: result.iterations, ...CLIENT_ORCH },
-            intent_plan_critique: result.critiqueText,
-          },
-        };
+        return { kind: "json", status: 200, json: buildIntentJson(result) };
       } catch (err) {
         const e = err as IntentPlanPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };

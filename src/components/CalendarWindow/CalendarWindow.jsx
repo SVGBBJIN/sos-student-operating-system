@@ -256,6 +256,7 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
 
 /* ─── Month Grid ────────────────────────────────────────────────── */
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function MonthGrid({ monthDate, events, onDayClick }) {
   const today = toISODate(new Date());
@@ -318,6 +319,43 @@ function MonthGrid({ monthDate, events, onDayClick }) {
   );
 }
 
+/* ─── Year Grid ─────────────────────────────────────────────────── */
+function YearGrid({ year, events, onMonthClick }) {
+  const today = toISODate(new Date());
+  return (
+    <div className="cw-year-grid">
+      {Array.from({ length: 12 }, (_, mi) => {
+        const firstDay = new Date(year, mi, 1);
+        const startDow = firstDay.getDay(); // 0=Sun
+        const daysInMonth = new Date(year, mi + 1, 0).getDate();
+        const cells = Array.from({ length: startDow + daysInMonth }, (_, i) => i < startDow ? null : i - startDow + 1);
+        return (
+          <div key={mi} className="cw-year-month" onClick={() => onMonthClick(mi)}>
+            <div className="cw-year-month-title">{MONTH_NAMES_SHORT[mi]}</div>
+            <div className="cw-year-mini-grid">
+              {['S','M','T','W','T','F','S'].map((d, i) => (
+                <span key={i} className="cw-year-mini-hdr">{d}</span>
+              ))}
+              {cells.map((day, i) => {
+                if (!day) return <span key={i} />;
+                const dateStr = `${year}-${String(mi+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                const isToday = dateStr === today;
+                const dayEvents = events.filter(e => e.date === dateStr);
+                return (
+                  <span key={i} className={'cw-year-mini-day' + (isToday ? ' cw-year-mini-today' : '')}>
+                    {day}
+                    {dayEvents.length > 0 && <span className="cw-year-mini-dot" />}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── CalendarWindow ─────────────────────────────────────────────── */
 export default function CalendarWindow({
   defaultSize = 'fullscreen',
@@ -343,6 +381,7 @@ export default function CalendarWindow({
 
   const [viewMode, setViewMode] = useState('week');
   const [monthOffset, setMonthOffset] = useState(0);
+  const [yearOffset, setYearOffset] = useState(0);
 
   const monthDate = useMemo(() => {
     const d = new Date();
@@ -350,6 +389,9 @@ export default function CalendarWindow({
   }, [monthOffset]);
 
   const periodLabel = useMemo(() => {
+    if (viewMode === 'year') {
+      return String(new Date().getFullYear() + yearOffset);
+    }
     if (viewMode === 'month') {
       return `${MONTH_NAMES[monthDate.getMonth()]} ${monthDate.getFullYear()}`;
     }
@@ -361,7 +403,7 @@ export default function CalendarWindow({
     return m1 === m2
       ? `${m1} ${f.getDate()}–${l.getDate()}`
       : `${m1} ${f.getDate()} – ${m2} ${l.getDate()}`;
-  }, [viewMode, monthDate, weekDates]);
+  }, [viewMode, monthDate, weekDates, yearOffset]);
 
   function handleMonthDayClick(clickedDate) {
     const now = new Date();
@@ -375,6 +417,17 @@ export default function CalendarWindow({
     const offset = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
     setWeekOffset(offset);
     setViewMode('week');
+  }
+
+  function handleYearMonthClick(monthIndex) {
+    const now = new Date();
+    const targetYear = now.getFullYear() + yearOffset;
+    const targetMonth = monthIndex;
+    const nowMonth = now.getMonth();
+    const nowYear = now.getFullYear();
+    const offset = (targetYear - nowYear) * 12 + (targetMonth - nowMonth);
+    setMonthOffset(offset);
+    setViewMode('month');
   }
 
   useEffect(() => { setLocalEvents(events); }, [events]);
@@ -478,15 +531,21 @@ export default function CalendarWindow({
                   className={'cw-view-btn' + (viewMode === 'month' ? ' cw-view-btn-active' : '')}
                   onClick={() => setViewMode('month')}
                 >Month</button>
+                <button
+                  className={'cw-view-btn' + (viewMode === 'year' ? ' cw-view-btn-active' : '')}
+                  onClick={() => setViewMode('year')}
+                >Year</button>
               </div>
               <div className="cw-nav">
                 <button className="cw-nav-btn" onClick={() => {
-                  if (viewMode === 'month') setMonthOffset(o => o - 1);
+                  if (viewMode === 'year') setYearOffset(o => o - 1);
+                  else if (viewMode === 'month') setMonthOffset(o => o - 1);
                   else setWeekOffset(o => o - 1);
                 }}>‹</button>
-                <button className="cw-nav-btn" onClick={() => { setWeekOffset(0); setMonthOffset(0); }}>Today</button>
+                <button className="cw-nav-btn" onClick={() => { setWeekOffset(0); setMonthOffset(0); setYearOffset(0); }}>Today</button>
                 <button className="cw-nav-btn" onClick={() => {
-                  if (viewMode === 'month') setMonthOffset(o => o + 1);
+                  if (viewMode === 'year') setYearOffset(o => o + 1);
+                  else if (viewMode === 'month') setMonthOffset(o => o + 1);
                   else setWeekOffset(o => o + 1);
                 }}>›</button>
               </div>
@@ -500,6 +559,12 @@ export default function CalendarWindow({
             weekDates={weekDates}
             events={localEvents}
             onDayClick={() => setSize('half-left')}
+          />
+        ) : viewMode === 'year' ? (
+          <YearGrid
+            year={new Date().getFullYear() + yearOffset}
+            events={localEvents}
+            onMonthClick={handleYearMonthClick}
           />
         ) : viewMode === 'month' ? (
           <MonthGrid

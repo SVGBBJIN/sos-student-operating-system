@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import BrandMark from '../components/BrandMark.jsx';
 
 /* ─── Inline icon set (2px stroke, currentColor) ─────────────── */
 const Icon = ({ name, size = 18, sw = 1.75 }) => {
@@ -115,7 +116,7 @@ function StudioPanel({ scene, onHoverChange }) {
     >
       <div className="ld-p-topbar">
         <div className="ld-p-brand">
-          <img src="/brain-logo.svg" alt="" style={{ width: 18, height: 18 }} />
+          <BrandMark fontSize={16} />
           <span>S<span className="o">O</span>S</span>
           <span className="ld-p-pill">studio</span>
         </div>

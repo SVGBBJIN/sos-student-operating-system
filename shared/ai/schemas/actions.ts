@@ -189,6 +189,76 @@ export const RevisePlanSchema = z.object({
 });
 export type RevisePlanInput = z.infer<typeof RevisePlanSchema>;
 
+export const UpdateTaskSchema = z
+  .object({
+    type: z.literal("update_task").optional(),
+    task_id: z.string().uuid().optional(),
+    title: titleLikeString("title").optional(),
+    new_title: titleLikeString("new_title").optional(),
+    due: dateString.optional(),
+    estimated_minutes: z.number().int().min(1).max(480).optional(),
+  })
+  .refine(
+    (v) => Boolean(v.task_id || v.title),
+    { message: "Provide task_id or title to identify the task", path: ["title"] }
+  )
+  .refine(
+    (v) => Boolean(v.new_title || v.due || v.estimated_minutes !== undefined),
+    { message: "Provide at least one of new_title, due, or estimated_minutes", path: ["new_title"] }
+  );
+export type UpdateTaskInput = z.infer<typeof UpdateTaskSchema>;
+
+export const EditNoteSchema = z.object({
+  type: z.literal("edit_note").optional(),
+  note_id: z.string().min(1, "note_id is required"),
+  new_content: z.string().max(50000),
+});
+export type EditNoteInput = z.infer<typeof EditNoteSchema>;
+
+export const DeleteNoteSchema = z.object({
+  type: z.literal("delete_note").optional(),
+  note_id: z.string().min(1, "note_id is required"),
+});
+export type DeleteNoteInput = z.infer<typeof DeleteNoteSchema>;
+
+export const SubtaskSchema = z.object({
+  title: titleLikeString("title"),
+  due: dateString.optional(),
+  estimated_minutes: z.number().int().min(1).max(480).optional(),
+});
+
+export const BreakTaskSchema = z.object({
+  type: z.literal("break_task").optional(),
+  parent_title: titleLikeString("parent_title"),
+  subtasks: z.array(SubtaskSchema).min(2).max(10),
+});
+export type BreakTaskInput = z.infer<typeof BreakTaskSchema>;
+
+export const ConvertEventToBlockSchema = z.object({
+  type: z.literal("convert_event_to_block").optional(),
+  title: titleLikeString("title").optional(),
+  event_id: z.string().optional(),
+  date: dateString.optional(),
+  start: timeString.optional(),
+  end: timeString.optional(),
+  category: blockCategoryEnum.optional(),
+}).refine(
+  (v) => Boolean(v.title || v.event_id),
+  { message: "Provide title or event_id to identify the event", path: ["title"] }
+);
+export type ConvertEventToBlockInput = z.infer<typeof ConvertEventToBlockSchema>;
+
+export const ConvertBlockToEventSchema = z.object({
+  type: z.literal("convert_block_to_event").optional(),
+  date: dateString,
+  start: timeString,
+  end: timeString,
+  title: titleLikeString("title").optional(),
+  event_type: eventTypeEnum.optional(),
+  subject: optionalSubjectString,
+});
+export type ConvertBlockToEventInput = z.infer<typeof ConvertBlockToEventSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -208,6 +278,12 @@ export const ACTION_SCHEMAS = {
   prioritize_tasks: PrioritizeTasksSchema,
   plan_intent: PlanIntentSchema,
   revise_plan: RevisePlanSchema,
+  update_task: UpdateTaskSchema,
+  edit_note: EditNoteSchema,
+  delete_note: DeleteNoteSchema,
+  break_task: BreakTaskSchema,
+  convert_event_to_block: ConvertEventToBlockSchema,
+  convert_block_to_event: ConvertBlockToEventSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -227,13 +303,19 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
   ask_clarification: "Ask the student for ONE missing or ambiguous detail before running an action. Set context_action to the target tool name (e.g. 'add_event'), missing_fields to the exact field(s) you need, and known_fields to every value already extracted from the student's message (e.g. {title:'Chem test', date:'2026-05-20'}). This lets the frontend merge the answer without a second AI roundtrip. Use up to 6 short options when helpful; omit for free-form answers.",
-  read_calendar: "Read-only lookup of the schedule for the given date range. Never combine with mutating tools unless the student explicitly asked.",
+  read_calendar: "Read-only lookup of the schedule. Set end_date to match the timeframe the user stated (e.g. 'next month', 'this week', 'next 3 days'). If no timeframe is given, omit end_date — the client defaults to a one-week window. Never combine with mutating tools unless the student explicitly asked.",
   set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
   cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
   add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
   prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Only call this when the student explicitly asks what to do next, what matters most, or which task to prioritize. Never combine with mutating tools.",
   plan_intent: "Convert a student goal or intent into a structured multi-week plan with recurring blocks, milestone tasks, and a review cadence. Use for goals like 'survive finals week', 'improve Chinese speaking', or 'balance coding and school'. `horizon` must be one of: week, month, semester. If no deadline or subject is stated, omit those fields — do not guess.",
   revise_plan: "Revise an existing saved study plan by re-running the intent plan pipeline with the student's correction instructions. Requires plan_id (UUID of the saved plan) and instructions (what to change, e.g. 'make the plan lighter' or 'add 2 more study sessions per week'). Only call this when the student explicitly asks to revise, adjust, or change a saved plan.",
+  update_task: "Update an existing task's title, due date, or estimated time. Identify the task by task_id (UUID) or title (fuzzy match). Provide at least one of new_title, due, or estimated_minutes. If the task cannot be found, ask_clarification.",
+  edit_note: "Replace the full content of an existing note. note_id must be the exact UUID of the note. new_content replaces the current body entirely.",
+  delete_note: "Permanently delete a note by its UUID. Only call when the student explicitly asks to delete or remove a note.",
+  break_task: "Split a task into 2–10 smaller subtasks. parent_title is the original task's name (used as subject context). Each subtask must have a real title; due and estimated_minutes are optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
+  convert_event_to_block: "Convert a calendar event into a time block on the schedule. Identify the event by title or event_id. Optionally override date, start, end, and category; if omitted, the client infers from the event. NEVER guess start/end — call ask_clarification if the student didn't state them.",
+  convert_block_to_event: "Convert a time block into a calendar event. date, start, and end identify the block to remove. title, event_type, and subject are optional — the client falls back to the block's name if title is omitted.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {

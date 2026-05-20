@@ -47,6 +47,7 @@ serve(async (req: Request): Promise<Response> => {
           else if (chunk.type === "tool_call") writer.send({ event: "tool_call", data: chunk.toolCall });
           else if (chunk.type === "usage") writer.send({ event: "usage", data: chunk.usage });
           else if (chunk.type === "grounding") writer.send({ event: "grounding", data: chunk.metadata });
+          else if (chunk.type === "progress") writer.send({ event: "progress", data: chunk.event });
         });
         writer.send({ event: "done", data: done });
       } catch (err) {

@@ -64,12 +64,21 @@ export interface ChatResponse {
   finishReason?: string;
 }
 
+export interface ProgressEvent {
+  phase: "analyzing" | "drafting" | "reviewing" | "finalizing";
+  label: string;
+  step: number;
+  totalSteps: number;
+  draft?: Record<string, unknown>;
+}
+
 export type StreamChunk =
   | { type: "delta"; text: string }
   | { type: "thinking"; text: string }
   | { type: "tool_call"; toolCall: ToolCall }
   | { type: "usage"; usage: TokenUsage }
   | { type: "grounding"; metadata: object }
+  | { type: "progress"; event: ProgressEvent }
   | { type: "done"; finishReason?: string; usage?: TokenUsage }
   | { type: "error"; message: string; code?: string };
 

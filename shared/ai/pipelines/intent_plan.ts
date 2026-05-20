@@ -6,7 +6,7 @@
 // Uses Pro tier throughout; gracefully degrades if critique or refine fails.
 
 import { callModel, type ChatAction, type CallModelResponse } from "../chat-core.js";
-import type { Message } from "../providers/types.js";
+import type { Message, ProgressEvent } from "../providers/types.js";
 
 export class IntentPlanPipelineError extends Error {
   public override readonly name = "IntentPlanPipelineError";
@@ -43,6 +43,7 @@ export interface IntentPlanInput {
   staticSystemPrompt?: string | null;
   dynamicContext?: string | null;
   messages: Message[];
+  onProgress?: (ev: ProgressEvent) => void;
 }
 
 export interface IntentPlanOutput {
@@ -83,10 +84,13 @@ const PASS_FLOOR_MS = 6_000;
 export async function runIntentPlanPipeline(
   input: IntentPlanInput
 ): Promise<IntentPlanOutput> {
-  const { systemPrompt, staticSystemPrompt, dynamicContext, messages } = input;
+  const { systemPrompt, staticSystemPrompt, dynamicContext, messages, onProgress } = input;
   const deadline = Date.now() + PIPELINE_BUDGET_MS;
 
+  onProgress?.({ phase: "analyzing", label: "Analyzing your goal…", step: 1, totalSteps: 4 });
+
   // ── Pass 1: Draft ──
+  onProgress?.({ phase: "drafting", label: "Building your study plan…", step: 2, totalSteps: 4 });
   let draft: CallModelResponse;
   try {
     draft = await callModel({
@@ -110,6 +114,7 @@ export async function runIntentPlanPipeline(
   if (!draftAction) {
     throw new IntentPlanPipelineError("draft", new Error(describeEmptyDraft(draft)));
   }
+  onProgress?.({ phase: "reviewing", label: "Reviewing for gaps…", step: 3, totalSteps: 4, draft: draftAction as Record<string, unknown> });
 
   // ── Pass 2: Critique ──
   const blocksArr = Array.isArray(draftAction.recurring_blocks)
@@ -154,6 +159,7 @@ export async function runIntentPlanPipeline(
   }
 
   // ── Pass 3: Refine ──
+  onProgress?.({ phase: "finalizing", label: "Refining the final plan…", step: 4, totalSteps: 4 });
   let proposal: ChatAction = draftAction;
   let iterations = critiqueText ? 2 : 1;
   if (deadline - Date.now() >= PASS_FLOOR_MS) {

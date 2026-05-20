@@ -5,7 +5,7 @@
 // critique/refine failures still ship the draft.
 
 import { callModel, type ChatAction } from "../chat-core.js";
-import type { Message } from "../providers/types.js";
+import type { Message, ProgressEvent } from "../providers/types.js";
 
 export class PlanningPipelineError extends Error {
   public override readonly name = "PlanningPipelineError";
@@ -28,6 +28,7 @@ export interface PlanningPipelineInput {
   staticSystemPrompt?: string | null;
   dynamicContext?: string | null;
   messages: Message[];
+  onProgress?: (ev: ProgressEvent) => void;
 }
 
 export interface PlanningPipelineOutput {
@@ -47,10 +48,13 @@ const REFINE_CAP_MS = 22_000;
 const PASS_FLOOR_MS = 6_000;
 
 export async function runPlanningPipeline(input: PlanningPipelineInput): Promise<PlanningPipelineOutput> {
-  const { systemPrompt, staticSystemPrompt, dynamicContext, messages } = input;
+  const { systemPrompt, staticSystemPrompt, dynamicContext, messages, onProgress } = input;
   const deadline = Date.now() + PIPELINE_BUDGET_MS;
 
+  onProgress?.({ phase: "analyzing", label: "Analyzing your request…", step: 1, totalSteps: 4 });
+
   // ── Pass 1: Draft ──
+  onProgress?.({ phase: "drafting", label: "Drafting the plan…", step: 2, totalSteps: 4 });
   let draftAction: ChatAction | undefined;
   try {
     const draft = await callModel({
@@ -74,6 +78,7 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
   if (!draftAction) {
     throw new PlanningPipelineError("draft", new Error("model returned no plan action"));
   }
+  onProgress?.({ phase: "reviewing", label: "Reviewing for gaps…", step: 3, totalSteps: 4, draft: draftAction as Record<string, unknown> });
 
   // ── Pass 2: Critique ──
   const stepLines = Array.isArray(draftAction.steps)
@@ -111,6 +116,7 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
   }
 
   // ── Pass 3: Refine ──
+  onProgress?.({ phase: "finalizing", label: "Refining the final plan…", step: 4, totalSteps: 4 });
   let proposal: ChatAction = draftAction;
   let iterations = critiqueText ? 2 : 1;
   if (deadline - Date.now() >= PASS_FLOOR_MS) {
