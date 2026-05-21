@@ -11,7 +11,7 @@ create table if not exists study_packs (
   status           text not null default 'ready',   -- generating|ready|needs_review|mastered|archived
   source_kind      text not null default 'manual',  -- manual|import|event
   artifacts        jsonb not null default '[]',     -- [{kind:'flashcards'|'quiz'|'summary', data}]
-  linked_event_id  uuid references events(id) on delete set null,
+  linked_event_id  text references events(id) on delete set null,
   mastery          numeric,                          -- 0..1, null until first quiz attempt
   last_reviewed_at timestamptz,
   created_at       timestamptz not null default now(),
