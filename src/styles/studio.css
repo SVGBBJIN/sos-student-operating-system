@@ -872,3 +872,18 @@
   color: var(--accent) !important;
   border-color: var(--accent) !important;
 }
+
+/* ── Mobile layout ───────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .studio {
+    grid-template-columns: 1fr;
+    grid-template-rows: 48px 1fr;
+  }
+  .studio > .studio-sidebar-col { display: none; }
+  .studio > .studio-center-col  { grid-column: 1; }
+}
+
+@media (max-width: 500px) {
+  .studio .topbar { padding: 0 12px; }
+  .studio .sync-pill { display: none; }
+}

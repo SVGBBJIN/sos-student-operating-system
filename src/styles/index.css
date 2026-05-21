@@ -407,8 +407,6 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .split-workspace{inset:0;border-radius:0}
   .split-workspace-grid{grid-template-columns:1fr}
   .peek-panel.embedded{border-right:none;border-bottom:1px solid rgba(245,158,11,0.15)}
-  .sos-chat-shell{flex-direction:column}
-  .sos-chat-column{min-height:0}
   .sos-chat-companion{width:100%;min-width:0;min-height:42vh;border-left:none;border-top:1px solid rgba(245,158,11,0.15);transition:min-height .38s cubic-bezier(0.16,1,0.3,1),max-height .38s cubic-bezier(0.16,1,0.3,1)}
   .sos-chat-companion.collapsed{width:100%;min-width:0;min-height:56px;max-height:56px;padding-top:0;align-items:center;transition:min-height .38s cubic-bezier(0.16,1,0.3,1),max-height .38s cubic-bezier(0.16,1,0.3,1)}
   .cal-cell{min-height:55px}
@@ -420,11 +418,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   /* Main content fills all remaining vertical space */
   .sos-main{flex:1;min-height:0;overflow:hidden}
 }
-@media(max-width:519px){
+@media(max-width:520px){
   /* Hide topbar button labels so icons-only fit within narrow viewports */
   .g-hdr-btn span{display:none}
-}
-@media(max-width:500px){
   .sos-input-area{padding:6px 10px 10px}
   .sos-bubble{max-width:92%;font-size:0.88rem}
   .sos-chip{font-size:0.78rem;padding:5px 11px;min-height:44px;display:inline-flex;align-items:center}
@@ -447,8 +443,6 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .sos-header{padding:8px 10px;gap:6px}
   .topbar-actions{gap:6px !important}
   .topbar-actions .g-hdr-btn:not(.topbar-priority-btn){display:none}
-  /* Hide button text labels in topbar to save space, show icons only */
-  .g-hdr-btn span{display:none}
   .g-hdr-btn svg{display:block}
   .sos-input-area{padding:8px 8px 12px}
   .sos-input-row{gap:6px}
