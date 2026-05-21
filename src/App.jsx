@@ -8691,7 +8691,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
           : layoutMode === 'studio'
             ? {}
-            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
+            : { flexDirection: 'row' }
       }
     >
       {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
