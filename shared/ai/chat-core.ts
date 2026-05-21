@@ -30,6 +30,7 @@ import {
 } from "./schemas/actions.js";
 import { buildStudioToolDefs, validateStudio, type StudioToolName } from "./schemas/studio.js";
 import { buildIntentPlanToolDefs, validateIntentPlan } from "./schemas/intent_plan.js";
+import { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
 import { formatZodIssuesForModel, PLACEHOLDER_SUBJECT_STRINGS } from "./schemas/_helpers.js";
 import { SCHEMA_VERSIONS } from "./schemas/versions.js";
 import {
@@ -75,7 +76,7 @@ export interface CallModelRequest {
   dynamicContext?: string;
   messages: Message[];
   attachments?: Attachment[];
-  toolSet?: "action" | "studio" | "intent_plan" | "none" | "custom";
+  toolSet?: "action" | "studio" | "intent_plan" | "study_pack" | "none" | "custom";
   customTools?: ToolDef[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
@@ -129,6 +130,8 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
       return buildStudioToolDefs();
     case "intent_plan":
       return buildIntentPlanToolDefs();
+    case "study_pack":
+      return buildStudyPackToolDefs();
     case "custom":
       return req.customTools ?? [];
     case "none":
@@ -427,7 +430,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
   let result = parseResponse(req, response);
 
   // Schema repair retry — single shot, on action/studio/intent_plan tool sets.
-  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan")) {
+  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan" || req.toolSet === "study_pack")) {
     const feedback = result.validation_warnings.flatMap((w) =>
       formatZodIssuesForModel(w.tool, w.issues.map((i) => ({
         code: "custom",
@@ -492,6 +495,8 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 function schemaVersionForRequest(req: CallModelRequest): string {
   switch (req.toolSet) {
     case "studio": return SCHEMA_VERSIONS.studio_tools;
+    case "study_pack": return SCHEMA_VERSIONS.study_pack;
+    case "intent_plan": return SCHEMA_VERSIONS.intent_plan;
     case "action":
     case undefined:
       return SCHEMA_VERSIONS.action_tools;
@@ -553,18 +558,24 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
       continue;
     }
 
-    // Studio / intent_plan / action tools — pick the validator from the active tool set.
+    // Studio / intent_plan / study_pack / action tools — pick the validator
+    // from the active tool set. Content tool sets skip subject enrichment and
+    // clarification cards (they always force a single complete tool call).
     const isStudioTool = req.toolSet === "studio";
     const isIntentPlanTool = req.toolSet === "intent_plan";
-    const enriched = (isStudioTool || isIntentPlanTool) ? tc.args : preEnrichSubject(name, tc.args);
+    const isStudyPackTool = req.toolSet === "study_pack";
+    const isContentTool = isStudioTool || isIntentPlanTool || isStudyPackTool;
+    const enriched = isContentTool ? tc.args : preEnrichSubject(name, tc.args);
     const v = isStudioTool
       ? validateStudio(name, enriched)
       : isIntentPlanTool
         ? validateIntentPlan(enriched)
-        : validateAction(name as ActionName, enriched);
+        : isStudyPackTool
+          ? validateStudyPack(name, enriched)
+          : validateAction(name as ActionName, enriched);
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
-      if (!isStudioTool && !isIntentPlanTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
+      if (!isContentTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
       continue;
     }
     const actionType = (v.data as { type?: string }).type ?? name;

@@ -571,6 +571,25 @@ async function dbUpdateStudyPlan(planId, patch, userId) {
   const { error } = await sb.from('study_plans').update(patch).eq('id', planId).eq('user_id', userId);
   if (error) console.error('study_plans update error:', error);
 }
+async function dbSaveStudyPack(pack, userId, opts = {}) {
+  const artifacts = [
+    { kind: 'summary', data: { bullets: pack.summary || [], key_concepts: pack.key_concepts || [] } },
+    { kind: 'flashcards', data: pack.flashcards || [] },
+    { kind: 'quiz', data: pack.quiz || [] },
+  ];
+  const { data, error } = await sb.from('study_packs').insert({
+    user_id: userId,
+    title: (pack.title || 'Study Pack').slice(0, 200),
+    subject: pack.subject || null,
+    topic: pack.topic || null,
+    status: 'ready',
+    source_kind: opts.sourceKind || 'manual',
+    artifacts,
+    linked_event_id: opts.linkedEventId || null,
+  }).select('id').single();
+  if (error) { console.error('study_packs insert error:', error); return null; }
+  return data?.id || null;
+}
 
 /* ── Migrate localStorage → Supabase (first login) ── */
 async function migrateLocalStorage(userId) {
@@ -1068,7 +1087,8 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan','make_intent_plan'];
+const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan','make_intent_plan','make_study_pack'];
+const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 const INTENT_PLAN_REGEX = /\b(survive\s+finals|finals\s+week|help\s+me\s+(survive|balance|prepare|get\s+through)|improve\s+(my\s+)?(?:chinese|mandarin|spanish|french|korean|japanese|german|language|speaking|math|coding|programming)|build\s+a\s+routine|create\s+a\s+routine|set\s+up\s+(?:a\s+)?routine|balance\s+(?:my\s+)?(?:life|school|work|coding)|plan\s+(?:my\s+)?(?:week|month|semester)|semester\s+plan|weekly\s+(?:routine|schedule|plan))\b/i;
@@ -1092,6 +1112,10 @@ function isValidContentAction(action) {
       return Array.isArray(action.phases) && action.phases.length > 0 && action.phases.every(p => typeof p?.phase === 'string' && isStringArray(p?.tasks, 1));
     case 'make_plan':
       return typeof action.title === 'string' && Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.title === 'string');
+    case 'make_study_pack':
+      return typeof action.title === 'string'
+        && Array.isArray(action.flashcards) && action.flashcards.length > 0 && action.flashcards.every(c => typeof c?.q === 'string' && typeof c?.a === 'string')
+        && Array.isArray(action.quiz) && action.quiz.length > 0 && action.quiz.every(q => typeof q?.q === 'string' && isStringArray(q?.choices, 2) && typeof q?.answer === 'string');
     default:
       return false;
   }
@@ -2724,6 +2748,97 @@ function GenericContentDisplay({ data, icon, label, onSave, onDismiss, accentCol
   );
 }
 
+function StudyPackCard({ data, onDismiss }) {
+  const summary = data.summary || [];
+  const concepts = data.key_concepts || [];
+  const flashcards = data.flashcards || [];
+  const quiz = data.quiz || [];
+  const [tab, setTab] = useState('summary');
+  const [fcIdx, setFcIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [qIdx, setQIdx] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [revealed, setRevealed] = useState(false);
+  const [score, setScore] = useState(0);
+  const ac = 'var(--teal)';
+
+  const tabs = [
+    { id:'summary',    label:'Summary' },
+    { id:'flashcards', label:`Cards (${flashcards.length})` },
+    { id:'quiz',       label:`Quiz (${quiz.length})` },
+  ];
+  const q = quiz[qIdx];
+
+  return (
+    <div className="content-card" style={{borderLeftColor:ac}}>
+      <div className="content-card-header">
+        <div className="content-card-hdr-icon" style={{background:`color-mix(in srgb, ${ac} 10%, transparent)`,borderColor:`color-mix(in srgb, ${ac} 20%, transparent)`,color:ac}}>{Icon.bookOpen(16)}</div>
+        <div>
+          <div className="content-card-title">{data.title || 'Study Pack'}</div>
+          <div className="content-card-subject">{[data.subject, data.topic].filter(Boolean).join(' · ') || 'saved to your Library'}</div>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:4,padding:'0 14px 8px'}}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:'5px 8px',fontSize:'0.74rem',borderRadius:8,cursor:'pointer',border:`1px solid ${tab===t.id?ac:'transparent'}`,background:tab===t.id?`color-mix(in srgb, ${ac} 12%, transparent)`:'transparent',color:tab===t.id?ac:'var(--text-dim)'}}>{t.label}</button>
+        ))}
+      </div>
+      <div className="content-card-body">
+        {tab==='summary' && (
+          <div style={{fontSize:'0.85rem',lineHeight:1.6,maxHeight:220,overflowY:'auto'}}>
+            {summary.map((b,i)=>(<div key={i} style={{display:'flex',gap:8,padding:'3px 0'}}><span style={{width:5,height:5,borderRadius:'50%',background:ac,marginTop:7,flexShrink:0}}/>{b}</div>))}
+            {concepts.length>0 && (
+              <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:10}}>
+                {concepts.map((c,i)=>(<span key={i} style={{fontSize:'0.72rem',padding:'2px 8px',borderRadius:'var(--radius-full,999px)',background:`color-mix(in srgb, ${ac} 10%, transparent)`,border:`1px solid color-mix(in srgb, ${ac} 22%, transparent)`,color:ac}}>{c}</span>))}
+              </div>
+            )}
+          </div>
+        )}
+        {tab==='flashcards' && flashcards.length>0 && (
+          <>
+            <div className="fc-container" onClick={()=>setFlipped(f=>!f)}>
+              <div className={'fc-inner'+(flipped?' flipped':'')}>
+                <div className="fc-front"><div>{flashcards[fcIdx]?.q}</div></div>
+                <div className="fc-back"><div>{flashcards[fcIdx]?.a}</div></div>
+              </div>
+            </div>
+            <div className="fc-nav">
+              <button className="fc-nav-btn" onClick={(e)=>{e.stopPropagation();if(fcIdx>0){setFlipped(false);setFcIdx(i=>i-1);}}} disabled={fcIdx===0}>{Icon.chevronLeft(16)}</button>
+              <span className="fc-counter">{fcIdx+1} / {flashcards.length}</span>
+              <button className="fc-nav-btn" onClick={(e)=>{e.stopPropagation();if(fcIdx<flashcards.length-1){setFlipped(false);setFcIdx(i=>i+1);}}} disabled={fcIdx===flashcards.length-1}>{Icon.chevronRight(16)}</button>
+            </div>
+            <div className="fc-hint">tap card to flip</div>
+          </>
+        )}
+        {tab==='quiz' && q && (
+          <div>
+            <div className="quiz-question">{q.q}</div>
+            <div className="quiz-choices">
+              {(q.choices||[]).map((choice,i)=>{
+                let cls='quiz-choice';
+                if(revealed && choice===q.answer) cls+=' correct';
+                else if(revealed && choice===selected && choice!==q.answer) cls+=' wrong';
+                else if(!revealed && choice===selected) cls+=' selected';
+                return <button key={i} className={cls} onClick={()=>{if(!revealed)setSelected(choice);}}>{choice}</button>;
+              })}
+            </div>
+            {revealed && q.explanation && <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginTop:6}}>{q.explanation}</div>}
+            <div style={{display:'flex',gap:8,alignItems:'center',marginTop:8}}>
+              {!revealed && <button className="quiz-btn" disabled={!selected} onClick={()=>{setRevealed(true);if(selected===q.answer)setScore(s=>s+1);}}>Check Answer</button>}
+              {revealed && qIdx<quiz.length-1 && <button className="quiz-btn" onClick={()=>{setQIdx(i=>i+1);setSelected(null);setRevealed(false);}}>Next</button>}
+              <span style={{marginLeft:'auto',fontSize:'0.76rem',color:'var(--text-dim)'}}>{qIdx+1}/{quiz.length} · {score} correct</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="content-card-actions">
+        <button className="content-card-save" style={{background:`linear-gradient(135deg, ${ac}, color-mix(in srgb, ${ac} 70%, #000))`,boxShadow:`0 2px 12px color-mix(in srgb, ${ac} 25%, transparent)`}} onClick={()=>window.location.assign('/library')}>{Icon.bookOpen(14)} Open in Library</button>
+        <button className="content-card-dismiss" onClick={onDismiss}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Plan Templates ─── */
 const PLAN_TEMPLATES = [
   {
@@ -3435,6 +3550,8 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyInt
       const conflicts = detectPlanConflicts(content.recurring_blocks || [], existingRecurring || []);
       return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onApplyWithoutConflicts={onApplyIntentPlanSkipConflicts} onDismiss={onDismiss} conflicts={conflicts} />;
     }
+    case 'make_study_pack':
+      return <StudyPackCard data={content} onDismiss={onDismiss} />;
     default:
       return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
   }
@@ -5808,6 +5925,11 @@ function App() {
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
+          // Passive study generation: an exam/test/quiz auto-spawns a study pack
+          // linked to the event so material is ready before the deadline.
+          if (['test','exam','quiz'].includes(ev.type)) {
+            generateStudyPackInBackground({ subject: ev.subject, topic: ev.title, linkedEventId: ev.id, sourceKind: 'event' });
+          }
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -7104,12 +7226,40 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     generateDailyBrief();
   }, [DAILY_BRIEF_ENABLED, dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
 
+  // Background study-pack generation. Fires on file imports and on
+  // test/exam/quiz calendar events — no user request needed (passive study).
+  async function generateStudyPackInBackground({ subject, topic, sourceText, linkedEventId, sourceKind }) {
+    if (!user) return;
+    try {
+      setToastMsg(`Building a study pack for ${topic || subject || 'your material'}…`);
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const userMsg = sourceText
+        ? `Create a study pack${subject ? ' for ' + subject : ''}${topic ? ' on "' + topic + '"' : ''} from this material:\n\n${String(sourceText).slice(0, 12000)}`
+        : `Create a study pack${subject ? ' for ' + subject : ''}${topic ? ' on the topic "' + topic + '"' : ''}.`;
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        body: JSON.stringify({ mode: 'study_pack', messages: [{ role: 'user', content: userMsg }], maxTokens: 8000 }),
+      });
+      if (!res.ok) { console.error('study pack background gen failed:', res.status); return; }
+      const data = await res.json();
+      const proposal = data?.actions?.[0];
+      if (!proposal || proposal.type !== 'make_study_pack') return;
+      const packId = await dbSaveStudyPack(proposal, user.id, { linkedEventId: linkedEventId || null, sourceKind: sourceKind || 'manual' });
+      if (packId) setToastMsg(`Study pack ready: ${proposal.title} — open it in your Library 📚`);
+    } catch (e) {
+      console.error('study pack background gen error:', e);
+    }
+  }
+
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setShowGoogleModal(false);
     setToastMsg('Imported "' + title + '" to notes 📄');
+    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
   function handleImportPdf(title, text) {
@@ -7118,6 +7268,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     if (user) syncOp(() => dbUpsertNote(note, user.id));
     setShowGoogleModal(false);
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
+    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
   // ── Entity-link CRUD + wikilink sync ──
@@ -7487,8 +7638,9 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         || (statementSignals.test(msgContent) && (itemSignals.test(msgContent) || dateSignals.test(msgContent)))
       );
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
-      const isPlanningRequest = PLANNING_REGEX.test(text || '');
-      const isIntentPlanRequest = !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
+      const isStudyPackRequest = STUDY_PACK_REGEX.test(text || '');
+      const isPlanningRequest = !isStudyPackRequest && PLANNING_REGEX.test(text || '');
+      const isIntentPlanRequest = !isStudyPackRequest && !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
@@ -7532,7 +7684,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: groundedDynamic,
         messages: historyForApi,
-        maxTokens: (isPlanningRequest || isIntentPlanRequest) ? 3000 : 1024,
+        maxTokens: isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -7541,6 +7693,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         clientCalendarDensity: clientCalendarDensityPayload,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
         ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
+        ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -7642,6 +7795,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
           setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critiqueText }]);
+          return;
+        }
+      }
+
+      // ── Study-pack response: persist to Library, show interactive card ──
+      if (chatData?.orchestration?.mode === 'study_pack') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_study_pack') {
+          let packId = null;
+          if (user) packId = await dbSaveStudyPack(proposal, user.id, { sourceKind: 'manual' });
+          const cardCount = (proposal.flashcards || []).length;
+          const quizCount = (proposal.quiz || []).length;
+          const introMsg = { role: 'assistant', content: `here's your study pack for ${proposal.topic || proposal.title} — ${cardCount} flashcard${cardCount !== 1 ? 's' : ''}, a ${quizCount}-question quiz, and an exam summary. it's saved to your Library.`, timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _study_pack_id: packId }]);
           return;
         }
       }
@@ -8714,6 +8884,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
           {showPerfIndicatorTopbar && <PerfPill />}
           <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
+          <button onClick={()=>window.location.assign('/library')} className="g-hdr-btn" title="Library">{Icon.bookOpen(14)} <span>Library</span></button>
           <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
           <button onClick={()=>setActivePanel('proofread')} className="g-hdr-btn">{Icon.fileText(14)} <span>Proofread</span></button>
           <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>

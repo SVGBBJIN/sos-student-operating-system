@@ -101,7 +101,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan") && userId) {
+    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan" || body.mode === "study_pack") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
@@ -225,6 +225,25 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
         kind: "json",
         status: 200,
         json: { ...result, executed_actions: [], orchestration: { mode: "studio", ...CLIENT_ORCH } },
+      };
+    }
+
+    // ── Study pack (forced tool call, bundled content generation) ──
+    if (body.mode === "study_pack") {
+      const result = await callModel({
+        intent: "study_pack",
+        systemPrompt: body.systemPrompt ?? "",
+        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
+        dynamicContext,
+        messages,
+        toolSet: "study_pack",
+        toolChoice: "required",
+        maxOutputTokens: Math.min(Number(body.maxTokens) || 8192, 8192),
+      });
+      return {
+        kind: "json",
+        status: 200,
+        json: { ...result, executed_actions: [], orchestration: { mode: "study_pack", ...CLIENT_ORCH } },
       };
     }
 
