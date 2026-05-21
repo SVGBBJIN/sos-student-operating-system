@@ -28,6 +28,7 @@ const Icon = {
   trophy:(s=18)=>I(['M6 9H4.5a2.5 2.5 0 0 1 0-5H6','M18 9h1.5a2.5 2.5 0 0 0 0-5H18',{tag:'rect',x:'6',y:'2',width:'12',height:'10',rx:'2'},'M12 12v4','M8 20h8','M10 16h4'],s),
   thumbsUp:(s=18)=>I(['M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z','M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3'],s),
   bookOpen:(s=18)=>I(['M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z','M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z'],s),
+  home:(s=18)=>I(['M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z','M9 22V12h6v10'],s),
   alertTriangle:(s=18)=>I(['M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z','M12 9v4','M12 17h.01'],s),
   circleDot:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'},{tag:'circle',cx:'12',cy:'12',r:'3',fill:'currentColor'}],s),
   circle:(s=18)=>I([{tag:'circle',cx:'12',cy:'12',r:'10'}],s),

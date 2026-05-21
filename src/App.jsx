@@ -5063,7 +5063,7 @@ function App() {
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [layoutMode, setLayoutMode] = useState('studio');
+  const [layoutMode, setLayoutMode] = useState('sidebar');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -8691,7 +8691,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
           : layoutMode === 'studio'
             ? {}
-            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
+            : { flexDirection: 'row' }
       }
     >
       {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
@@ -8716,7 +8716,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
       </>}
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
-      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
+      {(layoutMode === 'sidebar' || layoutMode === 'topbar') && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
         <div className="sos-sidebar-head">
           <div className="sos-sidebar-head-left">
             <div className="sos-sidebar-brand">
@@ -8737,13 +8737,23 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             {Icon.panel(16)}
           </button>
         </div>
+
+        {/* Primary navigation */}
+        <div className="sos-side-nav">
+          <button className={'sos-side-btn'+(activePanel==='home'?' active':'')} onClick={()=>{ sfx.nav(); setActivePanel('home'); }} title="Home">{Icon.home(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Home</span></button>
+          <button className={'sos-side-btn'+(activePanel==='chat'?' active':'')} onClick={()=>{ sfx.nav(); setActivePanel('chat'); }} title="Chat">{Icon.messageCircle(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Chat</span></button>
+          <button className={'sos-side-btn'+(activePanel==='proofread'?' active':'')} onClick={()=>{ sfx.nav(); setActivePanel('proofread'); }} title="Proofread">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Proofread</span></button>
+          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); window.location.assign('/library'); }} title="Library">{Icon.bookOpen(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Library</span></button>
+        </div>
+
+        {/* Actions */}
         <div className="sos-side-actions">
           <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
+          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.edit(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
           {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowMyPlans(true); }} title="My Study Plans">{Icon.zap(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>My Plans{studyPlans.filter(p=>p.status==='active').length > 0 ? ` (${studyPlans.filter(p=>p.status==='active').length})` : ''}</span></button>}
           <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
         </div>
+
         <div className="sos-side-meta">
           <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
           <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
@@ -8777,37 +8787,16 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             </div>
           )}
         </div>
-        <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
-          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Topbar mode">{Icon.chevronLeft(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
+        <div style={{display:'flex',flexDirection:'column',gap:4,padding:'4px 2px 0'}}>
+          <button className={'sos-side-btn'+(activePanel==='settings'?' active':'')} onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
           {user ? (
-            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
+            <button className="sos-side-btn" onClick={handleLogout} style={{fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
           ) : (
-            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
+            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
           )}
         </div>
       </aside>}
 
-      {layoutMode === 'studio' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-          onNewChat={startNewChat}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-        />
-      )}
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
         blocks={blocks}
@@ -8843,53 +8832,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         : layoutMode === 'studio' ? 'studio-center-col studio-glass-card'
         : 'sos-main'
       }>
-      {layoutMode === 'lofi' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          onNewChat={startNewChat}
-          onImport={() => setShowGoogleModal(true)}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onSwitchLayout={() => setLayoutMode('sidebar')}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-        />
-      )}
-      {layoutMode === 'topbar' && <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <span className="sos-mark" style={{fontSize:20}}>
-              <span className="sos-mark-s">S</span>
-              <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-              <span className="sos-mark-s">S</span>
-            </span>
-          </div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
-        </div>
-        <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
-          {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
-          <button onClick={()=>window.location.assign('/library')} className="g-hdr-btn" title="Library">{Icon.bookOpen(14)} <span>Library</span></button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
-          <button onClick={()=>setActivePanel('proofread')} className="g-hdr-btn">{Icon.fileText(14)} <span>Proofread</span></button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
-        </div>
-      </div>}
 
       {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
         <PomodoroTimer
