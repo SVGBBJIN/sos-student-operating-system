@@ -18,7 +18,6 @@ import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import LofiRightPanel from './components/LofiRightPanel';
-import DynamicTopBar from './components/DynamicTopBar';
 import StudioSidebar from './components/StudioSidebar';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
@@ -34,7 +33,6 @@ import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.t
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
-import BacklinksList from './components/BacklinksList';
 import { useColumnLayout } from './hooks/useColumnLayout';
 import { ColumnResizeHandles, ColumnLockToggle } from './components/ColumnResizeHandles';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
@@ -3558,199 +3556,6 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyInt
 }
 
 /* ═══════════════════════════════════════════════
-   DAILY BRIEF CARD
-   ═══════════════════════════════════════════════ */
-function DailyBriefCard({ brief, onAction }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  if (!brief) return null;
-  const scheduleItems = (brief.schedule_items || []).filter(item => (item?.event_name || '').trim() || (item?.time || '').trim());
-  const isScheduleBlank = scheduleItems.length === 0;
-  const allClearMsg = 'all clear for now go have some fun';
-
-  return (
-    <div style={{
-      background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
-      border:'1px solid rgba(108,99,255,0.2)',
-      borderRadius:18,
-      padding:0,
-      maxWidth:480,
-      width:'100%',
-      maxHeight:'70vh',
-      overflowY:'auto',
-      overflowX:'hidden',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(108,99,255,0.08)',
-    }}>
-      {/* Header */}
-      <div style={{
-        background:'linear-gradient(135deg, rgba(108,99,255,0.15), rgba(43,203,186,0.1))',
-        padding:'16px 20px',
-        borderBottom:'1px solid rgba(108,99,255,0.1)',
-        display:'flex',
-        alignItems:'center',
-        gap:10
-      }}>
-        <div style={{
-          width:36, height:36, borderRadius:10,
-          background:'linear-gradient(135deg, var(--accent), var(--teal))',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 12px rgba(108,99,255,0.3)'
-        }}>
-          {Icon.calendar(18)}
-        </div>
-        <div>
-          <div style={{fontWeight:800, fontSize:'1rem', color:'var(--text)', letterSpacing:'-0.3px'}}>Daily Brief</div>
-          <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:1}}>
-            {new Date().toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })}
-          </div>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div style={{
-        padding:'14px 20px',
-        background:'rgba(108,99,255,0.04)',
-        borderBottom:'1px solid rgba(255,255,255,0.04)',
-        fontSize:'0.88rem',
-        color:'var(--text)',
-        lineHeight:1.5,
-        fontWeight:500
-      }}>
-        {isScheduleBlank ? allClearMsg : (brief.summary || allClearMsg)}
-      </div>
-
-      {/* Schedule Items */}
-      <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-        <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--accent)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Schedule</div>
-        {isScheduleBlank ? (
-          <div style={{fontSize:'0.84rem', color:'var(--text-dim)', lineHeight:1.5}}>{allClearMsg}</div>
-        ) : scheduleItems.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'center', gap:10,
-              padding:'6px 0',
-              borderBottom: i < scheduleItems.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none'
-            }}>
-              <span style={{
-                fontSize:'0.78rem', fontWeight:700, color:'var(--teal)',
-                minWidth:72, fontVariantNumeric:'tabular-nums'
-              }}>{item.time || '—'}</span>
-              <span style={{fontSize:'0.84rem', color:'var(--text)', flex:1}}>{item.event_name}</span>
-              {item.related_doc_id && (
-                <span style={{display:'flex', color:'var(--accent)', opacity:0.6}} title="Linked document">
-                  {Icon.fileText(13)}
-                </span>
-              )}
-            </div>
-          ))}
-      </div>
-
-      {/* Plan of Action */}
-      {brief.plan_of_action && brief.plan_of_action.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
-          <div style={{fontSize:'0.72rem', fontWeight:700, color:'var(--teal)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:8}}>Plan of Action</div>
-          {brief.plan_of_action.map((item, i) => (
-            <div key={i} style={{
-              display:'flex', alignItems:'flex-start', gap:8,
-              padding:'5px 0', fontSize:'0.84rem', color:'var(--text)', lineHeight:1.5
-            }}>
-              <span style={{
-                width:20, height:20, borderRadius:6, flexShrink:0, marginTop:1,
-                background:'rgba(43,203,186,0.1)',
-                border:'1px solid rgba(43,203,186,0.2)',
-                color:'var(--teal)',
-                display:'flex', alignItems:'center', justifyContent:'center',
-                fontSize:'0.7rem', fontWeight:700
-              }}>{i + 1}</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Quick Actions Dropdown */}
-      {brief.dropdown_options && brief.dropdown_options.length > 0 && (
-        <div style={{padding:'12px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', position:'relative'}}>
-          <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{
-            width:'100%',
-            background:'rgba(108,99,255,0.08)',
-            border:'1px solid rgba(108,99,255,0.2)',
-            borderRadius:10,
-            padding:'10px 14px',
-            color:'var(--accent)',
-            fontSize:'0.84rem',
-            fontWeight:600,
-            cursor:'pointer',
-            display:'flex',
-            alignItems:'center',
-            justifyContent:'space-between',
-            transition:'all .15s'
-          }}>
-            <span style={{display:'flex',alignItems:'center',gap:6}}>
-              {Icon.zap(14)} Quick Actions
-            </span>
-            <span style={{
-              display:'inline-flex',
-              transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition:'transform .2s'
-            }}>
-              {Icon.arrowRight(12)}
-            </span>
-          </button>
-          {dropdownOpen && (
-            <div style={{
-              marginTop:6,
-              borderRadius:10,
-              overflow:'hidden',
-              border:'1px solid rgba(108,99,255,0.15)',
-              background:'rgba(15,15,26,0.95)'
-            }}>
-              {brief.dropdown_options.map((opt, i) => (
-                <button key={i} onClick={() => { setDropdownOpen(false); onAction(opt); }}
-                  style={{
-                    width:'100%',
-                    background:'transparent',
-                    border:'none',
-                    borderBottom: i < brief.dropdown_options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                    padding:'10px 14px',
-                    color:'var(--text)',
-                    fontSize:'0.82rem',
-                    cursor:'pointer',
-                    textAlign:'left',
-                    transition:'background .15s',
-                    display:'flex',
-                    alignItems:'center',
-                    gap:8
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background='rgba(108,99,255,0.08)'}
-                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                  <span style={{color:'var(--accent)',display:'flex'}}>{Icon.sparkles(13)}</span>
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Encouragement Footer */}
-      {brief.encouragement && (
-        <div style={{
-          padding:'14px 20px',
-          background:'linear-gradient(135deg, rgba(43,203,186,0.06), rgba(108,99,255,0.04))',
-          fontSize:'0.84rem',
-          color:'var(--teal)',
-          fontWeight:600,
-          fontStyle:'italic',
-          textAlign:'center',
-          lineHeight:1.5
-        }}>
-          {brief.encouragement}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
 function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect, onConnect,
@@ -5062,7 +4867,6 @@ function App() {
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState('');
   const [layoutMode, setLayoutMode] = useState('studio');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
@@ -5205,11 +5009,6 @@ function App() {
   const ring2Ref = useRef(null);
   const ring3Ref = useRef(null);
   const ring4Ref = useRef(null);
-
-  // Daily Brief state
-  const DAILY_BRIEF_ENABLED = false;
-  const [dailyBrief, setDailyBrief] = useState(null);
-  const briefRequestedRef = useRef(false);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -7063,169 +6862,6 @@ function App() {
     return () => clearInterval(id);
   }, [calSyncEnabled, googleToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Daily Brief: Context Aggregator ──
-  async function getMorningContext() {
-    try {
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(startOfDay.getTime() + 86400000);
-      const localTodayEvents = events
-        .filter(ev => ev.date === today())
-        .slice(0, 25)
-        .map(ev => ({
-          id: ev.id,
-          title: ev.title,
-          time: 'Scheduled',
-          description: '',
-          attachments: []
-        }));
-
-      const docContents = {};
-      let calendarEvents = localTodayEvents;
-
-      if (!isGoogleConnected()) {
-        return { calendarEvents, docContents };
-      }
-
-      const params = new URLSearchParams({
-        timeMin: startOfDay.toISOString(),
-        timeMax: endOfDay.toISOString(),
-        singleEvents: 'true',
-        orderBy: 'startTime',
-        maxResults: '25'
-      });
-      const res = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events?' + params,
-        { headers: { 'Authorization': 'Bearer ' + googleToken } }
-      );
-      if (!res.ok) return { calendarEvents, docContents };
-      const data = await res.json();
-      const items = (data.items || []).filter(e => e.summary);
-
-      calendarEvents = items.map(e => ({
-        id: e.id,
-        title: e.summary,
-        time: e.start?.dateTime
-          ? new Date(e.start.dateTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
-          : 'All day',
-        description: e.description || '',
-        attachments: e.attachments || [],
-      }));
-
-      // Find Google Doc IDs in event descriptions and attachments
-      const docIds = new Set();
-      calendarEvents.forEach(ev => {
-        for (const m of (ev.description || '').matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)) docIds.add(m[1]);
-        (ev.attachments || []).forEach(att => {
-          if (att.fileUrl)
-            for (const m of att.fileUrl.matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)) docIds.add(m[1]);
-        });
-      });
-
-      // Fetch first 3000 chars of each linked Google Doc
-      await Promise.all([...docIds].map(async (docId) => {
-        try {
-          const docRes = await fetch(
-            'https://docs.googleapis.com/v1/documents/' + docId,
-            { headers: { 'Authorization': 'Bearer ' + googleToken } }
-          );
-          if (docRes.ok) {
-            const doc = await docRes.json();
-            const text = extractDocsText(doc);
-            docContents[docId] = text.slice(0, 3000);
-          }
-        } catch (_) {}
-      }));
-
-      return { calendarEvents, docContents };
-    } catch (e) {
-      console.error('getMorningContext error:', e);
-      return null;
-    }
-  }
-
-  // ── Daily Brief: Generator (single GPT-OSS API call) ──
-  async function generateDailyBrief() {
-    if (!DAILY_BRIEF_ENABLED) return;
-    if (briefRequestedRef.current) return;
-    briefRequestedRef.current = true;
-    setIsLoading(true);
-    try {
-      const context = await getMorningContext();
-      if (!context) { setIsLoading(false); return; }
-
-      const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
-      const activeTasks = tasks.filter(t => t.status !== 'done').slice(0, 10);
-
-      const briefPrompt = `You are SOS, a student's proactive daily planner. Based on the student's calendar and linked documents for today, generate a structured daily brief.
-
-TODAY: ${todayStr}
-
-CALENDAR EVENTS:
-${context.calendarEvents.map(e => '- ' + e.time + ': ' + e.title + (e.description ? ' | Notes: ' + e.description.slice(0, 200) : '')).join('\n') || '(no events today)'}
-
-LINKED DOCUMENT EXCERPTS:
-${Object.entries(context.docContents).map(([id, text]) => '[Doc ' + id + ']: ' + text.slice(0, 500) + '...').join('\n\n') || '(no linked docs)'}
-
-STUDENT'S TASKS:
-${activeTasks.map(t => '- ' + t.title + (t.subject ? ' [' + t.subject + ']' : '') + ' due ' + fmt(t.dueDate)).join('\n') || '(no active tasks)'}
-
-Respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
-{
-  "type": "DAILY_BRIEF",
-  "summary": "One sentence overview of the day",
-  "schedule_items": [{"time": "HH:MM AM/PM", "event_name": "...", "related_doc_id": "..." or null}],
-  "plan_of_action": ["Specific action item 1", "Specific action item 2", "...3-5 items total"],
-  "dropdown_options": ["Quick action label 1", "Quick action label 2", "...3-5 options total"],
-  "encouragement": "Short motivational sign-off"
-}
-
-Make plan_of_action items specific and reference actual events/tasks (e.g. "Review Chapter 4 before 2 PM Bio Lab").
-Make dropdown_options actionable quick-actions (e.g. "Generate Study Guide for Bio", "Reschedule Conflicts", "Break down project into subtasks").
-If there are no events, base the brief on the student's tasks and suggest a productive plan.`;
-
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const response = await fetch(EDGE_FN_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY)
-        },
-        body: JSON.stringify({
-          systemPrompt: briefPrompt,
-          messages: [{ role: 'user', content: 'Generate my daily brief for today.' }],
-          maxTokens: 2048,
-          tierOverride: MODEL_FAST,
-          isContentGen: false
-        })
-      });
-
-      if (!response.ok) { setIsLoading(false); return; }
-      const data = await response.json();
-      const raw = (data?.content || '').trim();
-
-      // Parse JSON from response (strip markdown fences if present)
-      const jsonStr = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/, '');
-      const brief = JSON.parse(jsonStr);
-      if (brief.type === 'DAILY_BRIEF') {
-        setDailyBrief(brief);
-      }
-    } catch (e) {
-      console.error('Daily brief generation failed:', e);
-    }
-    setIsLoading(false);
-  }
-
-  // ── Daily Brief: Auto-trigger on fresh session when the page opens ──
-  useEffect(() => {
-    if (!DAILY_BRIEF_ENABLED) return;
-    if (!dataLoaded || !googleToken) return;
-    if (messages.length > 0 || viewingSavedChatId) return;
-    if (!events || events.length === 0) return;
-    generateDailyBrief();
-  }, [DAILY_BRIEF_ENABLED, dataLoaded, googleToken, messages.length, viewingSavedChatId, events]);
-
   // Background study-pack generation. Fires on file imports and on
   // test/exam/quiz calendar events — no user request needed (passive study).
   async function generateStudyPackInBackground({ subject, topic, sourceText, linkedEventId, sourceKind }) {
@@ -7490,7 +7126,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
     const wasViewing = viewingSavedChatId === chatId;
     setSavedChats(prev => prev.filter(c => c.id !== chatId));
     if (user) syncOp(() => sb.from('notes').delete().eq('id', chatId).eq('user_id', user.id));
-    if (wasViewing) { setViewingSavedChatId(null); setMessages([]); setDailyBrief(null); briefRequestedRef.current = false; }
+    if (wasViewing) { setViewingSavedChatId(null); setMessages([]); }
     if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current);
     setSavedChatUndo({ chat, wasViewing });
     savedChatUndoTimerRef.current = setTimeout(() => setSavedChatUndo(null), 8000);
@@ -7702,8 +7338,7 @@ If there are no events, base the brief on the student's tasks and suggest a prod
 
       // Streaming chat path: SSE for the default chat mode, JSON for planning/studio
       // (server returns plain JSON for non-chat modes; streamChat detects content-type
-      // and falls back transparently). Token deltas hydrate setStreamingMessage so
-      // the chat bubble fills in live; the final payload arrives via the `done` frame.
+      // and falls back transparently). The final payload arrives via the `done` frame.
       let chatData;
       try {
         chatData = await streamChat({
@@ -7711,7 +7346,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           body: chatBody,
           token: token || SUPABASE_ANON_KEY,
           signal: abortSignal,
-          onDelta: (_, aggregated) => setStreamingMessage(aggregated),
           onProgress: (ev) => {
             setPipelineProgress(ev);
             if (ev.draft) {
@@ -7735,7 +7369,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
           setIsLoading(false);
-          setStreamingMessage('');
           return;
         }
         if (err?.status === 429 && err?.payload?.rateLimited) {
@@ -7745,15 +7378,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
           setContentGenUsed(err.payload.used || DAILY_CONTENT_LIMIT);
           setIsLoading(false);
-          setStreamingMessage('');
           return;
         }
-        setStreamingMessage('');
         setPipelineProgress(null);
         setPreviewPlanEntry(null);
         throw err;
       }
-      setStreamingMessage('');
       setPipelineProgress(null);
       setPreviewPlanEntry(null);
 
@@ -8793,18 +8423,8 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           syncStatus={syncStatus}
           theme={studioTheme}
           onTheme={setStudioTheme}
-          onNewChat={startNewChat}
           onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
           queueCount={pendingQueue ? pendingQueue.length : 0}
         />
       )}
@@ -8830,11 +8450,14 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
-            onHome={() => navigate('/')}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+            onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
+            tasks={tasks}
+            events={events}
+            notes={notes}
           />
         </div>
       )}
