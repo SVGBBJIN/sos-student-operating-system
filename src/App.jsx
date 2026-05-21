@@ -8423,9 +8423,7 @@ function App() {
           syncStatus={syncStatus}
           theme={studioTheme}
           onTheme={setStudioTheme}
-          onNewChat={startNewChat}
           onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
           onHome={() => navigate('/')}
           onChat={() => {
             setActivePanel('chat');
@@ -8434,7 +8432,6 @@ function App() {
             }
           }}
           onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
           queueCount={pendingQueue ? pendingQueue.length : 0}
         />
       )}
@@ -8460,9 +8457,7 @@ function App() {
             viewingSavedChatId={viewingSavedChatId}
             onPick={loadSavedChat}
             onNew={startNewChat}
-            onHome={() => navigate('/')}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
-            onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
           />

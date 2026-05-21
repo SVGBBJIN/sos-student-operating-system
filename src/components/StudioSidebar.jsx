@@ -22,16 +22,6 @@ function LogoutIcon() {
   );
 }
 
-function HomeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
-         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-         style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-      <polyline points="9 22 9 12 15 12 15 22"/>
-    </svg>
-  );
-}
 
 function isToday(dateVal) {
   if (!dateVal) return false;
@@ -72,8 +62,6 @@ export default function StudioSidebar({
   viewingSavedChatId,
   onPick,
   onNew,
-  onAuthAction,
-  onHome,
   onDelete,
   aiThinking = false,
   syncStatus,
@@ -101,15 +89,6 @@ export default function StudioSidebar({
           <span>New chat</span>
         </button>
       </div>
-
-      {onHome && (
-        <div className="sb-section" style={{ paddingTop: 0 }}>
-          <button className="sb-home" onClick={onHome} title="Back to home">
-            <HomeIcon />
-            <span>Home</span>
-          </button>
-        </div>
-      )}
 
       <div className="sb-list">
         {savedChats.length === 0 ? (
