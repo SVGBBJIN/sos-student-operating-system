@@ -8458,8 +8458,12 @@ function App() {
             onPick={loadSavedChat}
             onNew={startNewChat}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
+            onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
             syncStatus={syncStatus}
+            tasks={tasks}
+            events={events}
+            notes={notes}
           />
         </div>
       )}

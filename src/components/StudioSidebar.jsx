@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import DynamicIsland from './DynamicIsland';
+import ProjectsBar from './ProjectsBar';
 
 /* Inline SVG icons */
 function PlusIcon() {
@@ -21,7 +22,6 @@ function LogoutIcon() {
     </svg>
   );
 }
-
 
 function isToday(dateVal) {
   if (!dateVal) return false;
@@ -63,11 +63,16 @@ export default function StudioSidebar({
   onPick,
   onNew,
   onDelete,
+  onAuthAction,
   aiThinking = false,
   syncStatus,
   nextEvent,
   deadlineWarning,
+  tasks = [],
+  events = [],
+  notes = [],
 }) {
+  const [activeSubject, setActiveSubject] = useState(null);
   const today = savedChats.filter(c => isToday(c.savedAt));
   const earlier = savedChats.filter(c => !isToday(c.savedAt));
 
@@ -89,6 +94,14 @@ export default function StudioSidebar({
           <span>New chat</span>
         </button>
       </div>
+
+      <ProjectsBar
+        tasks={tasks}
+        events={events}
+        notes={notes}
+        activeSubject={activeSubject}
+        onSelectSubject={setActiveSubject}
+      />
 
       <div className="sb-list">
         {savedChats.length === 0 ? (
@@ -132,15 +145,17 @@ export default function StudioSidebar({
       <div className="sb-foot">
         <div className="sb-foot-avatar">{avatarLetter}</div>
         <div className="sb-foot-name">{displayName}</div>
-        <button
-          className="icon-btn"
-          style={{ width: 26, height: 26 }}
-          title={user ? 'Sign out' : 'Sign in'}
-          aria-label={user ? 'Sign out' : 'Sign in'}
-          onClick={onAuthAction}
-        >
-          <LogoutIcon />
-        </button>
+        {onAuthAction && (
+          <button
+            className="icon-btn"
+            style={{ width: 26, height: 26 }}
+            title={user ? 'Sign out' : 'Sign in'}
+            aria-label={user ? 'Sign out' : 'Sign in'}
+            onClick={onAuthAction}
+          >
+            <LogoutIcon />
+          </button>
+        )}
       </div>
     </>
   );
