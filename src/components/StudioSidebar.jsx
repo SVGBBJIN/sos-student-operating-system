@@ -23,6 +23,16 @@ function LogoutIcon() {
   );
 }
 
+function ProofreadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
+         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z"/>
+    </svg>
+  );
+}
+
 function isToday(dateVal) {
   if (!dateVal) return false;
   const d = new Date(dateVal);
@@ -64,6 +74,7 @@ export default function StudioSidebar({
   onNew,
   onDelete,
   onAuthAction,
+  onProofread,
   aiThinking = false,
   syncStatus,
   nextEvent,
@@ -93,6 +104,12 @@ export default function StudioSidebar({
           <PlusIcon />
           <span>New chat</span>
         </button>
+        {onProofread && (
+          <button className="sb-home" onClick={onProofread} title="Proofread">
+            <ProofreadIcon />
+            <span>Proofread</span>
+          </button>
+        )}
       </div>
 
       <ProjectsBar

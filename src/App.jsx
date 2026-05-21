@@ -8425,13 +8425,6 @@ function App() {
           onTheme={setStudioTheme}
           onSettings={() => setActivePanel('settings')}
           onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
           queueCount={pendingQueue ? pendingQueue.length : 0}
         />
       )}
@@ -8459,6 +8452,7 @@ function App() {
             onNew={startNewChat}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
+            onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
             tasks={tasks}

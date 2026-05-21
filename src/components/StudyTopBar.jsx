@@ -111,18 +111,6 @@ export default function StudyTopBar({
           </div>
         )}
 
-        {onChat && (
-          <button className="icon-btn" onClick={onChat} title="Chat" aria-label="Chat">
-            <Si name="message" size={15} />
-          </button>
-        )}
-
-        {onProofread && (
-          <button className="icon-btn" onClick={onProofread} title="Proofread" aria-label="Proofread">
-            <Si name="proofread" size={15} />
-          </button>
-        )}
-
         <button className="icon-btn" onClick={onSettings} title="Settings" aria-label="Settings">
           <Si name="settings" size={15} />
         </button>
