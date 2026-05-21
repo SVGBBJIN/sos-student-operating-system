@@ -5063,7 +5063,7 @@ function App() {
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [layoutMode, setLayoutMode] = useState('studio');
+  const [layoutMode, setLayoutMode] = useState('sidebar');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -8797,27 +8797,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         </div>
       </aside>}
 
-      {layoutMode === 'studio' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-          onNewChat={startNewChat}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-        />
-      )}
       {layoutMode === 'lofi' && <LofiLeftPanel
         events={events}
         blocks={blocks}
@@ -8853,29 +8832,6 @@ If there are no events, base the brief on the student's tasks and suggest a prod
         : layoutMode === 'studio' ? 'studio-center-col studio-glass-card'
         : 'sos-main'
       }>
-      {layoutMode === 'lofi' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          onNewChat={startNewChat}
-          onImport={() => setShowGoogleModal(true)}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onSwitchLayout={() => setLayoutMode('sidebar')}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-        />
-      )}
 
       {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
         <PomodoroTimer
