@@ -7,6 +7,7 @@
 // just yields the base context unchanged.
 
 import { getBehavioralSignals } from "../signals/behavioral.js";
+import { getStudySignals } from "../signals/study.js";
 import { retrieve, type RetrievedChunk } from "../rag/retrieve.js";
 import { assembleContext } from "./assembler.js";
 import type { TaskForScoring, CalendarDensity } from "../../scheduling/priority.js";
@@ -29,12 +30,13 @@ export async function enrichDynamicContext(opts: EnrichOptions): Promise<string>
   const tasks = opts.clientTasks.filter((t) => t.status !== "done").slice(0, 50);
 
   try {
-    const [signals, retrieved] = await Promise.all([
+    const [signals, retrieved, studySignals] = await Promise.all([
       getBehavioralSignals(opts.userId).catch(() => undefined),
       opts.intentQuery.trim().length > 0
         ? retrieve({ userId: opts.userId, query: opts.intentQuery, sources: opts.sources, k: 8 })
             .catch((): RetrievedChunk[] => [])
         : Promise.resolve<RetrievedChunk[]>([]),
+      getStudySignals(opts.userId).catch(() => undefined),
     ]);
 
     const assembled = await assembleContext({
@@ -42,6 +44,7 @@ export async function enrichDynamicContext(opts: EnrichOptions): Promise<string>
       workspaceContext: opts.workspaceContext,
       intentQuery: opts.intentQuery,
       behavioralSignals: signals,
+      studySignals,
       retrieved,
       clientTasks: tasks,
       clientCalendarDensity: opts.clientCalendarDensity,

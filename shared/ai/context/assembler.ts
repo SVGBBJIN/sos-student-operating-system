@@ -15,6 +15,8 @@ import { retrieve, type RetrievedChunk } from "../rag/retrieve.js";
 import { estimateTokens, trimToBudget } from "./ranker.js";
 import type { BehavioralSignals } from "../signals/behavioral.js";
 import { formatSignalsForContext } from "../signals/behavioral.js";
+import type { StudySignals } from "../signals/study.js";
+import { formatStudySignalsForContext } from "../signals/study.js";
 import { rankTasks, buildCalendarDensity, type TaskForScoring, type CalendarDensity } from "../../scheduling/priority.js";
 
 export interface AssembleOptions {
@@ -25,6 +27,7 @@ export interface AssembleOptions {
   budgetTokens?: number;
   sources?: string[];
   behavioralSignals?: BehavioralSignals;
+  studySignals?: StudySignals;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
   // Pre-fetched retrieval results. When supplied, assembleContext skips its own
@@ -99,6 +102,19 @@ export async function assembleContext(opts: AssembleOptions): Promise<AssembledC
     if (summary) {
       sections.push({
         heading: "Behavioral patterns",
+        lines: [summary],
+        pinned: true,
+      });
+    }
+  }
+
+  // Weak topics from study-pack quiz performance: a pinned hint so the
+  // assistant can gently suggest reviewing topics the student keeps missing.
+  if (opts.studySignals && opts.studySignals.weak_topics.length > 0) {
+    const summary = formatStudySignalsForContext(opts.studySignals);
+    if (summary) {
+      sections.push({
+        heading: "Topics needing review",
         lines: [summary],
         pinned: true,
       });

@@ -511,6 +511,7 @@ const PACK_STATUS_COLOR = {
 
 function StudyPacksContent({ user, events }) {
   const [packs,    setPacks]    = useState([]);
+  const [attempts, setAttempts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [tab,      setTab]      = useState('summary');
@@ -530,14 +531,21 @@ function StudyPacksContent({ user, events }) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .then(({ data }) => { if (data) setPacks(data); setLoading(false); });
+    sb.from('study_attempts')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('attempted_at', { ascending: true })
+      .then(({ data }) => { if (data) setAttempts(data); });
   }, [user]);
 
   const eventsById = {};
   (events || []).forEach(e => { eventsById[e.id] = e; });
 
   const sorted = [...packs].sort((a, b) => packUrgency(b, eventsById) - packUrgency(a, eventsById));
+  const needsReviewCount = packs.filter(p => p.status === 'needs_review').length;
   const pack = selected ? packs.find(p => p.id === selected) : null;
   const { summary, flashcards, quiz } = packArtifacts(pack);
+  const packAttempts = pack ? attempts.filter(a => a.study_pack_id === pack.id) : [];
 
   function openPack(id) {
     setSelected(id); setTab('summary');
@@ -563,10 +571,15 @@ function StudyPacksContent({ user, events }) {
     const patch = { mastery, status, last_reviewed_at: new Date().toISOString() };
     setPacks(prev => prev.map(p => p.id === packId ? { ...p, ...patch } : p));
     await sb.from('study_packs').update(patch).eq('id', packId).eq('user_id', user.id);
-    sb.from('analytics_events').insert({
-      user_id: user.id, event_type: 'study_quiz_completed',
-      metadata: { study_pack_id: packId, correct, total, mastery },
-    });
+    const p = packs.find(x => x.id === packId);
+    const { data } = await sb.from('study_attempts').insert({
+      user_id: user.id,
+      study_pack_id: packId,
+      topic: p?.topic || p?.title || null,
+      subject: p?.subject || null,
+      correct, total, mastery,
+    }).select('*').single();
+    if (data) setAttempts(prev => [...prev, data]);
   }
 
   const linkedEvent = pack?.linked_event_id ? eventsById[pack.linked_event_id] : null;
@@ -576,7 +589,7 @@ function StudyPacksContent({ user, events }) {
       {/* List */}
       <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--sidebar)', overflowY: 'auto' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Study Packs {packs.length > 0 && `· ${packs.length}`}
+          Study Packs {packs.length > 0 && `· ${packs.length}`}{needsReviewCount > 0 && ` · ${needsReviewCount} need review`}
         </div>
         {loading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>Loading…</div>}
         {!loading && packs.length === 0 && (
@@ -681,6 +694,11 @@ function StudyPacksContent({ user, events }) {
 
             {tab === 'quiz' && quiz.length > 0 && (
               <div style={{ maxWidth: 460 }}>
+                {packAttempts.length > 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12 }}>
+                    Past scores: {packAttempts.map(a => `${Math.round(Number(a.mastery) * 100)}%`).join(' → ')}
+                  </div>
+                )}
                 {qDone ? (
                   <div style={{ textAlign: 'center', padding: 20 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--primary)' }}>{qScore} / {quiz.length}</div>

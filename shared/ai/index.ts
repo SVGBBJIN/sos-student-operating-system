@@ -28,3 +28,5 @@ export { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.
 export type { MakeStudyPackInput } from "./schemas/study_pack.js";
 export type { BehavioralSignals } from "./signals/behavioral.js";
 export { getBehavioralSignals, formatSignalsForContext } from "./signals/behavioral.js";
+export type { StudySignals, WeakTopic } from "./signals/study.js";
+export { getStudySignals, formatStudySignalsForContext } from "./signals/study.js";
