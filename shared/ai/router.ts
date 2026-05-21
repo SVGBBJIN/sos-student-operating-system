@@ -25,6 +25,7 @@ export type Intent =
   | "studio"
   | "planning"
   | "intent_plan"
+  | "study_pack"
   | "proofread_classify"
   | "proofread_specialist"
   | "embed";
@@ -35,6 +36,7 @@ const TIER_BY_INTENT: Record<Intent, Tier> = {
   studio: "pro",
   planning: "pro",
   intent_plan: "pro",
+  study_pack: "pro",
   proofread_classify: "flash",
   proofread_specialist: "pro",
   embed: "embed",
