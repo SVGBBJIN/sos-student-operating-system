@@ -30,7 +30,8 @@ async function embedWithRetry(req: EmbedRequest): Promise<number[][]> {
       return await embedOnce(req);
     } catch (err) {
       attempt += 1;
-      if (attempt > MAX_RETRIES || !isRetryable(err)) throw err;
+      // An aborted request (budget exhausted) is terminal — never retry it.
+      if (req.signal?.aborted || attempt > MAX_RETRIES || !isRetryable(err)) throw err;
       await new Promise((r) => setTimeout(r, backoffMs(attempt)));
     }
   }
@@ -52,8 +53,8 @@ export async function embedBatch(texts: string[], taskType: EmbedRequest["taskTy
   return results.flat();
 }
 
-export async function embedQuery(text: string, dim = 1536): Promise<number[]> {
-  const [vec] = await embedWithRetry({ inputs: [text], taskType: "RETRIEVAL_QUERY", dim });
+export async function embedQuery(text: string, dim = 1536, signal?: AbortSignal): Promise<number[]> {
+  const [vec] = await embedWithRetry({ inputs: [text], taskType: "RETRIEVAL_QUERY", dim, signal });
   if (!vec) throw new Error("embedQuery: no vector returned");
   return vec;
 }

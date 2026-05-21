@@ -38,7 +38,7 @@ function parseSSEFrame(frame) {
   }
 }
 
-export async function streamChat({ url, body, token, signal, onDelta, onToolCall, onUsage, onGrounding } = {}) {
+export async function streamChat({ url, body, token, signal, onDelta, onToolCall, onUsage, onGrounding, onProgress } = {}) {
   if (!url) throw new Error('streamChat: url is required');
 
   const res = await fetch(url, {
@@ -99,6 +99,8 @@ export async function streamChat({ url, body, token, signal, onDelta, onToolCall
         onUsage && onUsage(data);
       } else if (event === 'grounding') {
         onGrounding && onGrounding(data);
+      } else if (event === 'progress') {
+        onProgress && onProgress(data);
       } else if (event === 'done') {
         final = data;
       } else if (event === 'error') {

@@ -27,9 +27,7 @@ export type Intent =
   | "intent_plan"
   | "proofread_classify"
   | "proofread_specialist"
-  | "embed"
-  | "summarize"
-  | "rerank";
+  | "embed";
 
 const TIER_BY_INTENT: Record<Intent, Tier> = {
   chat: "flash",
@@ -40,8 +38,6 @@ const TIER_BY_INTENT: Record<Intent, Tier> = {
   proofread_classify: "flash",
   proofread_specialist: "pro",
   embed: "embed",
-  summarize: "flash",
-  rerank: "flash",
 };
 
 const MODEL_BY_TIER: Record<Tier, string> = {
@@ -112,12 +108,4 @@ export function route(intent: Intent, tierOverride?: Tier, providerOverride?: Pr
     provider: providerOverride ?? cfg.provider[tier],
     fallbackProvider: providerOverride ? null : cfg.fallback[tier],
   };
-}
-
-export function modelForTier(tier: Tier): string {
-  return applyOverride().model[tier];
-}
-
-export function fallbackForTier(tier: Tier): string | null {
-  return applyOverride().fallbackModel[tier];
 }

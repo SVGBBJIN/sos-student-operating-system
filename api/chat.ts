@@ -1,33 +1,17 @@
-// Vercel serverless handler — chat surface.
+// Vercel serverless adapter — chat surface.
 //
-// Routing is driven by router.ts: chat/action_routing → Groq gpt-oss-20b, with
-// gemini-3-flash as cross-provider fallback. Voice transcription bypasses
-// callModel and goes directly to Groq Whisper via shared/ai/voice.ts.
+// Thin transport shim over shared/ai/chat-handler.ts. All routing, mode
+// dispatch, context enrichment and error shaping live in handleChatRequest so
+// this file and the Deno mirror (supabase/functions/sos-chat) cannot drift.
 //
-// Three response modes:
-//   - SSE (default; Accept: text/event-stream) — streams delta/tool_call/done frames.
-//   - JSON (Accept: application/json or no Accept) — returns the final aggregated
-//     payload for legacy clients.
-//
-// Routes:
-//   - mode === "voice"     → Groq Whisper transcription (returns JSON)
-//   - mode === "studio"    → STUDIO_TOOLS forced-call (gpt-oss-120b)
-//   - mode === "planning"  → 3-pass planning pipeline (non-streaming)
-//   - default              → chat with ACTION_TOOLS
+// Response modes:
+//   - SSE  (Accept: text/event-stream) — streams delta/tool_call/done frames.
+//   - JSON (otherwise) — returns the final aggregated payload.
 
-import { callModel, runPlanningPipeline, PlanningPipelineError, runIntentPlanPipeline, IntentPlanPipelineError, RpmExhaustedError, aggregateRpmStatus, overLimit, route, getBehavioralSignals, assembleContext } from "../shared/ai/index.js";
-import type { Intent } from "../shared/ai/index.js";
-import type { TaskForScoring, CalendarDensity } from "../shared/scheduling/priority.js";
-
-function overLimitForIntent(intent: Intent): boolean {
-  return overLimit(route(intent).tier);
-}
-import type { StreamChunk } from "../shared/ai/index.js";
-import { getEnv } from "../shared/env.js";
+import { handleChatRequest } from "../shared/ai/index.js";
+import type { ChatBody, StreamChunk } from "../shared/ai/index.js";
 import { extractUserId } from "../shared/auth.js";
-import { checkContentRateLimit } from "../shared/rate-limit.js";
 import { createSSEWriterForNode, type NodeResponseLike } from "../shared/sse.js";
-import { transcribeAudio } from "../shared/ai/voice.js";
 
 // Minimal request/response shapes — avoids the @vercel/node type dependency.
 interface VercelRequest {
@@ -58,23 +42,6 @@ function wantsSSE(req: VercelRequest): boolean {
   return /text\/event-stream/i.test(accept);
 }
 
-interface ChatBody {
-  mode?: string;
-  systemPrompt?: string;
-  staticSystemPrompt?: string;
-  dynamicContext?: string;
-  messages?: Array<{ role: string; content: string }>;
-  maxTokens?: number;
-  imageBase64?: string | null;
-  imageMimeType?: string | null;
-  audioBase64?: string;
-  audioMimeType?: string;
-  workspaceContext?: string;
-  prompt_version?: string;
-  clientTasks?: TaskForScoring[];
-  clientCalendarDensity?: CalendarDensity;
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   applyCors(res);
   if (req.method === "OPTIONS") {
@@ -86,234 +53,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Cold-start env sanity check. GROQ_API_KEY is required for chat + voice;
-  // GEMINI_API_KEY is required for embeddings and cross-provider fallback.
-  if (!getEnv("GROQ_API_KEY")) {
-    res.status(500).json({ error: "GROQ_API_KEY is not configured" });
-    return;
-  }
-  if (!getEnv("GEMINI_API_KEY")) {
-    res.status(500).json({ error: "GEMINI_API_KEY is not configured" });
-    return;
-  }
-
-  const body = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) as ChatBody;
-  const authHeader = req.headers.authorization;
-  const userId = extractUserId(typeof authHeader === "string" ? authHeader : null);
-  const workspaceContext = (body.workspaceContext ?? "chat").toLowerCase();
-
   try {
-    // ── Voice transcription (Groq Whisper) ──
-    if (body.mode === "voice") {
-      if (!body.audioBase64) {
-        res.status(400).json({ error: "No audio data provided" });
-        return;
+    const body = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) as ChatBody;
+    const authHeader = req.headers.authorization;
+    const userId = extractUserId(typeof authHeader === "string" ? authHeader : null);
+
+    const outcome = await handleChatRequest({ body, userId, wantsSSE: wantsSSE(req) });
+
+    if (outcome.kind === "json") {
+      if (outcome.headers) {
+        for (const [k, v] of Object.entries(outcome.headers)) res.setHeader(k, v);
       }
-      const transcript = await transcribeAudio({
-        audioBase64: body.audioBase64,
-        audioMimeType: body.audioMimeType ?? "audio/webm",
-      });
-      res.status(200).json({ text: transcript.text });
+      res.status(outcome.status).json(outcome.json);
       return;
     }
 
-    // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan") && userId) {
-      const rl = await checkContentRateLimit(userId);
-      if (!rl.allowed) {
-        res.status(429).json({ error: "Rate limited", rateLimited: true, used: rl.used });
-        return;
-      }
-    }
-
-    // ── Planning pipeline (non-streaming) ──
-    if (body.mode === "planning") {
-      try {
-        const result = await runPlanningPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
-          messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
-        });
-        res.status(200).json({
-          content: "",
-          actions: [result.proposal],
-          clarifications: [],
-          executed_actions: [],
-          orchestration: { mode: "planning", iterations: result.iterations, executed_on: "client" },
-          planning_critique: result.critiqueText,
-        });
-      } catch (err) {
-        const e = err as PlanningPipelineError;
-        res.status(500).json({ error: e.message, stage: e.stage, cause_code: e.cause_code });
-      }
-      return;
-    }
-
-    // ── Intent-plan pipeline (non-streaming) ──
-    if (body.mode === "intent_plan") {
-      try {
-        // Enrich dynamicContext with behavioral signals + priority if available.
-        let enrichedContext = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
-        if (userId && body.clientTasks && body.clientTasks.length > 0) {
-          const signals = await getBehavioralSignals(userId).catch(() => undefined);
-          const assembled = await assembleContext({
-            userId,
-            workspaceContext,
-            intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
-            behavioralSignals: signals,
-            clientTasks: body.clientTasks,
-            clientCalendarDensity: body.clientCalendarDensity,
-          });
-          if (assembled.contextText) enrichedContext += "\n\n" + assembled.contextText;
-        }
-        const result = await runIntentPlanPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: enrichedContext,
-          messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
-        });
-        res.status(200).json({
-          content: "",
-          actions: [result.proposal],
-          clarifications: [],
-          executed_actions: [],
-          orchestration: { mode: "intent_plan", iterations: result.iterations, executed_on: "client" },
-          intent_plan_critique: result.critiqueText,
-        });
-      } catch (err) {
-        const e = err as IntentPlanPipelineError;
-        res.status(500).json({ error: e.message, stage: e.stage, cause_code: e.cause_code });
-      }
-      return;
-    }
-
-    const contextSuffix = `\n\nWORKSPACE_CONTEXT: ${workspaceContext}. Prioritize this context when relevant. When any required field for an action is missing or ambiguous, call ask_clarification — never call action tools with placeholder/guessed values.`;
-    let dynamicContext = (body.dynamicContext ?? "") + contextSuffix;
-
-    // Inject priority ranking and behavioral signals for schedule-aware chat.
-    if (userId && body.clientTasks && body.clientTasks.length > 0) {
-      try {
-        const signals = await getBehavioralSignals(userId).catch(() => undefined);
-        const assembled = await assembleContext({
-          userId,
-          workspaceContext,
-          intentQuery: (body.messages ?? []).slice(-1)[0]?.content ?? "",
-          behavioralSignals: signals,
-          clientTasks: body.clientTasks.filter((t) => t.status !== "done").slice(0, 50),
-          clientCalendarDensity: body.clientCalendarDensity,
-        });
-        if (assembled.contextText) dynamicContext += "\n\n" + assembled.contextText;
-      } catch {
-        // Priority enrichment is best-effort; never block the chat response.
-      }
-    }
-
-    // ── Studio (forced tool call, content generation) ──
-    if (body.mode === "studio") {
-      const result = await callModel({
-        intent: "studio",
-        systemPrompt: body.systemPrompt ?? "",
-        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-        dynamicContext,
-        messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
-        toolSet: "studio",
-        toolChoice: "required",
-        maxOutputTokens: Math.min(Number(body.maxTokens) || 4096, 4096),
-      });
-      res.status(200).json({
-        ...result,
-        executed_actions: [],
-        orchestration: { mode: "studio", executed_on: "client" },
-      });
-      return;
-    }
-
-    // ── Default chat path ──
-    const attachments = body.imageBase64
-      ? [{ kind: "image" as const, mimeType: body.imageMimeType ?? "image/jpeg", base64: body.imageBase64 }]
-      : undefined;
-
-    if (wantsSSE(req)) {
-      // Precheck RPM *before* flushing SSE headers — once we start streaming
-      // we can't return a 429 JSON body, so the client would have to scrape
-      // an `error` event. Catching here lets the existing 429 path handle it.
-      // The RPM tracker is process-local; if we pass this gate, callModel
-      // will atomically re-check and record the request.
-      if (overLimitForIntent("action_routing")) {
-        const snap = aggregateRpmStatus();
-        const retryAfterSec = Math.max(1, Math.ceil((snap.resetAtMs - Date.now()) / 1000));
-        res.setHeader("Retry-After", String(retryAfterSec));
-        res.status(429).json({
-          error: "AI rate limit reached — try again shortly.",
-          rateLimited: true,
-          rpmExhausted: true,
-          tier: snap.tier,
-          resetAtMs: snap.resetAtMs,
-          rpm: snap,
-        });
-        return;
-      }
-      const writer = createSSEWriterForNode(res as unknown as NodeResponseLike);
-      const onChunk = (chunk: StreamChunk): void => {
+    // Streaming chat — own the SSE transport, delegate the model call.
+    const writer = createSSEWriterForNode(res as unknown as NodeResponseLike);
+    try {
+      const done = await outcome.run((chunk: StreamChunk) => {
         if (chunk.type === "delta") writer.send({ event: "delta", data: { text: chunk.text } });
         else if (chunk.type === "tool_call") writer.send({ event: "tool_call", data: chunk.toolCall });
         else if (chunk.type === "usage") writer.send({ event: "usage", data: chunk.usage });
         else if (chunk.type === "grounding") writer.send({ event: "grounding", data: chunk.metadata });
-      };
-      try {
-        const result = await callModel({
-          intent: "action_routing",
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-          dynamicContext,
-          messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
-          attachments,
-          toolSet: "action",
-          maxOutputTokens: body.maxTokens ?? 1024,
-          onChunk,
-        });
-        writer.send({ event: "done", data: { ...result, executed_actions: [], orchestration: { mode: "client_execution", executed_on: "client" } } });
-      } catch (err) {
-        writer.send({ event: "error", data: { message: err instanceof Error ? err.message : String(err) } });
-      } finally {
-        writer.close();
-      }
-      return;
+        else if (chunk.type === "progress") writer.send({ event: "progress", data: chunk.event });
+      });
+      writer.send({ event: "done", data: done });
+    } catch (err) {
+      writer.send({ event: "error", data: { message: err instanceof Error ? err.message : String(err) } });
+    } finally {
+      writer.close();
     }
-
-    const result = await callModel({
-      intent: "action_routing",
-      systemPrompt: body.systemPrompt ?? "",
-      staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-      dynamicContext,
-      messages: (body.messages ?? []) as Array<{ role: "user" | "assistant" | "system"; content: string }>,
-      attachments,
-      toolSet: "action",
-      maxOutputTokens: body.maxTokens ?? 1024,
-    });
-    res.status(200).json({
-      ...result,
-      executed_actions: [],
-      orchestration: { mode: "client_execution", executed_on: "client" },
-    });
   } catch (err) {
-    if (err instanceof RpmExhaustedError) {
-      const snap = aggregateRpmStatus();
-      const retryAfterSec = Math.max(1, Math.ceil((snap.resetAtMs - Date.now()) / 1000));
-      if (!res.headersSent) {
-        res.setHeader("Retry-After", String(retryAfterSec));
-        res.status(429).json({
-          error: "AI rate limit reached — try again shortly.",
-          rateLimited: true,
-          rpmExhausted: true,
-          tier: err.tier,
-          resetAtMs: err.resetAtMs,
-          rpm: snap,
-        });
-      }
-      return;
-    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("api/chat error:", message);
     if (!res.headersSent) {
@@ -321,4 +92,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
   }
 }
-

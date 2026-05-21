@@ -545,6 +545,18 @@ async function dbUpsertDateBlock(date, timeSlot, data, userId) {
   const { error } = await sb.from('date_blocks').upsert(row, { onConflict: 'user_id,block_date,time_slot' });
   if (error) console.error('Date block upsert error:', error);
 }
+async function dbSaveFlashcardDeck(deck, userId) {
+  const { data, error } = await sb.from('flashcard_decks').insert({
+    user_id: userId,
+    title: (deck.title || 'Flashcard Deck').slice(0, 200),
+    summary: deck.summary || null,
+    cards: deck.cards || [],
+    source: deck.source || 'ai',
+    card_count: (deck.cards || []).length,
+  }).select('id').single();
+  if (error) { console.error('flashcard_decks insert error:', error); return null; }
+  return data?.id || null;
+}
 async function dbSaveStudyPlan(plan, userId) {
   const title = (plan.summary || '').slice(0, 120) || 'Study Plan';
   const { data, error } = await sb.from('study_plans').insert({
@@ -4767,11 +4779,41 @@ function getLoadingMessage(msgContent, photo, isPlanRequest) {
 
 const ThinkingIndicator=({message="thinkisizing…"})=>(
   <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'10px 18px',display:'inline-flex',alignItems:'center',backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
+    <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.95),rgba(15,15,26,0.95))',border:'1px solid rgba(108,99,255,0.12)',borderRadius:16,borderBottomLeftRadius:4,padding:'10px 18px',display:'inline-flex',flexDirection:'column',gap:8,minWidth:200,backdropFilter:'blur(8px)',animation:'borderGlow 2s ease-in-out infinite'}}>
       <span style={{fontSize:13,fontStyle:'italic',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',animation:'textPulse 1.6s ease-in-out infinite'}}>{message}</span>
+      <div className="sos-slider-track" style={{height:3,width:'100%'}}/>
     </div>
   </div>
 );
+
+const PIPELINE_STEP_LABELS = ['Analyzing', 'Drafting', 'Reviewing', 'Finalizing'];
+function PipelineProgressIndicator({ progress }) {
+  if (!progress) return null;
+  const { step, totalSteps, label } = progress;
+  return (
+    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+      <div style={{background:'linear-gradient(135deg,rgba(26,26,46,0.97),rgba(15,15,26,0.97))',border:'1px solid rgba(108,99,255,0.2)',borderRadius:16,borderBottomLeftRadius:4,padding:'12px 18px',minWidth:260,backdropFilter:'blur(8px)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+          <span style={{fontSize:12,fontStyle:'italic',background:'linear-gradient(135deg, var(--accent), var(--teal))',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text',animation:'textPulse 1.6s ease-in-out infinite'}}>{label}</span>
+          <span style={{fontSize:11,color:'var(--text-dim)',marginLeft:'auto'}}>{step}/{totalSteps}</span>
+        </div>
+        {/* Continuous slider — sweeps the whole time so the panel never looks
+           frozen during the ~15s gaps between discrete progress events. */}
+        <div className="sos-slider-track" style={{height:4,marginBottom:10}}/>
+        <div style={{display:'flex',gap:4}}>
+          {Array.from({length:totalSteps},(_,i)=>(
+            <div key={i} style={{flex:1,height:3,borderRadius:2,background:i<step?'var(--accent)':'rgba(108,99,255,0.15)',transition:'background 0.4s ease'}}/>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:6,marginTop:10}}>
+          {PIPELINE_STEP_LABELS.slice(0,totalSteps).map((lbl,i)=>(
+            <span key={i} style={{flex:1,textAlign:'center',fontSize:9,color:i+1===step?'var(--accent)':i+1<step?'var(--teal)':'var(--text-dim)',fontWeight:i+1===step?700:400,textTransform:'uppercase',letterSpacing:'0.04em',transition:'color 0.3s ease'}}>{lbl}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const AutoApproveIndicator = ({ status }) => {
   if (!status) return null;
@@ -4850,6 +4892,8 @@ function App() {
   const [pasteStudyPrompt, setPasteStudyPrompt] = useState(null); // holds pasted text when >500 chars
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
+  const [pipelineProgress, setPipelineProgress] = useState(null);
+  const [previewPlanEntry, setPreviewPlanEntry] = useState(null);
   const [chatError, setChatError] = useState(null);
   const [autoApproveStatus, setAutoApproveStatus] = useState(null);
   const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
@@ -6198,7 +6242,7 @@ function App() {
           break;
         case 'read_calendar': {
           const startD = action.start_date || today();
-          const endD = action.end_date || startD;
+          const endD = action.end_date || (() => { const d = new Date(startD + 'T12:00:00'); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); })();
           const isSingleDay = startD === endD;
           const isMonthRange = !isSingleDay && (() => {
             const diffDays = Math.round((new Date(endD + 'T00:00:00') - new Date(startD + 'T00:00:00')) / 86400000);
@@ -6552,9 +6596,16 @@ function App() {
       }
     } catch(e) { return JSON.stringify(c, null, 2); }
   }
-  function handleSaveContent(idx) {
+  async function handleSaveContent(idx) {
     const c = pendingContent[idx];
     if (!c) return;
+    if (c.type === 'create_flashcards' && user) {
+      const deckId = await dbSaveFlashcardDeck({ title: c.title, summary: c.summary, cards: c.cards, source: 'ai' }, user.id);
+      setPendingContent(prev => prev.filter((_,i) => i !== idx));
+      setToastMsg('Saved "' + (c.title || 'Flashcard Deck') + '" to Library');
+      if (deckId) console.log('[sos] flashcard deck saved:', deckId);
+      return;
+    }
     const formatted = formatContentForNote(c);
     executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
@@ -7508,6 +7559,12 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           token: token || SUPABASE_ANON_KEY,
           signal: abortSignal,
           onDelta: (_, aggregated) => setStreamingMessage(aggregated),
+          onProgress: (ev) => {
+            setPipelineProgress(ev);
+            if (ev.draft) {
+              setPreviewPlanEntry(ev.draft);
+            }
+          },
         });
       } catch (err) {
         if (err?.status === 429 && err?.payload?.rpmExhausted) {
@@ -7539,9 +7596,13 @@ If there are no events, base the brief on the student's tasks and suggest a prod
           return;
         }
         setStreamingMessage('');
+        setPipelineProgress(null);
+        setPreviewPlanEntry(null);
         throw err;
       }
       setStreamingMessage('');
+      setPipelineProgress(null);
+      setPreviewPlanEntry(null);
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
       if (chatData?.model_used) {
@@ -9160,7 +9221,22 @@ If there are no events, base the brief on the student's tasks and suggest a prod
             />
           </div>
         ))}
-        {isLoading&&<ThinkingIndicator message={loadingMessage}/>}
+        {isLoading&&(pipelineProgress
+          ? <PipelineProgressIndicator progress={pipelineProgress}/>
+          : <ThinkingIndicator message={loadingMessage}/>
+        )}
+        {previewPlanEntry&&(()=>{
+          const planData=previewPlanEntry;
+          const isIntentPlan=planData.recurring_blocks||planData.milestone_tasks;
+          if(!isIntentPlan)return null;
+          const conflicts=detectPlanConflicts(planData.recurring_blocks||[],blocks.recurring||[]);
+          return(
+            <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px',opacity:0.82}}>
+              <div style={{fontSize:'0.72rem',color:'var(--accent)',marginBottom:4,paddingLeft:2,fontStyle:'italic',animation:'textPulse 1.6s ease-in-out infinite'}}>preview · refining…</div>
+              <IntentPlanCard data={planData} conflicts={conflicts} onApply={()=>{}} onApplyWithoutConflicts={()=>{}} onDismiss={()=>setPreviewPlanEntry(null)}/>
+            </div>
+          );
+        })()}
         {autoApproveStatus && <AutoApproveIndicator status={autoApproveStatus} />}
         {chatError&&<div style={{padding:'8px 16px'}}><div style={{padding:'10px 14px',borderRadius:16,background:'rgba(255,71,87,0.08)',border:'1px solid rgba(255,71,87,0.25)',fontSize:'0.84rem',color:'var(--danger)',maxWidth:'80%'}}>{chatError}</div></div>}
         <div ref={messagesEndRef} style={{height:1}}/>

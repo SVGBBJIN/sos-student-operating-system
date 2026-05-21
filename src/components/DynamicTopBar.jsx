@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BrandMark from './BrandMark.jsx';
 
 function Si({ name, size = 15 }) {
   const p = {
@@ -100,13 +101,7 @@ export default function DynamicTopBar({
     <div className="dtb-wrap">
       {/* Brand */}
       <div className="dtb-left">
-        <span className="sos-brand-mark" style={{ borderRadius: 6, padding: 3 }}>
-          <span className="sos-mark" style={{fontSize:20}}>
-            <span className="sos-mark-s">S</span>
-            <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-            <span className="sos-mark-s">S</span>
-          </span>
-        </span>
+        <BrandMark fontSize={20} />
       </div>
 
       {/* Center: morphing island */}

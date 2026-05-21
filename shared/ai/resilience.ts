@@ -1,21 +1,14 @@
-// Retry, timeout, and circuit-breaker behavior for AI calls.
+// Retry classification and circuit-breaker behavior for AI calls.
 //
-// Three layers, in order:
-//   1. Per-attempt timeout (AbortController + budgetMs)
-//   2. Retry ladder: 429 → exp backoff; 5xx → bounded; network → 1 shot
-//   3. Circuit breaker (process-local): if the last N requests inside a short
+// Two concerns:
+//   1. Retry classification: isRetryable + backoffMs (exp backoff with jitter).
+//   2. Circuit breaker (process-local): if the last N requests inside a short
 //      window all errored, open the circuit for COOLDOWN ms and synthesize a
 //      graceful fallback response.
 //
-// In-tier and tier-downgrade fallback (Gemini 3 Flash → 2.5 Flash, 2.5 Pro →
-// Gemini 3 Flash) is implemented in chat-core.ts because it needs to re-route.
-
-export interface RetryOptions {
-  budgetMs: number;
-  maxAttempts: number;
-}
-
-export const DEFAULT_RETRY: RetryOptions = { budgetMs: 12000, maxAttempts: 4 };
+// Per-attempt timeouts (budgetMs → AbortController) live in chat-core.ts, where
+// the request deadline is known. Cross-provider fallback is also in chat-core.ts
+// because it needs to re-route.
 
 export function isRetryable(err: unknown): boolean {
   const e = err as { status?: number; message?: string; name?: string };
@@ -30,18 +23,6 @@ export function isRetryable(err: unknown): boolean {
 export function backoffMs(attempt: number, base = 300, cap = 3000): number {
   const jitter = Math.random() * 0.3 + 0.85;
   return Math.min(cap, base * 2 ** attempt) * jitter;
-}
-
-export async function withTimeout<T>(p: Promise<T>, ms: number, label = "operation"): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([p, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 // ── Circuit breaker (process-local) ──────────────────────────────────────────
