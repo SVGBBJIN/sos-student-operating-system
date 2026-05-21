@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DynamicIsland from './DynamicIsland';
+import ProjectsBar from './ProjectsBar';
 
 /* Inline SVG icons */
 function PlusIcon() {
@@ -22,13 +24,22 @@ function LogoutIcon() {
   );
 }
 
-function HomeIcon() {
+function ProofreadIcon() {
   return (
     <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
          strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
          style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-      <polyline points="9 22 9 12 15 12 15 22"/>
+      <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z"/>
+    </svg>
+  );
+}
+
+function LibraryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
+         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
     </svg>
   );
 }
@@ -72,14 +83,19 @@ export default function StudioSidebar({
   viewingSavedChatId,
   onPick,
   onNew,
-  onAuthAction,
-  onHome,
   onDelete,
+  onAuthAction,
+  onProofread,
   aiThinking = false,
   syncStatus,
   nextEvent,
   deadlineWarning,
+  tasks = [],
+  events = [],
+  notes = [],
 }) {
+  const navigate = useNavigate();
+  const [activeSubject, setActiveSubject] = useState(null);
   const today = savedChats.filter(c => isToday(c.savedAt));
   const earlier = savedChats.filter(c => !isToday(c.savedAt));
 
@@ -100,16 +116,25 @@ export default function StudioSidebar({
           <PlusIcon />
           <span>New chat</span>
         </button>
+        {onProofread && (
+          <button className="sb-home" onClick={onProofread} title="Proofread">
+            <ProofreadIcon />
+            <span>Proofread</span>
+          </button>
+        )}
+        <button className="sb-home" onClick={() => navigate('/library')} title="Library">
+          <LibraryIcon />
+          <span>Library</span>
+        </button>
       </div>
 
-      {onHome && (
-        <div className="sb-section" style={{ paddingTop: 0 }}>
-          <button className="sb-home" onClick={onHome} title="Back to home">
-            <HomeIcon />
-            <span>Home</span>
-          </button>
-        </div>
-      )}
+      <ProjectsBar
+        tasks={tasks}
+        events={events}
+        notes={notes}
+        activeSubject={activeSubject}
+        onSelectSubject={setActiveSubject}
+      />
 
       <div className="sb-list">
         {savedChats.length === 0 ? (
@@ -153,15 +178,17 @@ export default function StudioSidebar({
       <div className="sb-foot">
         <div className="sb-foot-avatar">{avatarLetter}</div>
         <div className="sb-foot-name">{displayName}</div>
-        <button
-          className="icon-btn"
-          style={{ width: 26, height: 26 }}
-          title={user ? 'Sign out' : 'Sign in'}
-          aria-label={user ? 'Sign out' : 'Sign in'}
-          onClick={onAuthAction}
-        >
-          <LogoutIcon />
-        </button>
+        {onAuthAction && (
+          <button
+            className="icon-btn"
+            style={{ width: 26, height: 26 }}
+            title={user ? 'Sign out' : 'Sign in'}
+            aria-label={user ? 'Sign out' : 'Sign in'}
+            onClick={onAuthAction}
+          >
+            <LogoutIcon />
+          </button>
+        )}
       </div>
     </>
   );

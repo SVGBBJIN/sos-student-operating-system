@@ -55,7 +55,14 @@ export default function StudyTopBar({
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <span className="sos-brand-mark" style={{ borderRadius: 7, padding: 4 }}>
+        <span
+          className="sos-brand-mark"
+          style={{ borderRadius: 7, padding: 4, cursor: onHome ? 'pointer' : 'default' }}
+          onClick={onHome || undefined}
+          title={onHome ? 'Home' : undefined}
+          role={onHome ? 'button' : undefined}
+          aria-label={onHome ? 'Home' : undefined}
+        >
           <span className="sos-mark" style={{fontSize:20}}>
             <span className="sos-mark-s">S</span>
             <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
@@ -104,40 +111,21 @@ export default function StudyTopBar({
           </div>
         )}
 
-        {/* Nav: Home (above) then Chat (below) — kept as siblings in source order
-            so Home renders first in the topbar's flex flow. */}
-        {onHome && (
-          <button className="icon-btn" onClick={onHome} title="Home" aria-label="Home">
-            <Si name="home" size={15} />
-          </button>
-        )}
-        {onChat && (
-          <button className="icon-btn" onClick={onChat} title="Chat" aria-label="Chat">
-            <Si name="message" size={15} />
-          </button>
-        )}
-
-        {/* Proofread */}
-        {onProofread && (
-          <button className="icon-btn" onClick={onProofread} title="Proofread" aria-label="Proofread">
-            <Si name="proofread" size={15} />
-          </button>
-        )}
-
-        {/* Settings */}
         <button className="icon-btn" onClick={onSettings} title="Settings" aria-label="Settings">
           <Si name="settings" size={15} />
         </button>
 
-        {/* New chat */}
-        <button className="icon-btn primary" onClick={onNewChat} title="New chat" aria-label="New chat">
-          <Si name="plus" size={15} />
-        </button>
+        {onNewChat && (
+          <button className="icon-btn primary" onClick={onNewChat} title="New chat" aria-label="New chat">
+            <Si name="plus" size={15} />
+          </button>
+        )}
 
-        {/* Auth */}
-        <button className="icon-btn" onClick={onAuthAction} title={user ? 'Sign out' : 'Sign in'} aria-label={user ? 'Sign out' : 'Sign in'}>
-          <Si name="logout" size={15} />
-        </button>
+        {onAuthAction && (
+          <button className="icon-btn" onClick={onAuthAction} title={user ? 'Sign out' : 'Sign in'} aria-label={user ? 'Sign out' : 'Sign in'}>
+            <Si name="logout" size={15} />
+          </button>
+        )}
       </div>
     </div>
   );
