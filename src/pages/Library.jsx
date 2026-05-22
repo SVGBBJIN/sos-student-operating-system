@@ -4,6 +4,8 @@ import { sb } from '../lib/supabase.js';
 import DOMPurify from 'dompurify';
 import CalendarWindow from '../components/CalendarWindow/CalendarWindow.jsx';
 import ProofreadPanel from '../components/ProofreadPanel.jsx';
+import StudioSidebar from '../components/StudioSidebar.jsx';
+import StudyTopBar from '../components/StudyTopBar.jsx';
 
 /* ─── Notes Panel ────────────────────────────────────────────────── */
 function NotesContent({ user }) {
@@ -759,6 +761,9 @@ export default function Library() {
   const navigate = useNavigate();
   const [user,       setUser]       = useState(null);
   const [events,     setEvents]     = useState([]);
+  const [tasks,      setTasks]      = useState([]);
+  const [notes,      setNotes]      = useState([]);
+  const [savedChats, setSavedChats] = useState([]);
   const [activeView, setActiveView] = useState('study-packs');
 
   useEffect(() => {
@@ -766,10 +771,25 @@ export default function Library() {
       const u = data?.session?.user;
       if (!u) return;
       setUser(u);
-      sb.from('events')
-        .select('*')
-        .eq('user_id', u.id)
+      sb.from('events').select('*').eq('user_id', u.id)
         .then(({ data: ev }) => { if (ev) setEvents(ev); });
+      sb.from('tasks').select('*').eq('user_id', u.id)
+        .then(({ data: t }) => { if (t) setTasks(t); });
+      sb.from('notes').select('*').eq('user_id', u.id)
+        .then(({ data: ns }) => {
+          if (!ns) return;
+          const chats = [], regular = [];
+          ns.forEach(n => {
+            if (n.name?.startsWith('[chat-save]')) {
+              try {
+                const p = JSON.parse(n.content);
+                chats.push({ id: n.id, title: p.title || 'Untitled Chat', messages: p.messages || [], savedAt: p.savedAt || n.updated_at, messageCount: p.messageCount || 0 });
+              } catch { regular.push(n); }
+            } else { regular.push(n); }
+          });
+          setSavedChats(chats);
+          setNotes(regular);
+        });
     });
   }, []);
 
@@ -789,83 +809,102 @@ export default function Library() {
     setEvents(prev => prev.map(e => e.id === updated.id ? updated : e));
   }
 
+  async function handleLogout() {
+    await sb.auth.signOut();
+    navigate('/');
+  }
+
   const views = [
-    { id: 'study-packs', label: 'Study Packs',   icon: '📚' },
-    { id: 'notes',       label: 'Notes',        icon: '⊡' },
-    { id: 'study-plans', label: 'Study Plans',   icon: '📋' },
-    { id: 'flashcards',  label: 'Flashcards',    icon: '🃏' },
-    { id: 'schedule',    label: 'Schedule',      icon: '📅' },
-    { id: 'proofread',   label: 'Proofread',     icon: '✦' },
+    { id: 'study-packs', label: 'Study Packs', icon: '📚' },
+    { id: 'notes',       label: 'Notes',       icon: '⊡' },
+    { id: 'study-plans', label: 'Study Plans', icon: '📋' },
+    { id: 'flashcards',  label: 'Flashcards',  icon: '🃏' },
+    { id: 'schedule',    label: 'Schedule',    icon: '📅' },
+    { id: 'proofread',   label: 'Proofread',   icon: '✦' },
   ];
 
-  const viewLabel = views.find(v => v.id === activeView)?.label || '';
-
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--background)', fontFamily: 'var(--font-ui)' }}>
-      {/* Amber accent line */}
-      <div style={{ height: 2, background: 'linear-gradient(90deg, hsl(35,70%,50%), hsl(30,70%,55%))' }} />
+    <div className="studio">
+      {/* SVG symbol for the SOS mark used by StudyTopBar */}
+      <svg width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }} aria-hidden="true">
+        <defs>
+          <symbol id="sos-bulb" viewBox="0 0 60 86">
+            <path d="M 30 2 C 13.5 2, 4 16, 4 32 C 4 44.5, 11.5 53.5, 18 60 C 20 62, 21 63, 21 65.5 L 21 68 L 39 68 L 39 65.5 C 39 63, 40 62, 42 60 C 48.5 53.5, 56 44.5, 56 32 C 56 16, 46.5 2, 30 2 Z" fill="currentColor"/>
+            <rect x="21" y="71" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="21" y="76" width="18" height="3.6" rx="1" fill="currentColor"/>
+            <rect x="25" y="81" width="10" height="4" rx="1.4" fill="currentColor"/>
+          </symbol>
+        </defs>
+      </svg>
 
-      {/* Minimal top nav */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-4)', padding: 'var(--spacing-3) var(--spacing-6)', background: 'var(--sidebar)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <button
-          onClick={() => navigate('/studio')}
-          style={{ background: 'transparent', border: 'none', color: 'var(--muted-foreground)', fontFamily: 'var(--font-ui)', fontSize: 13, cursor: 'pointer', padding: 'var(--spacing-1) var(--spacing-2)', borderRadius: 'var(--radius-sm)' }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--foreground)'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--muted-foreground)'; }}
-        >
-          ← Studio
-        </button>
-        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-heading)', color: 'var(--foreground)' }}>
-          Library
-        </span>
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          {viewLabel}
-        </span>
+      <StudyTopBar
+        user={user}
+        syncStatus="saved"
+        onHome={() => navigate('/studio')}
+        onAuthAction={user ? handleLogout : () => navigate('/studio')}
+      />
+
+      <div className="studio-sidebar-col">
+        <StudioSidebar
+          user={user}
+          savedChats={savedChats}
+          viewingSavedChatId={null}
+          onPick={() => navigate('/studio')}
+          onNew={() => navigate('/studio')}
+          onDelete={() => {}}
+          onAuthAction={user ? handleLogout : () => navigate('/studio')}
+          onProofread={() => setActiveView('proofread')}
+          aiThinking={false}
+          syncStatus="saved"
+          tasks={tasks}
+          events={events}
+          notes={notes}
+        />
       </div>
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        {activeView === 'study-packs' && <StudyPacksContent user={user} events={events} />}
-        {activeView === 'notes' && <NotesContent user={user} />}
-        {activeView === 'study-plans' && <StudyPlansContent user={user} />}
-        {activeView === 'flashcards' && <FlashcardsContent user={user} />}
-        {activeView === 'schedule' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <CalendarWindow
-              embedded
-              defaultSize="fullscreen"
-              events={events}
-              onEventUpdate={handleEventUpdate}
-              userId={user?.id}
-            />
-          </div>
-        )}
-        {activeView === 'proofread' && <ProofreadPanel />}
-      </div>
+      <div className="studio-center-col">
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {activeView === 'study-packs' && <StudyPacksContent user={user} events={events} />}
+          {activeView === 'notes' && <NotesContent user={user} />}
+          {activeView === 'study-plans' && <StudyPlansContent user={user} />}
+          {activeView === 'flashcards' && <FlashcardsContent user={user} />}
+          {activeView === 'schedule' && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <CalendarWindow
+                embedded
+                defaultSize="fullscreen"
+                events={events}
+                onEventUpdate={handleEventUpdate}
+                userId={user?.id}
+              />
+            </div>
+          )}
+          {activeView === 'proofread' && <ProofreadPanel />}
+        </div>
 
-      {/* Bottom toggle bar */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '7px 16px', borderTop: '1px solid var(--border)', background: 'var(--sidebar)', flexWrap: 'wrap' }}>
-        {views.map(v => (
-          <button
-            key={v.id}
-            onClick={() => setActiveView(v.id)}
-            style={{
-              background: activeView === v.id ? 'var(--muted)' : 'transparent',
-              border: activeView === v.id ? '1px solid var(--primary)' : '1px solid transparent',
-              color: activeView === v.id ? 'var(--primary)' : 'var(--muted-foreground)',
-              borderRadius: 'var(--radius-full)',
-              padding: '4px 14px',
-              fontFamily: 'var(--font-ui)',
-              fontSize: 12,
-              cursor: 'pointer',
-              transition: 'all var(--duration-fast) ease-out',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {v.icon} {v.label}
-          </button>
-        ))}
+        {/* Bottom view switcher */}
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '7px 16px', borderTop: '1px solid var(--line)', background: 'var(--bg-2)', flexWrap: 'wrap' }}>
+          {views.map(v => (
+            <button
+              key={v.id}
+              onClick={() => setActiveView(v.id)}
+              style={{
+                background: activeView === v.id ? 'var(--bg-3)' : 'transparent',
+                border: activeView === v.id ? '1px solid var(--accent)' : '1px solid transparent',
+                color: activeView === v.id ? 'var(--accent)' : 'var(--fg-2)',
+                borderRadius: 999,
+                padding: '4px 14px',
+                fontFamily: 'var(--font-body)',
+                fontSize: 12,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {v.icon} {v.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
