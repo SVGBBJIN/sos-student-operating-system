@@ -814,15 +814,6 @@ export default function Library() {
     navigate('/');
   }
 
-  const views = [
-    { id: 'study-packs', label: 'Study Packs', icon: '📚' },
-    { id: 'notes',       label: 'Notes',       icon: '⊡' },
-    { id: 'study-plans', label: 'Study Plans', icon: '📋' },
-    { id: 'flashcards',  label: 'Flashcards',  icon: '🃏' },
-    { id: 'schedule',    label: 'Schedule',    icon: '📅' },
-    { id: 'proofread',   label: 'Proofread',   icon: '✦' },
-  ];
-
   return (
     <div className="studio">
       {/* SVG symbol for the SOS mark used by StudyTopBar */}
@@ -882,29 +873,6 @@ export default function Library() {
           {activeView === 'proofread' && <ProofreadPanel />}
         </div>
 
-        {/* Bottom view switcher */}
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '7px 16px', borderTop: '1px solid var(--line)', background: 'var(--bg-2)', flexWrap: 'wrap' }}>
-          {views.map(v => (
-            <button
-              key={v.id}
-              onClick={() => setActiveView(v.id)}
-              style={{
-                background: activeView === v.id ? 'var(--bg-3)' : 'transparent',
-                border: activeView === v.id ? '1px solid var(--accent)' : '1px solid transparent',
-                color: activeView === v.id ? 'var(--accent)' : 'var(--fg-2)',
-                borderRadius: 999,
-                padding: '4px 14px',
-                fontFamily: 'var(--font-body)',
-                fontSize: 12,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {v.icon} {v.label}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
