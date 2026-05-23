@@ -69,10 +69,10 @@ export default function AppRouter() {
           element={user ? <CalendarPage /> : <Navigate to="/" replace />}
         />
 
-        {/* Protected — library */}
+        {/* Library — auth handled internally */}
         <Route
           path="/library"
-          element={user ? <Library /> : <Navigate to="/" replace />}
+          element={<Library />}
         />
 
         {/* Redirects for old paths */}
