@@ -161,15 +161,17 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
               <div key={dateStr} className="cw-allday-cell">
                 {dayAllDay.map(ev => {
                   const isNew = ev.id === newEventId;
+                  const tentative = ev.status === 'tentative';
                   return (
                     <div
                       key={ev.id}
-                      className={'cw-event cw-event-allday' + (isNew ? ' cw-event-new' : '')}
+                      className={'cw-event cw-event-allday' + (isNew ? ' cw-event-new' : '') + (tentative ? ' cw-event-tentative' : '')}
                       style={{ background: ev.color || 'var(--primary)' }}
                       onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
                     >
                       <span className="cw-event-title">{ev.title}</span>
-                      {isNew && <span className="cw-ai-chip">✦ Added by Charles</span>}
+                      {tentative && <span className="cw-ai-chip">tentative</span>}
+                      {isNew && !tentative && <span className="cw-ai-chip">✦ Added by Charles</span>}
                     </div>
                   );
                 })}
@@ -229,10 +231,11 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
 
           const isNew = ev.id === newEventId;
 
+          const tentative = ev.status === 'tentative';
           return (
             <div
               key={ev.id}
-              className={'cw-event' + (isNew ? ' cw-event-new' : '')}
+              className={'cw-event' + (isNew ? ' cw-event-new' : '') + (tentative ? ' cw-event-tentative' : '')}
               style={{
                 top:    `${minutesToTopPx(startMin)}px`,
                 left:   `calc(56px + ${colIdx} * ((100% - 56px) / 7) + 2px)`,
@@ -243,7 +246,8 @@ function WeekGrid({ weekDates, events, blocks, onEventClick, newEventId }) {
               onClick={e => onEventClick(ev, e.currentTarget.getBoundingClientRect())}
             >
               <span className="cw-event-title">{ev.title}</span>
-              {isNew && (
+              {tentative && <span className="cw-ai-chip">tentative</span>}
+              {isNew && !tentative && (
                 <span className="cw-ai-chip">✦ Added by Charles</span>
               )}
             </div>

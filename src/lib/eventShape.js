@@ -19,6 +19,8 @@ export function dbEventToApp(row) {
     createdAt: row.created_at,
     googleId: row.google_id || null,
     source: row.source || 'manual',
+    confidence: row.confidence == null ? null : Number(row.confidence),
+    status: row.status || 'confirmed',
   };
 }
 
@@ -40,5 +42,7 @@ export function appEventToDb(e, userId) {
     created_at: e.createdAt || new Date().toISOString(),
     google_id: e.googleId || null,
     source: e.source || 'manual',
+    confidence: typeof e.confidence === 'number' ? e.confidence : null,
+    status: e.status || 'confirmed',
   };
 }
