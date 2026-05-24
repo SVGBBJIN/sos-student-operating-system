@@ -19,8 +19,9 @@ async function render() {
   $("enabled").checked = Boolean(state.config?.enabled);
   $("api-base").value = state.config?.apiBase || "";
   $("queue-status").textContent = `Queue: ${state.queueLen} event(s)`;
+  if (state.extensionId) $("ext-id").textContent = state.extensionId;
 
-  const granted = new Set(state.grantedHosts || []);
+  const granted = new Set(state.grantedOrigins || []);
   document.querySelectorAll(".domain button").forEach((btn) => {
     const origin = btn.dataset.origin;
     const isGranted = [...granted].some((g) => originsMatch(g, origin));
@@ -64,6 +65,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sign-in").addEventListener("click", async () => {
     const state = await send({ type: "sos:get-state" });
     if (state.hasToken) await signOut(); else await signIn();
+  });
+  $("copy-id").addEventListener("click", async () => {
+    const id = $("ext-id").textContent || "";
+    try { await navigator.clipboard.writeText(id); $("copy-id").textContent = "Copied"; setTimeout(() => $("copy-id").textContent = "Copy", 1200); } catch { /* noop */ }
   });
   $("flush").addEventListener("click", async () => {
     const r = await send({ type: "sos:flush" });

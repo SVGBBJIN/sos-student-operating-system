@@ -22,7 +22,7 @@ import { validateLmsEvents, type LmsEventInput } from "../ai/schemas/lms.js";
 
 export interface IngestResult {
   assignmentId: string;
-  lms: "classroom" | "canvas" | "schoology";
+  lms: "classroom" | "canvas" | "schoology" | "custom";
   confidence: number;
   bucket: ConfidenceBucket;
   matchedTaskId: string | null;
@@ -134,7 +134,7 @@ async function processOne(
       lms_assignment_title: event.lms_assignment_title ?? null,
       evidence_kind: event.evidence_kind,
       evidence_weight: outcome.perEvidenceWeight[outcome.perEvidenceWeight.length - 1] ?? 0,
-      evidence_detail: event.evidence_detail ?? {},
+      evidence_detail: { ...(event.evidence_detail ?? {}), ...(event.lms_custom_host ? { custom_host: event.lms_custom_host } : {}) },
       confidence_after: outcome.score,
       occurred_at: event.occurred_at ?? new Date().toISOString(),
     }),
@@ -174,6 +174,7 @@ async function markTaskCompleted(
       completion_confidence: score,
       lms_assignment_ref: {
         lms: event.lms,
+        custom_host: event.lms_custom_host ?? null,
         course_id: event.lms_course_id ?? null,
         assignment_id: event.lms_assignment_id,
         title: event.lms_assignment_title ?? null,

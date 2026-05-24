@@ -18,6 +18,22 @@ assignment is turned in.
    prompts for the specific host permission. No `<all_urls>` access is
    requested.
 
+## SOS Settings → Connectors
+
+Once the extension is loaded and the SOS app is open in the same browser:
+1. Click the extension icon to open the popup and copy the **Extension ID**.
+2. In the SOS app, go to **Settings → Connectors** and paste the ID.
+3. Toggle each supported LMS (Classroom, Canvas, Schoology) on/off — Chrome
+   shows a native per-host permission prompt.
+4. To add a custom LMS domain (self-hosted Canvas, district Schoology
+   subdomain, anything else), type the hostname in the **Custom domains**
+   field. The extension requests permission for that origin and dynamically
+   registers a generic content script via `chrome.scripting.registerContentScripts`.
+
+Cross-origin messaging from the SOS web app to the extension is allowed only
+on origins listed in `manifest.json` → `externally_connectable.matches`
+(localhost + `*.vercel.app` by default).
+
 ## Architecture
 
 - `manifest.json` — MV3 with optional host permissions per LMS.
@@ -29,6 +45,9 @@ assignment is turned in.
 - `content/classroom.js`, `content/canvas.js`, `content/schoology.js` — LMS-specific parsers. Each
   watches URL changes, MutationObserver, file uploads, and emits structured
   evidence events.
+- `content/generic.js` — generic parser for user-added custom domains.
+  Registered dynamically via `chrome.scripting.registerContentScripts` once
+  the user grants permission for a host.
 
 ## What is sent to the backend
 

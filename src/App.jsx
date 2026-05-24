@@ -24,6 +24,7 @@ import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
+import ConnectorsSettings from './components/ConnectorsSettings';
 import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
@@ -4197,6 +4198,7 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
           const lmsBadge = task.completionSource === 'lms'
             ? (task.lmsAssignmentRef?.lms === 'canvas' ? 'Canvas'
               : task.lmsAssignmentRef?.lms === 'schoology' ? 'Schoology'
+              : task.lmsAssignmentRef?.lms === 'custom' ? (task.lmsAssignmentRef.custom_host || 'LMS')
               : 'Classroom')
             : null;
           return(<div key={task.id} className={'peek-task-item'+(completing?' task-completing':'')} style={completing?{background:'rgba(46,213,115,0.08)',borderRadius:10,padding:'4px 6px',transition:'all .3s'}:{}}><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500,color:completing?'var(--success)':undefined,display:'flex',alignItems:'center',gap:6}}>{task.title}{lmsBadge&&<span title={`Auto-completed from ${lmsBadge}${typeof task.completionConfidence==='number'?` · ${task.completionConfidence}% confidence`:''}`} style={{fontSize:'0.62rem',fontWeight:600,padding:'1px 6px',borderRadius:8,background:'rgba(46,213,115,0.15)',color:'var(--success)',letterSpacing:'0.02em'}}>via {lmsBadge}</span>}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{completing?'Completed! 🎉':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{!completing&&' · '+(task.estTime||30)+'min'}</div></div><div style={{color:completing?'var(--success)':dotColor,display:'flex'}}>{completing?Icon.checkCircle(14):task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
@@ -5276,6 +5278,7 @@ function App() {
           ) {
             const where = t.lmsAssignmentRef?.lms === 'canvas' ? 'Canvas'
               : t.lmsAssignmentRef?.lms === 'schoology' ? 'Schoology'
+              : t.lmsAssignmentRef?.lms === 'custom' ? (t.lmsAssignmentRef.custom_host || 'your LMS')
               : 'Google Classroom';
             setToastMsg(`Auto-completed "${t.title}" from ${where}`);
           }
@@ -9292,6 +9295,8 @@ function App() {
             </div>
 
             {/* ── Data ── */}
+            <ConnectorsSettings onToast={(m) => setToastMsg(m)} />
+
             <div className="settings-card settings-fullscreen-card">
               <div className="settings-row" style={{paddingBottom:6}}>
                 <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--teal)'}}>Data</div>

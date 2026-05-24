@@ -14,7 +14,7 @@ const evidenceKindEnum = z.enum([
   "page_visit",
 ]);
 
-const lmsEnum = z.enum(["classroom", "canvas", "schoology"]);
+const lmsEnum = z.enum(["classroom", "canvas", "schoology", "custom"]);
 
 // One piece of evidence from a content script. The extension is responsible
 // for stripping anything that isn't structurally needed — see
@@ -22,6 +22,10 @@ const lmsEnum = z.enum(["classroom", "canvas", "schoology"]);
 // stored verbatim for debugging (e.g. the URL pattern that matched).
 export const LmsEventSchema = z.object({
   lms: lmsEnum,
+  // For lms='custom', the originating hostname (e.g. 'lms.myschool.org'). The
+  // engine and matcher treat custom domains the same as known LMSes; this
+  // field is purely for display/debugging.
+  lms_custom_host: z.string().max(200).optional(),
   lms_course_id: z.string().max(200).optional(),
   lms_course_name: z.string().max(200).optional(),
   lms_assignment_id: z.string().min(1).max(200),

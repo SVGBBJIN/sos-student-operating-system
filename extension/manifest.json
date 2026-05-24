@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "SOS — Submission Tracker",
-  "version": "0.1.0",
-  "description": "Ambient submission tracking for Google Classroom and Canvas. Auto-completes SOS tasks when assignments are turned in. School-domain-only monitoring; local-first parsing.",
-  "permissions": ["storage", "identity"],
+  "version": "0.2.0",
+  "description": "Ambient submission tracking for Google Classroom, Canvas, and Schoology. Auto-completes SOS tasks when assignments are turned in. School-domain-only monitoring; local-first parsing.",
+  "permissions": ["storage", "identity", "scripting"],
   "optional_host_permissions": [
     "https://classroom.google.com/*",
     "https://*.instructure.com/*",
@@ -12,6 +12,15 @@
   "host_permissions": [],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "SOS Submission Tracker" },
+  "externally_connectable": {
+    "matches": [
+      "http://localhost/*",
+      "http://localhost:*/*",
+      "http://127.0.0.1/*",
+      "http://127.0.0.1:*/*",
+      "https://*.vercel.app/*"
+    ]
+  },
   "content_scripts": [
     {
       "matches": ["https://classroom.google.com/*"],
@@ -30,6 +39,6 @@
     }
   ],
   "web_accessible_resources": [
-    { "resources": ["content/shared/net-page.js"], "matches": ["https://classroom.google.com/*", "https://*.instructure.com/*", "https://*.schoology.com/*"] }
+    { "resources": ["content/shared/net-page.js"], "matches": ["https://classroom.google.com/*", "https://*.instructure.com/*", "https://*.schoology.com/*", "<all_urls>"] }
   ]
 }
