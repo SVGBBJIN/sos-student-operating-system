@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "SOS — Submission Tracker",
+  "version": "0.1.0",
+  "description": "Ambient submission tracking for Google Classroom and Canvas. Auto-completes SOS tasks when assignments are turned in. School-domain-only monitoring; local-first parsing.",
+  "permissions": ["storage", "identity"],
+  "optional_host_permissions": [
+    "https://classroom.google.com/*",
+    "https://*.instructure.com/*"
+  ],
+  "host_permissions": [],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "SOS Submission Tracker" },
+  "content_scripts": [
+    {
+      "matches": ["https://classroom.google.com/*"],
+      "js": ["content/shared/parse.js", "content/shared/net.js", "content/classroom.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.instructure.com/*"],
+      "js": ["content/shared/parse.js", "content/shared/net.js", "content/canvas.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["content/shared/net-page.js"], "matches": ["https://classroom.google.com/*", "https://*.instructure.com/*"] }
+  ]
+}

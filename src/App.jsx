@@ -247,6 +247,10 @@ function dbTaskToApp(row) {
     study_plan_id: row.study_plan_id || null,
     confidence: row.confidence == null ? null : Number(row.confidence),
     commitment: row.commitment || 'confirmed',
+    // Browser-extension submission tracking (see shared/lms/ingest.ts).
+    completionSource: row.completion_source || null,
+    completionConfidence: row.completion_confidence == null ? null : Number(row.completion_confidence),
+    lmsAssignmentRef: row.lms_assignment_ref || null,
   };
 }
 function appTaskToDb(t, userId) {
@@ -258,6 +262,9 @@ function appTaskToDb(t, userId) {
     study_plan_id: t.study_plan_id || null,
     confidence: typeof t.confidence === 'number' ? t.confidence : null,
     commitment: t.commitment || 'confirmed',
+    completion_source: t.completionSource || null,
+    completion_confidence: typeof t.completionConfidence === 'number' ? t.completionConfidence : null,
+    lms_assignment_ref: t.lmsAssignmentRef || null,
   };
 }
 // Delegate to shared shape helpers — single source of truth for event ↔ DB conversion.
@@ -4187,7 +4194,10 @@ function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = 
           const completing = recentlyCompleted.has(task.id);
           const d=daysUntil(task.dueDate);
           const dotColor=completing?'var(--success)':d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          return(<div key={task.id} className={'peek-task-item'+(completing?' task-completing':'')} style={completing?{background:'rgba(46,213,115,0.08)',borderRadius:10,padding:'4px 6px',transition:'all .3s'}:{}}><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500,color:completing?'var(--success)':undefined}}>{task.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{completing?'Completed! 🎉':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{!completing&&' · '+(task.estTime||30)+'min'}</div></div><div style={{color:completing?'var(--success)':dotColor,display:'flex'}}>{completing?Icon.checkCircle(14):task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
+          const lmsBadge = task.completionSource === 'lms'
+            ? (task.lmsAssignmentRef?.lms === 'canvas' ? 'Canvas' : 'Classroom')
+            : null;
+          return(<div key={task.id} className={'peek-task-item'+(completing?' task-completing':'')} style={completing?{background:'rgba(46,213,115,0.08)',borderRadius:10,padding:'4px 6px',transition:'all .3s'}:{}}><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500,color:completing?'var(--success)':undefined,display:'flex',alignItems:'center',gap:6}}>{task.title}{lmsBadge&&<span title={`Auto-completed from ${lmsBadge}${typeof task.completionConfidence==='number'?` · ${task.completionConfidence}% confidence`:''}`} style={{fontSize:'0.62rem',fontWeight:600,padding:'1px 6px',borderRadius:8,background:'rgba(46,213,115,0.15)',color:'var(--success)',letterSpacing:'0.02em'}}>via {lmsBadge}</span>}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{completing?'Completed! 🎉':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{!completing&&' · '+(task.estTime||30)+'min'}</div></div><div style={{color:completing?'var(--success)':dotColor,display:'flex'}}>{completing?Icon.checkCircle(14):task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
         })}
       </div>}
       {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
@@ -5252,8 +5262,19 @@ function App() {
     const channel = sb.channel('sos-user-data-' + user.id)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const row = payload.new;
-          const t = { id: row.id, title: row.title, subject: row.subject || '', dueDate: row.due_date || '', estTime: row.est_time || 30, status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0, createdAt: row.created_at };
+          const t = dbTaskToApp(payload.new);
+          // Surface auto-completions from the browser extension as a soft toast
+          // the first time we see the row flip — only when the server picked it
+          // up (this device wasn't the one doing it).
+          if (
+            payload.eventType === 'UPDATE'
+            && t.completionSource === 'lms'
+            && t.status === 'done'
+            && (payload.old?.status !== 'done' || payload.old?.completion_source !== 'lms')
+          ) {
+            const where = t.lmsAssignmentRef?.lms === 'canvas' ? 'Canvas' : 'Google Classroom';
+            setToastMsg(`Auto-completed "${t.title}" from ${where}`);
+          }
           setTasks(prev => { const idx = prev.findIndex(x => x.id === t.id); return idx >= 0 ? prev.map((x, i) => i === idx ? t : x) : [...prev, t]; });
         } else if (payload.eventType === 'DELETE') {
           setTasks(prev => prev.filter(x => x.id !== payload.old.id));
