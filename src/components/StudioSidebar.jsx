@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import DynamicIsland from './DynamicIsland';
 import ProjectsBar from './ProjectsBar';
@@ -93,9 +93,10 @@ export default function StudioSidebar({
   tasks = [],
   events = [],
   notes = [],
+  selectedProject = null,
+  onSelectProject,
 }) {
   const navigate = useNavigate();
-  const [activeSubject, setActiveSubject] = useState(null);
   const today = savedChats.filter(c => isToday(c.savedAt));
   const earlier = savedChats.filter(c => !isToday(c.savedAt));
 
@@ -132,8 +133,8 @@ export default function StudioSidebar({
         tasks={tasks}
         events={events}
         notes={notes}
-        activeSubject={activeSubject}
-        onSelectSubject={setActiveSubject}
+        activeSubject={selectedProject}
+        onSelectSubject={onSelectProject}
       />
 
       <div className="sb-list">

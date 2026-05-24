@@ -4,8 +4,8 @@ import { sb } from './lib/supabase.js';
 import App from './App.jsx';
 
 // Lazy-loaded pages (loaded after auth check)
-const Landing     = React.lazy(() => import('./pages/Landing.jsx'));
-const Library     = React.lazy(() => import('./pages/Library.jsx'));
+const Landing      = React.lazy(() => import('./pages/Landing.jsx'));
+const Library      = React.lazy(() => import('./pages/Library.jsx'));
 const CalendarPage = React.lazy(() => import('./pages/CalendarPage.jsx'));
 
 /**

@@ -19,6 +19,7 @@ import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import LofiRightPanel from './components/LofiRightPanel';
 import StudioSidebar from './components/StudioSidebar';
+import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -4801,6 +4802,8 @@ function App() {
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
   const [studyPlans, setStudyPlans] = useState([]);
+  const [flashcardDecks, setFlashcardDecks] = useState([]);
+  const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -4865,6 +4868,7 @@ function App() {
   const linkSuggestTimerRef = useRef(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
+  const [selectedProject, setSelectedProject] = useState(null);
   const [showNotes, setShowNotes] = useState(false);
   const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
@@ -5156,6 +5160,17 @@ function App() {
       setEntityLinks(data.entityLinks || []);
       setStudyPlans(data.studyPlans || []);
     }
+
+    // Load flashcard decks for AI tool access (read_study_sets, delete_study_set, read_project)
+    try {
+      const { data: decks } = await sb.from('flashcard_decks').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(100);
+      setFlashcardDecks(decks || []);
+    } catch (e) { console.error('Failed to load flashcard decks:', e); }
+
+    try {
+        const { data: gradesData } = await sb.from('grades').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(500);
+        setGrades(gradesData || []);
+      } catch (e) { console.error('Failed to load grades:', e); }
 
     // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
     // whose fire_at is already past (laptop slept, tab closed, etc.).
@@ -5476,6 +5491,8 @@ function App() {
     setEvents(snap.events);
     setNotes(snap.notes);
     setBlocks(snap.blocks);
+    if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
+    if (snap.grades) setGrades(snap.grades);
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     postAssistantNote("Done — I've undone that action.");
@@ -5562,7 +5579,9 @@ function App() {
       'add_task','add_event','add_block','add_recurring_event',
       'update_task','update_event','delete_task','delete_event','delete_block',
       'complete_task','convert_event_to_block','convert_block_to_event',
-      'break_task','clear_all',
+      'break_task','clear_all','delete_study_set',
+      'update_block','postpone_task','bulk_complete',
+      'rename_note','move_note','create_folder','log_grade','update_study_set',
     ]);
     if (mutatingTypes.has(action.type) && !action.__confirmed) {
       const conf = typeof action.confidence === 'number' ? action.confidence : null;
@@ -5577,7 +5596,7 @@ function App() {
     }
 
     // Snapshot state before any mutation so the user can undo within 8 seconds
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
     try {
       switch (action.type) {
         case 'add_task': {
@@ -6433,6 +6452,339 @@ function App() {
           recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
         }
+        case 'delete_study_set': {
+          const titleSearch = (action.title || '').toLowerCase().trim();
+          const match = flashcardDecks.find(d =>
+            d.title.toLowerCase().includes(titleSearch) ||
+            titleSearch.includes(d.title.toLowerCase())
+          );
+          if (!match) {
+            postAssistantNote(`I couldn't find a flashcard deck called "${action.title}" to delete.`);
+            break;
+          }
+          setFlashcardDecks(prev => prev.filter(d => d.id !== match.id));
+          if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', match.id).eq('user_id', user.id));
+          recordExecution('delete_study_set', `"${match.title}"`);
+          pushUndoToast(`Undo: deleted study set "${match.title}"`, undoSnap);
+          break;
+        }
+        case 'read_notes': {
+          const subjectFilter = (action.subject || '').trim();
+          const searchFilter = (action.search || '').trim();
+          let filteredNotes = notes;
+          if (subjectFilter) {
+            const sl = subjectFilter.toLowerCase();
+            filteredNotes = filteredNotes.filter(n => (n.subject || n.tab_name || '').toLowerCase() === sl);
+          }
+          if (searchFilter) {
+            const ql = searchFilter.toLowerCase();
+            filteredNotes = filteredNotes.filter(n =>
+              n.name?.toLowerCase().includes(ql) ||
+              (n.content || '').replace(/<[^>]+>/g, '').toLowerCase().includes(ql)
+            );
+          }
+          if (filteredNotes.length === 0) {
+            postAssistantNote(`No notes found${subjectFilter ? ' for ' + subjectFilter : ''}${searchFilter ? ' matching "' + searchFilter + '"' : ''}.`);
+            break;
+          }
+          const noteLines = [`**Notes${subjectFilter ? ' — ' + subjectFilter : ''}** (${filteredNotes.length}):\n`];
+          filteredNotes.slice(0, 15).forEach(n => {
+            const dateStr = n.updatedAt ? ` · ${new Date(n.updatedAt).toLocaleDateString()}` : (n.updated_at ? ` · ${new Date(n.updated_at).toLocaleDateString()}` : '');
+            noteLines.push(`- **${n.name || 'Untitled'}**${dateStr}`);
+          });
+          if (filteredNotes.length > 15) noteLines.push(`\n_…and ${filteredNotes.length - 15} more_`);
+          postAssistantNote(noteLines.join('\n'));
+          break;
+        }
+        case 'read_study_sets': {
+          if (flashcardDecks.length === 0) {
+            postAssistantNote('No flashcard decks found. Create one by asking me to "make flashcards on [topic]".');
+            break;
+          }
+          const deckLines = [`**Flashcard Decks** (${flashcardDecks.length}):\n`];
+          flashcardDecks.forEach(d => {
+            const cc = d.card_count || (d.cards || []).length;
+            const src = d.source === 'ai' ? ' · AI-generated' : ' · manual';
+            deckLines.push(`- **${d.title}**${src} · ${cc} card${cc !== 1 ? 's' : ''}`);
+          });
+          postAssistantNote(deckLines.join('\n'));
+          break;
+        }
+        case 'read_project': {
+          const projSubject = (action.subject || '').trim();
+          if (!projSubject) {
+            postAssistantNote('Specify a subject/project name.');
+            break;
+          }
+          const psl = projSubject.toLowerCase();
+          const projTasks = tasks.filter(t => (t.subject || '').toLowerCase() === psl && t.status !== 'done');
+          const projEvents = events.filter(e => (e.subject || '').toLowerCase() === psl);
+          const projNotes = notes.filter(n => (n.subject || n.tab_name || '').toLowerCase() === psl);
+          const projDecks = flashcardDecks.filter(d => d.title.toLowerCase().includes(psl));
+          const total = projTasks.length + projEvents.length + projNotes.length + projDecks.length;
+          if (total === 0) {
+            postAssistantNote(`No content found for "${projSubject}". Check the subject name — it must match exactly.`);
+            break;
+          }
+          const projLines = [`**Project: ${projSubject}** (${total} items)\n`];
+          if (projTasks.length > 0) {
+            projLines.push(`\n**Tasks (${projTasks.length}):**`);
+            projTasks.forEach(t => {
+              const d = daysUntil(t.dueDate);
+              const urgency = d < 0 ? ' ⚠️ overdue' : d === 0 ? ' — due today' : '';
+              projLines.push(`- ${t.title} · due ${t.dueDate}${urgency}`);
+            });
+          }
+          if (projEvents.length > 0) {
+            projLines.push(`\n**Events (${projEvents.length}):**`);
+            projEvents.forEach(e => projLines.push(`- ${e.title} · ${e.date}${e.type && e.type !== 'event' ? ' [' + e.type + ']' : ''}`));
+          }
+          if (projNotes.length > 0) {
+            projLines.push(`\n**Notes (${projNotes.length}):**`);
+            projNotes.forEach(n => projLines.push(`- ${n.name || 'Untitled'}`));
+          }
+          if (projDecks.length > 0) {
+            projLines.push(`\n**Study Sets (${projDecks.length}):**`);
+            projDecks.forEach(d => {
+              const cc = d.card_count || (d.cards || []).length;
+              projLines.push(`- ${d.title} · ${cc} cards`);
+            });
+          }
+          postAssistantNote(projLines.join('\n'));
+          break;
+        }
+        case 'read_tasks': {
+          const subj = (action.subject || '').trim().toLowerCase();
+          const statusFilter = action.status;
+          let filtered = statusFilter ? tasks.filter(t => t.status === statusFilter) : tasks.filter(t => t.status !== 'done');
+          if (subj) filtered = filtered.filter(t => (t.subject || '').toLowerCase().includes(subj));
+          if (action.due_within_days) {
+            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + action.due_within_days);
+            const cutoffStr = cutoff.toISOString().slice(0, 10);
+            filtered = filtered.filter(t => t.dueDate <= cutoffStr);
+          }
+          if (filtered.length === 0) {
+            postAssistantNote(`No tasks found${action.subject ? ' for ' + action.subject : ''}${statusFilter ? ' with status ' + statusFilter : ''}.`);
+            break;
+          }
+          const lines = [`**Tasks** (${filtered.length}):\n`];
+          filtered.slice(0, 20).forEach(t => {
+            const statusEmoji = t.status === 'done' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
+            const overdue = t.dueDate < today() && t.status !== 'done' ? ' ⚠️ overdue' : '';
+            lines.push(`${statusEmoji} **${t.title}** · due ${t.dueDate}${t.subject ? ' · ' + t.subject : ''}${overdue}`);
+          });
+          if (filtered.length > 20) lines.push(`\n_…and ${filtered.length - 20} more_`);
+          postAssistantNote(lines.join('\n'));
+          recordExecution('read_tasks', `${filtered.length} tasks`);
+          break;
+        }
+        case 'update_block': {
+          const range = resolveBlockRange(action, blocks);
+          if (!range) {
+            postAssistantNote(`I couldn't find a block at ${action.start || action.activity} on ${action.date} to update.`);
+            break;
+          }
+          const newActivity = (action.new_activity || '').trim() || range.name;
+          const newCategory = action.new_category || range.category || 'school';
+          const newStart = action.new_start || range.start;
+          const newEnd = action.new_end || range.end;
+          const hmOk = (t) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(t || '').trim());
+          if (!hmOk(newStart) || !hmOk(newEnd)) {
+            postAssistantNote(`I need valid start and end times to update this block.`);
+            break;
+          }
+          const [osh, osm] = range.start.split(':').map(Number);
+          const [oeh, oem] = range.end.split(':').map(Number);
+          const [nsh, nsm] = newStart.split(':').map(Number);
+          const [neh, nem] = newEnd.split(':').map(Number);
+          const deleteOps = [];
+          const addOps = [];
+          setBlocks(prev => {
+            const newDates = { ...(prev.dates || {}) };
+            const dayBlocks = { ...(newDates[range.date] || {}) };
+            let dch = osh, dcm = osm;
+            while (dch < oeh || (dch === oeh && dcm < oem)) {
+              const key = String(dch).padStart(2,'0') + ':' + String(dcm).padStart(2,'0');
+              deleteOps.push(key);
+              delete dayBlocks[key];
+              dcm += 30; if (dcm >= 60) { dch++; dcm = 0; }
+            }
+            let nch = nsh, ncm = nsm;
+            while (nch < neh || (nch === neh && ncm < nem)) {
+              const key = String(nch).padStart(2,'0') + ':' + String(ncm).padStart(2,'0');
+              const data = { name: newActivity, category: newCategory };
+              dayBlocks[key] = data;
+              addOps.push({ date: range.date, key, data });
+              ncm += 30; if (ncm >= 60) { nch++; ncm = 0; }
+            }
+            newDates[range.date] = dayBlocks;
+            return { ...prev, dates: newDates };
+          });
+          if (user) syncOp(() => Promise.all([
+            ...deleteOps.map(key => dbUpsertDateBlock(range.date, key, null, user.id)),
+            ...addOps.map(s => dbUpsertDateBlock(s.date, s.key, s.data, user.id)),
+          ]));
+          pushUndoToast(`Undo: updated block "${range.name}"`, undoSnap);
+          break;
+        }
+        case 'postpone_task': {
+          const target = resolveTask(action.title, tasks);
+          if (!target) {
+            postAssistantNote(`I couldn't find a task called "${action.title}" to postpone.`);
+            break;
+          }
+          const rawDate = (action.new_due_date || '').trim();
+          if (!rawDate || !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+            postAssistantNote(`I need a valid new due date to postpone this task.`);
+            break;
+          }
+          const newPostponeCount = (target.postponeCount || 0) + 1;
+          updateTask(target.id, { dueDate: rawDate, postponeCount: newPostponeCount });
+          const daysDiff = Math.round((new Date(rawDate + 'T12:00:00').getTime() - new Date((target.dueDate || today()) + 'T12:00:00').getTime()) / 86400000);
+          if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'postpone', fromStatus: target.status, toStatus: target.status, metadata: { title: target.title, subject: target.subject, from_due: target.dueDate, to_due: rawDate, days_diff: daysDiff } }, user.id);
+          postAssistantNote(`Postponed **${target.title}** to ${rawDate}.`);
+          pushUndoToast(`Undo: postponed "${target.title}"`, undoSnap);
+          break;
+        }
+        case 'bulk_complete': {
+          const bcSubj = (action.subject || '').trim().toLowerCase();
+          const titleList = (action.titles || []).map(t => t.trim().toLowerCase()).filter(Boolean);
+          if (!bcSubj && titleList.length === 0) {
+            postAssistantNote(`Tell me which tasks to complete — by subject or list the titles.`);
+            break;
+          }
+          let targets = tasks.filter(t => t.status !== 'done');
+          if (bcSubj) targets = targets.filter(t => (t.subject || '').toLowerCase() === bcSubj);
+          if (titleList.length > 0) targets = targets.filter(t => titleList.some(tl => matchScore(tl, t.title) >= 30));
+          if (targets.length === 0) {
+            postAssistantNote(`No active tasks found${action.subject ? ' for ' + action.subject : ''} to mark complete.`);
+            break;
+          }
+          const completedAt = new Date().toISOString();
+          targets.forEach(t => {
+            updateTask(t.id, { status: 'done', completedAt });
+            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(t.id); return n; });
+            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(t.id); return n; }), 900);
+            if (user) dbInsertTaskEvent({ taskId: t.id, eventType: 'complete', fromStatus: t.status, toStatus: 'done', metadata: { title: t.title, subject: t.subject } }, user.id);
+          });
+          postAssistantNote(`Marked ${targets.length} task${targets.length !== 1 ? 's' : ''} as done.`);
+          pushUndoToast(`Undo: completed ${targets.length} task${targets.length !== 1 ? 's' : ''}`, undoSnap);
+          break;
+        }
+        case 'rename_note': {
+          const rnSearch = (action.title || '').trim().toLowerCase();
+          const rnMatch = notes.find(n => !n.is_folder && (n.name || '').toLowerCase().includes(rnSearch));
+          if (!rnMatch) {
+            postAssistantNote(`I couldn't find a note called "${action.title}" to rename.`);
+            break;
+          }
+          const rnNew = (action.new_title || '').trim();
+          if (!rnNew || rnNew.length < 2) {
+            postAssistantNote(`Please provide a new name for the note.`);
+            break;
+          }
+          const rnUpdated = { ...rnMatch, name: rnNew, updatedAt: new Date().toISOString() };
+          setNotes(prev => prev.map(n => n.id === rnMatch.id ? rnUpdated : n));
+          if (user) syncOp(() => dbUpsertNote(rnUpdated, user.id));
+          postAssistantNote(`Renamed **${rnMatch.name}** to **${rnNew}**.`);
+          pushUndoToast(`Undo: renamed note "${rnMatch.name}"`, undoSnap);
+          break;
+        }
+        case 'move_note': {
+          const mnSearch = (action.title || '').trim().toLowerCase();
+          const mnMatch = notes.find(n => !n.is_folder && (n.name || '').toLowerCase().includes(mnSearch));
+          if (!mnMatch) {
+            postAssistantNote(`I couldn't find a note called "${action.title}" to move.`);
+            break;
+          }
+          let mnParentId = null;
+          if (action.folder) {
+            const fs = action.folder.trim().toLowerCase();
+            const mnFolder = notes.find(n => n.is_folder && (n.name || '').toLowerCase().includes(fs));
+            if (!mnFolder) {
+              postAssistantNote(`I couldn't find a folder called "${action.folder}". Create it first with "create a ${action.folder} folder".`);
+              break;
+            }
+            mnParentId = mnFolder.id;
+          }
+          const mnUpdated = { ...mnMatch, parent_id: mnParentId, updatedAt: new Date().toISOString() };
+          setNotes(prev => prev.map(n => n.id === mnMatch.id ? mnUpdated : n));
+          if (user) syncOp(() => dbUpsertNote(mnUpdated, user.id));
+          const mnDest = action.folder ? `**${action.folder}**` : 'the root folder';
+          postAssistantNote(`Moved **${mnMatch.name}** to ${mnDest}.`);
+          pushUndoToast(`Undo: moved note "${mnMatch.name}"`, undoSnap);
+          break;
+        }
+        case 'create_folder': {
+          const cfName = (action.name || '').trim();
+          if (!cfName || cfName.length < 2) {
+            postAssistantNote(`Please provide a name for the folder.`);
+            break;
+          }
+          const cfExisting = notes.find(n => n.is_folder && (n.name || '').toLowerCase() === cfName.toLowerCase());
+          if (cfExisting) {
+            postAssistantNote(`A folder called **${cfName}** already exists.`);
+            break;
+          }
+          let cfParentId = null;
+          if (action.parent_folder) {
+            const pfs = action.parent_folder.trim().toLowerCase();
+            const cfParent = notes.find(n => n.is_folder && (n.name || '').toLowerCase().includes(pfs));
+            if (cfParent) cfParentId = cfParent.id;
+          }
+          const cfFolder = { id: uid(), name: cfName, content: '', updatedAt: new Date().toISOString(), is_folder: true, parent_id: cfParentId };
+          setNotes(prev => [...prev, cfFolder]);
+          if (user) syncOp(() => dbUpsertNote(cfFolder, user.id));
+          postAssistantNote(`Created folder **${cfName}**.`);
+          pushUndoToast(`Undo: created folder "${cfName}"`, undoSnap);
+          break;
+        }
+        case 'log_grade': {
+          const lgSubject = (action.subject || '').trim();
+          const lgAssignment = (action.assignment || '').trim();
+          const lgGrade = typeof action.grade === 'number' ? action.grade : parseFloat(action.grade);
+          if (!lgSubject || !lgAssignment || isNaN(lgGrade)) {
+            postAssistantNote(`I need subject, assignment name, and grade to log this.`);
+            break;
+          }
+          const gradeRecord = { id: uid(), subject: lgSubject, assignment: lgAssignment, grade: lgGrade, grade_type: action.grade_type || 'other', created_at: new Date().toISOString() };
+          setGrades(prev => [gradeRecord, ...prev]);
+          if (user) syncOp(() => sb.from('grades').insert({ id: gradeRecord.id, user_id: user.id, subject: lgSubject, assignment: lgAssignment, grade: lgGrade, grade_type: gradeRecord.grade_type }));
+          const subjectGrades = [...grades, gradeRecord].filter(g => (g.subject || '').toLowerCase() === lgSubject.toLowerCase());
+          const avg = subjectGrades.reduce((s, g) => s + Number(g.grade), 0) / subjectGrades.length;
+          postAssistantNote(`Logged **${lgGrade}%** on **${lgAssignment}** (${lgSubject}).\n\nYour ${lgSubject} average is now **${avg.toFixed(1)}%** across ${subjectGrades.length} grade${subjectGrades.length !== 1 ? 's' : ''}.`);
+          recordExecution('log_grade', `${lgGrade}% on "${lgAssignment}" (${lgSubject})`);
+          break;
+        }
+        case 'update_study_set': {
+          const usSearch = (action.title || '').trim().toLowerCase();
+          const usMatch = flashcardDecks.find(d =>
+            d.title.toLowerCase().includes(usSearch) || usSearch.includes(d.title.toLowerCase())
+          );
+          if (!usMatch) {
+            postAssistantNote(`I couldn't find a flashcard deck called "${action.title}" to update.`);
+            break;
+          }
+          let updatedCards = [...(usMatch.cards || [])];
+          if (action.cards_to_remove && action.cards_to_remove.length > 0) {
+            const removeSet = action.cards_to_remove.map(q => q.trim().toLowerCase());
+            updatedCards = updatedCards.filter(c => !removeSet.some(rq => (c.q || '').toLowerCase().includes(rq)));
+          }
+          if (action.cards_to_add && action.cards_to_add.length > 0) {
+            updatedCards = [...updatedCards, ...action.cards_to_add];
+          }
+          const usNewTitle = (action.new_title || '').trim() || usMatch.title;
+          const usUpdated = { ...usMatch, title: usNewTitle, cards: updatedCards, card_count: updatedCards.length };
+          setFlashcardDecks(prev => prev.map(d => d.id === usMatch.id ? usUpdated : d));
+          if (user) syncOp(() => sb.from('flashcard_decks').update({ title: usNewTitle, cards: updatedCards, card_count: updatedCards.length }).eq('id', usMatch.id).eq('user_id', user.id));
+          const usChanges = [];
+          if (usNewTitle !== usMatch.title) usChanges.push(`renamed to "${usNewTitle}"`);
+          if (action.cards_to_add?.length) usChanges.push(`added ${action.cards_to_add.length} card${action.cards_to_add.length !== 1 ? 's' : ''}`);
+          if (action.cards_to_remove?.length) usChanges.push(`removed ${action.cards_to_remove.length} card${action.cards_to_remove.length !== 1 ? 's' : ''}`);
+          postAssistantNote(`Updated **${usMatch.title}**: ${usChanges.join(', ') || 'no changes'}. Now has ${updatedCards.length} card${updatedCards.length !== 1 ? 's' : ''}.`);
+          pushUndoToast(`Undo: updated deck "${usMatch.title}"`, undoSnap);
+          break;
+        }
         case 'plan_intent': {
           const goal = String(action.goal || '').trim();
           if (!goal) {
@@ -6630,7 +6982,10 @@ function App() {
       const deckId = await dbSaveFlashcardDeck({ title: c.title, summary: c.summary, cards: c.cards, source: 'ai' }, user.id);
       setPendingContent(prev => prev.filter((_,i) => i !== idx));
       setToastMsg('Saved "' + (c.title || 'Flashcard Deck') + '" to Library');
-      if (deckId) console.log('[sos] flashcard deck saved:', deckId);
+      if (deckId) {
+        console.log('[sos] flashcard deck saved:', deckId);
+        setFlashcardDecks(prev => [{ id: deckId, title: c.title, summary: c.summary || null, cards: c.cards || [], source: 'ai', card_count: (c.cards || []).length, created_at: new Date().toISOString() }, ...prev]);
+      }
       return;
     }
     const formatted = formatContentForNote(c);
@@ -6648,7 +7003,7 @@ function App() {
   }
 
   async function handleApplyIntentPlan(idx, plan, skipConflicts = false) {
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
     let taskCount = 0, blockCount = 0;
     const createdTaskIds = [];
 
@@ -8594,6 +8949,15 @@ function App() {
             tasks={tasks}
             events={events}
             notes={notes}
+            selectedProject={selectedProject}
+            onSelectProject={(name) => {
+              if (selectedProject === name) {
+                setSelectedProject(null);
+              } else {
+                setSelectedProject(name);
+                if (activePanel !== 'chat') setActivePanel('chat');
+              }
+            }}
           />
         </div>
       )}
@@ -8946,6 +9310,23 @@ function App() {
             <ProofreadPanel />
           </div>
         </div>
+      ) : selectedProject ? (
+        <ProjectPanel
+          subject={selectedProject}
+          tasks={tasks}
+          events={events}
+          notes={notes}
+          flashcardDecks={flashcardDecks}
+          onClose={() => setSelectedProject(null)}
+          onDeleteItems={(items) => {
+            items.forEach(({ type, id }) => {
+              if (type === 'task') { setTasks(prev => prev.filter(t => t.id !== id)); if (user) syncOp(() => dbDeleteTask(id, user.id)); }
+              else if (type === 'event') { setEvents(prev => prev.filter(e => e.id !== id)); if (user) syncOp(() => dbDeleteEvent(id, user.id)); }
+              else if (type === 'note') { setNotes(prev => prev.filter(n => n.id !== id)); if (user) syncOp(() => sb.from('notes').delete().eq('id', id).eq('user_id', user.id)); }
+              else if (type === 'deck') { setFlashcardDecks(prev => prev.filter(d => d.id !== id)); if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', id).eq('user_id', user.id)); }
+            });
+          }}
+        />
       ) : (
       <>
       <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
