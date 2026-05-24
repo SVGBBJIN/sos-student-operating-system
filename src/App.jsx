@@ -19,6 +19,7 @@ import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import LofiRightPanel from './components/LofiRightPanel';
 import StudioSidebar from './components/StudioSidebar';
+import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
@@ -4867,6 +4868,7 @@ function App() {
   const linkSuggestTimerRef = useRef(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
+  const [selectedProject, setSelectedProject] = useState(null);
   const [showNotes, setShowNotes] = useState(false);
   const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
@@ -8947,6 +8949,15 @@ function App() {
             tasks={tasks}
             events={events}
             notes={notes}
+            selectedProject={selectedProject}
+            onSelectProject={(name) => {
+              if (selectedProject === name) {
+                setSelectedProject(null);
+              } else {
+                setSelectedProject(name);
+                if (activePanel !== 'chat') setActivePanel('chat');
+              }
+            }}
           />
         </div>
       )}
@@ -9299,6 +9310,23 @@ function App() {
             <ProofreadPanel />
           </div>
         </div>
+      ) : selectedProject ? (
+        <ProjectPanel
+          subject={selectedProject}
+          tasks={tasks}
+          events={events}
+          notes={notes}
+          flashcardDecks={flashcardDecks}
+          onClose={() => setSelectedProject(null)}
+          onDeleteItems={(items) => {
+            items.forEach(({ type, id }) => {
+              if (type === 'task') { setTasks(prev => prev.filter(t => t.id !== id)); if (user) syncOp(() => dbDeleteTask(id, user.id)); }
+              else if (type === 'event') { setEvents(prev => prev.filter(e => e.id !== id)); if (user) syncOp(() => dbDeleteEvent(id, user.id)); }
+              else if (type === 'note') { setNotes(prev => prev.filter(n => n.id !== id)); if (user) syncOp(() => sb.from('notes').delete().eq('id', id).eq('user_id', user.id)); }
+              else if (type === 'deck') { setFlashcardDecks(prev => prev.filter(d => d.id !== id)); if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', id).eq('user_id', user.id)); }
+            });
+          }}
+        />
       ) : (
       <>
       <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
