@@ -4802,6 +4802,7 @@ function App() {
   const [events, setEvents] = useState([]);
   const [studyPlans, setStudyPlans] = useState([]);
   const [flashcardDecks, setFlashcardDecks] = useState([]);
+  const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);

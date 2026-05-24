@@ -299,6 +299,92 @@ export const ReadProjectSchema = z.object({
 });
 export type ReadProjectInput = z.infer<typeof ReadProjectSchema>;
 
+export const ReadTasksSchema = z.object({
+  type: z.literal("read_tasks").optional(),
+  subject: optionalSubjectString,
+  status: z.enum(["not_started", "in_progress", "done"]).optional(),
+  due_within_days: z.number().int().min(1).max(90).optional(),
+});
+export type ReadTasksInput = z.infer<typeof ReadTasksSchema>;
+
+export const UpdateBlockSchema = z
+  .object({
+    type: z.literal("update_block").optional(),
+    date: dateString,
+    start: timeString.optional(),
+    activity: z.string().max(200).optional(),
+    new_activity: z.string().max(80).optional(),
+    new_start: timeString.optional(),
+    new_end: timeString.optional(),
+    new_category: blockCategoryEnum.optional(),
+  })
+  .refine(
+    (v) => Boolean(v.start || v.activity),
+    { message: "Provide start time or activity name to identify the block", path: ["start"] }
+  );
+export type UpdateBlockInput = z.infer<typeof UpdateBlockSchema>;
+
+export const PostponeTaskSchema = z.object({
+  type: z.literal("postpone_task").optional(),
+  title: titleLikeString("title"),
+  new_due_date: dateString,
+});
+export type PostponeTaskInput = z.infer<typeof PostponeTaskSchema>;
+
+export const BulkCompleteSchema = z
+  .object({
+    type: z.literal("bulk_complete").optional(),
+    subject: optionalSubjectString,
+    titles: z.array(z.string().min(1).max(200)).max(20).optional(),
+  })
+  .refine(
+    (v) => Boolean(v.subject || (v.titles && v.titles.length > 0)),
+    { message: "Provide subject or titles to bulk-complete", path: ["subject"] }
+  );
+export type BulkCompleteInput = z.infer<typeof BulkCompleteSchema>;
+
+export const RenameNoteSchema = z.object({
+  type: z.literal("rename_note").optional(),
+  title: titleLikeString("title"),
+  new_title: titleLikeString("new_title"),
+});
+export type RenameNoteInput = z.infer<typeof RenameNoteSchema>;
+
+export const MoveNoteSchema = z.object({
+  type: z.literal("move_note").optional(),
+  title: titleLikeString("title"),
+  folder: z.string().max(80).optional(),
+});
+export type MoveNoteInput = z.infer<typeof MoveNoteSchema>;
+
+export const CreateFolderSchema = z.object({
+  type: z.literal("create_folder").optional(),
+  name: titleLikeString("name"),
+  parent_folder: z.string().max(80).optional(),
+});
+export type CreateFolderInput = z.infer<typeof CreateFolderSchema>;
+
+export const LogGradeSchema = z.object({
+  type: z.literal("log_grade").optional(),
+  subject: subjectString,
+  assignment: titleLikeString("assignment"),
+  grade: z.number().min(0).max(100),
+  grade_type: z.enum(["exam", "quiz", "homework", "project", "other"]).optional(),
+});
+export type LogGradeInput = z.infer<typeof LogGradeSchema>;
+
+export const UpdateStudySetSchema = z.object({
+  type: z.literal("update_study_set").optional(),
+  title: titleLikeString("title"),
+  new_title: z.string().min(2).max(120).optional(),
+  cards_to_add: z
+    .array(z.object({ q: z.string().min(1).max(500), a: z.string().min(1).max(500) }))
+    .max(50)
+    .optional(),
+  cards_to_remove: z.array(z.string().min(1).max(500)).max(50).optional(),
+});
+export type UpdateStudySetInput = z.infer<typeof UpdateStudySetSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -328,6 +414,15 @@ export const ACTION_SCHEMAS = {
   read_notes: ReadNotesSchema,
   read_study_sets: ReadStudySetsSchema,
   read_project: ReadProjectSchema,
+  read_tasks: ReadTasksSchema,
+  update_block: UpdateBlockSchema,
+  postpone_task: PostponeTaskSchema,
+  bulk_complete: BulkCompleteSchema,
+  rename_note: RenameNoteSchema,
+  move_note: MoveNoteSchema,
+  create_folder: CreateFolderSchema,
+  log_grade: LogGradeSchema,
+  update_study_set: UpdateStudySetSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -364,6 +459,15 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   read_notes: "Read and list the student's notes, optionally filtered by subject or search query. Posts a summary to chat with note titles and IDs so the student can reference them. Call when the student asks what notes they have, wants to find a note, or asks to see their notes.",
   read_study_sets: "Read and list all flashcard decks the student has saved. Posts a summary to chat with deck titles and card counts. Call when the student asks what study sets or flashcard decks they have.",
   read_project: "Read all content (tasks, events, notes, study sets) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
+  read_tasks: "List the student's tasks with optional filters: subject, status (not_started/in_progress/done), or tasks due within N days. Posts a formatted list to chat. Call when the student asks what tasks they have, wants to see pending work, or asks about tasks for a specific subject.",
+  update_block: "Modify an existing time block — rename it, change its time, or change its category. Identify the block by date + start time OR date + activity name. Provide at least one of new_activity, new_start, new_end, or new_category. NEVER guess times — call ask_clarification if the student didn't state them.",
+  postpone_task: "Push a task's due date to a later date. Identify by title (fuzzy match). new_due_date must be a valid YYYY-MM-DD date. Increments the task's postpone count for behavioral tracking.",
+  bulk_complete: "Mark multiple tasks done in one shot. Filter by subject (e.g. 'Math') and/or a list of titles. At least one of subject or titles is required. Common at end of study sessions ('mark all my English tasks as done').",
+  rename_note: "Change the title/name of an existing note without touching its content. title is the current name (fuzzy match); new_title is the replacement.",
+  move_note: "Move a note into a different folder by updating its parent. title identifies the note (fuzzy match). folder is the destination folder name — omit to move to root. If the folder doesn't exist, tell the student to create it first.",
+  create_folder: "Create a new folder in the student's notes. name is the folder title. Optionally nest it under a parent_folder. Does not create duplicate folders.",
+  log_grade: "Record a grade for an assignment or exam. subject, assignment name, and grade (0–100) are required. grade_type can be 'exam', 'quiz', 'homework', 'project', or 'other'. Posts the logged grade and the updated subject average to chat.",
+  update_study_set: "Edit an existing flashcard deck — rename it, add new cards, or remove cards by question text. At least one of new_title, cards_to_add, or cards_to_remove must be provided. Identify the deck by title (fuzzy match).",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
