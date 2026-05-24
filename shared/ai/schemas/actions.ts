@@ -35,6 +35,14 @@ const dayEnum = z.enum([
   "Friday", "Saturday", "Sunday",
 ]);
 
+// Confidence + commitment shared fields. The model attaches these whenever an
+// extracted item is uncertain — e.g. "I think there might be a chem test
+// Thursday" → confidence ~0.4, tentative. The frontend uses them to gate the
+// confidence rail (see executeAction in App.jsx).
+const confidenceField = z.number().min(0).max(1).optional();
+const eventCommitmentField = z.enum(["tentative", "confirmed"]).optional();
+const taskCommitmentField = z.enum(["tentative", "confirmed"]).optional();
+
 export const AddEventSchema = z.object({
   type: z.literal("add_event").optional(),
   title: titleLikeString("title"),
@@ -45,6 +53,8 @@ export const AddEventSchema = z.object({
   priority: priorityEnum.optional(),
   event_type: eventTypeEnum.optional(),
   subject: optionalSubjectString,
+  confidence: confidenceField,
+  status: eventCommitmentField,
 });
 export type AddEventInput = z.infer<typeof AddEventSchema>;
 
@@ -53,6 +63,8 @@ export const AddTaskSchema = z.object({
   task_name: titleLikeString("task_name"),
   due_date: dateString,
   subject: optionalSubjectString,
+  confidence: confidenceField,
+  commitment: taskCommitmentField,
 });
 export type AddTaskInput = z.infer<typeof AddTaskSchema>;
 
@@ -74,10 +86,12 @@ export const UpdateEventSchema = z
     date: dateString.optional(),
     event_type: eventTypeEnum.optional(),
     subject: optionalSubjectString,
+    confidence: confidenceField,
+    status: eventCommitmentField,
   })
   .refine(
-    (v) => Boolean(v.new_title || v.date || v.event_type || v.subject),
-    { message: "Provide at least one of new_title, date, event_type, or subject", path: ["new_title"] }
+    (v) => Boolean(v.new_title || v.date || v.event_type || v.subject || v.status),
+    { message: "Provide at least one of new_title, date, event_type, subject, or status", path: ["new_title"] }
   );
 
 export const CompleteTaskSchema = z.object({
@@ -197,14 +211,16 @@ export const UpdateTaskSchema = z
     new_title: titleLikeString("new_title").optional(),
     due: dateString.optional(),
     estimated_minutes: z.number().int().min(1).max(480).optional(),
+    confidence: confidenceField,
+    commitment: taskCommitmentField,
   })
   .refine(
     (v) => Boolean(v.task_id || v.title),
     { message: "Provide task_id or title to identify the task", path: ["title"] }
   )
   .refine(
-    (v) => Boolean(v.new_title || v.due || v.estimated_minutes !== undefined),
-    { message: "Provide at least one of new_title, due, or estimated_minutes", path: ["new_title"] }
+    (v) => Boolean(v.new_title || v.due || v.estimated_minutes !== undefined || v.commitment),
+    { message: "Provide at least one of new_title, due, estimated_minutes, or commitment", path: ["new_title"] }
   );
 export type UpdateTaskInput = z.infer<typeof UpdateTaskSchema>;
 
@@ -292,8 +308,8 @@ export type ActionName = keyof typeof ACTION_SCHEMAS;
 // terse enough to fit Gemini's tool-prompt budget but explicit on the rules
 // the model previously violated (placeholders, dates, ask_clarification escape).
 const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
-  add_event: "Add a calendar event (tests, quizzes, practices, games, appointments). Title/date must be the student's exact wording. Infer subject from the title; if any required field is missing or ambiguous, call ask_clarification.",
-  add_task: "Add a homework/todo task. Use task_name as the student said it; resolve due_date against today; ask_clarification when uncertain. Use 'personal' subject for non-academic tasks.",
+  add_event: "Add a calendar event (tests, quizzes, practices, games, appointments). Title/date must be the student's exact wording. Infer subject from the title; if any required field is missing or ambiguous, call ask_clarification. Optionally include `confidence` (0..1) and `status` ('tentative' or 'confirmed'). When the student's wording is hedged ('I think', 'maybe', 'might be', 'around', 'somewhere'), or the date is inferred rather than verbatim, set status='tentative' and confidence below 0.7 — the client routes those to a review rail instead of auto-applying them.",
+  add_task: "Add a homework/todo task. Use task_name as the student said it; resolve due_date against today; ask_clarification when uncertain. Use 'personal' subject for non-academic tasks. Optionally include `confidence` (0..1) and `commitment` ('tentative' or 'confirmed'). Use commitment='tentative' and confidence below 0.7 when the student's wording is hedged or the due_date is inferred rather than explicit — the client routes those to a review rail.",
   delete_event: "Cancel/remove an event from the calendar by title.",
   delete_task: "Remove a task from the to-do list by title.",
   update_event: "Update an existing event — change new_title, date, event_type, or subject. `title` must match an event already on the calendar.",

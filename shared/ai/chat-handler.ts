@@ -9,6 +9,7 @@
 import { callModel, RpmExhaustedError } from "./chat-core.js";
 import { runPlanningPipeline, PlanningPipelineError } from "./pipelines/planning.js";
 import { runIntentPlanPipeline, IntentPlanPipelineError } from "./pipelines/intent_plan.js";
+import { runBrainDumpPipeline, BrainDumpPipelineError } from "./pipelines/brain_dump.js";
 import { aggregateRpmStatus, overLimit } from "./rpm-tracker.js";
 import { route, type Intent } from "./router.js";
 import { enrichDynamicContext } from "./context/enrich.js";
@@ -192,6 +193,109 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
       } catch (err) {
         const e = err as IntentPlanPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
+      }
+    }
+
+    // ── Brain-dump pipeline (voice / messy text → batch of tentative actions) ──
+    if (body.mode === "brain_dump") {
+      const dumpCtx = await enrichDynamicContext({
+        userId,
+        workspaceContext,
+        intentQuery,
+        baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
+        clientTasks: body.clientTasks,
+        clientCalendarDensity: body.clientCalendarDensity,
+      });
+      const buildDumpJson = (result: { actions: unknown[]; summary: string; iterations: number; critiqueText: string }) => ({
+        content: result.summary,
+        actions: result.actions,
+        clarifications: [],
+        executed_actions: [],
+        orchestration: { mode: "brain_dump", iterations: result.iterations, ...CLIENT_ORCH },
+        brain_dump_critique: result.critiqueText,
+      });
+      if (wantsSSE) {
+        return {
+          kind: "stream",
+          run: async (onChunk) => {
+            const result = await runBrainDumpPipeline({
+              systemPrompt: body.systemPrompt ?? "",
+              staticSystemPrompt: body.staticSystemPrompt ?? null,
+              dynamicContext: dumpCtx,
+              messages,
+              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
+            });
+            return buildDumpJson(result);
+          },
+        };
+      }
+      try {
+        const result = await runBrainDumpPipeline({
+          systemPrompt: body.systemPrompt ?? "",
+          staticSystemPrompt: body.staticSystemPrompt ?? null,
+          dynamicContext: dumpCtx,
+          messages,
+        });
+        return { kind: "json", status: 200, json: buildDumpJson(result) };
+      } catch (err) {
+        const e = err as BrainDumpPipelineError;
+        return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
+      }
+    }
+
+    // ── Daily briefing: structured rollup for today (or tomorrow when date='tomorrow') ──
+    if (body.mode === "briefing") {
+      const briefingCtx = await enrichDynamicContext({
+        userId,
+        workspaceContext,
+        intentQuery: "briefing",
+        baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
+        clientTasks: body.clientTasks,
+        clientCalendarDensity: body.clientCalendarDensity,
+      });
+      const briefingPrompt = (body.systemPrompt ?? "") +
+        "\n\nProduce a concise daily briefing as STRICT JSON only — no prose outside the JSON. " +
+        "Schema: { \"summary\": string (1 sentence), \"events_today\": string[], " +
+        "\"unfinished_tasks\": string[], \"prep_gaps\": string[], \"missing\": string[] }. " +
+        "Use the assembled context to fill events_today and unfinished_tasks; leave prep_gaps " +
+        "and missing as empty arrays for now.";
+      try {
+        const result = await callModel({
+          intent: "chat",
+          systemPrompt: briefingPrompt,
+          staticSystemPrompt: body.staticSystemPrompt ?? undefined,
+          dynamicContext: briefingCtx,
+          messages,
+          toolSet: "none",
+          responseMimeType: "application/json",
+          maxOutputTokens: 600,
+          temperature: 0.3,
+        });
+        let briefing: Record<string, unknown> = {
+          summary: "", events_today: [], unfinished_tasks: [], prep_gaps: [], missing: [],
+        };
+        try {
+          const parsed = JSON.parse(result.content || "{}");
+          if (parsed && typeof parsed === "object") briefing = { ...briefing, ...parsed };
+        } catch {
+          // Model returned non-JSON — keep the empty briefing skeleton and pass the text along.
+          briefing.summary = (result.content || "").trim().slice(0, 280);
+        }
+        return {
+          kind: "json",
+          status: 200,
+          json: {
+            content: "",
+            actions: [],
+            clarifications: [],
+            executed_actions: [],
+            orchestration: { mode: "briefing", ...CLIENT_ORCH },
+            briefing,
+          },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { kind: "json", status: 500, json: { error: message } };
       }
     }
 

@@ -244,6 +244,8 @@ function dbTaskToApp(row) {
     status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0,
     completedAt: row.completed_at, createdAt: row.created_at,
     study_plan_id: row.study_plan_id || null,
+    confidence: row.confidence == null ? null : Number(row.confidence),
+    commitment: row.commitment || 'confirmed',
   };
 }
 function appTaskToDb(t, userId) {
@@ -253,6 +255,8 @@ function appTaskToDb(t, userId) {
     status: t.status || 'not_started', focus_minutes: t.focusMinutes || 0,
     completed_at: t.completedAt || null, created_at: t.createdAt || new Date().toISOString(),
     study_plan_id: t.study_plan_id || null,
+    confidence: typeof t.confidence === 'number' ? t.confidence : null,
+    commitment: t.commitment || 'confirmed',
   };
 }
 // Delegate to shared shape helpers — single source of truth for event ↔ DB conversion.
@@ -5014,6 +5018,65 @@ function App() {
   const inputRef = useRef(null);
   const chatAreaRef = useRef(null);
 
+  // Daily briefing card: AI-generated rollup of today's schedule + open tasks.
+  // Auto-loads once per session-day (gate via localStorage) and on demand from
+  // the chat header button. Schema mirrors the server briefing JSON.
+  const [briefingData, setBriefingData] = useState(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const briefingFetchedRef = useRef(false);
+
+  async function loadBriefing() {
+    if (briefingLoading) return;
+    setBriefingLoading(true);
+    try {
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const clientTasksPayload = tasks
+        .filter(t => t.status !== 'done')
+        .slice(0, 50)
+        .map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
+      const todaysEvents = events.filter(ev => ev.date === todayStr).map(ev => `${ev.title}${ev.time ? ' @ ' + ev.time : ''}`);
+      const unfinishedTitles = tasks.filter(t => t.status !== 'done' && t.dueDate <= todayStr).map(t => t.title);
+      const dynamicContext = `TODAY: ${todayStr}\nTODAY'S EVENTS: ${todaysEvents.join('; ') || '(none)'}\nUNFINISHED TASKS DUE TODAY OR EARLIER: ${unfinishedTitles.join('; ') || '(none)'}`;
+      const res = await fetch(EDGE_FN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        body: JSON.stringify({
+          mode: 'briefing',
+          systemPrompt: 'You are SOS, a student-focused planner. Tone: warm, concise, second person.',
+          dynamicContext,
+          messages: [{ role: 'user', content: "Give me today's briefing." }],
+          workspaceContext: 'schedule',
+          clientTasks: clientTasksPayload,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.briefing) {
+          setBriefingData({ ...data.briefing, _fetchedAt: Date.now() });
+          try { localStorage.setItem('sos-last-briefing', todayStr); } catch (_) {}
+        }
+      }
+    } catch (err) {
+      console.warn('Briefing load failed:', err);
+    } finally {
+      setBriefingLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!user || briefingFetchedRef.current) return;
+    let last = '';
+    try { last = localStorage.getItem('sos-last-briefing') || ''; } catch (_) {}
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (last === todayStr) return;
+    briefingFetchedRef.current = true;
+    // Small delay so initial Supabase fetches (tasks, events) populate first.
+    const t = setTimeout(() => { loadBriefing(); }, 1500);
+    return () => clearTimeout(t);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Wikilink autocomplete on the chat input — opens an entity picker when the
   // user types `[[`. Inserts `[[Selected Name]]` on commit; ↵/Tab to confirm,
   // Esc to dismiss, ↑/↓ to navigate.
@@ -5488,6 +5551,31 @@ function App() {
         entry,
       ].slice(-10);
     }
+
+    // ── Confidence gate ──
+    // Items the model marked tentative or low-confidence go to the review rail
+    // instead of mutating state. Singletons with confidence >= 0.85 still
+    // auto-apply (the cutoff is high enough that the rail catches anything
+    // hedged). __confirmed bypasses the gate when the user has already approved
+    // an item from the rail.
+    const mutatingTypes = new Set([
+      'add_task','add_event','add_block','add_recurring_event',
+      'update_task','update_event','delete_task','delete_event','delete_block',
+      'complete_task','convert_event_to_block','convert_block_to_event',
+      'break_task','clear_all',
+    ]);
+    if (mutatingTypes.has(action.type) && !action.__confirmed) {
+      const conf = typeof action.confidence === 'number' ? action.confidence : null;
+      const tentative = action.status === 'tentative' || action.commitment === 'tentative';
+      const lowConf = conf != null && conf < 0.7;
+      const autoConf = conf != null && conf >= 0.85;
+      if ((lowConf || tentative) && !autoConf) {
+        const reason = tentative && !lowConf ? 'tentative' : 'low_confidence';
+        setPendingActions(prev => [...prev, { action, reason, confidence: conf }]);
+        return;
+      }
+    }
+
     // Snapshot state before any mutation so the user can undo within 8 seconds
     const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
     try {
@@ -5539,7 +5627,7 @@ function App() {
             const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
           }
-          const task = { id:uid(), title:taskName, subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:action.status||'not_started', focusMinutes:0, createdAt:new Date().toISOString() };
+          const task = { id:uid(), title:taskName, subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:(action.status && action.status !== 'tentative' && action.status !== 'confirmed') ? action.status : 'not_started', focusMinutes:0, createdAt:new Date().toISOString(), confidence: typeof action.confidence === 'number' ? action.confidence : null, commitment: action.commitment === 'tentative' ? 'tentative' : 'confirmed' };
           setTasks(prev => {
             const updated = [...prev, task];
             // P2.5: Overloaded day detection
@@ -5692,7 +5780,7 @@ function App() {
             return;
           }
           const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
-          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, end_time:action.endTime||action.end_time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null };
+          const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, end_time:action.endTime||action.end_time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null, confidence: typeof action.confidence === 'number' ? action.confidence : null, status: action.status === 'tentative' ? 'tentative' : 'confirmed' };
           setEvents(prev => {
             const updated = [...prev, ev];
             // P2.4: Recurring event pattern detection
@@ -6466,8 +6554,17 @@ function App() {
       }
     }
     sfx.confirm();
-    executeAction(action);
+    // Mark as confirmed so the confidence gate doesn't bounce the item back to
+    // the rail. The user reviewed it and is committing.
+    const pa = pendingActions[idx];
+    const confirmedAction = { ...action, __confirmed: true, commitment: 'confirmed', status: action.type === 'add_event' || action.type === 'update_event' ? 'confirmed' : action.status };
+    executeAction(confirmedAction);
     setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+    if (user) {
+      try {
+        trackEvent(user.id, 'ai_action_confirmed', { action_type: action.type, reason: pa?.reason || null, confidence: pa?.confidence ?? null });
+      } catch (_) {}
+    }
     const name = action.title||action.activity||'Action';
     const verb = action.type?.startsWith('delete') ? 'removed' : action.type === 'update_event' ? 'updated' : action.type === 'complete_task' ? 'completed' : 'added';
     setToastMsg('✓ ' + name + ' ' + verb);
@@ -6490,7 +6587,16 @@ function App() {
       }
     }
   }
-  function handleCancelAction(idx) { sfx.dismiss(); setPendingActions(prev => prev.filter((_,i)=>i!==idx)); }
+  function handleCancelAction(idx) {
+    sfx.dismiss();
+    const pa = pendingActions[idx];
+    if (user && pa) {
+      try {
+        trackEvent(user.id, 'ai_action_rejected', { action_type: pa.action?.type, reason: pa.reason || null, confidence: pa.confidence ?? null });
+      } catch (_) {}
+    }
+    setPendingActions(prev => prev.filter((_,i)=>i!==idx));
+  }
 
   // ── Content save/dismiss helpers ──
   function formatContentForNote(c) {
@@ -7330,6 +7436,9 @@ function App() {
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
         ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
+        // Caller-supplied mode override (e.g. brain_dump from voice transcripts).
+        // Wins over the heuristics above.
+        ...(opts.mode ? { mode: opts.mode } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -7411,6 +7520,31 @@ function App() {
           setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
           return;
         }
+      }
+
+      // ── Brain-dump pipeline response: extracted actions go to the review rail ──
+      if (chatData?.orchestration?.mode === 'brain_dump') {
+        const dumpActions = Array.isArray(chatData.actions) ? chatData.actions : [];
+        const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
+          ? chatData.content.trim()
+          : (dumpActions.length === 0
+            ? "I didn't catch anything actionable in that — try saying it again with a date or a name?"
+            : `Pulled out ${dumpActions.length} item${dumpActions.length === 1 ? '' : 's'} — review below.`);
+        const assistantMsg = { role:'assistant', content:summaryText, timestamp:Date.now() };
+        sfx.arrive();
+        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', summaryText, user.id);
+        if (dumpActions.length > 0) {
+          const rows = dumpActions.map(a => {
+            const conf = typeof a.confidence === 'number' ? a.confidence : null;
+            const tentative = a.status === 'tentative' || a.commitment === 'tentative';
+            const lowConf = conf != null && conf < 0.7;
+            const reason = tentative && !lowConf ? 'tentative' : (lowConf ? 'low_confidence' : 'review');
+            return { action: a, reason, confidence: conf };
+          });
+          setPendingActions(prev => [...prev, ...rows]);
+        }
+        return;
       }
 
       // ── Intent-plan pipeline response: show proposed routine in propose mode ──
@@ -8173,8 +8307,10 @@ function App() {
     speechTranscriptRef.current = '';
 
     if (transcript) {
-      // Auto-send the transcribed message directly
-      sendMessage(transcript);
+      // Voice → brain_dump pipeline: extract structured tasks/events with
+      // confidence scoring. Tentative items land in the review rail rather
+      // than mutating state immediately.
+      sendMessage(transcript, { mode: 'brain_dump' });
     } else {
       const hasBrowserSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
       setToastMsg(hasBrowserSR
@@ -8886,6 +9022,50 @@ function App() {
               )}
             </div>
           )}
+          {briefingData && (
+            <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+              <div style={{borderLeft:'3px solid var(--accent)',background:'rgba(108,99,255,0.05)',borderRadius:12,padding:'12px 14px'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                  <strong style={{fontSize:'0.92rem'}}>Today's briefing</strong>
+                  <div style={{display:'flex',gap:6}}>
+                    <button onClick={loadBriefing} disabled={briefingLoading} title="Refresh"
+                      style={{background:'transparent',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-dim)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer'}}>
+                      {briefingLoading ? '…' : '↻'}
+                    </button>
+                    <button onClick={()=>setBriefingData(null)} title="Dismiss"
+                      style={{background:'transparent',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-dim)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer'}}>×</button>
+                  </div>
+                </div>
+                {briefingData.summary && (
+                  <div style={{fontSize:'0.86rem',color:'var(--text)',marginBottom:10,lineHeight:1.4}}>{briefingData.summary}</div>
+                )}
+                {Array.isArray(briefingData.events_today) && briefingData.events_today.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Schedule</div>
+                    {briefingData.events_today.map((ev,j)=>(<div key={'be'+j} style={{fontSize:'0.84rem',padding:'2px 0'}}>· {ev}</div>))}
+                  </div>
+                )}
+                {Array.isArray(briefingData.unfinished_tasks) && briefingData.unfinished_tasks.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Unfinished</div>
+                    {briefingData.unfinished_tasks.map((t,j)=>(<div key={'bt'+j} style={{fontSize:'0.84rem',padding:'2px 0'}}>· {t}</div>))}
+                  </div>
+                )}
+                {Array.isArray(briefingData.prep_gaps) && briefingData.prep_gaps.length > 0 && (
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:'0.7rem',color:'var(--warning)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Prep gaps</div>
+                    {briefingData.prep_gaps.map((g,j)=>(<div key={'bg'+j} style={{fontSize:'0.84rem',padding:'2px 0'}}>· {g}</div>))}
+                  </div>
+                )}
+                {Array.isArray(briefingData.missing) && briefingData.missing.length > 0 && (
+                  <div>
+                    <div style={{fontSize:'0.7rem',color:'var(--warning)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Anything missing?</div>
+                    {briefingData.missing.map((m,j)=>(<div key={'bm'+j} style={{fontSize:'0.84rem',padding:'2px 0'}}>· {m}</div>))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {messages.map((msg,i)=>(
           <React.Fragment key={i}>
             {/* P1.4: "Earlier in conversation" separator */}
@@ -8964,12 +9144,15 @@ function App() {
                     while(cursor<=end&&count<100){
                       if(dayIndices.includes(cursor.getDay())){
                         const ds=toDateStr(cursor);
-                        executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||''});
+                        executeAction({type:'add_event',title:pa.action.title,date:ds,event_type:pa.action.event_type||'event',subject:pa.action.subject||'',__confirmed:true});
                         count++;
                       }
                       cursor.setDate(cursor.getDate()+1);
                     }
-                  } else { executeAction(pa.action); }
+                  } else {
+                    executeAction({ ...pa.action, __confirmed: true, commitment: 'confirmed', status: (pa.action.type === 'add_event' || pa.action.type === 'update_event') ? 'confirmed' : pa.action.status });
+                    if (user) { try { trackEvent(user.id, 'ai_action_confirmed', { action_type: pa.action?.type, reason: pa.reason || null, confidence: pa.confidence ?? null, bulk: true }); } catch (_) {} }
+                  }
                 });
                 setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
                 if(toExec.length>0){
@@ -8989,14 +9172,24 @@ function App() {
               <RecurringEventPopup
                 action={pa.action}
                 onConfirm={(checkedEvents)=>{
-                  checkedEvents.forEach(ev=>executeAction({type:'add_event',title:ev.title,date:ev.date,event_type:ev.event_type,subject:ev.subject}));
+                  checkedEvents.forEach(ev=>executeAction({type:'add_event',title:ev.title,date:ev.date,event_type:ev.event_type,subject:ev.subject,__confirmed:true}));
                   setPendingActions(prev=>prev.filter((_,i)=>i!==idx));
                   setToastMsg('Added '+checkedEvents.length+' recurring events');
                 }}
                 onCancel={()=>handleCancelAction(idx)}
               />
             ) : (
-              <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
+              <>
+                {(pa.reason === 'tentative' || pa.reason === 'low_confidence') && (
+                  <div style={{marginBottom:4,display:'flex',alignItems:'center',gap:6,fontSize:'0.7rem',color:'var(--warning)',textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                    <span style={{padding:'2px 8px',borderRadius:8,background:'rgba(255,165,2,0.1)',border:'1px solid rgba(255,165,2,0.25)'}}>
+                      {pa.reason === 'tentative' ? 'tentative' : 'low confidence'}
+                      {typeof pa.confidence === 'number' ? ` · ${Math.round(pa.confidence * 100)}%` : ''}
+                    </span>
+                  </div>
+                )}
+                <ConfirmationCard action={pa.action} onConfirm={(action)=>handleConfirmAction(idx,action)} onCancel={()=>handleCancelAction(idx)} isFallback={pa.isFallback}/>
+              </>
             )}
           </div>
         ))}
