@@ -4,9 +4,10 @@ import { sb } from './lib/supabase.js';
 import App from './App.jsx';
 
 // Lazy-loaded pages (loaded after auth check)
-const Landing     = React.lazy(() => import('./pages/Landing.jsx'));
-const Library     = React.lazy(() => import('./pages/Library.jsx'));
+const Landing      = React.lazy(() => import('./pages/Landing.jsx'));
+const Library      = React.lazy(() => import('./pages/Library.jsx'));
 const CalendarPage = React.lazy(() => import('./pages/CalendarPage.jsx'));
+const ProjectsPage = React.lazy(() => import('./pages/ProjectsPage.jsx'));
 
 /**
  * AppRouter — thin router wrapper.
@@ -73,6 +74,12 @@ export default function AppRouter() {
         <Route
           path="/library"
           element={<Library />}
+        />
+
+        {/* Projects — auth handled internally */}
+        <Route
+          path="/projects"
+          element={<ProjectsPage />}
         />
 
         {/* Redirects for old paths */}

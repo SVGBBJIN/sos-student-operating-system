@@ -4801,6 +4801,7 @@ function App() {
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
   const [studyPlans, setStudyPlans] = useState([]);
+  const [flashcardDecks, setFlashcardDecks] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -5157,6 +5158,12 @@ function App() {
       setStudyPlans(data.studyPlans || []);
     }
 
+    // Load flashcard decks for AI tool access (read_study_sets, delete_study_set, read_project)
+    try {
+      const { data: decks } = await sb.from('flashcard_decks').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(100);
+      setFlashcardDecks(decks || []);
+    } catch (e) { console.error('Failed to load flashcard decks:', e); }
+
     // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
     // whose fire_at is already past (laptop slept, tab closed, etc.).
     try {
@@ -5476,6 +5483,7 @@ function App() {
     setEvents(snap.events);
     setNotes(snap.notes);
     setBlocks(snap.blocks);
+    if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     postAssistantNote("Done — I've undone that action.");
@@ -5562,7 +5570,7 @@ function App() {
       'add_task','add_event','add_block','add_recurring_event',
       'update_task','update_event','delete_task','delete_event','delete_block',
       'complete_task','convert_event_to_block','convert_block_to_event',
-      'break_task','clear_all',
+      'break_task','clear_all','delete_study_set',
     ]);
     if (mutatingTypes.has(action.type) && !action.__confirmed) {
       const conf = typeof action.confidence === 'number' ? action.confidence : null;
@@ -5577,7 +5585,7 @@ function App() {
     }
 
     // Snapshot state before any mutation so the user can undo within 8 seconds
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice() };
     try {
       switch (action.type) {
         case 'add_task': {
@@ -6433,6 +6441,107 @@ function App() {
           recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
         }
+        case 'delete_study_set': {
+          const titleSearch = (action.title || '').toLowerCase().trim();
+          const match = flashcardDecks.find(d =>
+            d.title.toLowerCase().includes(titleSearch) ||
+            titleSearch.includes(d.title.toLowerCase())
+          );
+          if (!match) {
+            postAssistantNote(`I couldn't find a flashcard deck called "${action.title}" to delete.`);
+            break;
+          }
+          setFlashcardDecks(prev => prev.filter(d => d.id !== match.id));
+          if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', match.id).eq('user_id', user.id));
+          recordExecution('delete_study_set', `"${match.title}"`);
+          pushUndoToast(`Undo: deleted study set "${match.title}"`, undoSnap);
+          break;
+        }
+        case 'read_notes': {
+          const subjectFilter = (action.subject || '').trim();
+          const searchFilter = (action.search || '').trim();
+          let filteredNotes = notes;
+          if (subjectFilter) {
+            const sl = subjectFilter.toLowerCase();
+            filteredNotes = filteredNotes.filter(n => (n.subject || n.tab_name || '').toLowerCase() === sl);
+          }
+          if (searchFilter) {
+            const ql = searchFilter.toLowerCase();
+            filteredNotes = filteredNotes.filter(n =>
+              n.name?.toLowerCase().includes(ql) ||
+              (n.content || '').replace(/<[^>]+>/g, '').toLowerCase().includes(ql)
+            );
+          }
+          if (filteredNotes.length === 0) {
+            postAssistantNote(`No notes found${subjectFilter ? ' for ' + subjectFilter : ''}${searchFilter ? ' matching "' + searchFilter + '"' : ''}.`);
+            break;
+          }
+          const noteLines = [`**Notes${subjectFilter ? ' — ' + subjectFilter : ''}** (${filteredNotes.length}):\n`];
+          filteredNotes.slice(0, 15).forEach(n => {
+            const dateStr = n.updatedAt ? ` · ${new Date(n.updatedAt).toLocaleDateString()}` : (n.updated_at ? ` · ${new Date(n.updated_at).toLocaleDateString()}` : '');
+            noteLines.push(`- **${n.name || 'Untitled'}**${dateStr}`);
+          });
+          if (filteredNotes.length > 15) noteLines.push(`\n_…and ${filteredNotes.length - 15} more_`);
+          postAssistantNote(noteLines.join('\n'));
+          break;
+        }
+        case 'read_study_sets': {
+          if (flashcardDecks.length === 0) {
+            postAssistantNote('No flashcard decks found. Create one by asking me to "make flashcards on [topic]".');
+            break;
+          }
+          const deckLines = [`**Flashcard Decks** (${flashcardDecks.length}):\n`];
+          flashcardDecks.forEach(d => {
+            const cc = d.card_count || (d.cards || []).length;
+            const src = d.source === 'ai' ? ' · AI-generated' : ' · manual';
+            deckLines.push(`- **${d.title}**${src} · ${cc} card${cc !== 1 ? 's' : ''}`);
+          });
+          postAssistantNote(deckLines.join('\n'));
+          break;
+        }
+        case 'read_project': {
+          const projSubject = (action.subject || '').trim();
+          if (!projSubject) {
+            postAssistantNote('Specify a subject/project name.');
+            break;
+          }
+          const psl = projSubject.toLowerCase();
+          const projTasks = tasks.filter(t => (t.subject || '').toLowerCase() === psl && t.status !== 'done');
+          const projEvents = events.filter(e => (e.subject || '').toLowerCase() === psl);
+          const projNotes = notes.filter(n => (n.subject || n.tab_name || '').toLowerCase() === psl);
+          const projDecks = flashcardDecks.filter(d => d.title.toLowerCase().includes(psl));
+          const total = projTasks.length + projEvents.length + projNotes.length + projDecks.length;
+          if (total === 0) {
+            postAssistantNote(`No content found for "${projSubject}". Check the subject name — it must match exactly.`);
+            break;
+          }
+          const projLines = [`**Project: ${projSubject}** (${total} items)\n`];
+          if (projTasks.length > 0) {
+            projLines.push(`\n**Tasks (${projTasks.length}):**`);
+            projTasks.forEach(t => {
+              const d = daysUntil(t.dueDate);
+              const urgency = d < 0 ? ' ⚠️ overdue' : d === 0 ? ' — due today' : '';
+              projLines.push(`- ${t.title} · due ${t.dueDate}${urgency}`);
+            });
+          }
+          if (projEvents.length > 0) {
+            projLines.push(`\n**Events (${projEvents.length}):**`);
+            projEvents.forEach(e => projLines.push(`- ${e.title} · ${e.date}${e.type && e.type !== 'event' ? ' [' + e.type + ']' : ''}`));
+          }
+          if (projNotes.length > 0) {
+            projLines.push(`\n**Notes (${projNotes.length}):**`);
+            projNotes.forEach(n => projLines.push(`- ${n.name || 'Untitled'}`));
+          }
+          if (projDecks.length > 0) {
+            projLines.push(`\n**Study Sets (${projDecks.length}):**`);
+            projDecks.forEach(d => {
+              const cc = d.card_count || (d.cards || []).length;
+              projLines.push(`- ${d.title} · ${cc} cards`);
+            });
+          }
+          postAssistantNote(projLines.join('\n'));
+          break;
+        }
         case 'plan_intent': {
           const goal = String(action.goal || '').trim();
           if (!goal) {
@@ -6630,7 +6739,10 @@ function App() {
       const deckId = await dbSaveFlashcardDeck({ title: c.title, summary: c.summary, cards: c.cards, source: 'ai' }, user.id);
       setPendingContent(prev => prev.filter((_,i) => i !== idx));
       setToastMsg('Saved "' + (c.title || 'Flashcard Deck') + '" to Library');
-      if (deckId) console.log('[sos] flashcard deck saved:', deckId);
+      if (deckId) {
+        console.log('[sos] flashcard deck saved:', deckId);
+        setFlashcardDecks(prev => [{ id: deckId, title: c.title, summary: c.summary || null, cards: c.cards || [], source: 'ai', card_count: (c.cards || []).length, created_at: new Date().toISOString() }, ...prev]);
+      }
       return;
     }
     const formatted = formatContentForNote(c);
@@ -6648,7 +6760,7 @@ function App() {
   }
 
   async function handleApplyIntentPlan(idx, plan, skipConflicts = false) {
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)) };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice() };
     let taskCount = 0, blockCount = 0;
     const createdTaskIds = [];
 

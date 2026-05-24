@@ -275,6 +275,30 @@ export const ConvertBlockToEventSchema = z.object({
 });
 export type ConvertBlockToEventInput = z.infer<typeof ConvertBlockToEventSchema>;
 
+export const DeleteStudySetSchema = z.object({
+  type: z.literal("delete_study_set").optional(),
+  title: titleLikeString("title"),
+});
+export type DeleteStudySetInput = z.infer<typeof DeleteStudySetSchema>;
+
+export const ReadNotesSchema = z.object({
+  type: z.literal("read_notes").optional(),
+  subject: optionalSubjectString,
+  search: z.string().max(100).optional(),
+});
+export type ReadNotesInput = z.infer<typeof ReadNotesSchema>;
+
+export const ReadStudySetsSchema = z.object({
+  type: z.literal("read_study_sets").optional(),
+});
+export type ReadStudySetsInput = z.infer<typeof ReadStudySetsSchema>;
+
+export const ReadProjectSchema = z.object({
+  type: z.literal("read_project").optional(),
+  subject: subjectString,
+});
+export type ReadProjectInput = z.infer<typeof ReadProjectSchema>;
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -300,6 +324,10 @@ export const ACTION_SCHEMAS = {
   break_task: BreakTaskSchema,
   convert_event_to_block: ConvertEventToBlockSchema,
   convert_block_to_event: ConvertBlockToEventSchema,
+  delete_study_set: DeleteStudySetSchema,
+  read_notes: ReadNotesSchema,
+  read_study_sets: ReadStudySetsSchema,
+  read_project: ReadProjectSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -332,6 +360,10 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   break_task: "Split a task into 2–10 smaller subtasks. parent_title is the original task's name (used as subject context). Each subtask must have a real title; due and estimated_minutes are optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
   convert_event_to_block: "Convert a calendar event into a time block on the schedule. Identify the event by title or event_id. Optionally override date, start, end, and category; if omitted, the client infers from the event. NEVER guess start/end — call ask_clarification if the student didn't state them.",
   convert_block_to_event: "Convert a time block into a calendar event. date, start, and end identify the block to remove. title, event_type, and subject are optional — the client falls back to the block's name if title is omitted.",
+  delete_study_set: "Permanently delete a flashcard deck / study set by title. Uses fuzzy title matching. Only call when the student explicitly asks to delete or remove a flashcard deck or study set.",
+  read_notes: "Read and list the student's notes, optionally filtered by subject or search query. Posts a summary to chat with note titles and IDs so the student can reference them. Call when the student asks what notes they have, wants to find a note, or asks to see their notes.",
+  read_study_sets: "Read and list all flashcard decks the student has saved. Posts a summary to chat with deck titles and card counts. Call when the student asks what study sets or flashcard decks they have.",
+  read_project: "Read all content (tasks, events, notes, study sets) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
