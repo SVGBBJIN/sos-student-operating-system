@@ -14,7 +14,7 @@ const evidenceKindEnum = z.enum([
   "page_visit",
 ]);
 
-const lmsEnum = z.enum(["classroom", "canvas"]);
+const lmsEnum = z.enum(["classroom", "canvas", "schoology"]);
 
 // One piece of evidence from a content script. The extension is responsible
 // for stripping anything that isn't structurally needed — see

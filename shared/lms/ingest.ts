@@ -22,7 +22,7 @@ import { validateLmsEvents, type LmsEventInput } from "../ai/schemas/lms.js";
 
 export interface IngestResult {
   assignmentId: string;
-  lms: "classroom" | "canvas";
+  lms: "classroom" | "canvas" | "schoology";
   confidence: number;
   bucket: ConfidenceBucket;
   matchedTaskId: string | null;

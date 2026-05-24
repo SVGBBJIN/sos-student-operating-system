@@ -1,6 +1,6 @@
 # SOS — Submission Tracker (browser extension)
 
-Ambient submission tracking PoC. Watches Google Classroom and Canvas in the
+Ambient submission tracking PoC. Watches Google Classroom, Canvas, and Schoology in the
 student's own browser and posts structured evidence to the SOS backend, which
 applies a confidence engine and flips matching SOS tasks to `done` when an
 assignment is turned in.
@@ -14,8 +14,9 @@ assignment is turned in.
 3. Click **Sign in** — the popup opens `${apiBase}/extension-auth`, which
    needs to redirect back with `#access_token=<jwt>` in the URL hash. The
    chrome.identity callback URL is `https://<extension-id>.chromiumapp.org/supabase`.
-4. Approve **Google Classroom** and/or **Canvas** — Chrome prompts for the
-   specific host permission. No `<all_urls>` access is requested.
+4. Approve **Google Classroom**, **Canvas**, and/or **Schoology** — Chrome
+   prompts for the specific host permission. No `<all_urls>` access is
+   requested.
 
 ## Architecture
 
@@ -25,7 +26,7 @@ assignment is turned in.
 - `content/shared/parse.js` — submission text/URL pattern primitives.
 - `content/shared/net.js` + `net-page.js` — wraps `fetch`/XHR in page context
   via web-accessible resource injection, captures successful submission POSTs.
-- `content/classroom.js`, `content/canvas.js` — LMS-specific parsers. Each
+- `content/classroom.js`, `content/canvas.js`, `content/schoology.js` — LMS-specific parsers. Each
   watches URL changes, MutationObserver, file uploads, and emits structured
   evidence events.
 
