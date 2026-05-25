@@ -4102,14 +4102,53 @@ function LmsSetupModal({ onClose, onToast }) {
           </div>
         )}
 
-        {/* ── Step 2: connect ── */}
-        {step === 2 && picked && (
+        {/* ── Step 2 (pull): OAuth connect ── */}
+        {step === 2 && picked && picked.mode === 'pull' && (
           <div className="g-section">
             <div className="g-note" style={{marginBottom:10}}>
               Click Connect to authorize {picked.display_name}. SOS reads your assignments and submissions; it never posts on your behalf.
             </div>
             <button className="g-hdr-btn" disabled={loading} onClick={connectPull}>
               {loading ? 'Connecting…' : 'Connect ' + picked.display_name}
+            </button>
+            <div style={{marginTop:12}}>
+              <button onClick={()=>{setStep(1);setPicked(null);}} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'0.78rem'}}>← Back</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2 (extension): download Chrome extension ── */}
+        {step === 2 && picked && picked.mode !== 'pull' && (
+          <div className="g-section">
+            <div className="g-note" style={{marginBottom:10}}>
+              {picked.display_name} syncs through a lightweight Chrome extension that watches your LMS tabs and posts submissions back to SOS. No LMS API keys, no admin setup.
+            </div>
+            <a
+              href="/sos-extension.zip"
+              download="sos-extension.zip"
+              className="g-hdr-btn"
+              style={{display:'inline-flex',alignItems:'center',gap:8,textDecoration:'none'}}
+              onClick={()=>onToast && onToast('Downloading SOS extension…')}
+            >
+              {Icon.link(14)} Download extension (.zip)
+            </a>
+            <ol style={{fontSize:'0.78rem',color:'var(--text-dim)',paddingLeft:20,marginTop:14,lineHeight:1.55}}>
+              <li>Unzip the downloaded file.</li>
+              <li>Open <code>chrome://extensions</code> and enable <strong>Developer mode</strong> (top-right).</li>
+              <li>Click <strong>Load unpacked</strong> and select the unzipped <code>sos-extension</code> folder.</li>
+              <li>Click the SOS icon in your Chrome toolbar, set the API base to <code>{typeof window !== 'undefined' ? window.location.origin : ''}</code>, and approve {picked.display_name}.</li>
+              <li>Open {picked.display_name} in any tab — submissions sync automatically every few seconds.</li>
+            </ol>
+            <div className="g-note" style={{marginTop:10,fontSize:'0.72rem'}}>
+              Chrome only for now — Firefox and Safari builds are on the way.
+            </div>
+            <button
+              className="g-hdr-btn"
+              disabled={loading}
+              onClick={() => { onToast && onToast(picked.display_name + ' extension setup ✓'); onClose(); }}
+              style={{marginTop:14}}
+            >
+              I installed the extension
             </button>
             <div style={{marginTop:12}}>
               <button onClick={()=>{setStep(1);setPicked(null);}} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'0.78rem'}}>← Back</button>
