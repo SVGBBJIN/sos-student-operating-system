@@ -10,6 +10,7 @@ export const SCHEMA_VERSIONS = {
   study_pack: "v1-2026-05",
   reference_search: "v1-2026-05",
   lesson_search: "v1-2026-05",
+  lms_event: "v1-2026-05",
 } as const;
 
 export type SchemaSurface = keyof typeof SCHEMA_VERSIONS;

@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SOS</title>
+    <style>
+      :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
+      body { width: 320px; padding: 14px 16px; margin: 0; }
+      h1 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
+      .row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 8px; }
+      .muted { opacity: 0.7; font-size: 11px; }
+      button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid currentColor; background: transparent; cursor: pointer; }
+      button.primary { background: #2ecc71; color: white; border-color: #2ecc71; }
+      .domain { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+      hr { border: none; border-top: 1px solid currentColor; opacity: 0.15; margin: 10px 0; }
+      input[type="text"] { width: 100%; padding: 4px 6px; box-sizing: border-box; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <h1>SOS — Submission Tracker</h1>
+
+    <div class="row">
+      <span id="auth-status" class="muted">Checking…</span>
+      <button id="sign-in" class="primary">Sign in</button>
+    </div>
+
+    <hr/>
+
+    <div class="row"><strong>Approved schools</strong></div>
+    <div id="domains">
+      <div class="domain"><span>Google Classroom</span><button data-origin="https://classroom.google.com/*">Allow</button></div>
+      <div class="domain"><span>Canvas (Instructure)</span><button data-origin="https://*.instructure.com/*">Allow</button></div>
+      <div class="domain"><span>Schoology</span><button data-origin="https://*.schoology.com/*">Allow</button></div>
+    </div>
+    <div class="muted">Access is requested per school. We never request access to your full browsing history.</div>
+
+    <hr/>
+
+    <div class="row">
+      <label><input type="checkbox" id="enabled" /> Monitoring enabled</label>
+      <button id="flush">Send now</button>
+    </div>
+
+    <div class="row">
+      <label style="flex:1">API base
+        <input type="text" id="api-base" placeholder="https://sos.example.com" />
+      </label>
+    </div>
+
+    <div class="muted" id="queue-status">Queue: 0</div>
+
+    <hr/>
+
+    <div class="muted">Extension ID (paste into SOS Settings → Connectors):</div>
+    <div class="row" style="margin-top:4px">
+      <code id="ext-id" style="font-size:11px;flex:1;user-select:all;word-break:break-all"></code>
+      <button id="copy-id">Copy</button>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
