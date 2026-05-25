@@ -1,9 +1,7 @@
-// Adapter contract shared by the pull orchestrator and the webhook receiver.
+// Adapter contract for LMS pull adapters (polled by sync-submissions every 10 minutes).
 //
-// Each LMS adapter lives in its own file in this directory and exposes either a
-// PullAdapter (polled by sync-submissions every 10 minutes) or a PushAdapter
-// (invoked by lms-webhook when the LMS POSTs to us). Both modes converge on the
-// NormalizedSubmission shape so the upsert path doesn't have to branch.
+// Extension-scraped providers (Schoology) bypass this layer entirely — they POST
+// directly to api/lms-ingest. Both paths converge on NormalizedSubmission.
 
 export type SubmissionState = "submitted" | "graded" | "returned" | "missing" | "draft";
 
@@ -27,7 +25,6 @@ export interface UserIntegrationRow {
   access_token: string | null;
   refresh_token: string | null;
   token_expires_at: string | null;
-  webhook_secret: string | null;
   external_user_id: string | null;
   status: "active" | "pending" | "revoked" | "error";
   last_sync_at: string | null;
@@ -63,16 +60,4 @@ export interface PullAdapter {
   listCourses?(ctx: PullAdapterCtx): Promise<Array<{ externalCourseId: string; name: string }>>;
 }
 
-export interface PushParseResult {
-  externalUserId: string;
-  signatureValid: boolean;
-  submission: NormalizedSubmission;
-}
-
-export interface PushAdapter {
-  id: string;
-  mode: "push";
-  parseWebhook(req: Request, rawBody: string, sharedSecret: string | null): Promise<PushParseResult>;
-}
-
-export type LMSAdapter = PullAdapter | PushAdapter;
+export type LMSAdapter = PullAdapter;

@@ -82,44 +82,6 @@ export async function completeOAuth(args: CompleteOAuthArgs): Promise<UserIntegr
   return row;
 }
 
-function randomHex(bytes: number): string {
-  const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
-  let hex = "";
-  for (let i = 0; i < buf.length; i++) hex += (buf[i] ?? 0).toString(16).padStart(2, "0");
-  return hex;
-}
-
-export interface RegisterWebhookArgs {
-  userId: string;
-  providerId: string;
-  externalUserId: string;
-}
-
-/** For push providers: create (or refresh) an integration row with a per-user secret. */
-export async function registerWebhookIntegration(args: RegisterWebhookArgs): Promise<UserIntegrationRow> {
-  const ctx = supabaseService();
-  const existing = await getIntegrationForUser(args.userId, args.providerId);
-  const secret = existing?.webhook_secret ?? randomHex(32);
-  await upsertRows<Record<string, unknown>>(
-    ctx,
-    "user_integrations",
-    [
-      {
-        user_id: args.userId,
-        provider_id: args.providerId,
-        external_user_id: args.externalUserId,
-        webhook_secret: secret,
-        status: existing?.status === "active" ? "active" : "pending",
-        updated_at: new Date().toISOString(),
-      },
-    ],
-    "user_id,provider_id"
-  );
-  const row = await getIntegrationForUser(args.userId, args.providerId);
-  if (!row) throw new Error("Failed to load integration after webhook registration");
-  return row;
-}
 
 export async function listCoursesViaAdapter(
   userId: string,

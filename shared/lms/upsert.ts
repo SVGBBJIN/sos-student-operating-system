@@ -28,7 +28,7 @@ interface SubmissionRow {
   grade: number | null;
   url: string | null;
   raw_payload: unknown;
-  source: "pull" | "push";
+  source: "pull" | "extension";
   fetched_at: string;
 }
 
@@ -44,7 +44,7 @@ export async function upsertSubmissions(
   ctx: SupabaseRest,
   integration: UserIntegrationRow,
   subs: NormalizedSubmission[],
-  source: "pull" | "push"
+  source: "pull" | "extension"
 ): Promise<{ upserted: number; tasksClosed: number }> {
   if (subs.length === 0) return { upserted: 0, tasksClosed: 0 };
   const nowIso = new Date().toISOString();

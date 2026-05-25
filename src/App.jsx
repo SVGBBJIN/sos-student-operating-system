@@ -3958,9 +3958,6 @@ function LmsSetupModal({ onClose, onToast }) {
   const [picked, setPicked] = useState(null);
   const [courses, setCourses] = useState([]);
   const [selected, setSelected] = useState(new Set());
-  const [webhookInfo, setWebhookInfo] = useState(null);
-  const [externalUserId, setExternalUserId] = useState('');
-
   async function authHeader() {
     const session = await sb.auth.getSession();
     const token = session?.data?.session?.access_token;
@@ -4042,27 +4039,6 @@ function LmsSetupModal({ onClose, onToast }) {
     } catch (e) { setErr(e.message); setLoading(false); }
   }
 
-  // ── Step 2 (push) — register a per-user webhook secret ──
-  async function connectPush() {
-    if (!externalUserId.trim()) { setErr('Enter your ' + (picked?.display_name || 'LMS') + ' user id first.'); return; }
-    setLoading(true); setErr(null);
-    try {
-      const r = await fetch('/api/lms-register-webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ provider: picked.id, externalUserId: externalUserId.trim() }),
-      });
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        throw new Error(body.error || 'Webhook registration failed: ' + r.status);
-      }
-      const data = await r.json();
-      setWebhookInfo({ url: data.webhookUrl, secret: data.webhookSecret });
-      setStep(3);
-    } catch (e) { setErr(e.message); }
-    finally { setLoading(false); }
-  }
-
   function toggleCourse(id) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
@@ -4071,24 +4047,22 @@ function LmsSetupModal({ onClose, onToast }) {
   async function finish() {
     setLoading(true); setErr(null);
     try {
-      if (picked.mode === 'pull') {
-        const selections = courses
-          .filter(c => selected.has(c.externalCourseId))
-          .map(c => ({ externalCourseId: c.externalCourseId, courseName: c.name }));
-        const r = await fetch('/api/lms-tracked-courses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-          body: JSON.stringify({ provider: picked.id, selections }),
-        });
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}));
-          throw new Error(body.error || 'Saving courses failed: ' + r.status);
-        }
-        // Immediate first sync.
-        await fetch('/api/lms-sync-trigger', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        }).catch(() => {});
+      const selections = courses
+        .filter(c => selected.has(c.externalCourseId))
+        .map(c => ({ externalCourseId: c.externalCourseId, courseName: c.name }));
+      const r = await fetch('/api/lms-tracked-courses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ provider: picked.id, selections }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error || 'Saving courses failed: ' + r.status);
       }
+      // Immediate first sync.
+      await fetch('/api/lms-sync-trigger', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+      }).catch(() => {});
       onToast && onToast('Connected to ' + picked.display_name + ' ✓');
       onClose();
     } catch (e) { setErr(e.message); }
@@ -4120,7 +4094,7 @@ function LmsSetupModal({ onClose, onToast }) {
                 <button key={p.id} onClick={()=>pickProvider(p)} style={{textAlign:'left',padding:'12px 14px',border:'1px solid var(--border)',background:'transparent',borderRadius:10,cursor:'pointer',color:'var(--text)'}}>
                   <div style={{fontWeight:700}}>{p.display_name}</div>
                   <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginTop:2}}>
-                    {p.mode === 'pull' ? 'Server-side polling via OAuth — works automatically.' : 'Webhook-based — needs district admin setup.'}
+                    {p.mode === 'pull' ? 'Server-side polling via OAuth — works automatically.' : 'Browser extension — installs once, syncs automatically.'}
                   </div>
                 </button>
               ))}
@@ -4131,40 +4105,20 @@ function LmsSetupModal({ onClose, onToast }) {
         {/* ── Step 2: connect ── */}
         {step === 2 && picked && (
           <div className="g-section">
-            {picked.mode === 'pull' ? (
-              <>
-                <div className="g-note" style={{marginBottom:10}}>
-                  Click Connect to authorize {picked.display_name}. SOS reads your assignments and submissions; it never posts on your behalf.
-                </div>
-                <button className="g-hdr-btn" disabled={loading} onClick={connectPull}>
-                  {loading ? 'Connecting…' : 'Connect ' + picked.display_name}
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="g-note" style={{marginBottom:10}}>
-                  {picked.setup_notes || 'Your district admin needs to configure a webhook in ' + picked.display_name + '. Enter your LMS user id below — we use it to route inbound events back to you.'}
-                </div>
-                <input
-                  type="text"
-                  placeholder={picked.display_name + ' user id (e.g. your numeric UID)'}
-                  value={externalUserId}
-                  onChange={e => setExternalUserId(e.target.value)}
-                  style={{width:'100%',padding:'8px 10px',border:'1px solid var(--border)',borderRadius:8,background:'transparent',color:'var(--text)',marginBottom:10}}
-                />
-                <button className="g-hdr-btn" disabled={loading} onClick={connectPush}>
-                  {loading ? 'Registering…' : 'Generate webhook secret'}
-                </button>
-              </>
-            )}
+            <div className="g-note" style={{marginBottom:10}}>
+              Click Connect to authorize {picked.display_name}. SOS reads your assignments and submissions; it never posts on your behalf.
+            </div>
+            <button className="g-hdr-btn" disabled={loading} onClick={connectPull}>
+              {loading ? 'Connecting…' : 'Connect ' + picked.display_name}
+            </button>
             <div style={{marginTop:12}}>
               <button onClick={()=>{setStep(1);setPicked(null);}} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'0.78rem'}}>← Back</button>
             </div>
           </div>
         )}
 
-        {/* ── Step 3: course picker (pull) or webhook info (push) ── */}
-        {step === 3 && picked && picked.mode === 'pull' && (
+        {/* ── Step 3: course picker ── */}
+        {step === 3 && picked && (
           <div className="g-section">
             <div className="g-note" style={{marginBottom:10}}>Pick the courses to track. Submissions from these will auto-close any matching open task.</div>
             <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:300,overflowY:'auto',marginBottom:12}}>
@@ -4182,20 +4136,6 @@ function LmsSetupModal({ onClose, onToast }) {
           </div>
         )}
 
-        {step === 3 && picked && picked.mode === 'push' && webhookInfo && (
-          <div className="g-section">
-            <div className="g-note" style={{marginBottom:10}}>Give these to your {picked.display_name} admin. Once they set the webhook, submissions will start flowing into SOS automatically — no further action on your side.</div>
-            <div style={{padding:10,border:'1px solid var(--border)',borderRadius:8,marginBottom:10}}>
-              <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:4}}>Webhook URL</div>
-              <code style={{fontSize:'0.78rem',wordBreak:'break-all'}}>{webhookInfo.url || '(set LMS_WEBHOOK_BASE_URL on the server)'}</code>
-            </div>
-            <div style={{padding:10,border:'1px solid var(--border)',borderRadius:8,marginBottom:10}}>
-              <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:4}}>Shared secret (HMAC-SHA256)</div>
-              <code style={{fontSize:'0.78rem',wordBreak:'break-all'}}>{webhookInfo.secret}</code>
-            </div>
-            <button className="g-hdr-btn" disabled={loading} onClick={finish}>Done</button>
-          </div>
-        )}
       </div>
     </>
   );
