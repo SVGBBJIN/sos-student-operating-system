@@ -29,7 +29,8 @@ export type ConfidenceBucket = "submitted" | "likely_submitted" | "incomplete";
 export interface ConfidenceOutcome {
   score: number;            // 0..100
   bucket: ConfidenceBucket;
-  autoCompletable: boolean; // gated on strong evidence, not score alone
+  autoCompletable: boolean; // gated on strong evidence + corroboration
+  corroborated: boolean;    // 2+ distinct medium/strong evidence kinds seen
   perEvidenceWeight: number[]; // capped weight contributed by each input event
 }
 
@@ -53,6 +54,17 @@ const STRONG_EVIDENCE = new Set<EvidenceKind>([
   "text_indicator",
 ]);
 
+// Evidence kinds with weight ≥50 that count toward corroboration. A submission
+// is corroborated when at least 2 distinct kinds from this set are present —
+// meaning the signal came from more than one source (e.g., the DOM said
+// "Turned in" AND the URL changed to the submission view, not just one alone).
+const CORROBORATING_EVIDENCE = new Set<EvidenceKind>([
+  "submission_post",
+  "grade_posted",
+  "text_indicator",
+  "url_state",
+]);
+
 const SUBMITTED_THRESHOLD = 85;
 const LIKELY_THRESHOLD = 50;
 
@@ -61,6 +73,7 @@ export function scoreEvidence(events: Evidence[]): ConfidenceOutcome {
   const perEvidenceWeight: number[] = [];
   let total = 0;
   let hasStrong = false;
+  const corroboratingKindsSeen = new Set<EvidenceKind>();
 
   for (const ev of events) {
     const rule = RULES[ev.kind];
@@ -71,6 +84,7 @@ export function scoreEvidence(events: Evidence[]): ConfidenceOutcome {
       perEvidenceWeight.push(rule.weight);
       usage.set(ev.kind, used + 1);
       if (STRONG_EVIDENCE.has(ev.kind)) hasStrong = true;
+      if (CORROBORATING_EVIDENCE.has(ev.kind)) corroboratingKindsSeen.add(ev.kind);
     } else {
       perEvidenceWeight.push(0);
     }
@@ -82,10 +96,16 @@ export function scoreEvidence(events: Evidence[]): ConfidenceOutcome {
     : score >= LIKELY_THRESHOLD  ? "likely_submitted"
     : "incomplete";
 
+  const corroborated = corroboratingKindsSeen.size >= 2;
+
   return {
     score,
     bucket,
-    autoCompletable: bucket === "submitted" && hasStrong,
+    // Require corroboration: 2+ independent medium/strong signals must agree
+    // before we close a task without asking. A single DOM text change or a
+    // single API post is not enough — both need to be present.
+    autoCompletable: bucket === "submitted" && hasStrong && corroborated,
+    corroborated,
     perEvidenceWeight,
   };
 }
