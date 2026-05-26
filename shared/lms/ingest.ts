@@ -150,10 +150,11 @@ async function processOne(
     return { assignmentId: event.lms_assignment_id, lms: event.lms, confidence: outcome.score, bucket: outcome.bucket, matchedTaskId, action: "auto_completed" };
   }
 
-  if (outcome.bucket === "submitted" && !outcome.corroborated) {
-    // Score crossed 85 on a single strong signal. Don't close yet — flag the
-    // task for student confirmation. The client will show an actionable toast;
-    // a cron job auto-confirms after 5 min if the student doesn't respond.
+  if (outcome.bucket === "likely_submitted" || (outcome.bucket === "submitted" && !outcome.corroborated)) {
+    // Score is 50–84 (some signal present) or 85+ with only one source.
+    // Either way we're not certain enough to close silently — ask the student.
+    // The client shows an actionable "Did you submit this?" card; a cron job
+    // auto-confirms after 5 min if there's no response.
     await markTaskPendingClose(ctx, userId, matchedTaskId, outcome.score, event);
     return { assignmentId: event.lms_assignment_id, lms: event.lms, confidence: outcome.score, bucket: outcome.bucket, matchedTaskId, action: "pending_review" };
   }
