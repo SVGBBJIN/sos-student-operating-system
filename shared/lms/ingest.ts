@@ -26,7 +26,7 @@ export interface IngestResult {
   confidence: number;
   bucket: ConfidenceBucket;
   matchedTaskId: string | null;
-  action: "auto_completed" | "awaiting" | "unmatched" | "noop";
+  action: "auto_completed" | "pending_review" | "awaiting" | "unmatched" | "noop";
 }
 
 export interface HandleLmsEventArgs {
@@ -145,8 +145,17 @@ async function processOne(
   }
 
   if (outcome.autoCompletable) {
+    // Corroborated by 2+ independent signals — safe to close immediately.
     await markTaskCompleted(ctx, userId, matchedTaskId, outcome.score, event);
     return { assignmentId: event.lms_assignment_id, lms: event.lms, confidence: outcome.score, bucket: outcome.bucket, matchedTaskId, action: "auto_completed" };
+  }
+
+  if (outcome.bucket === "submitted" && !outcome.corroborated) {
+    // Score crossed 85 on a single strong signal. Don't close yet — flag the
+    // task for student confirmation. The client will show an actionable toast;
+    // a cron job auto-confirms after 5 min if the student doesn't respond.
+    await markTaskPendingClose(ctx, userId, matchedTaskId, outcome.score, event);
+    return { assignmentId: event.lms_assignment_id, lms: event.lms, confidence: outcome.score, bucket: outcome.bucket, matchedTaskId, action: "pending_review" };
   }
 
   return { assignmentId: event.lms_assignment_id, lms: event.lms, confidence: outcome.score, bucket: outcome.bucket, matchedTaskId, action: "awaiting" };
@@ -200,6 +209,37 @@ async function markTaskCompleted(
         lms: event.lms,
         assignment_id: event.lms_assignment_id,
         confidence: score,
+      },
+    }),
+  });
+}
+
+// Single strong signal crossed 85 but a second independent signal hasn't
+// arrived yet. Flag the task so the student can confirm or dismiss. A pg_cron
+// job in 20260528_lms_pending_close.sql auto-promotes after 5 min if there's
+// no response — catch-and-confirm rather than catch-and-block.
+async function markTaskPendingClose(
+  ctx: SupabaseCtx,
+  userId: string,
+  taskId: string,
+  score: number,
+  event: LmsEventInput
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const patchUrl = `${ctx.url}/rest/v1/tasks?id=eq.${encodeURIComponent(taskId)}&user_id=eq.${encodeURIComponent(userId)}&status=neq.done`;
+  await fetch(patchUrl, {
+    method: "PATCH",
+    headers: headers(ctx, { Prefer: "return=minimal" }),
+    body: JSON.stringify({
+      lms_pending_close: true,
+      lms_pending_close_at: nowIso,
+      completion_confidence: score,
+      lms_assignment_ref: {
+        lms: event.lms,
+        custom_host: event.lms_custom_host ?? null,
+        course_id: event.lms_course_id ?? null,
+        assignment_id: event.lms_assignment_id,
+        title: event.lms_assignment_title ?? null,
       },
     }),
   });
