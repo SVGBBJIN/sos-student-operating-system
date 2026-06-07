@@ -90,6 +90,9 @@ export default function StudioSidebar({
   syncStatus,
   nextEvent,
   deadlineWarning,
+  ambient = null,
+  onAmbientAction,
+  onAmbientDismiss,
   tasks = [],
   events = [],
   notes = [],
@@ -110,6 +113,9 @@ export default function StudioSidebar({
         syncStatus={syncStatus}
         nextEvent={nextEvent}
         deadlineWarning={deadlineWarning}
+        ambient={ambient}
+        onAmbientAction={onAmbientAction}
+        onAmbientDismiss={onAmbientDismiss}
       />
 
       <div className="sb-section">
