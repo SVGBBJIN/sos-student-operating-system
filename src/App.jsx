@@ -32,6 +32,8 @@ import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions,
 import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import { selectAmbientStatus } from '../shared/scheduling/ambient.ts';
+import { loadAmbientSuppression, recordAmbientDismissal } from './lib/ambientDismissals';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import LinkSuggestionCard from './components/LinkSuggestionCard';
 import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
@@ -58,6 +60,98 @@ function daysUntil(dateStr) {
   const now = new Date(); now.setHours(0,0,0,0);
   const target = new Date(dateStr + 'T00:00:00');
   return Math.round((target - now) / 86400000);
+}
+
+// ── Ambient status surface ──────────────────────────────────────────────────
+// How long an LMS-detected submission sits "pending close" before auto-marking.
+const AMBIENT_LMS_WINDOW_MIN = 5;
+
+function ambientLmsName(ref) {
+  const lms = ref?.lms;
+  if (lms === 'canvas') return 'Canvas';
+  if (lms === 'schoology') return 'Schoology';
+  if (lms === 'custom') return ref?.custom_host || 'your LMS';
+  return 'Google Classroom';
+}
+
+// Assemble the AmbientInput for selectAmbientStatus() from live client state.
+// Pure: derives candidates from already-loaded tasks / blocks / study plans, so
+// no extra queries are needed.
+function buildAmbientInput({ tasks, blocks, studyPlans, suppression, now }) {
+  const todayStr = toDateStr(now);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const dow = now.getDay();
+
+  const scoringTasks = (tasks || [])
+    .filter(t => t.dueDate && t.status !== 'done')
+    .map(t => ({
+      id: t.id, title: t.title, subject: t.subject || '', dueDate: t.dueDate,
+      estTime: t.estTime, status: t.status, priority: t.priority,
+      createdAt: t.createdAt, postponeCount: t.postponeCount || 0,
+      lastAttemptedAt: t.lastAttemptedAt || null,
+    }));
+
+  // LMS submissions about to auto-close (push-eligible).
+  const pendingCloses = (tasks || [])
+    .filter(t => t.lmsPendingClose && t.lmsPendingCloseAt && t.status !== 'done')
+    .map(t => {
+      const startedMs = new Date(t.lmsPendingCloseAt).getTime();
+      const minutesLeft = AMBIENT_LMS_WINDOW_MIN - (now.getTime() - startedMs) / 60000;
+      return { taskId: t.id, title: t.title, lms: ambientLmsName(t.lmsAssignmentRef), minutesLeft };
+    })
+    .filter(p => p.minutesLeft > 0);
+
+  // Calendar blocks starting imminently (push-eligible). Build a slightly wider
+  // window than the push horizon; the selector trims it.
+  const blockStartsSoon = [];
+  function pushBlock(name, start, id) {
+    if (!name || !start) return;
+    const parts = String(start).split(':');
+    const h = Number(parts[0]); const m = Number(parts[1] || 0);
+    if (Number.isNaN(h)) return;
+    const startsInMin = (h * 60 + m) - nowMin;
+    if (startsInMin >= 0 && startsInMin <= 10) blockStartsSoon.push({ id, name, startsInMin });
+  }
+  for (const rb of (blocks?.recurring || [])) {
+    if (Array.isArray(rb.days) && rb.days.includes(dow)) pushBlock(rb.name, rb.start, `rb:${rb.name}:${rb.start}`);
+  }
+  for (const [slot, info] of Object.entries(blocks?.dates?.[todayStr] || {})) {
+    if (info && info.name) pushBlock(info.name, slot, `db:${todayStr}:${slot}`);
+  }
+
+  // Plan-vs-actual slippage: a milestone whose matching task drifted later.
+  const planSlippage = [];
+  for (const plan of (studyPlans || [])) {
+    if (plan.status !== 'active') continue;
+    const milestones = plan.plan_json?.milestone_tasks || [];
+    if (!milestones.length) continue;
+    const taskIds = [];
+    for (const ms of milestones) {
+      const name = (ms.task_name || '').trim().toLowerCase();
+      if (!name || !ms.due_date) continue;
+      const match = (tasks || []).find(t =>
+        t.status !== 'done' &&
+        (t.title || '').trim().toLowerCase() === name &&
+        (t.study_plan_id == null || t.study_plan_id === plan.id)
+      );
+      if (match && match.dueDate && match.dueDate > ms.due_date) taskIds.push(match.id);
+    }
+    if (taskIds.length > 0) {
+      planSlippage.push({ planId: plan.id, planTitle: plan.title || 'study', slippedCount: taskIds.length, taskIds });
+    }
+  }
+
+  return {
+    tasks: scoringTasks,
+    pendingCloses,
+    blockStartsSoon,
+    planSlippage,
+    density: buildCalendarDensity(scoringTasks, blocks?.dates || {}),
+    signals: undefined,
+    now,
+    dismissedSignatures: suppression.dismissedSignatures,
+    classDismissalCounts: suppression.classDismissalCounts,
+  };
 }
 
 /* ── Notification scheduling helper ──────────────────────────── */
@@ -245,6 +339,8 @@ function dbTaskToApp(row) {
     dueDate: row.due_date, estTime: row.est_time || 30,
     status: row.status || 'not_started', focusMinutes: row.focus_minutes || 0,
     completedAt: row.completed_at, createdAt: row.created_at,
+    postponeCount: row.postpone_count || 0,
+    lastAttemptedAt: row.last_attempted_at || null,
     study_plan_id: row.study_plan_id || null,
     confidence: row.confidence == null ? null : Number(row.confidence),
     commitment: row.commitment || 'confirmed',
@@ -5064,6 +5160,11 @@ function App() {
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
   const [studyPlans, setStudyPlans] = useState([]);
+  // Ambient status surface — at most one terse status in the DynamicIsland.
+  const [ambientStatus, setAmbientStatus] = useState(null);
+  const ambientSuppressionRef = useRef({ dismissedSignatures: new Set(), classDismissalCounts: {} });
+  const ambientTimerRef = useRef(null);
+  const ambientPushedRef = useRef(null); // last signature pushed to the SW (dedupe)
   const [flashcardDecks, setFlashcardDecks] = useState([]);
   const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
@@ -5717,6 +5818,119 @@ function App() {
     const notifications = buildNotifications(tasks, events, notifPrefs);
     scheduleNotificationsToSW(notifications);
   }, [tasks, events, notifPrefs, dataLoaded]);
+
+  // ── Ambient status surface ──
+  // Load durable dismissals + per-class engagement counts once data is ready.
+  useEffect(() => {
+    if (!dataLoaded || !user?.id) return;
+    let cancelled = false;
+    loadAmbientSuppression(user.id).then(s => { if (!cancelled) ambientSuppressionRef.current = s; });
+    return () => { cancelled = true; };
+  }, [dataLoaded, user?.id]);
+
+  // Recompute the ambient status from live state. Debounced so realtime bursts
+  // (multi-device sync) don't thrash the selector. Defaults to silence (null).
+  useEffect(() => {
+    if (!dataLoaded) return;
+    clearTimeout(ambientTimerRef.current);
+    ambientTimerRef.current = setTimeout(() => {
+      const input = buildAmbientInput({
+        tasks, blocks, studyPlans,
+        suppression: ambientSuppressionRef.current,
+        now: new Date(),
+      });
+      setAmbientStatus(selectAmbientStatus(input));
+    }, 1500);
+    return () => clearTimeout(ambientTimerRef.current);
+  }, [tasks, blocks, studyPlans, dataLoaded]);
+
+  // Push tier: fire a real OS notification for time-critical, costly-to-miss
+  // items. Ambient-tier items stay silent in the Island. Dedupe by signature.
+  useEffect(() => {
+    if (!ambientStatus || ambientStatus.tier !== 'push') return;
+    if (ambientSuppressionRef.current.dismissedSignatures.has(ambientStatus.signature)) return;
+    if (ambientPushedRef.current === ambientStatus.signature) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    ambientPushedRef.current = ambientStatus.signature;
+    scheduleNotificationsToSW([{
+      title: 'SOS',
+      body: ambientStatus.text,
+      fireAt: Date.now() + 1000,
+      tag: 'ambient-' + ambientStatus.signature,
+    }]);
+  }, [ambientStatus]);
+
+  // Action button on an ambient item → route to the matching existing handler.
+  function handleAmbientAction(action) {
+    if (!action) return;
+    switch (action.verb) {
+      case 'reject_lms': {
+        // Student says "not yet" — cancel the pending auto-close.
+        (async () => {
+          try {
+            const tok = (await sb.auth.getSession())?.data?.session?.access_token;
+            await fetch('/api/lms-confirm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) },
+              body: JSON.stringify({ taskId: action.targetId, confirm: false }),
+            });
+          } catch (e) { console.error('ambient reject_lms error:', e); }
+        })();
+        break;
+      }
+      case 'pull_back_plan': {
+        // Restore every slipped task in this plan to its milestone target date.
+        const plan = studyPlans.find(p => p.id === action.targetId);
+        if (!plan) break;
+        const milestones = plan.plan_json?.milestone_tasks || [];
+        const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+        let restored = 0;
+        for (const ms of milestones) {
+          const name = (ms.task_name || '').trim().toLowerCase();
+          if (!name || !ms.due_date) continue;
+          const match = tasks.find(t =>
+            t.status !== 'done' &&
+            (t.title || '').trim().toLowerCase() === name &&
+            (t.study_plan_id == null || t.study_plan_id === plan.id)
+          );
+          if (match && match.dueDate && match.dueDate > ms.due_date) {
+            updateTask(match.id, { dueDate: ms.due_date });
+            restored++;
+          }
+        }
+        if (restored > 0) {
+          pushUndoToast(`Pulled ${restored} task${restored === 1 ? '' : 's'} back to plan`, undoSnap);
+        }
+        break;
+      }
+      case 'open_plan':
+        setShowMyPlans(true);
+        break;
+      case 'open_task':
+        setActivePanel('chat');
+        break;
+      default:
+        break;
+    }
+    setAmbientStatus(null);
+  }
+
+  // Dismiss an ambient item — durable + raises the bar for its class.
+  function handleAmbientDismiss(a) {
+    if (!a) return;
+    const sup = ambientSuppressionRef.current;
+    sup.dismissedSignatures.add(a.signature);
+    sup.classDismissalCounts[a.kind] = (sup.classDismissalCounts[a.kind] || 0) + 1;
+    setAmbientStatus(null);
+    if (user?.id) {
+      recordAmbientDismissal(user.id, {
+        kind: a.kind,
+        signature: a.signature,
+        ttlHours: a.tier === 'push' ? 6 : 24,
+        taskId: a.action?.targetId && a.kind !== 'plan_slippage' ? a.action.targetId : null,
+      });
+    }
+  }
 
   function updateNotifPref(key, val) {
     const next = { ...notifPrefs, [key]: val };
@@ -9220,6 +9434,9 @@ function App() {
         onDeleteNote={handleDeleteNote}
         onImportClick={() => setShowGoogleModal(true)}
         aiThinking={isLoading}
+        ambient={ambientStatus}
+        onAmbientAction={handleAmbientAction}
+        onAmbientDismiss={handleAmbientDismiss}
       />}
       {layoutMode === 'studio' && (
         <div className="studio-sidebar-col">
@@ -9234,6 +9451,9 @@ function App() {
             onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
+            ambient={ambientStatus}
+            onAmbientAction={handleAmbientAction}
+            onAmbientDismiss={handleAmbientDismiss}
             tasks={tasks}
             events={events}
             notes={notes}

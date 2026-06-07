@@ -37,6 +37,9 @@ export default function DynamicIsland({
   syncStatus,
   nextEvent,
   deadlineWarning,
+  ambient = null,          // AmbientStatus | null — the ambient status surface
+  onAmbientAction,         // (action) => void
+  onAmbientDismiss,        // (ambient) => void
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -45,24 +48,56 @@ export default function DynamicIsland({
     if (aiThinking) setExpanded(false);
   }, [aiThinking]);
 
-  // Derive mode from props
+  // Derive mode from props.
+  // Precedence: thinking > push-tier ambient > deadline > next > ambient > idle.
+  // A push-tier ambient item is time-critical, so it is the only ambient surface
+  // allowed to outrank an explicit deadline/next; ambient-tier sits just above
+  // idle so it never shouts over those.
   let mode;
   if (aiThinking) {
     mode = { id: 'thinking', label: 'sos is thinking', accent: 'accent' };
+  } else if (ambient && ambient.tier === 'push') {
+    mode = { id: 'ambient', label: ambient.text, accent: 'warning', ambient };
   } else if (deadlineWarning) {
     mode = { id: 'deadline', label: deadlineWarning, accent: 'warning' };
   } else if (nextEvent) {
     mode = { id: 'next', label: nextEvent.name || nextEvent.title || 'upcoming', accent: 'success', time: nextEvent.time || nextEvent.startTime || '' };
+  } else if (ambient) {
+    mode = { id: 'ambient', label: ambient.text, accent: 'accent', ambient };
   } else {
     mode = { id: 'idle', label: 'all clear', accent: 'idle' };
   }
 
-  const expandable = mode.id !== 'idle' && mode.id !== 'thinking';
+  // Ambient is already terse; it carries its own action, so it does not expand.
+  const expandable = mode.id !== 'idle' && mode.id !== 'thinking' && mode.id !== 'ambient';
 
   function renderPayload() {
     switch (mode.id) {
       case 'idle':
         return <span className="di-status">{mode.label}</span>;
+      case 'ambient': {
+        const a = mode.ambient;
+        return (
+          <div className="di-stack">
+            <span className="di-title">{a.text}</span>
+            <div className="di-actions">
+              {a.action && (
+                <button
+                  onClick={e => { e.stopPropagation(); onAmbientAction && onAmbientAction(a.action); }}
+                >
+                  {a.action.label}
+                </button>
+              )}
+              <button
+                aria-label="dismiss"
+                onClick={e => { e.stopPropagation(); onAmbientDismiss && onAmbientDismiss(a); }}
+              >
+                dismiss
+              </button>
+            </div>
+          </div>
+        );
+      }
       case 'thinking':
         return (
           <div className="di-stack">

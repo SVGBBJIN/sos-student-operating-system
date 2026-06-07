@@ -97,6 +97,7 @@ export default function LofiLeftPanel({
   notes, tasks, entityLinks,
   onCreateNote, onUpdateNote, onDeleteNote, onImportClick,
   aiThinking = false,
+  ambient = null, onAmbientAction, onAmbientDismiss,
 }) {
   const [activeView, setActiveView] = useState('calendar');
   const [openNoteId, setOpenNoteId] = useState(null);
@@ -125,7 +126,12 @@ export default function LofiLeftPanel({
   return (
     <div className="study-left study-glass" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {/* Dynamic Island */}
-      <DynamicIsland aiThinking={aiThinking} />
+      <DynamicIsland
+        aiThinking={aiThinking}
+        ambient={ambient}
+        onAmbientAction={onAmbientAction}
+        onAmbientDismiss={onAmbientDismiss}
+      />
 
       {/* Projects bar — colored-blob folder list mirroring the landing card */}
       <ProjectsBar
