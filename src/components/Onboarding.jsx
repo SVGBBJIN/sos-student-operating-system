@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Icon from '../lib/icons';
 import {
   buildOnboardingDraft,
   draftToRecurringRows,
-  makeBlock,
   COUNT_OPTIONS,
   DURATION_OPTIONS,
 } from '../lib/onboardingDraft';
@@ -79,91 +78,54 @@ function BlockChip({ block, animateIn, index, removable, onRemove }) {
   );
 }
 
+const BUILD_MSGS = [
+  'Locking in your commitments…',
+  'Placing study windows…',
+  'Balancing the week…',
+  'Filling the gaps…',
+  'Almost there…',
+];
+
 export default function Onboarding({ firstName, onComplete, onSkip }) {
   const [phase, setPhase] = useState('intro');
   const [count, setCount] = useState(null);
   const [durationId, setDurationId] = useState(null);
   const [q3, setQ3] = useState('');
   const [draft, setDraft] = useState([]);
-  const [dayIndex, setDayIndex] = useState(0);
-  const [adjusting, setAdjusting] = useState(false);
-  const [workingBlocks, setWorkingBlocks] = useState([]);
-  const [lockedDays, setLockedDays] = useState([]);
-  const [signals, setSignals] = useState([]);
-  const [locking, setLocking] = useState(false);
-  const advanceRef = useRef(null);
+  const [buildStep, setBuildStep] = useState(0);
 
   const durationMinutes = DURATION_OPTIONS.find((d) => d.id === durationId)?.minutes || 90;
 
-  // Build the draft once the three questions are answered, then run a brief
-  // "assembling" beat before the day-by-day review.
   function beginAssembly(q3val) {
     const d = buildOnboardingDraft({ commitmentCount: count, commitmentMinutes: durationMinutes });
     setDraft(d);
     setQ3((q3val ?? q3).trim());
+    setBuildStep(0);
     setPhase('assembling');
   }
 
   useEffect(() => {
     if (phase !== 'assembling') return;
-    const t = setTimeout(() => { setPhase('calibrate'); setDayIndex(0); }, 1700);
-    return () => clearTimeout(t);
+    let step = 0;
+    const reveal = setInterval(() => {
+      step += 1;
+      setBuildStep(step);
+      if (step >= 7) clearInterval(reveal);
+    }, 280);
+    const done = setTimeout(() => setPhase('finale'), 2800);
+    return () => { clearInterval(reveal); clearTimeout(done); };
   }, [phase]);
 
-  useEffect(() => () => { if (advanceRef.current) clearTimeout(advanceRef.current); }, []);
-
-  const currentDay = draft[dayIndex];
-  const shownBlocks = adjusting ? workingBlocks : (currentDay?.blocks || []);
-
-  function lockDay(finalBlocks, clean) {
-    if (locking) return;
-    const day = draft[dayIndex];
-    const dropped = (day.blocks || []).filter((b) => !finalBlocks.some((f) => f.id === b.id));
-    const added = finalBlocks.filter((b) => !(day.blocks || []).some((o) => o.id === b.id));
-    setLockedDays((prev) => [...prev, { ...day, blocks: finalBlocks }]);
-    setSignals((prev) => [...prev, {
-      dow: day.dow,
-      day: day.label,
-      approvedClean: clean,
-      removed: dropped.map((b) => b.kind),
-      added: added.map((b) => b.kind),
-      blockCount: finalBlocks.length,
-    }]);
-    setLocking(true);
-    advanceRef.current = setTimeout(() => {
-      setLocking(false);
-      setAdjusting(false);
-      setWorkingBlocks([]);
-      if (dayIndex >= draft.length - 1) setPhase('finale');
-      else setDayIndex((i) => i + 1);
-    }, 780);
-  }
-
-  function startAdjust() {
-    setWorkingBlocks((currentDay.blocks || []).map((b) => ({ ...b })));
-    setAdjusting(true);
-  }
-  function removeWorking(id) {
-    setWorkingBlocks((prev) => prev.filter((b) => b.id !== id));
-  }
-  function addWorking(kind) {
-    const name = kind === 'focus' ? 'Focus block' : 'Break';
-    const len = kind === 'focus' ? 60 : 30;
-    const startMin = lastEnd(workingBlocks);
-    if (startMin + len > 21 * 60) return; // keep it inside the evening
-    setWorkingBlocks((prev) => [...prev, makeBlock(name, kind, 'free time', startMin, startMin + len)]);
-  }
-
   function finish() {
-    const rows = draftToRecurringRows(lockedDays);
+    const rows = draftToRecurringRows(draft);
     onComplete({
-      days: lockedDays,
+      days: draft,
       rows,
       count,
       durationId,
       commitmentMinutes: durationMinutes,
       q3: q3 || null,
-      signals,
+      signals: [],
     });
   }
 
@@ -260,89 +222,45 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
     );
   }
 
-  // ── Assembling beat ──
+  // ── Building schedule animation ──
   if (phase === 'assembling') {
+    const msgIndex = Math.min(Math.floor(buildStep / 1.5), BUILD_MSGS.length - 1);
     return overlay(
       <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade" style={{ textAlign: 'center', maxWidth: 420 }}>
-        <div className="sos-onb-assemble" aria-hidden="true">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <span key={i} className="sos-onb-assemble-col" style={{ '--i': i }} />
-          ))}
-        </div>
-        <h2 className="sos-onb-h2" style={{ marginTop: 22 }}>Drafting your week…</h2>
-        <p className="sos-onb-sub">Placing what's certain. Sketching the rest.</p>
-      </div>
-    );
-  }
-
-  // ── Day-by-day calibration ──
-  if (phase === 'calibrate' && currentDay) {
-    const draftCount = shownBlocks.filter((b) => !b.committed).length;
-    return overlay(
-      <div className="sos-onb-card sos-onb-puzzle-card" key={dayIndex}>
-        <div className="sos-onb-progress" aria-hidden="true">
-          {draft.map((_, i) => (
-            <span key={i} className={`sos-onb-pip ${i < dayIndex ? 'done' : i === dayIndex ? 'cur' : ''}`} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
-          <h2 className="sos-onb-h2" style={{ margin: 0 }}>{currentDay.label}</h2>
-          <span className="sos-onb-step" style={{ margin: 0 }}>Day {dayIndex + 1} / 7</span>
-        </div>
-        <p className="sos-onb-sub" style={{ marginBottom: 14 }}>
-          {adjusting
-            ? 'Drop what doesn\'t fit. Add what does. Committed time stays put.'
-            : currentDay.blocks.length === 0
-              ? 'Left this one open. Nothing to prove on a free day.'
-              : currentDay.hasCommitment ? 'School, your commitment, and a light study window.' : 'School and a study window. Adjust if it\'s too much.'}
-        </p>
-
-        <div className="sos-onb-column">
-          {shownBlocks.length === 0 && (
-            <div style={{ padding: '18px 12px', textAlign: 'center', color: 'var(--text-dim)', border: '1px dashed var(--border)', borderRadius: 12, fontSize: '0.82rem' }}>
-              Open day
+        <div className="sos-onb-build-grid" aria-hidden="true">
+          {draft.length > 0 ? draft.map((day, i) => (
+            <div key={day.dow} className="sos-onb-build-col" style={{ '--i': i }}>
+              <div className="sos-onb-build-stack">
+                {day.blocks.length === 0 ? (
+                  <span className="sos-onb-build-bar" style={{ background: 'var(--border)', opacity: 0.18, height: 10 }} />
+                ) : day.blocks.map((b) => {
+                  const meta = KIND_META[b.kind] || KIND_META.focus;
+                  return (
+                    <span
+                      key={b.id}
+                      className={`sos-onb-build-bar ${buildStep > i ? 'sos-onb-build-bar-lit' : ''}`}
+                      style={{
+                        '--bar-color': meta.color,
+                        opacity: buildStep > i ? (b.committed ? 0.95 : 0.55) : 0.12,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <span className="sos-onb-week-label" style={{ opacity: buildStep > i ? 1 : 0.3, transition: 'opacity 0.25s' }}>{day.key}</span>
             </div>
-          )}
-          {shownBlocks.map((b, i) => (
-            <BlockChip
-              key={b.id}
-              block={b}
-              animateIn={!adjusting}
-              index={i}
-              removable={adjusting && !b.committed}
-              onRemove={() => removeWorking(b.id)}
-            />
+          )) : Array.from({ length: 7 }).map((_, i) => (
+            <div key={i} className="sos-onb-build-col" style={{ '--i': i }}>
+              <div className="sos-onb-build-stack">
+                <span className="sos-onb-build-bar" style={{ background: 'var(--border)', opacity: 0.15, height: 14 }} />
+                <span className="sos-onb-build-bar" style={{ background: 'var(--border)', opacity: 0.15, height: 10 }} />
+              </div>
+              <span className="sos-onb-week-label" style={{ opacity: 0.2 }}>—</span>
+            </div>
           ))}
         </div>
-
-        {adjusting ? (
-          <>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="sos-onb-add" onClick={() => addWorking('focus')} disabled={lastEnd(workingBlocks) + 60 > 21 * 60}>
-                {Icon.plus(14)} Focus
-              </button>
-              <button className="sos-onb-add" onClick={() => addWorking('break')} disabled={lastEnd(workingBlocks) + 30 > 21 * 60}>
-                {Icon.plus(14)} Break
-              </button>
-            </div>
-            <button className="sos-onb-primary" style={{ marginTop: 14, width: '100%' }} onClick={() => lockDay(workingBlocks, false)}>
-              Lock it in {Icon.check(16)}
-            </button>
-          </>
-        ) : (
-          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button className="sos-onb-bad" onClick={startAdjust}>Looks bad</button>
-            <button className="sos-onb-good" onClick={() => lockDay(currentDay.blocks, true)}>
-              Looks good {Icon.check(16)}
-            </button>
-          </div>
-        )}
-
-        {locking && (
-          <div className="sos-onb-locked" aria-hidden="true">
-            <span className="sos-onb-locked-stamp">{currentDay.key} · LOCKED</span>
-          </div>
-        )}
+        <h2 className="sos-onb-h2" style={{ marginTop: 24 }}>Building your week…</h2>
+        <p key={msgIndex} className="sos-onb-sub sos-onb-build-msg">{BUILD_MSGS[msgIndex]}</p>
       </div>
     );
   }
@@ -353,7 +271,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
     return overlay(
       <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade" style={{ maxWidth: 480, textAlign: 'center' }}>
         <div className="sos-onb-week" aria-hidden="true">
-          {lockedDays.map((d, i) => (
+          {draft.map((d, i) => (
             <div key={d.dow} className="sos-onb-week-col" style={{ '--i': i }}>
               <span className="sos-onb-week-label">{d.key}</span>
               <div className="sos-onb-week-stack">
