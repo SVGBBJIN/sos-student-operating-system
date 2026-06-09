@@ -40,6 +40,25 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
+
+function isOnboardingEstablished(userId) {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(ONBOARDING_ESTABLISHED_PREFIX + userId) === '1'
+      || localStorage.getItem('sos_onboarded_' + userId) === '1';
+  } catch (_) { return false; }
+}
+
+function setOnboardingEstablished(userId) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(ONBOARDING_ESTABLISHED_PREFIX + userId, '1');
+    // Keep the legacy one-shot key in sync for older clients that still read it.
+    localStorage.setItem('sos_onboarded_' + userId, '1');
+  } catch (_) {}
+}
+
 
 /* ─── Date helpers ─── */
 /* ── Notification scheduling helper ──────────────────────────── */
@@ -102,6 +121,86 @@ function summarizeBlockSlots(slotMap) {
   }
   if (curName !== null) ranges.push(curName + ' ' + startKey + '-' + advance(prevKey));
   return ranges;
+}
+
+
+function addDaysISO(dateStr, days) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function buildBlocksForDate(blocks, dateStr) {
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  const slots = {};
+  (blocks?.recurring || []).forEach(rb => {
+    if (!Array.isArray(rb?.days) || !rb.days.includes(dow)) return;
+    const [sh, sm] = (rb.start || '00:00').split(':').map(Number);
+    const [eh, em] = (rb.end || '00:00').split(':').map(Number);
+    let ch = sh, cm = sm;
+    while (ch < eh || (ch === eh && cm < em)) {
+      slots[String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0')] = { name: rb.name, category: rb.category };
+      cm += 30; if (cm >= 60) { ch++; cm = 0; }
+    }
+  });
+  Object.entries(blocks?.dates?.[dateStr] || {}).forEach(([key, value]) => {
+    if (value === null) delete slots[key];
+    else slots[key] = value;
+  });
+  return slots;
+}
+
+function scheduleShortcutTarget(message) {
+  const lower = (message || '').toLowerCase().trim();
+  if (!lower) return null;
+  const writeIntent = /\b(add|create|book|put|move|reschedule|cancel|delete|remove|set)\b.*\b(event|meeting|appointment|practice|block|task|timer)\b/i.test(lower)
+    || /^schedule\s+(a|an|my)?\s*(event|meeting|appointment|practice|block|task)\b/i.test(lower);
+  if (writeIntent) return null;
+  const readIntent = /(what'?s|what is|show|view|open|pull up|see|look at|tell me|check|anything).*(schedule|agenda|calendar|day)\b/i.test(lower)
+    || /\b(my|today'?s|tomorrow'?s|this week'?s)\s+(schedule|agenda|calendar)\b/i.test(lower)
+    || /^agenda\b/i.test(lower);
+  if (!readIntent) return null;
+  if (/\b(this|my)\s+week\b|\bweekly\b|\bnext\s+7\s+days\b/i.test(lower)) return 'week';
+  if (/\btomorrow\b|\btmrw\b|\btmw\b|\b2morrow\b/i.test(lower)) return 'tomorrow';
+  return 'today';
+}
+
+function buildScheduleShortcutReply(message, tasks, events, blocks) {
+  const target = scheduleShortcutTarget(message);
+  if (!target) return null;
+
+  const describeDate = (dateStr, label) => {
+    const blockItems = summarizeBlockSlots(buildBlocksForDate(blocks, dateStr));
+    const eventItems = (events || [])
+      .filter(e => e.date === dateStr)
+      .sort((a, b) => (a.time || a.start_time || '23:59').localeCompare(b.time || b.start_time || '23:59'))
+      .map(e => `${e.time || e.start_time ? fmtTime(e.time || e.start_time) + ' ' : ''}${e.title || 'event'}`);
+    const taskItems = (tasks || [])
+      .filter(t => t.dueDate === dateStr && t.status !== 'done')
+      .map(t => `due: ${t.title}`);
+    const items = [...blockItems, ...eventItems, ...taskItems];
+    if (items.length === 0) return `${label}: clear`;
+    const visible = items.slice(0, 4).join('; ');
+    const overflow = items.length > 4 ? `; +${items.length - 4} more` : '';
+    return `${label}: ${visible}${overflow}`;
+  };
+
+  if (target === 'week') {
+    const start = today();
+    const days = Array.from({ length: 7 }, (_, i) => addDaysISO(start, i));
+    const summaries = days
+      .map((dateStr, i) => describeDate(dateStr, i === 0 ? 'today' : fmt(dateStr)))
+      .filter(line => !line.endsWith(': clear'))
+      .slice(0, 4);
+    return summaries.length > 0
+      ? `opened your schedule widget. this week: ${summaries.join(' · ')}.`
+      : `opened your schedule widget. this week looks clear.`;
+  }
+
+  const dateStr = target === 'tomorrow' ? addDaysISO(today(), 1) : today();
+  const label = target === 'tomorrow' ? 'tomorrow' : 'today';
+  const summary = describeDate(dateStr, label);
+  return `opened your schedule widget. ${summary}.`;
 }
 
 /* ─── Map raw Google Calendar API items → app event shape ─── */
@@ -4982,7 +5081,8 @@ function App() {
     // unconfigured get the weekly skeleton flow instead of being disqualified
     // just because they have existing data.
     try {
-      const onboardingConfigured = !!(data && data.onboardingCompleted);
+      const onboardingEstablished = isOnboardingEstablished(authUser.id);
+      const onboardingConfigured = !!(data && data.onboardingCompleted) || onboardingEstablished;
       if (data && !onboardingConfigured) {
         const fn = authUser?.user_metadata?.full_name?.split(' ')[0]
           || authUser?.email?.split('@')[0] || '';
@@ -6848,7 +6948,7 @@ function App() {
   // never banks a speculative block as fact.
   function markOnboardingDone() {
     if (user) {
-      try { localStorage.setItem('sos_onboarded_' + user.id, '1'); } catch (_) {}
+      setOnboardingEstablished(user.id);
       // Best-effort; column may not exist on older DBs.
       sb.from('profiles').update({ onboarding_completed: true }).eq('id', user.id).then(() => {}, () => {});
     }
@@ -7360,6 +7460,41 @@ function App() {
       setPendingTemplateSelector({ context: msgContent });
       return;
     }
+    // Simple read-only schedule asks do not need a model roundtrip. Open the
+    // widget and use a deterministic prewritten response so we save tokens for
+    // actual planning/action work.
+    const scheduleShortcutReply = !fromClarification && !photo
+      ? buildScheduleShortcutReply(msgContent, tasks, events, blocks)
+      : null;
+    if (scheduleShortcutReply) {
+      setActiveWidgets(w => ({ ...w, schedule: true }));
+      const userMsg = { role:'user', content:msgContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,userMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      setInput('');
+      if (user) {
+        dbInsertChatMsg('user', msgContent, user.id);
+      } else if (msgContent) {
+        try {
+          const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+          demoChat.push({ role: 'user', content: msgContent });
+          localStorage.setItem('cc_chat', JSON.stringify(demoChat));
+        } catch {}
+      }
+      const assistantMsg = { role:'assistant', content:scheduleShortcutReply, timestamp:Date.now() };
+      sfx.arrive();
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      if (user) {
+        dbInsertChatMsg('assistant', scheduleShortcutReply, user.id);
+      } else {
+        try {
+          const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
+          demoChat.push({ role: 'assistant', content: scheduleShortcutReply });
+          localStorage.setItem('cc_chat', JSON.stringify(demoChat));
+        } catch {}
+      }
+      return;
+    }
+
     // Summon floating widgets from chat keywords. Mirrors the landing
     // page: "set a timer" pops the Pomodoro, "what's my schedule" pops
     // the day timeline. Widgets render only when explicitly invoked.

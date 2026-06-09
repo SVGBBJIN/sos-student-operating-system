@@ -1616,9 +1616,11 @@ body {
 .sos-onb-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;overflow:hidden;background:radial-gradient(120% 120% at 50% 0%,rgba(12,20,44,0.96),rgba(4,7,16,0.99));backdrop-filter:blur(10px);animation:overlayIn .35s ease}
 .sos-onb-grid-bg{position:absolute;inset:-50%;background-image:linear-gradient(rgba(56,216,232,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(56,216,232,0.06) 1px,transparent 1px);background-size:46px 46px;mask-image:radial-gradient(60% 55% at 50% 45%,#000 0%,transparent 75%);-webkit-mask-image:radial-gradient(60% 55% at 50% 45%,#000 0%,transparent 75%);animation:sosOnbGrid 18s linear infinite;pointer-events:none}
 @keyframes sosOnbGrid{from{transform:translateY(0)}to{transform:translateY(46px)}}
-.sos-onb-stage{position:relative;z-index:1;width:100%;display:flex;justify-content:center}
+.sos-onb-stage{position:relative;z-index:1;width:100%;display:flex;justify-content:center;perspective:1200px}
 .sos-onb-card{position:relative;width:100%;max-width:480px;background:linear-gradient(180deg,rgba(15,22,46,0.92),rgba(8,12,28,0.92));border:1px solid var(--border-mid);border-radius:22px;padding:30px 28px;box-shadow:0 24px 80px rgba(1,6,22,0.6),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden}
-.sos-onb-fade{animation:floatUp .5s cubic-bezier(0.16,1,0.3,1)}
+.sos-onb-puzzle-card{animation:sosOnbPuzzleCard .58s cubic-bezier(0.16,1,0.3,1) both}
+.sos-onb-fade{animation:sosOnbPuzzleCard .58s cubic-bezier(0.16,1,0.3,1) both}
+@keyframes sosOnbPuzzleCard{0%{opacity:.5;transform:translateX(52px) rotateY(-8deg) scale(.96);filter:blur(3px)}58%{opacity:.72;transform:translateX(-8px) rotateY(2deg) scale(.985);filter:blur(1px)}100%{opacity:1;transform:translateX(0) rotateY(0) scale(1);filter:blur(0)}}
 .sos-onb-h1{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;line-height:1.2;color:var(--text);margin:0 0 8px}
 .sos-onb-h2{font-family:'Syne',sans-serif;font-size:1.22rem;font-weight:700;line-height:1.25;color:var(--text);margin:0 0 6px}
 .sos-onb-sub{font-size:0.86rem;line-height:1.5;color:var(--text-dim);margin:0 0 20px}
@@ -1652,10 +1654,8 @@ body {
 .sos-onb-pip.done{background:var(--accent)}
 .sos-onb-pip.cur{background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
 .sos-onb-locked{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(60% 60% at 50% 50%,rgba(56,216,232,0.16),rgba(4,7,16,0.78));border-radius:22px;animation:sosOnbLockIn .78s ease forwards;pointer-events:none;overflow:hidden}
-.sos-onb-locked::before{content:'';position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);box-shadow:0 0 14px var(--accent);animation:sosOnbScan .78s cubic-bezier(0.5,0,0.5,1) forwards}
 .sos-onb-locked-stamp{font-family:'JetBrains Mono',monospace;font-size:0.92rem;font-weight:600;letter-spacing:0.22em;color:var(--accent);border:1px solid var(--accent-dim);padding:8px 16px;border-radius:10px;background:rgba(8,12,28,0.7);transform:scale(0.9);animation:scaleIn .4s .12s cubic-bezier(0.16,1,0.3,1) both}
 @keyframes sosOnbLockIn{0%{opacity:0}25%{opacity:1}80%{opacity:1}100%{opacity:0}}
-@keyframes sosOnbScan{from{top:0}to{top:100%}}
 .sos-onb-assemble{display:flex;gap:8px;justify-content:center;align-items:flex-end;height:84px}
 .sos-onb-assemble-col{width:26px;border-radius:6px;background:linear-gradient(180deg,var(--accent),rgba(56,216,232,0.2));animation:sosOnbAssemble 1.4s cubic-bezier(0.5,0,0.5,1) infinite;animation-delay:calc(var(--i) * 110ms)}
 @keyframes sosOnbAssemble{0%,100%{height:18px;opacity:0.35}50%{height:74px;opacity:1}}
@@ -1667,5 +1667,5 @@ body {
 @keyframes sosOnbColRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){
   .sos-onb-grid-bg,.sos-onb-assemble-col{animation:none}
-  .sos-onb-block,.sos-onb-week-col{animation-duration:.01ms;animation-delay:0ms}
+  .sos-onb-puzzle-card,.sos-onb-block,.sos-onb-week-col{animation-duration:.01ms;animation-delay:0ms}
 }
