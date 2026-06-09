@@ -178,7 +178,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   // ── Intro ──
   if (phase === 'intro') {
     return overlay(
-      <div className="sos-onb-card sos-onb-fade" style={{ textAlign: 'center', maxWidth: 440 }}>
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade" style={{ textAlign: 'center', maxWidth: 440 }}>
         <div style={{ color: 'var(--accent)', display: 'flex', justifyContent: 'center', marginBottom: 14 }}>{Icon.calendarClock(34)}</div>
         <h1 className="sos-onb-h1">{firstName ? `${firstName}. Let's build your week.` : "Let's build your week."}</h1>
         <p className="sos-onb-sub">Three taps. I draft the rest. Under two minutes — no forms.</p>
@@ -193,7 +193,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   // ── Q1: count ──
   if (phase === 'q1') {
     return overlay(
-      <div className="sos-onb-card sos-onb-fade">
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade">
         <div className="sos-onb-step">Question 1 / 3</div>
         <h2 className="sos-onb-h2">How many after-school commitments?</h2>
         <p className="sos-onb-sub">Sports, a job, clubs — whatever owns your afternoons.</p>
@@ -215,7 +215,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   // ── Q2: duration ──
   if (phase === 'q2') {
     return overlay(
-      <div className="sos-onb-card sos-onb-fade">
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade">
         <div className="sos-onb-step">Question 2 / 3</div>
         <h2 className="sos-onb-h2">How long do they run?</h2>
         <p className="sos-onb-sub">Ballpark. I'll leave room either way.</p>
@@ -237,7 +237,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   // ── Q3: whimsy (tone only) ──
   if (phase === 'q3') {
     return overlay(
-      <div className="sos-onb-card sos-onb-fade">
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade">
         <div className="sos-onb-step">Question 3 / 3 · optional</div>
         <h2 className="sos-onb-h2">What would you rather be doing than homework?</h2>
         <p className="sos-onb-sub">Stays between us. Doesn't touch your schedule.</p>
@@ -263,7 +263,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   // ── Assembling beat ──
   if (phase === 'assembling') {
     return overlay(
-      <div className="sos-onb-card sos-onb-fade" style={{ textAlign: 'center', maxWidth: 420 }}>
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade" style={{ textAlign: 'center', maxWidth: 420 }}>
         <div className="sos-onb-assemble" aria-hidden="true">
           {Array.from({ length: 7 }).map((_, i) => (
             <span key={i} className="sos-onb-assemble-col" style={{ '--i': i }} />
@@ -279,7 +279,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   if (phase === 'calibrate' && currentDay) {
     const draftCount = shownBlocks.filter((b) => !b.committed).length;
     return overlay(
-      <div className="sos-onb-card" key={dayIndex}>
+      <div className="sos-onb-card sos-onb-puzzle-card" key={dayIndex}>
         <div className="sos-onb-progress" aria-hidden="true">
           {draft.map((_, i) => (
             <span key={i} className={`sos-onb-pip ${i < dayIndex ? 'done' : i === dayIndex ? 'cur' : ''}`} />
@@ -351,7 +351,7 @@ export default function Onboarding({ firstName, onComplete, onSkip }) {
   if (phase === 'finale') {
     const jarvis = q3 ? `Week's set. Now go ${q3}.` : "Week's set. Go find something that isn't homework.";
     return overlay(
-      <div className="sos-onb-card sos-onb-fade" style={{ maxWidth: 480, textAlign: 'center' }}>
+      <div className="sos-onb-card sos-onb-puzzle-card sos-onb-fade" style={{ maxWidth: 480, textAlign: 'center' }}>
         <div className="sos-onb-week" aria-hidden="true">
           {lockedDays.map((d, i) => (
             <div key={d.dow} className="sos-onb-week-col" style={{ '--i': i }}>
