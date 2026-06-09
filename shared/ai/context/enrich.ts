@@ -1,14 +1,15 @@
 // Best-effort dynamic-context enrichment, shared by both chat handlers.
 //
-// Runs the two independent reads — behavioral signals and RAG retrieval —
-// concurrently, then folds the assembled context onto the caller's base
-// string. Never throws and never blocks the request: any failure (or a slow
-// upstream that trips the per-call timeouts in behavioral.ts / retrieve.ts)
-// just yields the base context unchanged.
+// Runs the always-on behavioral/study signal reads concurrently, then folds the
+// assembled context onto the caller's base string. Semantic memory retrieval is
+// NOT done here — it is exposed to the model as the `search_memory` tool and
+// only runs when the model decides it needs background context, so the common
+// turn never pays for an embedding round-trip. Never throws and never blocks the
+// request: any failure (or a slow upstream that trips the per-call timeout in
+// behavioral.ts) just yields the base context unchanged.
 
 import { getBehavioralSignals } from "../signals/behavioral.js";
 import { getStudySignals } from "../signals/study.js";
-import { retrieve, type RetrievedChunk } from "../rag/retrieve.js";
 import { assembleContext } from "./assembler.js";
 import type { TaskForScoring, CalendarDensity } from "../../scheduling/priority.js";
 
@@ -19,7 +20,6 @@ export interface EnrichOptions {
   baseContext: string;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
-  sources?: string[];
 }
 
 export async function enrichDynamicContext(opts: EnrichOptions): Promise<string> {
@@ -30,12 +30,8 @@ export async function enrichDynamicContext(opts: EnrichOptions): Promise<string>
   const tasks = opts.clientTasks.filter((t) => t.status !== "done").slice(0, 50);
 
   try {
-    const [signals, retrieved, studySignals] = await Promise.all([
+    const [signals, studySignals] = await Promise.all([
       getBehavioralSignals(opts.userId).catch(() => undefined),
-      opts.intentQuery.trim().length > 0
-        ? retrieve({ userId: opts.userId, query: opts.intentQuery, sources: opts.sources, k: 8 })
-            .catch((): RetrievedChunk[] => [])
-        : Promise.resolve<RetrievedChunk[]>([]),
       getStudySignals(opts.userId).catch(() => undefined),
     ]);
 
@@ -45,7 +41,7 @@ export async function enrichDynamicContext(opts: EnrichOptions): Promise<string>
       intentQuery: opts.intentQuery,
       behavioralSignals: signals,
       studySignals,
-      retrieved,
+      retrieved: [],
       clientTasks: tasks,
       clientCalendarDensity: opts.clientCalendarDensity,
     });
