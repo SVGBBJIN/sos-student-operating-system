@@ -8,6 +8,7 @@ import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import { dbInsertTaskEvent } from './lib/dataHandlers';
 import ErrorBoundary from './components/ErrorBoundary';
+import Onboarding from './components/Onboarding';
 
 import * as sfx from './lib/sfx';
 import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
@@ -335,8 +336,10 @@ async function loadAllFromSupabase(userId) {
 
     const entityLinks = linksRes.error ? [] : (linksRes.data || []);
     const studyPlans = studyPlansRes.error ? [] : (studyPlansRes.data || []);
+    // `onboarding_completed` may be absent on older DBs; treat missing as false.
+    const onboardingCompleted = !!(profileRes.data && profileRes.data.onboarding_completed);
 
-    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks, studyPlans };
+    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks, studyPlans, onboardingCompleted };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -5057,6 +5060,8 @@ function App() {
   const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
   const [authNudge, setAuthNudge] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingName, setOnboardingName] = useState('');
 
   // ── Data stores ──
   const [tasks, setTasks] = useState([]);
@@ -5458,6 +5463,26 @@ function App() {
     } catch(e) { console.error('Failed to fetch content gen count:', e); }
 
     setDataLoaded(true);
+
+    // ── First-run onboarding gate ──
+    // Show the three-question setup once, cold, for a brand-new user with zero
+    // prior data. The profile flag is the durable cross-device record; the
+    // localStorage key is a belt-and-suspenders guard so a failed DB write never
+    // re-triggers it on this device.
+    try {
+      const noData = data
+        && (data.tasks?.length || 0) === 0
+        && (data.events?.length || 0) === 0
+        && (data.blocks?.recurring?.length || 0) === 0;
+      const alreadyDone = (data && data.onboardingCompleted)
+        || localStorage.getItem('sos_onboarded_' + authUser.id);
+      if (noData && !alreadyDone) {
+        const fn = authUser?.user_metadata?.full_name?.split(' ')[0]
+          || authUser?.email?.split('@')[0] || '';
+        setOnboardingName(fn);
+        setShowOnboarding(true);
+      }
+    } catch (_) { /* gate is best-effort; never block load */ }
   }
 
   // ── Restore accent color from localStorage before first paint ──
@@ -7351,6 +7376,67 @@ function App() {
 
   function handleApplyIntentPlanSkipConflicts(idx, plan) {
     return handleApplyIntentPlan(idx, plan, true);
+  }
+
+  // ── Onboarding: seed the calibrated weekly skeleton ──
+  // Committed time (school + the student's stated commitments) lands confirmed /
+  // high-confidence; the drafted focus/break blocks land tentative / low-
+  // confidence — reusing the same gate as tasks/events so the proactive layer
+  // never banks a speculative block as fact.
+  function markOnboardingDone() {
+    if (user) {
+      try { localStorage.setItem('sos_onboarded_' + user.id, '1'); } catch (_) {}
+      // Best-effort; column may not exist on older DBs.
+      sb.from('profiles').update({ onboarding_completed: true }).eq('id', user.id).then(() => {}, () => {});
+    }
+    setShowOnboarding(false);
+  }
+
+  async function handleOnboardingComplete(payload) {
+    const rows = payload?.rows || [];
+    markOnboardingDone();
+
+    if (user) {
+      try { trackEvent(user.id, 'onboarding_completed', {
+        commitment_count: payload.count,
+        commitment_duration: payload.durationId,
+        days_adjusted: (payload.signals || []).filter(s => !s.approvedClean).length,
+        q3_given: !!payload.q3,
+        blocks: rows.length,
+      }); } catch (_) {}
+    }
+
+    if (rows.length === 0) { setToastMsg("Week's set."); return; }
+
+    const baseRows = rows.map(r => ({
+      user_id: user?.id, name: r.name, category: r.category,
+      start_time: r.start, end_time: r.end, days: r.days,
+    }));
+    const fullRows = rows.map((r, i) => ({ ...baseRows[i], confidence: r.confidence, commitment: r.commitment }));
+
+    let inserted = null;
+    if (user) {
+      let res = await sb.from('recurring_blocks').insert(fullRows).select('*');
+      if (res.error) {
+        // Older DB without confidence/commitment columns — retry without them so
+        // the week still gets seeded.
+        res = await sb.from('recurring_blocks').insert(baseRows).select('*');
+      }
+      if (!res.error) inserted = res.data;
+      else console.error('Onboarding block seed failed:', res.error);
+    }
+
+    const clientRecurring = (inserted && inserted.length)
+      ? inserted.map(rb => ({ id: rb.id, name: rb.name, category: rb.category, start: rb.start_time?.slice(0, 5) || rb.start_time, end: rb.end_time?.slice(0, 5) || rb.end_time, days: rb.days || [] }))
+      : rows.map(r => ({ id: uid(), name: r.name, category: r.category, start: r.start, end: r.end, days: r.days }));
+
+    setBlocks(prev => ({ ...prev, recurring: [...(prev.recurring || []), ...clientRecurring] }));
+    setToastMsg(`Week's set — ${clientRecurring.length} recurring block${clientRecurring.length !== 1 ? 's' : ''} added.`);
+  }
+
+  function handleOnboardingSkip() {
+    markOnboardingDone();
+    if (user) { try { trackEvent(user.id, 'onboarding_skipped', {}); } catch (_) {} }
   }
 
   function handleStartPlanTask(step) {
@@ -10171,6 +10257,7 @@ function App() {
         />
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
+      {showOnboarding && <Onboarding firstName={onboardingName} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} />}
       {savedChatUndo&&(
         <div className="sos-saved-chat-undo" role="status">
           <span>Deleted “{savedChatUndo.chat.title || 'Saved chat'}”</span>
