@@ -2,13 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import CalendarWindow from './CalendarWindow/CalendarWindow.jsx';
 import DOMPurify from 'dompurify';
 import ProofreadPanel from './ProofreadPanel.jsx';
-import BacklinksList from './BacklinksList.jsx';
 import ProjectsTree from './ProjectsTree.jsx';
 import ProjectsBar from './ProjectsBar.jsx';
 import DynamicIsland from './DynamicIsland.jsx';
 
 /* ── Focused note editor for the Projects tree ─────────────── */
-function ProjectNoteEditor({ note, notes, events, tasks, entityLinks, onBack, onUpdateNote, onDeleteNote }) {
+function ProjectNoteEditor({ note, onBack, onUpdateNote, onDeleteNote }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note?.name || '');
   const editorRef = useRef(null);
@@ -77,14 +76,6 @@ function ProjectNoteEditor({ note, notes, events, tasks, entityLinks, onBack, on
             style={{ padding: '12px 14px', color: 'var(--foreground)', fontSize: 13, lineHeight: 1.65 }}
             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(note.content || '') }}
           />
-          <BacklinksList
-            entityType="note"
-            entityId={note.id}
-            entityLinks={entityLinks}
-            notes={notes}
-            events={events}
-            tasks={tasks}
-          />
         </div>
       )}
     </div>
@@ -94,7 +85,7 @@ function ProjectNoteEditor({ note, notes, events, tasks, entityLinks, onBack, on
 /* ── Main panel ──────────────────────────────────────────────── */
 export default function LofiLeftPanel({
   events, blocks, userId, onEventUpdate,
-  notes, tasks, entityLinks,
+  notes, tasks,
   onCreateNote, onUpdateNote, onDeleteNote, onImportClick,
   aiThinking = false,
 }) {
@@ -161,10 +152,6 @@ export default function LofiLeftPanel({
         {activeView === 'projects' && openNote && (
           <ProjectNoteEditor
             note={openNote}
-            notes={notes || []}
-            events={events || []}
-            tasks={tasks || []}
-            entityLinks={entityLinks || []}
             onBack={() => setOpenNoteId(null)}
             onUpdateNote={onUpdateNote}
             onDeleteNote={(id) => { onDeleteNote?.(id); setOpenNoteId(null); }}
