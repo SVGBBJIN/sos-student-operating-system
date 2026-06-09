@@ -14,6 +14,8 @@ import * as sfx from './lib/sfx';
 import StudyTopBar from './components/StudyTopBar';
 import { srsCardKey, srsRate } from './lib/srs';
 import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getNudge, getPriority } from './lib/dateUtils';
+import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
@@ -40,19 +42,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 
 /* ─── Date helpers ─── */
-function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
-function fmtFull(d) { return new Date(d).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
-function toDateStr(d) {
-  const dt = new Date(d);
-  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-}
-function today() { return toDateStr(new Date()); }
-function daysUntil(dateStr) {
-  const now = new Date(); now.setHours(0,0,0,0);
-  const target = new Date(dateStr + 'T00:00:00');
-  return Math.round((target - now) / 86400000);
-}
-
 /* ── Notification scheduling helper ──────────────────────────── */
 function buildNotifications(tasks, events, prefs) {
   const notes = [];
@@ -95,11 +84,6 @@ async function scheduleNotificationsToSW(notifications) {
   } catch(_) {}
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function fmtTime(h, m) {
-  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
-}
 
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
@@ -129,27 +113,6 @@ function mapGoogleCalItems(items) {
     startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
     allDay: !!e.start?.date,
   }));
-}
-
-/* ─── Nudge Engine ─── */
-function getNudge(task) {
-  if (task.status === 'done') return { emoji:'done', text:'Done! Nice work.' };
-  const d = daysUntil(task.dueDate);
-  if (d < 0) return { emoji:'overdue', text:'Overdue by ' + Math.abs(d) + ' day' + (Math.abs(d)>1?'s':'') };
-  if (d === 0) return { emoji:'today', text:'Due today' };
-  if (d === 1) return { emoji:'tomorrow', text:'Due tomorrow' };
-  if (d <= 3) return { emoji:'soon', text:d + ' days left' };
-  if (d <= 7) return { emoji:'week', text:d + ' days left' };
-  return { emoji:'chill', text:d + ' days left' };
-}
-
-function getPriority(task) {
-  if (task.status === 'done') return 999;
-  const d = daysUntil(task.dueDate);
-  let score = d;
-  if (task.status === 'not_started') score -= 2;
-  if (task.status === 'in_progress') score -= 1;
-  return score;
 }
 
 /* ─── Category Colors ─── */
@@ -337,73 +300,6 @@ async function loadAllFromSupabase(userId) {
 }
 
 /* ── Name resolver: translates fuzzy AI names → real objects with IDs ── */
-// Common abbreviations teens use → expanded form
-const SUBJECT_ALIASES = {
-  calc:'calculus', math:'mathematics', bio:'biology', chem:'chemistry',
-  phys:'physics', eng:'english', hist:'history', sci:'science', span:'spanish',
-  econ:'economics', psych:'psychology', gov:'government', geo:'geography',
-  pe:'physical education', gym:'physical education', lit:'literature',
-  cs:'computer science', comp:'computer science', la:'language arts'
-};
-
-const SUBJECT_ALIAS_PATTERNS = Object.entries(SUBJECT_ALIASES).map(
-  ([short, long]) => ({ regex: new RegExp('\\b' + short + '\\b', 'g'), replacement: long })
-);
-function normalize(str) {
-  if (!str) return '';
-  let s = str.toLowerCase().trim();
-  // expand known abbreviations
-  for (const { regex, replacement } of SUBJECT_ALIAS_PATTERNS) {
-    regex.lastIndex = 0;
-    s = s.replace(regex, replacement);
-  }
-  return s;
-}
-
-// Score how well two strings match (higher = better, 0 = no match)
-function matchScore(query, target) {
-  const q = normalize(query);
-  const t = normalize(target);
-  if (!q || !t) return 0;
-  if (q === t) return 100;               // exact match
-  if (t.includes(q)) return 80;          // target contains query ("Math Test" contains "math")
-  if (q.includes(t)) return 70;          // query contains target ("cancel the math test" contains "math test")
-  // word overlap — how many query words appear in target
-  const qWords = q.split(/\s+/);
-  const tWords = t.split(/\s+/);
-  const overlap = qWords.filter(w => tWords.some(tw => tw.includes(w) || w.includes(tw))).length;
-  if (overlap > 0) return 30 + (overlap / qWords.length) * 40;
-  return 0;
-}
-
-// Find the best-matching event from the array. Returns the event object or null.
-function resolveEvent(nameOrId, eventsList) {
-  if (!nameOrId || !eventsList?.length) return null;
-  // 1. Try exact ID match first
-  const byId = eventsList.find(ev => ev.id === nameOrId);
-  if (byId) return byId;
-  // 2. Score every event by name similarity, pick the best
-  let best = null, bestScore = 0;
-  for (const ev of eventsList) {
-    const s = matchScore(nameOrId, ev.title);
-    if (s > bestScore) { bestScore = s; best = ev; }
-  }
-  return bestScore >= 30 ? best : null;
-}
-
-// Find the best-matching task from the array. Returns the task object or null.
-function resolveTask(nameOrId, tasksList) {
-  if (!nameOrId || !tasksList?.length) return null;
-  const byId = tasksList.find(t => t.id === nameOrId);
-  if (byId) return byId;
-  let best = null, bestScore = 0;
-  for (const t of tasksList) {
-    const s = matchScore(nameOrId, t.title);
-    if (s > bestScore) { bestScore = s; best = t; }
-  }
-  return bestScore >= 30 ? best : null;
-}
-
 function addThirtyMinutes(timeStr) {
   const [h, m] = (timeStr || '00:00').split(':').map(Number);
   const d = new Date();
