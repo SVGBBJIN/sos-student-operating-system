@@ -1613,3 +1613,63 @@ body {
   position: relative;
   z-index: 1;
 }
+
+/* ── Onboarding — three-question setup → seven-day calibration ──
+   Animate the system, not the user: blocks assemble, snap into the grid, a
+   HUD-style lock-in resolves each day. No confetti, no reward pops. */
+.sos-onb-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;overflow:hidden;background:radial-gradient(120% 120% at 50% 0%,rgba(12,20,44,0.96),rgba(4,7,16,0.99));backdrop-filter:blur(10px);animation:overlayIn .35s ease}
+.sos-onb-grid-bg{position:absolute;inset:-50%;background-image:linear-gradient(rgba(56,216,232,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(56,216,232,0.06) 1px,transparent 1px);background-size:46px 46px;mask-image:radial-gradient(60% 55% at 50% 45%,#000 0%,transparent 75%);-webkit-mask-image:radial-gradient(60% 55% at 50% 45%,#000 0%,transparent 75%);animation:sosOnbGrid 18s linear infinite;pointer-events:none}
+@keyframes sosOnbGrid{from{transform:translateY(0)}to{transform:translateY(46px)}}
+.sos-onb-stage{position:relative;z-index:1;width:100%;display:flex;justify-content:center}
+.sos-onb-card{position:relative;width:100%;max-width:480px;background:linear-gradient(180deg,rgba(15,22,46,0.92),rgba(8,12,28,0.92));border:1px solid var(--border-mid);border-radius:22px;padding:30px 28px;box-shadow:0 24px 80px rgba(1,6,22,0.6),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden}
+.sos-onb-fade{animation:floatUp .5s cubic-bezier(0.16,1,0.3,1)}
+.sos-onb-h1{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;line-height:1.2;color:var(--text);margin:0 0 8px}
+.sos-onb-h2{font-family:'Syne',sans-serif;font-size:1.22rem;font-weight:700;line-height:1.25;color:var(--text);margin:0 0 6px}
+.sos-onb-sub{font-size:0.86rem;line-height:1.5;color:var(--text-dim);margin:0 0 20px}
+.sos-onb-step{font-size:0.68rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:12px;font-family:'JetBrains Mono',monospace}
+.sos-onb-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;margin:8px auto 0;padding:12px 22px;border:1px solid var(--accent-dim);border-radius:14px;background:linear-gradient(135deg,rgba(56,216,232,0.2),rgba(56,216,232,0.08));color:var(--accent);font-weight:700;font-size:0.92rem;cursor:pointer;transition:transform .18s cubic-bezier(0.16,1,0.3,1),box-shadow .18s,background .18s}
+.sos-onb-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(56,216,232,0.22);background:linear-gradient(135deg,rgba(56,216,232,0.3),rgba(56,216,232,0.12))}
+.sos-onb-primary:active{transform:translateY(0) scale(0.985)}
+.sos-onb-ghost{display:block;margin:14px auto 0;padding:6px 12px;background:transparent;border:none;color:var(--text-dim);font-size:0.78rem;cursor:pointer;transition:color .18s}
+.sos-onb-ghost:hover{color:var(--text)}
+.sos-onb-options{display:grid;gap:10px;margin-top:4px}
+.sos-onb-opt{display:flex;align-items:center;justify-content:center;min-height:64px;padding:12px;border:1px solid var(--border-mid);border-radius:14px;background:rgba(13,22,48,0.6);color:var(--text);cursor:pointer;transition:transform .16s cubic-bezier(0.16,1,0.3,1),border-color .16s,background .16s}
+.sos-onb-opt:hover{transform:translateY(-2px);border-color:var(--accent-dim);background:rgba(56,216,232,0.08)}
+.sos-onb-opt:active{transform:translateY(0) scale(0.98)}
+.sos-onb-opt.sel{border-color:var(--accent);background:rgba(56,216,232,0.12);box-shadow:0 0 0 1px var(--accent-dim)}
+.sos-onb-input{width:100%;padding:13px 15px;border:1px solid var(--border-mid);border-radius:14px;background:rgba(8,12,28,0.7);color:var(--text);font-size:0.95rem;transition:border-color .18s}
+.sos-onb-input:focus{border-color:var(--accent)}
+.sos-onb-input::placeholder{color:rgba(201,216,255,0.4);font-style:italic}
+.sos-onb-column{display:flex;flex-direction:column;gap:8px}
+.sos-onb-block{animation:sosOnbBlockIn .5s cubic-bezier(0.16,1,0.3,1) both;animation-delay:calc(var(--i,0) * 90ms)}
+@keyframes sosOnbBlockIn{from{opacity:0;transform:translateY(14px) scale(0.96);filter:blur(3px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+.sos-onb-add{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px;border:1px dashed var(--border-mid);border-radius:11px;background:transparent;color:var(--text-dim);font-size:0.8rem;font-weight:600;cursor:pointer;transition:border-color .16s,color .16s}
+.sos-onb-add:hover:not(:disabled){border-color:var(--accent-dim);color:var(--accent)}
+.sos-onb-add:disabled{opacity:0.4;cursor:not-allowed}
+.sos-onb-good{flex:2;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:1px solid var(--accent-dim);border-radius:14px;background:linear-gradient(135deg,rgba(56,216,232,0.2),rgba(56,216,232,0.08));color:var(--accent);font-weight:700;font-size:0.9rem;cursor:pointer;transition:transform .16s,box-shadow .16s}
+.sos-onb-good:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(56,216,232,0.2)}
+.sos-onb-good:active{transform:translateY(0) scale(0.985)}
+.sos-onb-bad{flex:1;padding:12px;border:1px solid var(--border-mid);border-radius:14px;background:rgba(13,22,48,0.5);color:var(--text-dim);font-weight:600;font-size:0.9rem;cursor:pointer;transition:border-color .16s,color .16s}
+.sos-onb-bad:hover{border-color:var(--warning);color:var(--warning)}
+.sos-onb-progress{display:flex;gap:6px;margin-bottom:16px}
+.sos-onb-pip{flex:1;height:3px;border-radius:2px;background:rgba(112,142,214,0.22);transition:background .3s,box-shadow .3s}
+.sos-onb-pip.done{background:var(--accent)}
+.sos-onb-pip.cur{background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
+.sos-onb-locked{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(60% 60% at 50% 50%,rgba(56,216,232,0.16),rgba(4,7,16,0.78));border-radius:22px;animation:sosOnbLockIn .78s ease forwards;pointer-events:none;overflow:hidden}
+.sos-onb-locked::before{content:'';position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);box-shadow:0 0 14px var(--accent);animation:sosOnbScan .78s cubic-bezier(0.5,0,0.5,1) forwards}
+.sos-onb-locked-stamp{font-family:'JetBrains Mono',monospace;font-size:0.92rem;font-weight:600;letter-spacing:0.22em;color:var(--accent);border:1px solid var(--accent-dim);padding:8px 16px;border-radius:10px;background:rgba(8,12,28,0.7);transform:scale(0.9);animation:scaleIn .4s .12s cubic-bezier(0.16,1,0.3,1) both}
+@keyframes sosOnbLockIn{0%{opacity:0}25%{opacity:1}80%{opacity:1}100%{opacity:0}}
+@keyframes sosOnbScan{from{top:0}to{top:100%}}
+.sos-onb-assemble{display:flex;gap:8px;justify-content:center;align-items:flex-end;height:84px}
+.sos-onb-assemble-col{width:26px;border-radius:6px;background:linear-gradient(180deg,var(--accent),rgba(56,216,232,0.2));animation:sosOnbAssemble 1.4s cubic-bezier(0.5,0,0.5,1) infinite;animation-delay:calc(var(--i) * 110ms)}
+@keyframes sosOnbAssemble{0%,100%{height:18px;opacity:0.35}50%{height:74px;opacity:1}}
+.sos-onb-week{display:flex;gap:7px;justify-content:center;align-items:flex-end}
+.sos-onb-week-col{display:flex;flex-direction:column;align-items:center;gap:6px;animation:sosOnbColRise .5s cubic-bezier(0.16,1,0.3,1) both;animation-delay:calc(var(--i) * 80ms)}
+.sos-onb-week-label{font-size:0.6rem;letter-spacing:0.06em;color:var(--text-dim);font-family:'JetBrains Mono',monospace}
+.sos-onb-week-stack{display:flex;flex-direction:column;gap:3px;width:30px}
+.sos-onb-week-bar{height:11px;border-radius:3px}
+@keyframes sosOnbColRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){
+  .sos-onb-grid-bg,.sos-onb-assemble-col{animation:none}
+  .sos-onb-block,.sos-onb-week-col{animation-duration:.01ms;animation-delay:0ms}
+}
