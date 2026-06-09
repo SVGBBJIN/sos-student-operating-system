@@ -4975,19 +4975,15 @@ function App() {
 
     setDataLoaded(true);
 
-    // ── First-run onboarding gate ──
-    // Show the three-question setup once, cold, for a brand-new user with zero
-    // prior data. The profile flag is the durable cross-device record; the
-    // localStorage key is a belt-and-suspenders guard so a failed DB write never
-    // re-triggers it on this device.
+    // ── Onboarding configuration gate ──
+    // Prompt any account that has not completed onboarding yet, even if it
+    // already has tasks/events/blocks from migration or manual setup. The
+    // profile flag is the durable source of truth so accounts that are still
+    // unconfigured get the weekly skeleton flow instead of being disqualified
+    // just because they have existing data.
     try {
-      const noData = data
-        && (data.tasks?.length || 0) === 0
-        && (data.events?.length || 0) === 0
-        && (data.blocks?.recurring?.length || 0) === 0;
-      const alreadyDone = (data && data.onboardingCompleted)
-        || localStorage.getItem('sos_onboarded_' + authUser.id);
-      if (noData && !alreadyDone) {
+      const onboardingConfigured = !!(data && data.onboardingCompleted);
+      if (data && !onboardingConfigured) {
         const fn = authUser?.user_metadata?.full_name?.split(' ')[0]
           || authUser?.email?.split('@')[0] || '';
         setOnboardingName(fn);
