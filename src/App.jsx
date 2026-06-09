@@ -11,14 +11,14 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Onboarding from './components/Onboarding';
 
 import * as sfx from './lib/sfx';
-import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
-import StudyBottomBar from './components/StudyBottomBar';
-import LofiLeftPanel from './components/LofiLeftPanel';
+import { srsCardKey, srsRate } from './lib/srs';
+import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getNudge, getPriority } from './lib/dateUtils';
+import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
-import LofiRightPanel from './components/LofiRightPanel';
 import StudioSidebar from './components/StudioSidebar';
 import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
@@ -29,15 +29,9 @@ import ConnectorsSettings from './components/ConnectorsSettings';
 import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
-import { extractWikilinks, renderWikilinks, resolveLinkName, findEntityMentions, stripHtml as stripNoteHtml } from './lib/wikilinks';
-import { bestSuggestion, flattenEntities } from './lib/linkSuggestions';
 import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
-import LinkSuggestionCard from './components/LinkSuggestionCard';
-import { useWikilinkAutocomplete } from './components/WikilinkAutocomplete';
-import { useColumnLayout } from './hooks/useColumnLayout';
-import { ColumnResizeHandles, ColumnLockToggle } from './components/ColumnResizeHandles';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 
 // Configure pdfjs worker
@@ -48,19 +42,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 
 /* ─── Date helpers ─── */
-function fmt(d) { return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
-function fmtFull(d) { return new Date(d).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
-function toDateStr(d) {
-  const dt = new Date(d);
-  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-}
-function today() { return toDateStr(new Date()); }
-function daysUntil(dateStr) {
-  const now = new Date(); now.setHours(0,0,0,0);
-  const target = new Date(dateStr + 'T00:00:00');
-  return Math.round((target - now) / 86400000);
-}
-
 /* ── Notification scheduling helper ──────────────────────────── */
 function buildNotifications(tasks, events, prefs) {
   const notes = [];
@@ -103,11 +84,6 @@ async function scheduleNotificationsToSW(notifications) {
   } catch(_) {}
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function fmtTime(h, m) {
-  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return hr + ':' + String(m).padStart(2,'0') + ' ' + ampm;
-}
 
 /* ─── Collapse a {HH:MM: {name}} slot map into "Name HH:MM-HH:MM" strings ─── */
 function summarizeBlockSlots(slotMap) {
@@ -137,27 +113,6 @@ function mapGoogleCalItems(items) {
     startTime: e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : null,
     allDay: !!e.start?.date,
   }));
-}
-
-/* ─── Nudge Engine ─── */
-function getNudge(task) {
-  if (task.status === 'done') return { emoji:'done', text:'Done! Nice work.' };
-  const d = daysUntil(task.dueDate);
-  if (d < 0) return { emoji:'overdue', text:'Overdue by ' + Math.abs(d) + ' day' + (Math.abs(d)>1?'s':'') };
-  if (d === 0) return { emoji:'today', text:'Due today' };
-  if (d === 1) return { emoji:'tomorrow', text:'Due tomorrow' };
-  if (d <= 3) return { emoji:'soon', text:d + ' days left' };
-  if (d <= 7) return { emoji:'week', text:d + ' days left' };
-  return { emoji:'chill', text:d + ' days left' };
-}
-
-function getPriority(task) {
-  if (task.status === 'done') return 999;
-  const d = daysUntil(task.dueDate);
-  let score = d;
-  if (task.status === 'not_started') score -= 2;
-  if (task.status === 'in_progress') score -= 1;
-  return score;
 }
 
 /* ─── Category Colors ─── */
@@ -299,7 +254,7 @@ function appNoteToDb(n, userId) {
 /* Full load from Supabase */
 async function loadAllFromSupabase(userId) {
   try {
-    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes, linksRes, studyPlansRes] = await Promise.all([
+    const [tasksRes, eventsRes, notesRes, chatRes, recurringRes, dateBlocksRes, profileRes, studyPlansRes] = await Promise.all([
       sb.from('tasks').select('*').eq('user_id', userId),
       sb.from('events').select('*').eq('user_id', userId),
       sb.from('notes').select('*').eq('user_id', userId),
@@ -307,7 +262,6 @@ async function loadAllFromSupabase(userId) {
       sb.from('recurring_blocks').select('*').eq('user_id', userId),
       sb.from('date_blocks').select('*').eq('user_id', userId),
       sb.from('profiles').select('*').eq('id', userId).single(),
-      sb.from('entity_links').select('*').eq('user_id', userId),
       sb.from('study_plans').select('id,title,created_at,applied_at,status,plan_json,total_tasks,review_cadence_days').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
     ]);
 
@@ -334,12 +288,11 @@ async function loadAllFromSupabase(userId) {
       ? { lat: profileRes.data.weather_lat || 42.33, lon: profileRes.data.weather_lon || -71.21 }
       : { lat: 42.33, lon: -71.21 };
 
-    const entityLinks = linksRes.error ? [] : (linksRes.data || []);
     const studyPlans = studyPlansRes.error ? [] : (studyPlansRes.data || []);
     // `onboarding_completed` may be absent on older DBs; treat missing as false.
     const onboardingCompleted = !!(profileRes.data && profileRes.data.onboarding_completed);
 
-    return { tasks, events, notes, messages, blocks, weatherCoords, entityLinks, studyPlans, onboardingCompleted };
+    return { tasks, events, notes, messages, blocks, weatherCoords, studyPlans, onboardingCompleted };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -347,73 +300,6 @@ async function loadAllFromSupabase(userId) {
 }
 
 /* ── Name resolver: translates fuzzy AI names → real objects with IDs ── */
-// Common abbreviations teens use → expanded form
-const SUBJECT_ALIASES = {
-  calc:'calculus', math:'mathematics', bio:'biology', chem:'chemistry',
-  phys:'physics', eng:'english', hist:'history', sci:'science', span:'spanish',
-  econ:'economics', psych:'psychology', gov:'government', geo:'geography',
-  pe:'physical education', gym:'physical education', lit:'literature',
-  cs:'computer science', comp:'computer science', la:'language arts'
-};
-
-const SUBJECT_ALIAS_PATTERNS = Object.entries(SUBJECT_ALIASES).map(
-  ([short, long]) => ({ regex: new RegExp('\\b' + short + '\\b', 'g'), replacement: long })
-);
-function normalize(str) {
-  if (!str) return '';
-  let s = str.toLowerCase().trim();
-  // expand known abbreviations
-  for (const { regex, replacement } of SUBJECT_ALIAS_PATTERNS) {
-    regex.lastIndex = 0;
-    s = s.replace(regex, replacement);
-  }
-  return s;
-}
-
-// Score how well two strings match (higher = better, 0 = no match)
-function matchScore(query, target) {
-  const q = normalize(query);
-  const t = normalize(target);
-  if (!q || !t) return 0;
-  if (q === t) return 100;               // exact match
-  if (t.includes(q)) return 80;          // target contains query ("Math Test" contains "math")
-  if (q.includes(t)) return 70;          // query contains target ("cancel the math test" contains "math test")
-  // word overlap — how many query words appear in target
-  const qWords = q.split(/\s+/);
-  const tWords = t.split(/\s+/);
-  const overlap = qWords.filter(w => tWords.some(tw => tw.includes(w) || w.includes(tw))).length;
-  if (overlap > 0) return 30 + (overlap / qWords.length) * 40;
-  return 0;
-}
-
-// Find the best-matching event from the array. Returns the event object or null.
-function resolveEvent(nameOrId, eventsList) {
-  if (!nameOrId || !eventsList?.length) return null;
-  // 1. Try exact ID match first
-  const byId = eventsList.find(ev => ev.id === nameOrId);
-  if (byId) return byId;
-  // 2. Score every event by name similarity, pick the best
-  let best = null, bestScore = 0;
-  for (const ev of eventsList) {
-    const s = matchScore(nameOrId, ev.title);
-    if (s > bestScore) { bestScore = s; best = ev; }
-  }
-  return bestScore >= 30 ? best : null;
-}
-
-// Find the best-matching task from the array. Returns the task object or null.
-function resolveTask(nameOrId, tasksList) {
-  if (!nameOrId || !tasksList?.length) return null;
-  const byId = tasksList.find(t => t.id === nameOrId);
-  if (byId) return byId;
-  let best = null, bestScore = 0;
-  for (const t of tasksList) {
-    const s = matchScore(nameOrId, t.title);
-    if (s > bestScore) { bestScore = s; best = t; }
-  }
-  return bestScore >= 30 ? best : null;
-}
-
 function addThirtyMinutes(timeStr) {
   const [h, m] = (timeStr || '00:00').split(':').map(Number);
   const d = new Date();
@@ -478,40 +364,6 @@ async function dbDeleteEvent(eventId, userId) {
 async function dbUpsertNote(note, userId) {
   const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
   if (error) console.error('Note upsert error:', error);
-}
-/* ── Entity links: bidirectional graph between notes/events/tasks ── */
-async function dbInsertEntityLink(link, userId) {
-  const row = {
-    user_id: userId,
-    source_type: link.source_type,
-    source_id: link.source_id,
-    target_type: link.target_type,
-    target_id: link.target_id,
-    origin: link.origin || 'manual',
-    confirmed_at: link.confirmed_at || (link.origin === 'rejected' ? null : new Date().toISOString()),
-  };
-  const { data, error } = await sb.from('entity_links')
-    .upsert(row, { onConflict: 'user_id,source_type,source_id,target_type,target_id' })
-    .select()
-    .single();
-  if (error) { console.error('Entity link insert error:', error); return null; }
-  return data;
-}
-async function dbDeleteEntityLink(linkId, userId) {
-  const { error } = await sb.from('entity_links').delete().eq('id', linkId).eq('user_id', userId);
-  if (error) console.error('Entity link delete error:', error);
-}
-async function dbDeleteEntityLinkByPair(link, userId) {
-  const { error } = await sb.from('entity_links').delete()
-    .eq('user_id', userId)
-    .eq('source_type', link.source_type).eq('source_id', link.source_id)
-    .eq('target_type', link.target_type).eq('target_id', link.target_id);
-  if (error) console.error('Entity link delete by pair error:', error);
-}
-async function dbLoadEntityLinks(userId) {
-  const { data, error } = await sb.from('entity_links').select('*').eq('user_id', userId);
-  if (error) { console.error('Entity links load error:', error); return []; }
-  return data || [];
 }
 async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
   const row = { user_id: userId, role, content };
@@ -709,122 +561,6 @@ const POLICY_MODULES = {
   notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
 };
 
-function estimateInputTokens(text = '') {
-  return Math.max(1, Math.ceil((text || '').length / 4));
-}
-
-// Build a "LINKED CONTEXT" block for a chat message: pull referenced entities
-// (via [[wikilinks]] + fuzzy title matches) and their 1-hop graph neighbors,
-// formatted as text the model can read. Strict budget: 3 sources × 5 neighbors,
-// 300 chars per neighbor preview, ~1.1k tokens worst case.
-function buildLinkedContextBlock({ message, notes, events, tasks, entityLinks, normalizeFn }) {
-  if (!message || !Array.isArray(entityLinks) || entityLinks.length === 0) return '';
-  const explicit = extractWikilinks(message)
-    .map(w => resolveLinkName(w.name, { notes, events, tasks }, normalizeFn))
-    .filter(Boolean);
-  const fuzzy = findEntityMentions(message, { notes, events }, normalizeFn);
-  const seen = new Set();
-  const sources = [];
-  for (const e of [...explicit, ...fuzzy]) {
-    if (!e) continue;
-    const key = `${e.type}:${e.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sources.push(e);
-    if (sources.length >= 3) break;
-  }
-  if (sources.length === 0) return '';
-
-  function fetchEntity(type, id) {
-    if (type === 'note') { const n = notes.find(x => x.id === id); return n ? { type, id, title: n.name, body: stripNoteHtml(n.content || '') } : null; }
-    if (type === 'event') { const ev = events.find(x => x.id === id); return ev ? { type, id, title: ev.title, body: ev.description || '' } : null; }
-    if (type === 'task') { const t = tasks.find(x => x.id === id); return t ? { type, id, title: t.title, body: '' } : null; }
-    return null;
-  }
-  function neighborsOf(src) {
-    const n = [];
-    for (const l of entityLinks) {
-      if (l.origin === 'rejected') continue;
-      if (l.source_type === src.type && l.source_id === src.id) n.push(fetchEntity(l.target_type, l.target_id));
-      else if (l.target_type === src.type && l.target_id === src.id) n.push(fetchEntity(l.source_type, l.source_id));
-    }
-    return n.filter(Boolean).slice(0, 5);
-  }
-
-  const blocks = [];
-  let totalChars = 0;
-  const HARD_CAP = 4500;
-  for (const src of sources) {
-    if (totalChars >= HARD_CAP) break;
-    const srcFull = fetchEntity(src.type, src.id);
-    if (!srcFull) continue;
-    const lines = [`LINKED CONTEXT FOR "${truncateWithEllipsis(srcFull.title, 60)}" (${srcFull.type}):`];
-    if (srcFull.body) lines.push(`  - source body: ${truncateWithEllipsis(srcFull.body.replace(/\s+/g,' ').trim(), 300)}`);
-    const nbrs = neighborsOf(srcFull);
-    if (nbrs.length === 0) {
-      lines.push('  - (no linked neighbors)');
-    } else {
-      for (const nb of nbrs) {
-        if (totalChars >= HARD_CAP) break;
-        const preview = truncateWithEllipsis((nb.body || '').replace(/\s+/g,' ').trim(), 300);
-        const line = `  - linked ${nb.type}: "${truncateWithEllipsis(nb.title, 60)}"${preview ? ` — ${preview}` : ''}`;
-        lines.push(line);
-        totalChars += line.length;
-      }
-    }
-    const block = lines.join('\n');
-    blocks.push(block);
-    totalChars += block.length;
-  }
-  if (blocks.length === 0) return '';
-  return blocks.join('\n\n');
-}
-
-function truncateWithEllipsis(text = '', maxChars = 300) {
-  if (!text || text.length <= maxChars) return text || '';
-  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
-}
-
-function capLines(lines = [], maxChars = 1000, summaryLabel = 'items') {
-  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
-  const kept = [];
-  let used = 0;
-  for (let i = 0; i < safeLines.length; i++) {
-    const line = String(safeLines[i]).trim();
-    if (!line) continue;
-    const lineLen = line.length + 1;
-    if (used + lineLen > maxChars) break;
-    kept.push(line);
-    used += lineLen;
-  }
-  const omitted = Math.max(0, safeLines.length - kept.length);
-  if (omitted > 0) kept.push('… +' + omitted + ' more ' + summaryLabel + ' omitted for context budget');
-  return kept.join('\n');
-}
-// Returns { text, shown, total } for trim-aware callers
-function capLinesInfo(lines = [], maxChars = 1000, summaryLabel = 'items') {
-  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
-  const text = capLines(safeLines, maxChars, summaryLabel);
-  const total = safeLines.length;
-  // count kept lines = total lines minus the '… +N more' line if present
-  const omitted = Math.max(0, safeLines.filter(l => String(l).trim()).length - text.split('\n').filter(l => !l.startsWith('…')).length);
-  const shown = total - omitted;
-  return { text, shown, total, trimmed: omitted > 0 };
-}
-
-function dedupeRepeatedLines(blockText = '') {
-  const seen = new Set();
-  return (blockText || '')
-    .split('\n')
-    .filter(line => {
-      const key = line.trim().toLowerCase();
-      if (!key) return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .join('\n');
-}
 
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const workspaceContext = options.workspaceContext || 'chat';
@@ -895,47 +631,6 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
 
   const noteNames = notes.map(n => n.name).join(', ') || 'none';
   const noteLines = [];
-  // Build a compact "link graph index" so the model knows which entities are
-  // connected without paying the token cost of full linked content.
-  const entityLinks = Array.isArray(options.entityLinks) ? options.entityLinks : [];
-  const graphIndexLines = (() => {
-    if (entityLinks.length === 0) return [];
-    const counts = new Map(); // key: type:id → { title, type, neighbors: { note:0, event:0, task:0 } }
-    function nameOf(type, id) {
-      if (type === 'note') return notes.find(n => n.id === id)?.name;
-      if (type === 'event') return events.find(e => e.id === id)?.title;
-      if (type === 'task') return tasks.find(t => t.id === id)?.title;
-      return null;
-    }
-    function bump(type, id, otherType) {
-      const key = `${type}:${id}`;
-      let bucket = counts.get(key);
-      if (!bucket) {
-        const title = nameOf(type, id);
-        if (!title) return;
-        bucket = { title, type, neighbors: { note: 0, event: 0, task: 0 } };
-        counts.set(key, bucket);
-      }
-      bucket.neighbors[otherType] = (bucket.neighbors[otherType] || 0) + 1;
-    }
-    for (const l of entityLinks) {
-      if (l.origin === 'rejected') continue;
-      bump(l.source_type, l.source_id, l.target_type);
-      bump(l.target_type, l.target_id, l.source_type);
-    }
-    const sorted = [...counts.values()].sort((a, b) => {
-      const ta = a.neighbors.note + a.neighbors.event + a.neighbors.task;
-      const tb = b.neighbors.note + b.neighbors.event + b.neighbors.task;
-      return tb - ta;
-    });
-    return sorted.map(b => {
-      const parts = [];
-      if (b.neighbors.note) parts.push(`${b.neighbors.note} note${b.neighbors.note === 1 ? '' : 's'}`);
-      if (b.neighbors.event) parts.push(`${b.neighbors.event} event${b.neighbors.event === 1 ? '' : 's'}`);
-      if (b.neighbors.task) parts.push(`${b.neighbors.task} task${b.neighbors.task === 1 ? '' : 's'}`);
-      return `- "${truncateWithEllipsis(b.title, 50)}" (${b.type}) ↔ ${parts.join(', ')}`;
-    });
-  })();
   if (notes.length > 0) {
     const sortOrder = { pdf: 0, google_docs: 1 };
     const sorted = notes.slice().sort((a, b) => (sortOrder[a.source] ?? 2) - (sortOrder[b.source] ?? 2));
@@ -988,7 +683,6 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
     'NOTES INDEX: ' + noteNames,
     'NOTES PREVIEWS (budgeted):',
     capLines(noteLines, notesBudget, 'note previews') || '(none)',
-    ...(graphIndexLines.length > 0 ? ['', 'LINK GRAPH INDEX (compact, neighbors only):', capLines(graphIndexLines, 400, 'links')] : []),
     '',
     'MODE FLAGS:',
     '- workspace_context: ' + workspaceContext,
@@ -2556,65 +2250,6 @@ function ContentCard({ icon, title, subject, onSave, onDismiss, children, accent
       </div>
     </div>
   );
-}
-
-function PerfPill() {
-  const [tier, setTier] = useState(() => getPerfTier());
-  useEffect(() => {
-    function onTier(e) { setTier(e.detail.tier); }
-    window.addEventListener('sos:perf-tier', onTier);
-    return () => window.removeEventListener('sos:perf-tier', onTier);
-  }, []);
-  const labels = { full: 'Full', mid: 'Mid', low: 'Lite' };
-  const cycle = () => {
-    const tiers = ['full', 'mid', 'low'];
-    const next = tiers[(tiers.indexOf(tier) + 1) % 3];
-    setPerfOverride(next);
-    setTier(next);
-  };
-  const pillClass = 'perf-pill' + (tier === 'full' ? ' tier-full' : tier === 'mid' ? ' tier-mid' : '');
-  return (
-    <button className={pillClass} onClick={cycle} title={`Performance: ${labels[tier]}. Click to cycle.`}>
-      {tier === 'full' ? '✦' : tier === 'mid' ? '⚡' : '⚡'} {labels[tier]}
-    </button>
-  );
-}
-
-/* ── SM-2 SRS helpers ──────────────────────────────────────────────── */
-function srsCardKey(title, q) {
-  return ('fc:' + (title || '') + ':' + (q || '')).slice(0, 120);
-}
-function srsLoad() {
-  try { return JSON.parse(localStorage.getItem('sos-fc-schedule') || '{}'); } catch(_) { return {}; }
-}
-function srsSave(schedule) {
-  try { localStorage.setItem('sos-fc-schedule', JSON.stringify(schedule)); } catch(_) {}
-}
-function srsDaysUntil(isoDate) {
-  if (!isoDate) return null;
-  const diff = new Date(isoDate) - new Date(new Date().toDateString());
-  return Math.round(diff / 86400000);
-}
-function srsRate(cardKey, rating) {
-  // rating: 'know' | 'unsure' | 'nope'
-  const schedule = srsLoad();
-  const prev = schedule[cardKey] || { interval: 1, easiness: 2.5 };
-  let { interval, easiness } = prev;
-  if (rating === 'know') {
-    easiness = Math.min(3.0, easiness + 0.1);
-    interval = Math.max(7, Math.round(interval * easiness));
-  } else if (rating === 'unsure') {
-    easiness = Math.max(1.3, easiness - 0.15);
-    interval = 1;
-  } else {
-    easiness = Math.max(1.3, easiness - 0.2);
-    interval = 0;
-  }
-  const nextReview = new Date();
-  nextReview.setDate(nextReview.getDate() + interval);
-  schedule[cardKey] = { interval, easiness, nextReview: nextReview.toISOString().slice(0, 10) };
-  srsSave(schedule);
-  return interval;
 }
 
 function FlashcardDisplay({ data, onSave, onDismiss }) {
@@ -4519,7 +4154,7 @@ function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes
 /* ═══════════════════════════════════════════════
    NOTES PANEL (reference system + editing + fullscreen)
    ═══════════════════════════════════════════════ */
-function NotesPanel({ notes, events = [], tasks = [], entityLinks = [], onClose, onDeleteNote, onUpdateNote, onCreateNote, onWikilinkClick, embedded = false }) {
+function NotesPanel({ notes, events = [], tasks = [], onClose, onDeleteNote, onUpdateNote, onCreateNote, embedded = false }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -4772,29 +4407,10 @@ function NotesPanel({ notes, events = [], tasks = [], entityLinks = [], onClose,
                       </div>
                     )}
                     {isExpanded && (
-                      <>
-                        <div
-                          className="notes-item-content"
-                          onClick={(e) => {
-                            const a = e.target.closest && e.target.closest('a.wikilink');
-                            if (!a) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const type = a.getAttribute('data-target-type');
-                            const id = a.getAttribute('data-target-id');
-                            if (type && id && onWikilinkClick) onWikilinkClick({ type, id });
-                          }}
-                          dangerouslySetInnerHTML={{__html: renderWikilinks(note.content || '', (name) => resolveLinkName(name, { notes, events, tasks }, normalize))}}
-                        />
-                        <BacklinksSection
-                          entity={{ type: 'note', id: note.id }}
-                          entityLinks={entityLinks}
-                          notes={notes}
-                          events={events}
-                          tasks={tasks}
-                          onWikilinkClick={onWikilinkClick}
-                        />
-                      </>
+                      <div
+                        className="notes-item-content"
+                        dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(note.content || '')}}
+                      />
                     )}
                   </>
                 )}
@@ -4804,57 +4420,6 @@ function NotesPanel({ notes, events = [], tasks = [], entityLinks = [], onClose,
         </div>
       </div>
     </>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   BACKLINKS SECTION (used inside NotesPanel + event detail)
-   ═══════════════════════════════════════════════ */
-function BacklinksSection({ entity, entityLinks = [], notes = [], events = [], tasks = [], onWikilinkClick }) {
-  const links = (entityLinks || []).filter(l => l.origin !== 'rejected' && (
-    (l.source_type === entity.type && l.source_id === entity.id) ||
-    (l.target_type === entity.type && l.target_id === entity.id)
-  ));
-  if (links.length === 0) return null;
-
-  function resolve(type, id) {
-    if (type === 'note') { const n = notes.find(x => x.id === id); return n ? { title: n.name, type, id } : null; }
-    if (type === 'event') { const e = events.find(x => x.id === id); return e ? { title: e.title, type, id } : null; }
-    if (type === 'task') { const t = tasks.find(x => x.id === id); return t ? { title: t.title, type, id } : null; }
-    return null;
-  }
-
-  const others = links.map(l => {
-    const isSource = l.source_type === entity.type && l.source_id === entity.id;
-    const otherType = isSource ? l.target_type : l.source_type;
-    const otherId = isSource ? l.target_id : l.source_id;
-    return { ...resolve(otherType, otherId), origin: l.origin, linkId: l.id };
-  }).filter(x => x && x.title);
-
-  if (others.length === 0) return null;
-
-  const TYPE_LABEL = { note: 'Note', event: 'Event', task: 'Task' };
-  const TYPE_COLOR = { note: 'var(--teal)', event: 'var(--blue)', task: 'var(--accent)' };
-
-  return (
-    <div style={{marginTop:12,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.06)'}}>
-      <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
-        <span style={{display:'flex',color:'var(--teal)'}}>{Icon.link(11)}</span>
-        Linked ({others.length})
-      </div>
-      <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-        {others.map((o,i) => (
-          <button
-            key={(o.linkId || '') + ':' + i}
-            onClick={(e) => { e.stopPropagation(); if (onWikilinkClick) onWikilinkClick({ type: o.type, id: o.id }); }}
-            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 8px',borderRadius:8,border:'1px solid rgba(255,255,255,0.08)',background:'var(--bg2)',color:'var(--text)',fontSize:'0.74rem',cursor:'pointer'}}
-          >
-            <span style={{fontSize:'0.62rem',color:TYPE_COLOR[o.type],fontWeight:700,textTransform:'uppercase'}}>{TYPE_LABEL[o.type]}</span>
-            <span>{o.title}</span>
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -5101,7 +4666,6 @@ function App() {
     templateSelector: null, // { context } when template picker is active
     clarification: null,    // active clarification question object
     clarificationAnswers: null, // cached partial answers to the clarification
-    linkSuggestions: [],    // [{key,source,target,score}]
     proposal: null,         // plan proposal { summary, action_type, prefilled }
     queue: [],              // rate-limit execution queue [{ id, action, addedAt }]
   };
@@ -5118,7 +4682,6 @@ function App() {
     templateSelector: pendingTemplateSelector,
     clarification: pendingClarification,
     clarificationAnswers: pendingClarificationAnswers,
-    linkSuggestions: pendingLinkSuggestions,
     proposal: pendingProposal,
     queue: pendingQueue,
   } = pending;
@@ -5128,72 +4691,36 @@ function App() {
   const setPendingTemplateSelector = (v) => updatePending(typeof v === "function" ? (p) => ({ templateSelector: v(p.templateSelector) }) : { templateSelector: v });
   const setPendingClarification = (v) => updatePending(typeof v === "function" ? (p) => ({ clarification: v(p.clarification) }) : { clarification: v });
   const setPendingClarificationAnswers = (v) => updatePending(typeof v === "function" ? (p) => ({ clarificationAnswers: v(p.clarificationAnswers) }) : { clarificationAnswers: v });
-  const setPendingLinkSuggestions = (v) => updatePending(typeof v === "function" ? (p) => ({ linkSuggestions: v(p.linkSuggestions) }) : { linkSuggestions: v });
   const setPendingProposal = (v) => updatePending(typeof v === "function" ? (p) => ({ proposal: v(p.proposal) }) : { proposal: v });
   const setPendingQueue = (v) => updatePending(typeof v === "function" ? (p) => ({ queue: v(p.queue) }) : { queue: v });
-  const [entityLinks, setEntityLinks] = useState([]); // [{id,source_type,source_id,target_type,target_id,origin,confirmed_at,created_at}]
-  const linkSuggestTimerRef = useRef(null);
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
   const [showPeek, setShowPeek] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showNotes, setShowNotes] = useState(false);
-  const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
-  const [layoutMode, setLayoutMode] = useState('studio');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
-  const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [studioTheme, setStudioTheme] = useState(() => localStorage.getItem('sos_studio_theme') || 'dark');
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', studioTheme);
     localStorage.setItem('sos_studio_theme', studioTheme);
   }, [studioTheme]);
   const [activePanel, setActivePanel] = useState('chat');
-  const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
-  const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
-  const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
-  const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
-  const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
-  const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel === 'notes';
-  const getWorkspaceContext = useCallback((overridePanel = null) => {
-    const effectivePanel = overridePanel || sidebarCompanionPanel;
-    if (layoutMode === 'sidebar' && activePanel === 'chat' && !companionCollapsed) {
-      if (effectivePanel === 'schedule') return 'schedule';
-      if (effectivePanel === 'notes') return 'notes';
-    }
-    if (layoutMode === 'topbar' && activePanel === 'chat') {
-      if (showNotes) return 'notes';
-      if (showPeek) return 'schedule';
-    }
+  const getWorkspaceContext = useCallback(() => {
     return activePanel === 'chat' ? 'chat' : 'none';
-  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed, showNotes, showPeek]);
+  }, [activePanel]);
   const workspaceContext = getWorkspaceContext();
   const workspaceModeLabel = workspaceContext === 'schedule'
     ? 'Schedule mode'
     : workspaceContext === 'notes'
       ? 'Notes mode'
       : null;
-  const openCompanionPanel = useCallback((panel) => {
-    setActivePanel('chat');
-    setSidebarCompanionPanel(panel);
-    setCompanionCollapsed(false);
-    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
-    setShowPeek(false);
-    setShowNotes(false);
-  }, [autoCollapseSidebarCompanion]);
-  const detectCompanionIntent = useCallback((text) => {
-    const msg = (text || '').toLowerCase();
-    if (!msg) return null;
-    if (/\b(notes?|document|docs?|pdf|reference|summarize my notes|in my notes)\b/.test(msg)) return 'notes';
-    return null;
-  }, []);
   const [toastMsg, setToastMsg] = useState(null);
   const [lmsPendingConfirm, setLmsPendingConfirm] = useState(null); // {taskId, taskTitle, lmsName}
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
@@ -5350,21 +4877,6 @@ function App() {
     return () => clearTimeout(t);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Wikilink autocomplete on the chat input — opens an entity picker when the
-  // user types `[[`. Inserts `[[Selected Name]]` on commit; ↵/Tab to confirm,
-  // Esc to dismiss, ↑/↓ to navigate.
-  const wikilinkChatHook = useWikilinkAutocomplete({
-    value: input,
-    setValue: setInput,
-    inputRef,
-    notes,
-    events,
-    tasks,
-  });
-
-  // Resizable columns + lock toggle for the lofi 3-column layout.
-  const columnLayout = useColumnLayout();
-  const studyAppRef = useRef(null);
 
   // Opt-in customizable home screen. Default disabled. Persisted in localStorage
   // under `sos_home_*` keys. Re-read on mount and whenever settings flip it.
@@ -5426,7 +4938,6 @@ function App() {
       setMessages(data.messages);
       setDbMessageCount(data.messages.length); // P1.4
       setWeatherCoords(data.weatherCoords);
-      setEntityLinks(data.entityLinks || []);
       setStudyPlans(data.studyPlans || []);
     }
 
@@ -5520,7 +5031,6 @@ function App() {
         setUser(null);
         setDataLoaded(false);
         setTasks([]); setBlocks({ recurring: [], dates: {} }); setNotes([]); setEvents([]); setMessages([]);
-        setEntityLinks([]); setPendingLinkSuggestions([]);
         setPendingClarification(null); setPendingClarificationAnswers(null);
       }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
@@ -6135,11 +5645,6 @@ function App() {
           });
           if (user) syncOp(() => dbUpsertEvent(ev, user.id));
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_event' });
-          if (user) {
-            const eventEntity = { type: 'event', id: ev.id, title: ev.title };
-            syncWikilinksForEntity(eventEntity, ev.description || '');
-            maybeSuggestLink(eventEntity);
-          }
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
@@ -6237,11 +5742,6 @@ function App() {
             savedNote = newNote;
             return [...prev, newNote];
           });
-          if (user && savedNote) {
-            const noteEntity = { type: 'note', id: savedNote.id, title: savedNote.name };
-            syncWikilinksForEntity(noteEntity, savedNote.content || '');
-            maybeSuggestLink(noteEntity);
-          }
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note', source });
           recordExecution('add_note', `note "${tabName}"${folderName ? ` in ${folderName}` : ''}`);
           window.dispatchEvent(new CustomEvent('sos:notes:created', { detail: { name: tabName, subject: folderName } }));
@@ -6348,9 +5848,6 @@ function App() {
             const note = updated.find(n => n.id === noteId);
             if (note && user) {
               syncOp(() => dbUpsertNote(note, user.id));
-              const noteEntity = { type: 'note', id: note.id, title: note.name };
-              syncWikilinksForEntity(noteEntity, note.content || '');
-              maybeSuggestLink(noteEntity);
             }
             return updated;
           });
@@ -6361,11 +5858,6 @@ function App() {
           setNotes(prev => prev.filter(n => n.id !== noteId));
           if (user) {
             syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
-            const orphaned = entityLinks.filter(l =>
-              (l.source_type === 'note' && l.source_id === noteId) ||
-              (l.target_type === 'note' && l.target_id === noteId));
-            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
-            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
           }
           break;
         }
@@ -6392,13 +5884,6 @@ function App() {
           }
           setTasks(prev => prev.filter(t => t.id !== match.id));
           if (user) syncOp(() => dbDeleteTask(match.id, user.id), 'the task');
-          if (user) {
-            const orphaned = entityLinks.filter(l =>
-              (l.source_type === 'task' && l.source_id === match.id) ||
-              (l.target_type === 'task' && l.target_id === match.id));
-            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
-            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
-          }
           if (user && match.status !== 'done') {
             const ageDays = match.createdAt ? Math.round((Date.now() - new Date(match.createdAt).getTime()) / 86400000) : 0;
             dbInsertTaskEvent({ taskId: match.id, eventType: 'abandon', fromStatus: match.status, metadata: { title: match.title, subject: match.subject, age_days: ageDays, prior_postpones: match.postponeCount || 0 } }, user.id);
@@ -6416,13 +5901,6 @@ function App() {
           }
           setEvents(prev => prev.filter(ev => ev.id !== match.id));
           if (user) syncOp(() => dbDeleteEvent(match.id, user.id), 'the event');
-          if (user) {
-            const orphaned = entityLinks.filter(l =>
-              (l.source_type === 'event' && l.source_id === match.id) ||
-              (l.target_type === 'event' && l.target_id === match.id));
-            orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
-            setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
-          }
           if (match.googleId && isGoogleConnected() && calSyncEnabled) {
             deleteEventFromGoogle(match.googleId, googleToken);
           }
@@ -6455,11 +5933,6 @@ function App() {
             if (updated && user) syncOp(() => dbUpsertEvent(updated, user.id), 'the event');
             if (updated && updated.googleId && isGoogleConnected() && calSyncEnabled) {
               pushEventToGoogle(updated, googleToken);
-            }
-            if (updated && user && action.description !== undefined) {
-              const eventEntity = { type: 'event', id: updated.id, title: updated.title };
-              syncWikilinksForEntity(eventEntity, updated.description || '');
-              maybeSuggestLink(eventEntity);
             }
             return next;
           });
@@ -7109,7 +6582,7 @@ function App() {
             try {
               const session2 = await sb.auth.getSession();
               const token2 = session2?.data?.session?.access_token;
-              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, entityLinks, activeTimers });
+              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, activeTimers });
               const activeTasks = tasks.filter(t => t.status !== 'done' && t.dueDate >= today()).slice(0, 50);
               const activeTasksMapped = activeTasks.map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, priority: t.priority, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
               const intentData = await streamChat({
@@ -7162,7 +6635,7 @@ function App() {
             try {
               const session2 = await sb.auth.getSession();
               const token2 = session2?.data?.session?.access_token;
-              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, entityLinks, activeTimers });
+              const promptPayload2 = buildSystemPrompt(tasks, blocks, events, notes, 2, { workspaceContext: 'schedule', intentType: 'action', recentlyExecutedActions: recentlyExecutedActionsRef.current, responseStyle, activeTimers });
               const existingPlanSummary = JSON.stringify(existingPlan.plan_json, null, 2);
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
@@ -7243,12 +6716,6 @@ function App() {
       };
       const body = bodyByType[action.type] || `${name} saved to`;
       setSosNotif({ label: 'just now', body, accent: subj });
-    }
-    const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
-    if (calendarActionTypes.includes(action.type)) {
-      if (layoutMode === 'sidebar') {
-        openCompanionPanel('notes');
-      }
     }
   }
   function handleCancelAction(idx) {
@@ -7741,132 +7208,10 @@ function App() {
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
-  // ── Entity-link CRUD + wikilink sync ──
-  function _normalizeEntity(entity) {
-    if (!entity) return null;
-    if (entity.type && entity.id) return entity;
-    if (entity.name && !entity.title) return { type: 'note', id: entity.id, title: entity.name };
-    if (entity.title) return { type: entity.type || 'event', id: entity.id, title: entity.title };
-    return null;
-  }
-  function _resolverFor() {
-    return (name) => resolveLinkName(name, { notes, events, tasks }, normalize);
-  }
-  async function createEntityLink({ source, target, origin = 'manual' }) {
-    const s = _normalizeEntity(source); const t = _normalizeEntity(target);
-    if (!s || !t || !user) return null;
-    if (s.type === t.type && s.id === t.id) return null;
-    const exists = entityLinks.find(l =>
-      l.source_type === s.type && l.source_id === s.id &&
-      l.target_type === t.type && l.target_id === t.id);
-    if (exists && exists.origin !== 'rejected' && origin !== 'rejected') return exists;
-    const row = await dbInsertEntityLink({
-      source_type: s.type, source_id: s.id,
-      target_type: t.type, target_id: t.id,
-      origin,
-    }, user.id);
-    if (row) {
-      setEntityLinks(prev => {
-        const idx = prev.findIndex(l => l.id === row.id);
-        return idx >= 0 ? prev.map((l,i) => i===idx ? row : l) : [...prev, row];
-      });
-    }
-    return row;
-  }
-  async function deleteEntityLinkRow(link) {
-    if (!user || !link) return;
-    if (link.id) {
-      await dbDeleteEntityLink(link.id, user.id);
-    } else {
-      await dbDeleteEntityLinkByPair(link, user.id);
-    }
-    setEntityLinks(prev => prev.filter(l => link.id ? l.id !== link.id :
-      !(l.source_type===link.source_type && l.source_id===link.source_id &&
-        l.target_type===link.target_type && l.target_id===link.target_id)));
-  }
-  // Reconcile [[wikilinks]] inside an HTML body against existing wikilink-origin
-  // rows for that source. Inserts new ones, removes ones the user took out.
-  async function syncWikilinksForEntity(source, html) {
-    const s = _normalizeEntity(source); if (!s || !user) return;
-    const found = extractWikilinks(html || '');
-    const resolver = _resolverFor();
-    const resolved = found
-      .map(f => resolver(f.name))
-      .filter(t => t && !(t.type === s.type && t.id === s.id));
-    const wantKeys = new Set(resolved.map(t => `${t.type}:${t.id}`));
-    const existingWiki = entityLinks.filter(l =>
-      l.origin === 'wikilink' && l.source_type === s.type && l.source_id === s.id);
-    // Insert missing
-    for (const t of resolved) {
-      const has = existingWiki.find(l => l.target_type === t.type && l.target_id === t.id);
-      if (!has) await createEntityLink({ source: s, target: t, origin: 'wikilink' });
-    }
-    // Delete removed
-    for (const l of existingWiki) {
-      const key = `${l.target_type}:${l.target_id}`;
-      if (!wantKeys.has(key)) await deleteEntityLinkRow(l);
-    }
-  }
-  // Debounced auto-suggestion: 2s after a save, scan for the best heuristic
-  // candidate and surface it for user approval.
-  function maybeSuggestLink(changedEntity) {
-    const s = _normalizeEntity(changedEntity); if (!s) return;
-    if (linkSuggestTimerRef.current) clearTimeout(linkSuggestTimerRef.current);
-    linkSuggestTimerRef.current = setTimeout(() => {
-      try {
-        const all = flattenEntities({ notes, events, tasks });
-        const changedFull = all.find(e => e.type === s.type && e.id === s.id) || s;
-        const suggestion = bestSuggestion(changedFull, all, {
-          threshold: 80,
-          links: entityLinks,
-          deriveSubject: inferSubjectFromTitle,
-        });
-        if (!suggestion) return;
-        const key = [suggestion.source.type, suggestion.source.id, suggestion.target.type, suggestion.target.id].join('|');
-        setPendingLinkSuggestions(prev => prev.find(p => p.key === key) ? prev : [...prev, { ...suggestion, key }]);
-      } catch (e) { console.warn('link suggestion failed:', e); }
-    }, 2000);
-  }
-  async function confirmLinkSuggestion(item) {
-    if (!item) return;
-    await createEntityLink({ source: item.source, target: item.target, origin: 'heuristic' });
-    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
-    setToastMsg('Linked');
-  }
-  async function rejectLinkSuggestion(item) {
-    if (!item) return;
-    await createEntityLink({ source: item.source, target: item.target, origin: 'rejected' });
-    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
-  }
-  function dismissLinkSuggestion(item) {
-    if (!item) return;
-    setPendingLinkSuggestions(prev => prev.filter(p => p.key !== item.key));
-  }
-  // Click handler for rendered <a class="wikilink"> spans inside notes/event descriptions.
-  function handleWikilinkClick(target) {
-    if (!target) return;
-    if (target.type === 'event') {
-      window.dispatchEvent(new CustomEvent('sos:calendar:focus-event', { detail: { id: target.id } }));
-      setShowNotes(false);
-      setLofiNoteOpen(false);
-    } else if (target.type === 'task') {
-      setActivePanel('tasks');
-      window.dispatchEvent(new CustomEvent('sos:tasks:focus', { detail: { id: target.id } }));
-    } else if (target.type === 'note') {
-      window.dispatchEvent(new CustomEvent('sos:notes:focus', { detail: { id: target.id } }));
-    }
-  }
-
   function handleDeleteNote(noteId) {
     setNotes(prev => prev.filter(n => n.id !== noteId));
     if (user) {
       syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
-      // Remove links referencing this note (either side).
-      const orphaned = entityLinks.filter(l =>
-        (l.source_type === 'note' && l.source_id === noteId) ||
-        (l.target_type === 'note' && l.target_id === noteId));
-      orphaned.forEach(l => syncOp(() => dbDeleteEntityLink(l.id, user.id)));
-      setEntityLinks(prev => prev.filter(l => !orphaned.find(o => o.id === l.id)));
     }
     setToastMsg('Note deleted');
   }
@@ -7874,11 +7219,6 @@ function App() {
   function handleUpdateNote(updated) {
     setNotes(prev => prev.map(n => n.id === updated.id ? { ...n, ...updated } : n));
     if (user) syncOp(() => dbUpsertNote(updated, user.id));
-    if (user) {
-      const entity = { type: 'note', id: updated.id, title: updated.name };
-      syncWikilinksForEntity(entity, updated.content || '');
-      maybeSuggestLink(entity);
-    }
     setToastMsg('Note saved');
   }
 
@@ -7886,11 +7226,6 @@ function App() {
     const note = { id: uid(), ...noteData, updatedAt: new Date().toISOString() };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
-    if (user) {
-      const entity = { type: 'note', id: note.id, title: note.name };
-      syncWikilinksForEntity(entity, note.content || '');
-      maybeSuggestLink(entity);
-    }
     setToastMsg('Note created');
   }
 
@@ -8039,11 +7374,7 @@ function App() {
     if (/(my\s+)?schedule\b|today'?s\s+(schedule|agenda|calendar)|what'?s\s+on\s+(my|the)\s+(schedule|agenda|calendar|day)|show\s+(me\s+)?(my\s+)?(schedule|agenda|calendar)|look\s+at\s+(my\s+)?(schedule|agenda|calendar)|agenda\b/.test(lower)) {
       setActiveWidgets(w => ({ ...w, schedule: true }));
     }
-    const requestedCompanion = detectCompanionIntent(msgContent);
-    if (requestedCompanion && layoutMode === 'sidebar') {
-      openCompanionPanel(requestedCompanion);
-    }
-    const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
+    const effectiveWorkspaceContext = getWorkspaceContext();
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
@@ -8116,28 +7447,12 @@ function App() {
         intentType: inferredIntentType,
         recentlyExecutedActions: recentlyExecutedActionsRef.current,
         responseStyle,
-        entityLinks,
         activeTimers,
       });
       setContextTrimInfo(promptPayload.trimInfo || null);
 
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-
-      // Build LINKED CONTEXT for any [[wikilinks]] or fuzzy entity mentions in the
-      // user's message. Pulls 1-hop neighbors so the model can reason about the
-      // mentioned project's surrounding work. Empty string when nothing matches.
-      const linkedContextBlock = buildLinkedContextBlock({
-        message: msgContent,
-        notes, events, tasks,
-        entityLinks,
-        normalizeFn: normalize,
-      });
-      // For planning requests, the same block doubles as Pass 0 grounding —
-      // the planning pipeline forwards dynamicContext through draft/critique/refine.
-      const groundedDynamic = linkedContextBlock
-        ? `${promptPayload.dynamicContext || ''}${promptPayload.dynamicContext ? '\n\n' : ''}${isPlanningRequest ? 'GROUNDED SOURCES (use these as the basis for the plan; do not invent material outside them):\n' : ''}${linkedContextBlock}`
-        : promptPayload.dynamicContext;
 
       // Build clientTasks payload for priority engine (non-done, due within 30 days).
       const thirtyDaysOut = new Date(); thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
@@ -8152,7 +7467,7 @@ function App() {
         systemPrompt: promptPayload.prompt,
         // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
         staticSystemPrompt: promptPayload.stablePrompt,
-        dynamicContext: groundedDynamic,
+        dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
         maxTokens: isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : 1024,
         workspaceContext: effectiveWorkspaceContext,
@@ -9086,25 +8401,10 @@ function App() {
     autoSaveCurrentChat();
     setActivePanel('chat');
     clearChat();
-    closeSidebarCompanion();
   }
 
   async function handleLogout() {
     await sb.auth.signOut();
-  }
-
-  function openSidebarCompanion(panel) {
-    setActivePanel('chat');
-    setSidebarCompanionPanel(panel);
-    setCompanionCollapsed(false);
-    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
-    setShowPeek(false);
-    setShowNotes(false);
-  }
-
-  function closeSidebarCompanion() {
-    setSidebarCompanionPanel('none');
-    setCompanionCollapsed(true);
   }
 
   // ── Keyboard shortcuts ──
@@ -9127,28 +8427,16 @@ function App() {
       }
       else if(key==='n'){
         e.preventDefault();
-        if (layoutMode === 'topbar') {
-          setShowNotes(p=>!p);
-        } else if (activePanel === 'chat') {
-          openCompanionPanel('notes');
-        } else {
-          setShowNotes(p=>!p);
-        }
+        setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel,layoutMode,openCompanionPanel]);
+  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel]);
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  // layoutMode is fixed to 'lofi' — no persistence needed
-  useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
-  useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
-  useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
@@ -9174,19 +8462,7 @@ function App() {
 
   return (
     <div
-      ref={layoutMode === 'lofi' ? studyAppRef : undefined}
-      className={
-        layoutMode === 'lofi' ? 'study-app'
-        : layoutMode === 'studio' ? 'studio'
-        : 'sos-app'
-      }
-      style={
-        layoutMode === 'lofi'
-          ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
-          : layoutMode === 'studio'
-            ? {}
-            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
-      }
+      className="studio"
     >
       {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
       <svg width="0" height="0" style={{position:'absolute',overflow:'hidden'}} aria-hidden="true">
@@ -9199,116 +8475,18 @@ function App() {
           </symbol>
         </defs>
       </svg>
-      {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
-      {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
-      {/* Neon Lofi — corner targeting reticles (decorative) */}
-      {(layoutMode === 'sidebar' || layoutMode === 'topbar') && <>
-        <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
-      </>}
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
-      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
-        <div className="sos-sidebar-head">
-          <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand">
-              <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
-                <span className="sos-mark" style={{ fontSize: sidebarCollapsed ? 18 : 22 }}>
-                  <span className="sos-mark-s">S</span>
-                  <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-                  <span className="sos-mark-s">S</span>
-                </span>
-              </span>
-            </div>
-            {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-              <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-              {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-            </div>}
-          </div>
-          <button className="sos-collapse-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>
-            {Icon.panel(16)}
-          </button>
-        </div>
-        <div className="sos-side-actions">
-          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowMyPlans(true); }} title="My Study Plans">{Icon.zap(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>My Plans{studyPlans.filter(p=>p.status==='active').length > 0 ? ` (${studyPlans.filter(p=>p.status==='active').length})` : ''}</span></button>}
-          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowLmsModal(true); }} title="Connect LMS">{Icon.checkCircle(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Connect LMS</span></button>}
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
-        </div>
-        <div className="sos-side-meta">
-          <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
-          <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
-        </div>
-        {showPerfIndicatorSidebar && (
-          <div className="sos-side-indicators sos-side-meta">
-            <PerfPill />
-          </div>
-        )}
-        <div className="sos-side-list">
-          {savedChats.length === 0 ? (
-            <div className="chat-sidebar-empty" style={{paddingTop:24}}>
-              <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-              <div>No saved chats yet. Like bookmarks, but smarter.</div>
-            </div>
-          ) : (
-            <div className="chat-sidebar-list">
-              {savedChats.map(chat => (
-                <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
-                  onClick={() => loadSavedChat(chat.id)}>
-                  <div className="chat-sidebar-item-title">{chat.title}</div>
-                  <div className="chat-sidebar-item-meta">
-                    <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
-                    <span style={{display:'flex',gap:4}}>
-                      <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
-                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); setConfirmDeleteChat(chat); }}>Delete</button>
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
-          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Topbar mode">{Icon.chevronLeft(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
-          {user ? (
-            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
-          ) : (
-            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
-          )}
-        </div>
-      </aside>}
-
-      {layoutMode === 'studio' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-          onSettings={() => setActivePanel('settings')}
-          onHome={() => navigate('/')}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-        />
-      )}
-      {layoutMode === 'lofi' && <LofiLeftPanel
-        events={events}
-        blocks={blocks}
-        tasks={tasks}
-        entityLinks={entityLinks}
-        userId={user?.id}
-        onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
-        notes={notes}
-        onCreateNote={handleCreateNote}
-        onUpdateNote={handleUpdateNote}
-        onDeleteNote={handleDeleteNote}
-        onImportClick={() => setShowGoogleModal(true)}
-        aiThinking={isLoading}
-      />}
-      {layoutMode === 'studio' && (
-        <div className="studio-sidebar-col">
+      <StudyTopBar
+        user={user}
+        syncStatus={syncStatus}
+        theme={studioTheme}
+        onTheme={setStudioTheme}
+        onSettings={() => setActivePanel('settings')}
+        onHome={() => navigate('/')}
+        queueCount={pendingQueue ? pendingQueue.length : 0}
+      />
+      <div className="studio-sidebar-col">
           <StudioSidebar
             user={user}
             savedChats={savedChats}
@@ -9334,61 +8512,8 @@ function App() {
             }}
           />
         </div>
-      )}
-      <div className={
-        layoutMode === 'lofi' ? 'study-center study-glass'
-        : layoutMode === 'studio' ? 'studio-center-col studio-glass-card'
-        : 'sos-main'
-      }>
-      {layoutMode === 'lofi' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          onNewChat={startNewChat}
-          onImport={() => setShowGoogleModal(true)}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onSwitchLayout={() => setLayoutMode('sidebar')}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-        />
-      )}
-      {layoutMode === 'topbar' && <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <span className="sos-mark" style={{fontSize:20}}>
-              <span className="sos-mark-s">S</span>
-              <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-              <span className="sos-mark-s">S</span>
-            </span>
-          </div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
-        </div>
-        <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
-          {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
-          <button onClick={()=>window.location.assign('/library')} className="g-hdr-btn" title="Library">{Icon.bookOpen(14)} <span>Library</span></button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
-          <button onClick={()=>setActivePanel('proofread')} className="g-hdr-btn">{Icon.fileText(14)} <span>Proofread</span></button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
-        </div>
-      </div>}
-
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
+      <div className="studio-center-col studio-glass-card">
+      {activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
         <PomodoroTimer
           sessionType={pomodoroSession}
           onSessionType={setPomodoroSession}
@@ -9397,7 +8522,7 @@ function App() {
           onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))}
         />
       )}
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.schedule && (
+      {activePanel === 'chat' && activeWidgets.schedule && (
         <ScheduleWidget
           events={events}
           blocks={blocks}
@@ -9705,7 +8830,7 @@ function App() {
         />
       ) : (
       <>
-      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
+      <div className="sos-chat-shell">
       <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
@@ -9914,10 +9039,6 @@ function App() {
                 setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
                 if(toExec.length>0){
                   setToastMsg('Added '+toExec.length+' items');
-                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
-                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('notes');}
-                  }
                 }
               }}
               onCancel={()=>setPendingActions([])}
@@ -9953,16 +9074,6 @@ function App() {
         {pendingContent.map((pc,idx)=>(
           <div key={'pc-'+idx} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onApplyIntentPlan={(plan)=>handleApplyIntentPlan(idx,plan)} onApplyIntentPlanSkipConflicts={(plan)=>handleApplyIntentPlanSkipConflicts(idx,plan)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()} existingRecurring={blocks.recurring}/>
-          </div>
-        ))}
-        {pendingLinkSuggestions.map((sug)=>(
-          <div key={'pls-'+sug.key} className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
-            <LinkSuggestionCard
-              suggestion={sug}
-              onApprove={confirmLinkSuggestion}
-              onReject={rejectLinkSuggestion}
-              onDismiss={dismissLinkSuggestion}
-            />
           </div>
         ))}
         {isLoading&&(pipelineProgress
@@ -10094,20 +9205,14 @@ function App() {
                     setTimeout(()=>setPasteStudyPrompt(text), 50);
                   }
                 }}
-                onChange={wikilinkChatHook.inputProps.onChange}
+                onChange={e=>setInput(e.target.value)}
                 placeholder={pendingPhoto?"add a message or just send the photo...":messages.length===0?["What's on your plate today?","What do you need help with?","Tell me about your classes...","What's coming up this week?","Anything on your mind?"][welcomeIdx]:"Ask anything"}
                 disabled={isLoading}
                 style={{width:'100%',background:'var(--bg)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:24,padding:'12px 20px',fontSize:'0.92rem',outline:'none',opacity:isLoading?0.5:1,transition:'all .25s cubic-bezier(0.16,1,0.3,1)'}}
                 onKeyDown={e=>{
-                  // Wikilink autocomplete intercepts ↑↓/Enter/Tab/Esc when its popover is open.
-                  if (wikilinkChatHook.isOpen) {
-                    wikilinkChatHook.inputProps.onKeyDown(e);
-                    if (e.defaultPrevented) return;
-                  }
                   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSubmit();}
                 }}
               />
-              {wikilinkChatHook.popover}
               </div>
               <button type="submit" className="sos-send-btn neon-primary" disabled={isLoading||(!input.trim()&&!pendingPhoto)} style={{width:44,height:44,borderRadius:14,color:'#fff',border:'none',cursor:(isLoading||(!input.trim()&&!pendingPhoto))?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s',flexShrink:0,opacity:(isLoading||(!input.trim()&&!pendingPhoto))?0.3:1}}>{Icon.send(18)}</button>
             </form>
@@ -10123,61 +9228,13 @@ function App() {
         </div>
       </div>
       </div>
-      {showSidebarCompanion && (
-        <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
-          <button
-            className={'sos-companion-toggle' + (compactCompanionToggle ? ' icon-only' : ' classic-bar')}
-            onClick={() => setCompanionCollapsed(prev => !prev)}
-            title={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-            aria-label={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-          >
-            <span>{Icon.panel(14)}</span>
-            {!compactCompanionToggle && <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>}
-          </button>
-          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <div style={{padding:'6px 10px 0'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <div style={{fontSize:'0.76rem',fontWeight:700,color:'var(--text-dim)',letterSpacing:'0.02em',textTransform:'uppercase'}}>
-                  Notes workflows
-                </div>
-                <button className="settings-toggle" onClick={closeSidebarCompanion} style={{padding:'4px 8px',fontSize:'0.68rem'}}>Close panel</button>
-              </div>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
-                {['Summarize note','Make flashcards','Quiz me'].map((chip) => (
-                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick} embedded/>
-          )}
-        </div>
-      )}
       </div>
       </>
       )}
-      {layoutMode === 'lofi' && (
-        <StudyBottomBar
-          tasks={tasks}
-          recentlyCompleted={tasks.filter(t => t.status === 'done')}
-          analyticsInfo={showAnalytics && (rpmSnapshot.remaining !== Infinity || currentModel)
-            ? `${rpmSnapshot.remaining !== Infinity ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM · ` : ''}${currentModel ? currentModel.split('/').pop() : ''}${modelFallbackUsed ? ' ↩' : ''}`
-            : null}
-        />
-      )}
       </div>
 
-      {layoutMode === 'lofi' && <LofiRightPanel
-        weatherData={weatherData}
-        savedChats={savedChats}
-        onOpenSavedChat={loadSavedChat}
-        onDeleteSavedChat={deleteSavedChat}
-        onRenameSavedChat={renameSavedChat}
-      />}
-      {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
+      {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {showMyPlans && user && <MyPlansPanel plans={studyPlans} tasks={tasks} onClose={()=>setShowMyPlans(false)} onRevise={(planId)=>{ const plan = studyPlans.find(p=>p.id===planId); setShowMyPlans(false); setPendingRevisionPlanId(planId); postAssistantNote(`What changes should I make to "${plan?.title||'your plan'}"? (e.g. "make the schedule lighter", "add 2 more study sessions per week")`); }} onArchive={(planId)=>{ syncOp(()=>dbUpdateStudyPlan(planId,{status:'archived'},user.id)); setStudyPlans(prev=>prev.map(p=>p.id===planId?{...p,status:'archived'}:p)); }}/>}
-      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} events={events} tasks={tasks} entityLinks={entityLinks} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} onWikilinkClick={handleWikilinkClick}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}
         onQueryChange={setGlobalSearchQuery}

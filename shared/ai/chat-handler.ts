@@ -6,7 +6,8 @@
 // context enrichment, budgeting and error shaping live here so the two
 // runtimes can never drift.
 
-import { callModel, RpmExhaustedError } from "./chat-core.js";
+import { callModel, RpmExhaustedError, type CallModelResponse, type ChatAction } from "./chat-core.js";
+import { retrieve, type RetrievedChunk } from "./rag/retrieve.js";
 import { runPlanningPipeline, PlanningPipelineError } from "./pipelines/planning.js";
 import { runIntentPlanPipeline, IntentPlanPipelineError } from "./pipelines/intent_plan.js";
 import { runBrainDumpPipeline, BrainDumpPipelineError } from "./pipelines/brain_dump.js";
@@ -50,6 +51,44 @@ export interface HandleChatInput {
 }
 
 const CLIENT_ORCH = { executed_on: "client" as const };
+
+// ── search_memory tool hop ──────────────────────────────────────────────────
+// Semantic retrieval is no longer run on every turn. The model calls the
+// `search_memory` tool when it decides it needs stored background; the handler
+// executes the retrieval server-side, feeds the results back, and re-runs the
+// model once. `search_memory` is stripped from the actions returned to the
+// client — it is server-internal and never client-executed.
+
+function extractMemoryQuery(actions: ChatAction[]): { query: string; sources?: string[] } | null {
+  const a = actions.find((x) => x.type === "search_memory");
+  if (!a || typeof a.query !== "string" || a.query.trim().length === 0) return null;
+  const sources = Array.isArray(a.sources)
+    ? (a.sources.filter((s): s is string => typeof s === "string"))
+    : undefined;
+  return { query: a.query.trim(), sources };
+}
+
+function formatMemories(chunks: RetrievedChunk[]): string {
+  if (chunks.length === 0) {
+    return "[Retrieved memories]\n(no matching memories found — answer from what you know)";
+  }
+  const lines = chunks.map((r) => `- (${r.source} · sim=${r.similarity.toFixed(2)}) ${r.text}`);
+  return `[Retrieved memories]\n${lines.join("\n")}`;
+}
+
+function stripMemoryActions(result: CallModelResponse): CallModelResponse {
+  if (!result.actions.some((a) => a.type === "search_memory")) return result;
+  return { ...result, actions: result.actions.filter((a) => a.type !== "search_memory") };
+}
+
+// Drop search_memory tool-call frames from the live stream so the internal tool
+// never surfaces as a client-side action preview; everything else passes through.
+function filterMemoryFrames(onChunk: (c: StreamChunk) => void): (c: StreamChunk) => void {
+  return (c) => {
+    if (c.type === "tool_call" && c.toolCall?.name === "search_memory") return;
+    onChunk(c);
+  };
+}
 
 function overLimitForIntent(intent: Intent): boolean {
   return overLimit(route(intent).tier);
@@ -357,6 +396,35 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
       : undefined;
     const maxOutputTokens = body.maxTokens ?? 1024;
 
+    const runChat = (ctx: string, onChunk?: (c: StreamChunk) => void) =>
+      callModel({
+        intent: "action_routing",
+        systemPrompt: body.systemPrompt ?? "",
+        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
+        dynamicContext: ctx,
+        messages,
+        attachments,
+        toolSet: "action",
+        maxOutputTokens,
+        onChunk,
+      });
+
+    // One bounded retrieval hop: if the first pass asks to search memory, run the
+    // retrieval and re-run the model once with the results in context.
+    const runWithMemory = async (onChunk?: (c: StreamChunk) => void): Promise<CallModelResponse> => {
+      const first = await runChat(dynamicContext, onChunk ? filterMemoryFrames(onChunk) : undefined);
+      const mem = userId ? extractMemoryQuery(first.actions) : null;
+      if (!mem) return stripMemoryActions(first);
+      let chunks: RetrievedChunk[] = [];
+      try {
+        chunks = await retrieve({ userId: userId!, query: mem.query, sources: mem.sources, k: 8 });
+      } catch {
+        chunks = [];
+      }
+      const second = await runChat(`${dynamicContext}\n\n${formatMemories(chunks)}`, onChunk);
+      return stripMemoryActions(second);
+    };
+
     if (wantsSSE) {
       // Precheck RPM before the adapter flushes SSE headers — once streaming
       // starts we can only surface errors as SSE frames, not a 429 body.
@@ -367,32 +435,13 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
       return {
         kind: "stream",
         run: async (onChunk) => {
-          const result = await callModel({
-            intent: "action_routing",
-            systemPrompt: body.systemPrompt ?? "",
-            staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-            dynamicContext,
-            messages,
-            attachments,
-            toolSet: "action",
-            maxOutputTokens,
-            onChunk,
-          });
+          const result = await runWithMemory(onChunk);
           return { ...result, executed_actions: [], orchestration: { mode: "client_execution", ...CLIENT_ORCH } };
         },
       };
     }
 
-    const result = await callModel({
-      intent: "action_routing",
-      systemPrompt: body.systemPrompt ?? "",
-      staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-      dynamicContext,
-      messages,
-      attachments,
-      toolSet: "action",
-      maxOutputTokens,
-    });
+    const result = await runWithMemory();
     return {
       kind: "json",
       status: 200,
