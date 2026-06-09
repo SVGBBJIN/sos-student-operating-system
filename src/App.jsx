@@ -11,14 +11,10 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Onboarding from './components/Onboarding';
 
 import * as sfx from './lib/sfx';
-import { getPerfTier, setPerfOverride } from './lib/perfAdjuster';
 import StudyTopBar from './components/StudyTopBar';
-import StudyBottomBar from './components/StudyBottomBar';
-import LofiLeftPanel from './components/LofiLeftPanel';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
-import LofiRightPanel from './components/LofiRightPanel';
 import StudioSidebar from './components/StudioSidebar';
 import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
@@ -32,8 +28,6 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
-import { useColumnLayout } from './hooks/useColumnLayout';
-import { ColumnResizeHandles, ColumnLockToggle } from './components/ColumnResizeHandles';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 
 // Configure pdfjs worker
@@ -2406,28 +2400,6 @@ function ContentCard({ icon, title, subject, onSave, onDismiss, children, accent
         <button className="content-card-dismiss" onClick={onDismiss}>Dismiss</button>
       </div>
     </div>
-  );
-}
-
-function PerfPill() {
-  const [tier, setTier] = useState(() => getPerfTier());
-  useEffect(() => {
-    function onTier(e) { setTier(e.detail.tier); }
-    window.addEventListener('sos:perf-tier', onTier);
-    return () => window.removeEventListener('sos:perf-tier', onTier);
-  }, []);
-  const labels = { full: 'Full', mid: 'Mid', low: 'Lite' };
-  const cycle = () => {
-    const tiers = ['full', 'mid', 'low'];
-    const next = tiers[(tiers.indexOf(tier) + 1) % 3];
-    setPerfOverride(next);
-    setTier(next);
-  };
-  const pillClass = 'perf-pill' + (tier === 'full' ? ' tier-full' : tier === 'mid' ? ' tier-mid' : '');
-  return (
-    <button className={pillClass} onClick={cycle} title={`Performance: ${labels[tier]}. Click to cycle.`}>
-      {tier === 'full' ? '✦' : tier === 'mid' ? '⚡' : '⚡'} {labels[tier]}
-    </button>
   );
 }
 
@@ -4913,63 +4885,30 @@ function App() {
   const [showPeek, setShowPeek] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showNotes, setShowNotes] = useState(false);
-  const [lofiNoteOpen, setLofiNoteOpen] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
   const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
-  const [layoutMode, setLayoutMode] = useState('studio');
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sos_sidebar_collapsed') === 'true');
-  const [sidebarCompanionPanel, setSidebarCompanionPanel] = useState(() => localStorage.getItem('sos_sidebar_companion_panel') || 'notes');
   const [studioTheme, setStudioTheme] = useState(() => localStorage.getItem('sos_studio_theme') || 'dark');
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', studioTheme);
     localStorage.setItem('sos_studio_theme', studioTheme);
   }, [studioTheme]);
   const [activePanel, setActivePanel] = useState('chat');
-  const [companionCollapsed, setCompanionCollapsed] = useState(() => localStorage.getItem('sos_companion_collapsed') !== 'false');
-  const [autoCollapseSidebarCompanion, setAutoCollapseSidebarCompanion] = useState(() => localStorage.getItem('sos_auto_collapse_sidebar_companion') !== 'false');
-  const [compactCompanionToggle, setCompactCompanionToggle] = useState(() => localStorage.getItem('sos_companion_toggle_compact') !== 'false');
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
-  const [showPerfIndicatorSidebar, setShowPerfIndicatorSidebar] = useState(() => localStorage.getItem('sos_perf_indicator_sidebar') !== 'false');
-  const [showPerfIndicatorTopbar, setShowPerfIndicatorTopbar] = useState(() => localStorage.getItem('sos_perf_indicator_topbar') !== 'false');
-  const showSidebarCompanion = layoutMode === 'sidebar' && activePanel === 'chat' && sidebarCompanionPanel === 'notes';
-  const getWorkspaceContext = useCallback((overridePanel = null) => {
-    const effectivePanel = overridePanel || sidebarCompanionPanel;
-    if (layoutMode === 'sidebar' && activePanel === 'chat' && !companionCollapsed) {
-      if (effectivePanel === 'schedule') return 'schedule';
-      if (effectivePanel === 'notes') return 'notes';
-    }
-    if (layoutMode === 'topbar' && activePanel === 'chat') {
-      if (showNotes) return 'notes';
-      if (showPeek) return 'schedule';
-    }
+  const getWorkspaceContext = useCallback(() => {
     return activePanel === 'chat' ? 'chat' : 'none';
-  }, [sidebarCompanionPanel, layoutMode, activePanel, companionCollapsed, showNotes, showPeek]);
+  }, [activePanel]);
   const workspaceContext = getWorkspaceContext();
   const workspaceModeLabel = workspaceContext === 'schedule'
     ? 'Schedule mode'
     : workspaceContext === 'notes'
       ? 'Notes mode'
       : null;
-  const openCompanionPanel = useCallback((panel) => {
-    setActivePanel('chat');
-    setSidebarCompanionPanel(panel);
-    setCompanionCollapsed(false);
-    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
-    setShowPeek(false);
-    setShowNotes(false);
-  }, [autoCollapseSidebarCompanion]);
-  const detectCompanionIntent = useCallback((text) => {
-    const msg = (text || '').toLowerCase();
-    if (!msg) return null;
-    if (/\b(notes?|document|docs?|pdf|reference|summarize my notes|in my notes)\b/.test(msg)) return 'notes';
-    return null;
-  }, []);
   const [toastMsg, setToastMsg] = useState(null);
   const [lmsPendingConfirm, setLmsPendingConfirm] = useState(null); // {taskId, taskTitle, lmsName}
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
@@ -5126,9 +5065,6 @@ function App() {
     return () => clearTimeout(t);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Resizable columns + lock toggle for the lofi 3-column layout.
-  const columnLayout = useColumnLayout();
-  const studyAppRef = useRef(null);
 
   // Opt-in customizable home screen. Default disabled. Persisted in localStorage
   // under `sos_home_*` keys. Re-read on mount and whenever settings flip it.
@@ -6969,12 +6905,6 @@ function App() {
       const body = bodyByType[action.type] || `${name} saved to`;
       setSosNotif({ label: 'just now', body, accent: subj });
     }
-    const calendarActionTypes = ['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event'];
-    if (calendarActionTypes.includes(action.type)) {
-      if (layoutMode === 'sidebar') {
-        openCompanionPanel('notes');
-      }
-    }
   }
   function handleCancelAction(idx) {
     sfx.dismiss();
@@ -7632,11 +7562,7 @@ function App() {
     if (/(my\s+)?schedule\b|today'?s\s+(schedule|agenda|calendar)|what'?s\s+on\s+(my|the)\s+(schedule|agenda|calendar|day)|show\s+(me\s+)?(my\s+)?(schedule|agenda|calendar)|look\s+at\s+(my\s+)?(schedule|agenda|calendar)|agenda\b/.test(lower)) {
       setActiveWidgets(w => ({ ...w, schedule: true }));
     }
-    const requestedCompanion = detectCompanionIntent(msgContent);
-    if (requestedCompanion && layoutMode === 'sidebar') {
-      openCompanionPanel(requestedCompanion);
-    }
-    const effectiveWorkspaceContext = getWorkspaceContext(requestedCompanion);
+    const effectiveWorkspaceContext = getWorkspaceContext();
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
@@ -8663,25 +8589,10 @@ function App() {
     autoSaveCurrentChat();
     setActivePanel('chat');
     clearChat();
-    closeSidebarCompanion();
   }
 
   async function handleLogout() {
     await sb.auth.signOut();
-  }
-
-  function openSidebarCompanion(panel) {
-    setActivePanel('chat');
-    setSidebarCompanionPanel(panel);
-    setCompanionCollapsed(false);
-    if (autoCollapseSidebarCompanion) setSidebarCollapsed(true);
-    setShowPeek(false);
-    setShowNotes(false);
-  }
-
-  function closeSidebarCompanion() {
-    setSidebarCompanionPanel('none');
-    setCompanionCollapsed(true);
   }
 
   // ── Keyboard shortcuts ──
@@ -8704,28 +8615,16 @@ function App() {
       }
       else if(key==='n'){
         e.preventDefault();
-        if (layoutMode === 'topbar') {
-          setShowNotes(p=>!p);
-        } else if (activePanel === 'chat') {
-          openCompanionPanel('notes');
-        } else {
-          setShowNotes(p=>!p);
-        }
+        setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel,layoutMode,openCompanionPanel]);
+  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel]);
 
   const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
   const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
-  // layoutMode is fixed to 'lofi' — no persistence needed
-  useEffect(() => { localStorage.setItem('sos_sidebar_collapsed', String(sidebarCollapsed)); }, [sidebarCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_sidebar_companion_panel', sidebarCompanionPanel); }, [sidebarCompanionPanel]);
-  useEffect(() => { localStorage.setItem('sos_companion_collapsed', String(companionCollapsed)); }, [companionCollapsed]);
-  useEffect(() => { localStorage.setItem('sos_auto_collapse_sidebar_companion', String(autoCollapseSidebarCompanion)); }, [autoCollapseSidebarCompanion]);
-  useEffect(() => { localStorage.setItem('sos_companion_toggle_compact', String(compactCompanionToggle)); }, [compactCompanionToggle]);
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
@@ -8751,19 +8650,7 @@ function App() {
 
   return (
     <div
-      ref={layoutMode === 'lofi' ? studyAppRef : undefined}
-      className={
-        layoutMode === 'lofi' ? 'study-app'
-        : layoutMode === 'studio' ? 'studio'
-        : 'sos-app'
-      }
-      style={
-        layoutMode === 'lofi'
-          ? { gridTemplateColumns: columnLayout.gridTemplateColumns }
-          : layoutMode === 'studio'
-            ? {}
-            : { flexDirection: layoutMode === 'topbar' ? 'column' : 'row' }
-      }
+      className="studio"
     >
       {/* SOS logo SVG symbol — defined once, used via <use href="#sos-bulb"> everywhere */}
       <svg width="0" height="0" style={{position:'absolute',overflow:'hidden'}} aria-hidden="true">
@@ -8776,115 +8663,18 @@ function App() {
           </symbol>
         </defs>
       </svg>
-      {layoutMode === 'lofi' && <ColumnResizeHandles layout={columnLayout} containerRef={studyAppRef} />}
-      {layoutMode === 'lofi' && <ColumnLockToggle layout={columnLayout} />}
-      {/* Neon Lofi — corner targeting reticles (decorative) */}
-      {(layoutMode === 'sidebar' || layoutMode === 'topbar') && <>
-        <span className="corner-bracket corner-bracket-tl" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-tr" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-bl" aria-hidden="true" />
-        <span className="corner-bracket corner-bracket-br" aria-hidden="true" />
-      </>}
       {/* Loading scan line */}
       {isLoading && <div className="sos-loading-scan" aria-hidden="true" />}
-      {layoutMode === 'sidebar' && <aside className={'sos-sidebar'+(sidebarCollapsed?' collapsed':'')}>
-        <div className="sos-sidebar-head">
-          <div className="sos-sidebar-head-left">
-            <div className="sos-sidebar-brand">
-              <span className="sos-brand-mark" style={{ borderRadius: 7, padding: sidebarCollapsed ? 3 : 4 }}>
-                <span className="sos-mark" style={{ fontSize: sidebarCollapsed ? 18 : 22 }}>
-                  <span className="sos-mark-s">S</span>
-                  <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-                  <span className="sos-mark-s">S</span>
-                </span>
-              </span>
-            </div>
-            {user && <div className="sync-label" style={{fontSize:'0.73rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-              <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-              {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-            </div>}
-          </div>
-          <button className="sos-collapse-btn" onClick={()=>setSidebarCollapsed(prev=>!prev)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}>
-            {Icon.panel(16)}
-          </button>
-        </div>
-        <div className="sos-side-actions">
-          <button className="sos-side-btn" data-module="tasks" onClick={()=>{ sfx.nav(); startNewChat(); }} title="New chat">{Icon.plus(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>New chat</span></button>
-          <button className="sos-side-btn" data-module="notes" onClick={()=>{ sfx.nav(); if(sidebarCompanionPanel==='notes'&&!companionCollapsed){setCompanionCollapsed(true);}else{openCompanionPanel('notes');} }} title="Notes + chat">{Icon.fileText(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Notes + chat</span></button>
-          {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowMyPlans(true); }} title="My Study Plans">{Icon.zap(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>My Plans{studyPlans.filter(p=>p.status==='active').length > 0 ? ` (${studyPlans.filter(p=>p.status==='active').length})` : ''}</span></button>}
-          <button className="sos-side-btn" data-module="import" onClick={()=>{ sfx.nav(); setShowGoogleModal(true); }} title="Import">{Icon.link(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Import</span></button>
-          {user && <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setShowLmsModal(true); }} title="Connect LMS">{Icon.checkCircle(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Connect LMS</span></button>}
-          <button className="sos-side-btn" onClick={()=>{ sfx.nav(); setActivePanel('settings'); }} title="Settings">{Icon.gear(14)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Settings</span></button>
-        </div>
-        <div className="sos-side-meta">
-          <span>{activeTaskCount} task{activeTaskCount!==1?'s':''}{overdueCount>0?` • ${overdueCount} overdue`:''}</span>
-          <span style={{color:contentGenUsed>=DAILY_CONTENT_LIMIT?'var(--danger)':'var(--text-dim)'}}>{Math.max(0, DAILY_CONTENT_LIMIT - contentGenUsed)}/{DAILY_CONTENT_LIMIT}</span>
-        </div>
-        {showPerfIndicatorSidebar && (
-          <div className="sos-side-indicators sos-side-meta">
-            <PerfPill />
-          </div>
-        )}
-        <div className="sos-side-list">
-          {savedChats.length === 0 ? (
-            <div className="chat-sidebar-empty" style={{paddingTop:24}}>
-              <div style={{marginBottom:8,opacity:0.4,display:'flex',justifyContent:'center',color:'var(--accent)'}}>{Icon.messageCircle(28)}</div>
-              <div>No saved chats yet. Like bookmarks, but smarter.</div>
-            </div>
-          ) : (
-            <div className="chat-sidebar-list">
-              {savedChats.map(chat => (
-                <div key={chat.id} className={'chat-sidebar-item' + (viewingSavedChatId === chat.id ? ' active' : '')}
-                  onClick={() => loadSavedChat(chat.id)}>
-                  <div className="chat-sidebar-item-title">{chat.title}</div>
-                  <div className="chat-sidebar-item-meta">
-                    <span>{chat.messageCount} msg · {fmt(chat.savedAt)}</span>
-                    <span style={{display:'flex',gap:4}}>
-                      <button className="chat-sidebar-item-rename" onClick={e => { e.stopPropagation(); renameSavedChat(chat.id); }}>Rename</button>
-                      <button className="chat-sidebar-item-delete" onClick={e => { e.stopPropagation(); setConfirmDeleteChat(chat); }}>Delete</button>
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div style={{display:'flex',gap:8,padding:'4px 2px 0'}}>
-          <button className="sos-side-btn" onClick={()=>setLayoutMode('topbar')} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Topbar mode">{Icon.chevronLeft(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Topbar mode</span></button>
-          {user ? (
-            <button className="sos-side-btn" onClick={handleLogout} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign out">{Icon.logout(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign out</span></button>
-          ) : (
-            <button className="sos-side-btn" onClick={()=>setShowAuthModal(true)} style={{padding:'8px 10px',fontSize:'0.76rem'}} title="Sign in">{Icon.messageCircle(12)} <span className="sos-side-label" style={{flex:1,textAlign:'left'}}>Sign in</span></button>
-          )}
-        </div>
-      </aside>}
-
-      {layoutMode === 'studio' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-          onSettings={() => setActivePanel('settings')}
-          onHome={() => navigate('/')}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-        />
-      )}
-      {layoutMode === 'lofi' && <LofiLeftPanel
-        events={events}
-        blocks={blocks}
-        tasks={tasks}
-        userId={user?.id}
-        onEventUpdate={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
-        notes={notes}
-        onCreateNote={handleCreateNote}
-        onUpdateNote={handleUpdateNote}
-        onDeleteNote={handleDeleteNote}
-        onImportClick={() => setShowGoogleModal(true)}
-        aiThinking={isLoading}
-      />}
-      {layoutMode === 'studio' && (
-        <div className="studio-sidebar-col">
+      <StudyTopBar
+        user={user}
+        syncStatus={syncStatus}
+        theme={studioTheme}
+        onTheme={setStudioTheme}
+        onSettings={() => setActivePanel('settings')}
+        onHome={() => navigate('/')}
+        queueCount={pendingQueue ? pendingQueue.length : 0}
+      />
+      <div className="studio-sidebar-col">
           <StudioSidebar
             user={user}
             savedChats={savedChats}
@@ -8910,61 +8700,8 @@ function App() {
             }}
           />
         </div>
-      )}
-      <div className={
-        layoutMode === 'lofi' ? 'study-center study-glass'
-        : layoutMode === 'studio' ? 'studio-center-col studio-glass-card'
-        : 'sos-main'
-      }>
-      {layoutMode === 'lofi' && (
-        <StudyTopBar
-          user={user}
-          syncStatus={syncStatus}
-          onNewChat={startNewChat}
-          onImport={() => setShowGoogleModal(true)}
-          onSettings={() => setActivePanel('settings')}
-          onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-          onSwitchLayout={() => setLayoutMode('sidebar')}
-          onHome={() => navigate('/')}
-          onChat={() => {
-            setActivePanel('chat');
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-          }}
-          onProofread={() => setActivePanel('proofread')}
-          homeEnabled={true}
-          queueCount={pendingQueue ? pendingQueue.length : 0}
-          theme={studioTheme}
-          onTheme={setStudioTheme}
-        />
-      )}
-      {layoutMode === 'topbar' && <div className="sos-header">
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>setLayoutMode('sidebar')} className="topbar-sidebar-btn" title="Sidebar mode" aria-label="Sidebar mode">{Icon.panel(16)}</button>
-          <div className="sos-sidebar-brand" style={{width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <span className="sos-mark" style={{fontSize:20}}>
-              <span className="sos-mark-s">S</span>
-              <span className="sos-mark-bulb"><svg><use href="#sos-bulb"/></svg></span>
-              <span className="sos-mark-s">S</span>
-            </span>
-          </div>
-          {user && <div style={{fontSize:'0.75rem',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4}}>
-            <span className={'sync-dot '+(syncStatus==='saving'?'sync-saving':syncStatus==='error'?'sync-error':'sync-saved')}/>
-            {syncStatus==='saving'?'Saving...':syncStatus==='error'?'Sync error':'Synced'}
-          </div>}
-        </div>
-        <div className="topbar-actions" style={{display:'flex',alignItems:'center',gap:12}}>
-          {showPerfIndicatorTopbar && <PerfPill />}
-          <button onClick={()=>{ openCompanionPanel('notes'); if(!user){setAuthNudge(true);setTimeout(()=>setAuthNudge(false),5000);} }} className="g-hdr-btn topbar-priority-btn">{Icon.fileText(14)} <span>Notes + chat</span></button>
-          <button onClick={()=>window.location.assign('/library')} className="g-hdr-btn" title="Library">{Icon.bookOpen(14)} <span>Library</span></button>
-          <button onClick={()=>setShowChatSidebar(true)} className="g-hdr-btn">{Icon.messageCircle(14)} <span>Saved</span></button>
-          <button onClick={()=>setActivePanel('proofread')} className="g-hdr-btn">{Icon.fileText(14)} <span>Proofread</span></button>
-          <button onClick={()=>setActivePanel('settings')} className="g-hdr-btn">{Icon.gear(14)} <span>Settings</span></button>
-        </div>
-      </div>}
-
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
+      <div className="studio-center-col studio-glass-card">
+      {activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
         <PomodoroTimer
           sessionType={pomodoroSession}
           onSessionType={setPomodoroSession}
@@ -8973,7 +8710,7 @@ function App() {
           onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))}
         />
       )}
-      {(layoutMode === 'lofi' || layoutMode === 'studio') && activePanel === 'chat' && activeWidgets.schedule && (
+      {activePanel === 'chat' && activeWidgets.schedule && (
         <ScheduleWidget
           events={events}
           blocks={blocks}
@@ -9281,7 +9018,7 @@ function App() {
         />
       ) : (
       <>
-      <div className={'sos-chat-shell' + (showSidebarCompanion ? ' companion-open' : '') + (showSidebarCompanion && companionCollapsed ? ' companion-collapsed' : '')}>
+      <div className="sos-chat-shell">
       <div className="sos-chat-column">
       {/* ── Chat Area ── */}
       <ErrorBoundary>
@@ -9490,10 +9227,6 @@ function App() {
                 setPendingActions(prev=>prev.filter((_,i)=>!checkedArr[i]));
                 if(toExec.length>0){
                   setToastMsg('Added '+toExec.length+' items');
-                  const calTypes=['add_event','add_block','add_task','delete_event','delete_task','delete_block','update_event','convert_event_to_block','convert_block_to_event','add_recurring_event'];
-                  if(toExec.some(pa=>calTypes.includes(pa.action.type))){
-                    if(layoutMode==='sidebar'){openCompanionPanel('notes');}
-                  }
                 }
               }}
               onCancel={()=>setPendingActions([])}
@@ -9683,61 +9416,13 @@ function App() {
         </div>
       </div>
       </div>
-      {showSidebarCompanion && (
-        <div className={'sos-chat-companion' + (companionCollapsed ? ' collapsed' : '')}>
-          <button
-            className={'sos-companion-toggle' + (compactCompanionToggle ? ' icon-only' : ' classic-bar')}
-            onClick={() => setCompanionCollapsed(prev => !prev)}
-            title={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-            aria-label={companionCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-          >
-            <span>{Icon.panel(14)}</span>
-            {!compactCompanionToggle && <span>{companionCollapsed ? 'Open panel' : 'Collapse'}</span>}
-          </button>
-          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <div style={{padding:'6px 10px 0'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <div style={{fontSize:'0.76rem',fontWeight:700,color:'var(--text-dim)',letterSpacing:'0.02em',textTransform:'uppercase'}}>
-                  Notes workflows
-                </div>
-                <button className="settings-toggle" onClick={closeSidebarCompanion} style={{padding:'4px 8px',fontSize:'0.68rem'}}>Close panel</button>
-              </div>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
-                {['Summarize note','Make flashcards','Quiz me'].map((chip) => (
-                  <button key={chip} className="sos-chip" onClick={()=>sendChip(chip)}>{chip}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {!companionCollapsed && sidebarCompanionPanel === 'notes' && (
-            <NotesPanel notes={notes} events={events} tasks={tasks} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote} embedded/>
-          )}
-        </div>
-      )}
       </div>
       </>
       )}
-      {layoutMode === 'lofi' && (
-        <StudyBottomBar
-          tasks={tasks}
-          recentlyCompleted={tasks.filter(t => t.status === 'done')}
-          analyticsInfo={showAnalytics && (rpmSnapshot.remaining !== Infinity || currentModel)
-            ? `${rpmSnapshot.remaining !== Infinity ? `${rpmSnapshot.remaining}/${rpmSnapshot.limit} RPM · ` : ''}${currentModel ? currentModel.split('/').pop() : ''}${modelFallbackUsed ? ' ↩' : ''}`
-            : null}
-        />
-      )}
       </div>
 
-      {layoutMode === 'lofi' && <LofiRightPanel
-        weatherData={weatherData}
-        savedChats={savedChats}
-        onOpenSavedChat={loadSavedChat}
-        onDeleteSavedChat={deleteSavedChat}
-        onRenameSavedChat={renameSavedChat}
-      />}
       {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {showMyPlans && user && <MyPlansPanel plans={studyPlans} tasks={tasks} onClose={()=>setShowMyPlans(false)} onRevise={(planId)=>{ const plan = studyPlans.find(p=>p.id===planId); setShowMyPlans(false); setPendingRevisionPlanId(planId); postAssistantNote(`What changes should I make to "${plan?.title||'your plan'}"? (e.g. "make the schedule lighter", "add 2 more study sessions per week")`); }} onArchive={(planId)=>{ syncOp(()=>dbUpdateStudyPlan(planId,{status:'archived'},user.id)); setStudyPlans(prev=>prev.map(p=>p.id===planId?{...p,status:'archived'}:p)); }}/>}
-      {layoutMode === 'lofi' && lofiNoteOpen && <NotesPanel notes={notes} events={events} tasks={tasks} onClose={()=>setLofiNoteOpen(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}
         onQueryChange={setGlobalSearchQuery}
