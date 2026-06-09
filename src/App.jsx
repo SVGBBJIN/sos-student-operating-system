@@ -12,6 +12,8 @@ import Onboarding from './components/Onboarding';
 
 import * as sfx from './lib/sfx';
 import StudyTopBar from './components/StudyTopBar';
+import { srsCardKey, srsRate } from './lib/srs';
+import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
@@ -663,55 +665,6 @@ const POLICY_MODULES = {
   notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
 };
 
-function estimateInputTokens(text = '') {
-  return Math.max(1, Math.ceil((text || '').length / 4));
-}
-
-function truncateWithEllipsis(text = '', maxChars = 300) {
-  if (!text || text.length <= maxChars) return text || '';
-  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
-}
-
-function capLines(lines = [], maxChars = 1000, summaryLabel = 'items') {
-  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
-  const kept = [];
-  let used = 0;
-  for (let i = 0; i < safeLines.length; i++) {
-    const line = String(safeLines[i]).trim();
-    if (!line) continue;
-    const lineLen = line.length + 1;
-    if (used + lineLen > maxChars) break;
-    kept.push(line);
-    used += lineLen;
-  }
-  const omitted = Math.max(0, safeLines.length - kept.length);
-  if (omitted > 0) kept.push('… +' + omitted + ' more ' + summaryLabel + ' omitted for context budget');
-  return kept.join('\n');
-}
-// Returns { text, shown, total } for trim-aware callers
-function capLinesInfo(lines = [], maxChars = 1000, summaryLabel = 'items') {
-  const safeLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
-  const text = capLines(safeLines, maxChars, summaryLabel);
-  const total = safeLines.length;
-  // count kept lines = total lines minus the '… +N more' line if present
-  const omitted = Math.max(0, safeLines.filter(l => String(l).trim()).length - text.split('\n').filter(l => !l.startsWith('…')).length);
-  const shown = total - omitted;
-  return { text, shown, total, trimmed: omitted > 0 };
-}
-
-function dedupeRepeatedLines(blockText = '') {
-  const seen = new Set();
-  return (blockText || '')
-    .split('\n')
-    .filter(line => {
-      const key = line.trim().toLowerCase();
-      if (!key) return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .join('\n');
-}
 
 function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {}) {
   const workspaceContext = options.workspaceContext || 'chat';
@@ -2401,43 +2354,6 @@ function ContentCard({ icon, title, subject, onSave, onDismiss, children, accent
       </div>
     </div>
   );
-}
-
-/* ── SM-2 SRS helpers ──────────────────────────────────────────────── */
-function srsCardKey(title, q) {
-  return ('fc:' + (title || '') + ':' + (q || '')).slice(0, 120);
-}
-function srsLoad() {
-  try { return JSON.parse(localStorage.getItem('sos-fc-schedule') || '{}'); } catch(_) { return {}; }
-}
-function srsSave(schedule) {
-  try { localStorage.setItem('sos-fc-schedule', JSON.stringify(schedule)); } catch(_) {}
-}
-function srsDaysUntil(isoDate) {
-  if (!isoDate) return null;
-  const diff = new Date(isoDate) - new Date(new Date().toDateString());
-  return Math.round(diff / 86400000);
-}
-function srsRate(cardKey, rating) {
-  // rating: 'know' | 'unsure' | 'nope'
-  const schedule = srsLoad();
-  const prev = schedule[cardKey] || { interval: 1, easiness: 2.5 };
-  let { interval, easiness } = prev;
-  if (rating === 'know') {
-    easiness = Math.min(3.0, easiness + 0.1);
-    interval = Math.max(7, Math.round(interval * easiness));
-  } else if (rating === 'unsure') {
-    easiness = Math.max(1.3, easiness - 0.15);
-    interval = 1;
-  } else {
-    easiness = Math.max(1.3, easiness - 0.2);
-    interval = 0;
-  }
-  const nextReview = new Date();
-  nextReview.setDate(nextReview.getDate() + interval);
-  schedule[cardKey] = { interval, easiness, nextReview: nextReview.toISOString().slice(0, 10) };
-  srsSave(schedule);
-  return interval;
 }
 
 function FlashcardDisplay({ data, onSave, onDismiss }) {
