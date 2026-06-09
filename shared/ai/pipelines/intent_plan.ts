@@ -4,39 +4,14 @@
 // into a structured plan of recurring blocks + milestone tasks + review cadence.
 //
 // Uses Pro tier throughout; gracefully degrades if critique or refine fails.
+// The shared draft→critique→refine scaffold lives in agentic.ts.
 
-import { callModel, type ChatAction, type CallModelResponse } from "../chat-core.js";
+import { type ChatAction, type CallModelResponse } from "../chat-core.js";
 import type { Message, ProgressEvent } from "../providers/types.js";
+import { makePipelineError, runAgenticPipeline } from "./agentic.js";
 
-export class IntentPlanPipelineError extends Error {
-  public override readonly name = "IntentPlanPipelineError";
-  public readonly stage: "draft" | "critique" | "refine";
-  public readonly cause_code: string;
-  constructor(stage: IntentPlanPipelineError["stage"], cause: unknown) {
-    const causeMsg = cause instanceof Error ? cause.message : String(cause);
-    super(`Intent-plan pipeline failed at ${stage}: ${causeMsg}`);
-    this.stage = stage;
-    this.cause_code = (cause as { cause_code?: string } | null)?.cause_code ?? "stage_failed";
-  }
-}
-
-const DRAFT_HINT =
-  "\n\nINTENT PLAN PASS: DRAFT — Use make_intent_plan to produce a complete first draft. " +
-  "Build a realistic recurring routine (recurring_blocks), concrete milestone tasks, and a review cadence. " +
-  "Dates must be real YYYY-MM-DD values starting from today. Times must be HH:MM (24h). " +
-  "Aim for 2–5 recurring blocks and 5–12 milestone tasks. Do not hold back.";
-
-const CRITIQUE_HINT =
-  "\n\nINTENT PLAN PASS: CRITIQUE — A drafted intent plan is shown. Respond in plain text (no tool call). " +
-  "Identify: (1) Are the recurring blocks realistic given the existing schedule density? " +
-  "(2) Are review loops embedded or missing? " +
-  "(3) Are task estimates reasonable for a student? " +
-  "Be direct and concrete. 2–4 sentences max.";
-
-const REFINE_HINT =
-  "\n\nINTENT PLAN PASS: REFINE — You have the draft and a critique. " +
-  "Produce the final improved intent plan using make_intent_plan, incorporating the critique. " +
-  "Keep it actionable and time-realistic for a student.";
+export const IntentPlanPipelineError = makePipelineError("IntentPlanPipelineError", "Intent-plan pipeline");
+export type IntentPlanPipelineError = InstanceType<typeof IntentPlanPipelineError>;
 
 export interface IntentPlanInput {
   systemPrompt: string;
@@ -70,131 +45,68 @@ function describeEmptyDraft(draft: CallModelResponse): string {
   return "model returned no intent plan action";
 }
 
-// Wall-clock budget for the whole 3-pass pipeline. Stays under the platform
-// function ceiling (vercel.json maxDuration=60) with headroom for the
-// pre-pipeline context enrichment and response serialization. Each pass is
-// capped; the degradable critique/refine passes are skipped outright when the
-// budget is nearly spent — the pipeline still ships the draft.
-const PIPELINE_BUDGET_MS = 50_000;
-const DRAFT_CAP_MS = 22_000;
-const CRITIQUE_CAP_MS = 10_000;
-const REFINE_CAP_MS = 22_000;
-const PASS_FLOOR_MS = 6_000;
-
-export async function runIntentPlanPipeline(
-  input: IntentPlanInput
-): Promise<IntentPlanOutput> {
-  const { systemPrompt, staticSystemPrompt, dynamicContext, messages, onProgress } = input;
-  const deadline = Date.now() + PIPELINE_BUDGET_MS;
-
-  onProgress?.({ phase: "analyzing", label: "Analyzing your goal…", step: 1, totalSteps: 4 });
-
-  // ── Pass 1: Draft ──
-  onProgress?.({ phase: "drafting", label: "Building your study plan…", step: 2, totalSteps: 4 });
-  let draft: CallModelResponse;
-  try {
-    draft = await callModel({
-      intent: "intent_plan",
-      systemPrompt,
-      staticSystemPrompt: staticSystemPrompt ?? undefined,
-      dynamicContext: (dynamicContext ?? "") + DRAFT_HINT,
-      messages,
-      toolSet: "intent_plan",
-      customTools: [],
-      toolChoice: "required",
-      maxOutputTokens: 3000,
-      temperature: 0.4,
-      thinkingBudget: 4096,
-      budgetMs: Math.min(DRAFT_CAP_MS, deadline - Date.now()),
-    });
-  } catch (err) {
-    throw new IntentPlanPipelineError("draft", err);
-  }
-  const draftAction = draft.actions.find((a) => a.type === "make_intent_plan") ?? draft.actions[0];
-  if (!draftAction) {
-    throw new IntentPlanPipelineError("draft", new Error(describeEmptyDraft(draft)));
-  }
-  onProgress?.({ phase: "reviewing", label: "Reviewing for gaps…", step: 3, totalSteps: 4, draft: draftAction as Record<string, unknown> });
-
-  // ── Pass 2: Critique ──
-  const blocksArr = Array.isArray(draftAction.recurring_blocks)
-    ? (draftAction.recurring_blocks as Array<{ activity?: string; days?: string[]; start?: string; end?: string }>)
+function summarizeIntentPlan(actions: ChatAction[]): string {
+  const plan = actions[0]!;
+  const blocksArr = Array.isArray(plan.recurring_blocks)
+    ? (plan.recurring_blocks as Array<{ activity?: string; days?: string[]; start?: string; end?: string }>)
       .map((b) => `${b.activity ?? ""} on ${(b.days ?? []).join("/")} ${b.start ?? ""}–${b.end ?? ""}`)
       .join("; ")
     : "";
-  const tasksArr = Array.isArray(draftAction.milestone_tasks)
-    ? (draftAction.milestone_tasks as Array<{ task_name?: string; due_date?: string }>)
+  const tasksArr = Array.isArray(plan.milestone_tasks)
+    ? (plan.milestone_tasks as Array<{ task_name?: string; due_date?: string }>)
       .map((t) => `${t.task_name ?? ""} by ${t.due_date ?? ""}`)
       .join("; ")
     : "";
-  const draftSummary = `Goal plan summary: ${String(draftAction.summary ?? "")}\nBlocks: ${blocksArr}\nTasks: ${tasksArr}`;
+  return `Goal plan summary: ${String(plan.summary ?? "")}\nBlocks: ${blocksArr}\nTasks: ${tasksArr}`;
+}
 
-  let critiqueText = "";
-  if (deadline - Date.now() >= PASS_FLOOR_MS) {
-    try {
-      const critique = await callModel({
-        intent: "intent_plan",
-        systemPrompt,
-        staticSystemPrompt: staticSystemPrompt ?? undefined,
-        dynamicContext: (dynamicContext ?? "") + CRITIQUE_HINT,
-        messages: [
-          ...messages,
-          { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
-          { role: "user", content: "Critique the draft plan above. Is it realistic and complete?" },
-        ],
-        toolSet: "none",
-        maxOutputTokens: 600,
-        temperature: 0.3,
-        thinkingBudget: 1024,
-        budgetMs: Math.min(CRITIQUE_CAP_MS, deadline - Date.now()),
-      });
-      critiqueText = critique.content.trim();
-    } catch (err) {
-      console.warn(
-        `[intent-plan-pipeline] critique pass failed (${err instanceof Error ? err.message : err}) — proceeding with draft`
-      );
-    }
-  } else {
-    console.warn("[intent-plan-pipeline] skipping critique — pipeline budget nearly spent");
-  }
-
-  // ── Pass 3: Refine ──
-  onProgress?.({ phase: "finalizing", label: "Refining the final plan…", step: 4, totalSteps: 4 });
-  let proposal: ChatAction = draftAction;
-  let iterations = critiqueText ? 2 : 1;
-  if (deadline - Date.now() >= PASS_FLOOR_MS) {
-    try {
-      const refine = await callModel({
-        intent: "intent_plan",
-        systemPrompt,
-        staticSystemPrompt: staticSystemPrompt ?? undefined,
-        dynamicContext: (dynamicContext ?? "") + REFINE_HINT,
-        messages: [
-          ...messages,
-          { role: "assistant", content: `Draft intent plan:\n${draftSummary}` },
-          {
-            role: "user",
-            content: `Critique:\n${critiqueText || "No major issues found."}\n\nNow produce the final, improved intent plan.`,
-          },
-        ],
-        toolSet: "intent_plan",
-        customTools: [],
-        toolChoice: "required",
-        maxOutputTokens: 3000,
-        temperature: 0.4,
-        thinkingBudget: 4096,
-        budgetMs: Math.min(REFINE_CAP_MS, deadline - Date.now()),
-      });
-      proposal = refine.actions.find((a) => a.type === "make_intent_plan") ?? draftAction;
-      iterations = 3;
-    } catch (err) {
-      console.warn(
-        `[intent-plan-pipeline] refine pass failed (${err instanceof Error ? err.message : err}) — returning draft`
-      );
-    }
-  } else {
-    console.warn("[intent-plan-pipeline] skipping refine — pipeline budget nearly spent");
-  }
-
-  return { proposal, critiqueText, iterations };
+export async function runIntentPlanPipeline(input: IntentPlanInput): Promise<IntentPlanOutput> {
+  const { actions, critiqueText, iterations } = await runAgenticPipeline({
+    systemPrompt: input.systemPrompt,
+    staticSystemPrompt: input.staticSystemPrompt,
+    dynamicContext: input.dynamicContext,
+    messages: input.messages,
+    onProgress: input.onProgress,
+    budgetMs: 50_000,
+    passFloorMs: 6_000,
+    logName: "[intent-plan-pipeline]",
+    fail: (stage, cause) => new IntentPlanPipelineError(stage, cause),
+    hints: {
+      draft:
+        "\n\nINTENT PLAN PASS: DRAFT — Use make_intent_plan to produce a complete first draft. " +
+        "Build a realistic recurring routine (recurring_blocks), concrete milestone tasks, and a review cadence. " +
+        "Dates must be real YYYY-MM-DD values starting from today. Times must be HH:MM (24h). " +
+        "Aim for 2–5 recurring blocks and 5–12 milestone tasks. Do not hold back.",
+      critique:
+        "\n\nINTENT PLAN PASS: CRITIQUE — A drafted intent plan is shown. Respond in plain text (no tool call). " +
+        "Identify: (1) Are the recurring blocks realistic given the existing schedule density? " +
+        "(2) Are review loops embedded or missing? " +
+        "(3) Are task estimates reasonable for a student? " +
+        "Be direct and concrete. 2–4 sentences max.",
+      refine:
+        "\n\nINTENT PLAN PASS: REFINE — You have the draft and a critique. " +
+        "Produce the final improved intent plan using make_intent_plan, incorporating the critique. " +
+        "Keep it actionable and time-realistic for a student.",
+    },
+    labels: {
+      analyzing: "Analyzing your goal…",
+      drafting: "Building your study plan…",
+      reviewing: "Reviewing for gaps…",
+      finalizing: "Refining the final plan…",
+    },
+    draftPass: { intent: "intent_plan", toolSet: "intent_plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
+    critiquePass: { intent: "intent_plan", maxOutputTokens: 600, temperature: 0.3, thinkingBudget: 1024, capMs: 10_000 },
+    refinePass: { intent: "intent_plan", toolSet: "intent_plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
+    draftLabel: "Draft intent plan",
+    critiquePrompt: "Critique the draft plan above. Is it realistic and complete?",
+    refineInstruction: "Now produce the final, improved intent plan.",
+    matchActions: (resp) => {
+      const a = resp.actions.find((x) => x.type === "make_intent_plan") ?? resp.actions[0];
+      return a ? [a] : [];
+    },
+    summarizeActions: summarizeIntentPlan,
+    reviewPayload: (actions) => actions[0] as Record<string, unknown>,
+    onEmptyDraft: (resp) => ({ error: new Error(describeEmptyDraft(resp)) }),
+  });
+  return { proposal: actions[0]!, critiqueText, iterations };
 }
