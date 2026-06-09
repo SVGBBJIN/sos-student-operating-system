@@ -40,6 +40,25 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
+
+function isOnboardingEstablished(userId) {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(ONBOARDING_ESTABLISHED_PREFIX + userId) === '1'
+      || localStorage.getItem('sos_onboarded_' + userId) === '1';
+  } catch (_) { return false; }
+}
+
+function setOnboardingEstablished(userId) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(ONBOARDING_ESTABLISHED_PREFIX + userId, '1');
+    // Keep the legacy one-shot key in sync for older clients that still read it.
+    localStorage.setItem('sos_onboarded_' + userId, '1');
+  } catch (_) {}
+}
+
 
 /* ─── Date helpers ─── */
 /* ── Notification scheduling helper ──────────────────────────── */
@@ -4982,7 +5001,8 @@ function App() {
     // unconfigured get the weekly skeleton flow instead of being disqualified
     // just because they have existing data.
     try {
-      const onboardingConfigured = !!(data && data.onboardingCompleted);
+      const onboardingEstablished = isOnboardingEstablished(authUser.id);
+      const onboardingConfigured = !!(data && data.onboardingCompleted) || onboardingEstablished;
       if (data && !onboardingConfigured) {
         const fn = authUser?.user_metadata?.full_name?.split(' ')[0]
           || authUser?.email?.split('@')[0] || '';
@@ -6848,7 +6868,7 @@ function App() {
   // never banks a speculative block as fact.
   function markOnboardingDone() {
     if (user) {
-      try { localStorage.setItem('sos_onboarded_' + user.id, '1'); } catch (_) {}
+      setOnboardingEstablished(user.id);
       // Best-effort; column may not exist on older DBs.
       sb.from('profiles').update({ onboarding_completed: true }).eq('id', user.id).then(() => {}, () => {});
     }
