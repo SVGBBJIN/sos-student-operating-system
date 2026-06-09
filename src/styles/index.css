@@ -1665,7 +1665,15 @@ body {
 .sos-onb-week-stack{display:flex;flex-direction:column;gap:3px;width:30px}
 .sos-onb-week-bar{height:11px;border-radius:3px}
 @keyframes sosOnbColRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.sos-onb-build-grid{display:flex;gap:8px;justify-content:center;align-items:flex-end;height:110px;margin-bottom:4px}
+.sos-onb-build-col{display:flex;flex-direction:column;align-items:center;gap:5px;width:32px}
+.sos-onb-build-stack{display:flex;flex-direction:column;gap:3px;width:100%;flex:1;justify-content:flex-end}
+.sos-onb-build-bar{height:13px;border-radius:4px;background:var(--border);transition:background 0.3s,opacity 0.3s}
+.sos-onb-build-bar-lit{background:var(--bar-color);animation:sosOnbBarPop .35s cubic-bezier(0.16,1,0.3,1) both}
+@keyframes sosOnbBarPop{from{transform:scaleY(0.6);opacity:0}to{transform:scaleY(1);opacity:1}}
+.sos-onb-build-msg{transition:opacity 0.25s;animation:sosOnbMsgFade 0.3s ease both}
+@keyframes sosOnbMsgFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){
   .sos-onb-grid-bg,.sos-onb-assemble-col{animation:none}
-  .sos-onb-puzzle-card,.sos-onb-block,.sos-onb-week-col{animation-duration:.01ms;animation-delay:0ms}
+  .sos-onb-puzzle-card,.sos-onb-block,.sos-onb-week-col,.sos-onb-build-bar-lit,.sos-onb-build-msg{animation-duration:.01ms;animation-delay:0ms}
 }
