@@ -25,6 +25,7 @@ import type {
 } from "./providers/types.js";
 import {
   buildActionToolDefs,
+  buildChatToolDefs,
   validateAction,
   type ActionName,
 } from "./schemas/actions.js";
@@ -76,7 +77,7 @@ export interface CallModelRequest {
   dynamicContext?: string;
   messages: Message[];
   attachments?: Attachment[];
-  toolSet?: "action" | "studio" | "intent_plan" | "study_pack" | "none" | "custom";
+  toolSet?: "action" | "chat" | "studio" | "intent_plan" | "study_pack" | "none" | "custom";
   customTools?: ToolDef[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
@@ -126,6 +127,8 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
   switch (req.toolSet) {
     case "action":
       return buildActionToolDefs();
+    case "chat":
+      return buildChatToolDefs();
     case "studio":
       return buildStudioToolDefs();
     case "intent_plan":
@@ -429,8 +432,8 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 
   let result = parseResponse(req, response);
 
-  // Schema repair retry — single shot, on action/studio/intent_plan tool sets.
-  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan" || req.toolSet === "study_pack")) {
+  // Schema repair retry — single shot, on action/chat/studio/intent_plan tool sets.
+  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === "chat" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan" || req.toolSet === "study_pack")) {
     const feedback = result.validation_warnings.flatMap((w) =>
       formatZodIssuesForModel(w.tool, w.issues.map((i) => ({
         code: "custom",

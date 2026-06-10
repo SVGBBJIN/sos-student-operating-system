@@ -34,6 +34,7 @@ export interface ChatBody {
   prompt_version?: string;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
+  intentType?: string;
 }
 
 // Discriminated outcome. "json" → the adapter serializes it directly. "stream"
@@ -301,9 +302,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
 
     // ── Chat + studio share one enriched dynamic context ──
     const baseChatContext = (body.dynamicContext ?? "") +
-      `\n\nWORKSPACE_CONTEXT: ${workspaceContext}. Prioritize this context when relevant. ` +
-      "When any required field for an action is missing or ambiguous, call ask_clarification — " +
-      "never call action tools with placeholder/guessed values.";
+      `\n\nWORKSPACE_CONTEXT: ${workspaceContext}. Prioritize this context when relevant.`;
     const dynamicContext = await enrichDynamicContext({
       userId,
       workspaceContext,
@@ -374,7 +373,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
             dynamicContext,
             messages,
             attachments,
-            toolSet: "action",
+            toolSet: (body.intentType === "chat" && !body.imageBase64) ? "chat" : "action",
             maxOutputTokens,
             onChunk,
           });
@@ -390,7 +389,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
       dynamicContext,
       messages,
       attachments,
-      toolSet: "action",
+      toolSet: (body.intentType === "chat" && !body.imageBase64) ? "chat" : "action",
       maxOutputTokens,
     });
     return {
