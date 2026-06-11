@@ -33,6 +33,8 @@ import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
+import HomeDecisionGate from './components/HomeDecisionGate';
+import DecisionRollup from './components/DecisionRollup';
 
 // Configure pdfjs worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -306,6 +308,8 @@ function dbTaskToApp(row) {
     // Browser-extension submission tracking (see shared/lms/ingest.ts).
     completionSource: row.completion_source || null,
     completionConfidence: row.completion_confidence == null ? null : Number(row.completion_confidence),
+    startSource: row.start_source || null,
+    startedAt: row.started_at || null,
     lmsAssignmentRef: row.lms_assignment_ref || null,
     lmsPendingClose: row.lms_pending_close || false,
     lmsPendingCloseAt: row.lms_pending_close_at || null,
@@ -322,6 +326,8 @@ function appTaskToDb(t, userId) {
     commitment: t.commitment || 'confirmed',
     completion_source: t.completionSource || null,
     completion_confidence: typeof t.completionConfidence === 'number' ? t.completionConfidence : null,
+    start_source: t.startSource || null,
+    started_at: t.startedAt || null,
     lms_assignment_ref: t.lmsAssignmentRef || null,
   };
 }
@@ -5306,6 +5312,40 @@ function App() {
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
 
+  // ── Open the Home Decision Gate on the first open of the day ──
+  // Once per calendar day, after data is loaded and not mid-onboarding. The
+  // gate reads live tasks so a momentary pre-load render never shows a stale
+  // "clear board". Skips entirely if already shown today.
+  useEffect(() => {
+    if (gateCheckedRef.current) return;
+    if (!dataLoaded || !user || showOnboarding) return;
+    gateCheckedRef.current = true;
+    let last = null;
+    try { last = localStorage.getItem('sos_gate_last_shown'); } catch (_) {}
+    if (last === today()) return;
+    setGateOpen(true);
+    try { localStorage.setItem('sos_gate_last_shown', today()); } catch (_) {}
+  }, [dataLoaded, user, showOnboarding]);
+
+  // ── Surface the End-of-Day Decision Rollup once daily (evening) ──
+  // Fires only when there is something to review and never mid-day, so the
+  // day stays quiet. Skipped items simply carry over to the next evening.
+  useEffect(() => {
+    if (!dataLoaded || !user) return;
+    if (rollupOpen || gateOpen || showOnboarding) return;
+    const t = today();
+    if (rollupShownRef.current === t) return;
+    if ((rollupItems.length + rollupAuto.length) === 0) return;
+    let last = null;
+    try { last = localStorage.getItem('sos_rollup_last_shown'); } catch (_) {}
+    if (last === t) { rollupShownRef.current = t; return; }
+    if (new Date().getHours() >= 18) {
+      setRollupOpen(true);
+      rollupShownRef.current = t;
+      try { localStorage.setItem('sos_rollup_last_shown', t); } catch (_) {}
+    }
+  }, [dataLoaded, user, gateOpen, showOnboarding, rollupOpen, rollupItems, rollupAuto]);
+
   // ── Weather fetch ──
   const [weatherCity, setWeatherCity] = useState(null);
   const fetchWeather = useCallback(async (coords, city) => {
@@ -5431,6 +5471,28 @@ function App() {
   const [activeTimers, setActiveTimers] = useState([]);
   const timerTimeoutsRef = useRef(new Map());
 
+  // ── Focus session (Start primitive) ──
+  // A single non-committal 10-minute "just looking at it" session, surfaced
+  // in the DynamicIsland ambient tier. Distinct from set_timer so its expiry
+  // can offer continue/stop instead of a generic chime.
+  const [focusSession, setFocusSession] = useState(null); // { taskId, title, startedAt, endsAt, status }
+  const focusTimeoutRef = useRef(null);
+
+  // ── Home Decision Gate ──
+  // Shown once on the first open of the day: one decision, three doors, never
+  // forced work. Ranked candidates computed live from the priority engine.
+  const [gateOpen, setGateOpen] = useState(false);
+  const gateCheckedRef = useRef(false);
+
+  // ── End-of-Day Decision Rollup ──
+  // Sub-threshold AI items accumulate silently here instead of a standing
+  // review rail; auto-applied (>=0.85) items are mirrored so they surface as
+  // "already done · undo". Shown once daily (evening) as one batched pass.
+  const [rollupItems, setRollupItems] = useState([]); // [{ action, reason, confidence }]
+  const [rollupAuto, setRollupAuto] = useState([]);   // [{ action, summary, snap }]
+  const [rollupOpen, setRollupOpen] = useState(false);
+  const rollupShownRef = useRef(null);
+
   const scheduleTimerFire = useCallback((timer) => {
     const existing = timerTimeoutsRef.current.get(timer.id);
     if (existing) clearTimeout(existing);
@@ -5455,6 +5517,7 @@ function App() {
     return () => {
       for (const h of timerTimeoutsRef.current.values()) clearTimeout(h);
       timerTimeoutsRef.current.clear();
+      if (focusTimeoutRef.current) clearTimeout(focusTimeoutRef.current);
     };
   }, []);
 
@@ -5475,6 +5538,228 @@ function App() {
       }
       return next;
     });
+  }
+
+  // ── Start primitive ──
+  // One invocable launcher (gate today, other surfaces later). Non-committal:
+  // gather any linked materials, surface them, run a 10-minute ambient timer,
+  // log a start event. Degrades silently — no materials still starts the clock,
+  // no estimate still flips the task to in_progress. Source mirrors
+  // completion_source (manual | gate | ai).
+  const FOCUS_SESSION_MS = 10 * 60 * 1000;
+  function armFocusExpiry(taskId, title) {
+    if (focusTimeoutRef.current) clearTimeout(focusTimeoutRef.current);
+    focusTimeoutRef.current = setTimeout(() => {
+      setFocusSession(prev => (prev && prev.taskId === taskId) ? { ...prev, status: 'expired' } : prev);
+      // Silent ambient offer — keep going or stop. No interrupt, no praise.
+      setSosNotif({ label: '10 min up', body: `${title} — keep going or stop.`, accent: 'var(--text-dim)', duration: 9000 });
+    }, FOCUS_SESSION_MS);
+  }
+  async function startTask(task, source = 'manual') {
+    if (!task) return;
+    const startedAt = Date.now();
+    const endsAt = startedAt + FOCUS_SESSION_MS;
+
+    // Flip to in_progress + stamp provenance. Undoable via the next mutation's
+    // snapshot is not applicable here (no destructive change), but the status
+    // flip is trivially reversible by completing/leaving the task.
+    updateTask(task.id, {
+      status: task.status === 'done' ? task.status : 'in_progress',
+      startSource: source,
+      startedAt: new Date(startedAt).toISOString(),
+    });
+
+    // Behavioral telemetry — feeds plans-created vs started-within-24h.
+    if (user) dbInsertTaskEvent({
+      taskId: task.id, eventType: 'start', fromStatus: task.status, toStatus: 'in_progress',
+      metadata: { title: task.title, subject: task.subject, source, study_plan_id: task.study_plan_id || null },
+    }, user.id);
+
+    // Gather linked materials (best-effort, bounded). No links → skip silently.
+    let materials = [];
+    if (user) {
+      try {
+        const { data } = await sb.from('entity_links')
+          .select('source_type,source_id,target_type,target_id')
+          .eq('user_id', user.id)
+          .or(`and(source_type.eq.task,source_id.eq.${task.id}),and(target_type.eq.task,target_id.eq.${task.id})`);
+        const keys = new Set();
+        (data || []).forEach(l => {
+          if (l.source_type === 'task' && l.source_id === task.id) keys.add(l.target_type + ':' + l.target_id);
+          else if (l.target_type === 'task' && l.target_id === task.id) keys.add(l.source_type + ':' + l.source_id);
+        });
+        materials = [...keys].map(k => {
+          const [kind, id] = k.split(':');
+          if (kind === 'note') { const n = notes.find(x => x.id === id); return n ? { kind, id, title: n.title || 'note' } : null; }
+          if (kind === 'event') { const e = events.find(x => x.id === id); return e ? { kind, id, title: e.title || 'event' } : null; }
+          return null;
+        }).filter(Boolean);
+      } catch (_) { /* materials are a bonus, never a blocker */ }
+    }
+
+    // Surface materials in chat (terse, clickable later); degrade to nothing.
+    if (materials.length) {
+      const list = materials.map(m => `• ${m.title}`).join('\n');
+      postAssistantNote(`Pulled up for "${task.title}":\n${list}`);
+    }
+    const matLine = materials.length ? ` ${materials.length} linked.` : '';
+    setSosNotif({ label: 'Just looking at it', body: `${task.title} · 10 min.${matLine}`, accent: 'var(--accent)', duration: 4000 });
+
+    // Ambient countdown in the DynamicIsland focus tier.
+    setFocusSession({ taskId: task.id, title: task.title, startedAt, endsAt, status: 'running' });
+    armFocusExpiry(task.id, task.title);
+  }
+  function continueFocusSession() {
+    const fs = focusSession;
+    if (!fs) return;
+    const startedAt = Date.now();
+    setFocusSession({ ...fs, startedAt, endsAt: startedAt + FOCUS_SESSION_MS, status: 'running' });
+    armFocusExpiry(fs.taskId, fs.title);
+  }
+  function stopFocusSession() {
+    if (focusTimeoutRef.current) { clearTimeout(focusTimeoutRef.current); focusTimeoutRef.current = null; }
+    setFocusSession(null);
+  }
+
+  // ── Home Decision Gate helpers ──
+  // "On the board" = active + due within the 30-day priority horizon (the
+  // convention used elsewhere). Empty → genuinely clear board.
+  function gateRankedTasks() {
+    const horizon = new Date(); horizon.setDate(horizon.getDate() + 30);
+    const horizonStr = toDateStr(horizon);
+    const active = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (active.length === 0) return [];
+    const density = buildCalendarDensity(active, blocks.dates || {});
+    const ranked = rankTasks(active, new Date(), density, undefined);
+    const byId = Object.fromEntries(active.map(t => [t.id, t]));
+    return ranked.map(r => byId[r.taskId]).filter(Boolean);
+  }
+  function handleGateStart(task) {
+    setGateOpen(false);
+    startTask(task, 'gate');
+  }
+  function handleGatePass(task, passNo) {
+    // Postpone-equivalent signal — looked, chose to skip this one.
+    if (user && task) dbInsertTaskEvent({
+      taskId: task.id, eventType: 'postpone', fromStatus: task.status, toStatus: task.status,
+      metadata: { title: task.title, subject: task.subject, source: 'gate', gate_pass: passNo },
+    }, user.id);
+  }
+  function handleGateDismiss() {
+    const top = gateRankedTasks()[0];
+    setGateOpen(false);
+    // Clear board → the escape door; no task to log and no follow-up copy.
+    if (!top) return;
+    if (user) dbInsertTaskEvent({
+      taskId: top.id, eventType: 'gate_dismiss', metadata: { source: 'gate', title: top.title },
+    }, user.id);
+    postAssistantNote('Noted.');
+  }
+  function handleGateFallThrough() {
+    setGateOpen(false);
+  }
+
+  // ── Time payout on completion ──
+  // Information, not celebration. Computes when today goes clear from the
+  // remaining scheduled obligations. Degrades: no estimate → no time line.
+  function payoutLine(task) {
+    const parseHM = (s) => {
+      if (!s || typeof s !== 'string') return null;
+      const m = s.match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      const h = +m[1], mm = +m[2];
+      if (h > 23 || mm > 59) return null;
+      return h * 60 + mm;
+    };
+    const minToTime = (mins) => {
+      const h = Math.floor(mins / 60) % 24, m = mins % 60;
+      const hr = h % 12 === 0 ? 12 : h % 12;
+      return `${hr}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+    };
+    // No estimate → omit the time line entirely (hard rule).
+    if (!(typeof task.estTime === 'number' && task.estTime > 0)) return 'Done.';
+
+    const t = today();
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const ends = [];
+    events.filter(e => e && e.date === t && e.status !== 'cancelled').forEach(e => {
+      const m = parseHM(e.end_time || e.endTime || e.time);
+      if (m != null) ends.push(m);
+    });
+    const dow = now.toLocaleDateString('en-US', { weekday: 'long' });
+    (blocks.recurring || []).forEach(b => {
+      if ((b.days || []).includes(dow)) { const m = parseHM(b.end); if (m != null) ends.push(m); }
+    });
+    const dateSlots = (blocks.dates && blocks.dates[t]) || {};
+    Object.keys(dateSlots).forEach(slot => {
+      if (dateSlots[slot]) { const m = parseHM(slot); if (m != null) ends.push(m + 30); }
+    });
+
+    const futureEnds = ends.filter(m => m > nowMin);
+    const clearFrom = futureEnds.length ? Math.max(...futureEnds) : nowMin;
+    // Only surface the clear-from time when there's still evening to recover.
+    if (clearFrom >= 23 * 60) return 'Done.';
+    return `Done. Evening clear from ${minToTime(clearFrom)}.`;
+  }
+
+  // ── 24-Hour Plan Rule helpers ──
+  // Find the first concrete occurrence of any plan block (or, blockless, the
+  // earliest milestone task) within the next week.
+  function computeFirstPlanBlock(plan) {
+    const blocksList = [...((plan && plan.recurring_blocks) || [])];
+    if (plan && plan.review_cadence?.review_block) blocksList.push(plan.review_cadence.review_block);
+    if (!blocksList.length) {
+      const tasks0 = ((plan && plan.milestone_tasks) || []).filter(t => t.due_date).sort((a, b) => a.due_date.localeCompare(b.due_date));
+      if (!tasks0.length) return null;
+      return { activity: tasks0[0].task_name || 'first task', date: tasks0[0].due_date, daysAway: daysUntil(tasks0[0].due_date), kind: 'task' };
+    }
+    const now = new Date();
+    for (let i = 0; i <= 7; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i);
+      const ds = toDateStr(d);
+      const wd = d.toLocaleDateString('en-US', { weekday: 'long' });
+      for (const b of blocksList) {
+        const days = b.days || [];
+        if (!(days.includes(wd) || days.includes(wd.slice(0, 3)))) continue;
+        if (b.start_date && ds < b.start_date) continue;
+        if (b.end_date && ds > b.end_date) continue;
+        return { activity: b.activity, date: ds, daysAway: i, kind: 'block' };
+      }
+    }
+    return null;
+  }
+  function whenLabel(daysAway, date) {
+    if (daysAway <= 0) return 'today';
+    if (daysAway === 1) return 'tomorrow';
+    return `in ${daysAway} days (${date})`;
+  }
+
+  // ── Decision Rollup handlers ──
+  function actionSummary(action) {
+    const name = action.task_name || action.title || action.name || action.event_name || '';
+    const verb = (action.type || 'action').replace(/_/g, ' ');
+    return name ? `${verb} — ${name}` : verb;
+  }
+  function applyRollup(acceptedActions) {
+    setRollupOpen(false);
+    setRollupItems([]); // every item was decided this pass
+    if (!acceptedActions || !acceptedActions.length) return;
+    // Whole batch is one undoable snapshot.
+    const batchSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+    acceptedActions.forEach(a => executeAction({ ...a, __confirmed: true, commitment: 'confirmed' }));
+    pushUndoToast(`Undo: applied ${acceptedActions.length} batched item${acceptedActions.length !== 1 ? 's' : ''}`, batchSnap);
+  }
+  function dismissRollup() {
+    // Skipped — items roll into the next day's batch. Never nag.
+    setRollupOpen(false);
+  }
+  function undoRollupAuto(autoItem) {
+    const snap = autoItem.snap;
+    setTasks(snap.tasks); setEvents(snap.events); setNotes(snap.notes); setBlocks(snap.blocks);
+    if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
+    if (snap.grades) setGrades(snap.grades);
+    setRollupAuto(prev => prev.filter(x => x !== autoItem));
   }
 
   // ── Action executor (writes to Supabase) ──
@@ -5507,9 +5792,16 @@ function App() {
       const lowConf = conf != null && conf < 0.7;
       const autoConf = conf != null && conf >= 0.85;
       if ((lowConf || tentative) && !autoConf) {
+        // Sub-threshold: accumulate silently for the End-of-Day Rollup instead
+        // of a standing review rail. Never surfaces mid-day.
         const reason = tentative && !lowConf ? 'tentative' : 'low_confidence';
-        setPendingActions(prev => [...prev, { action, reason, confidence: conf }]);
+        setRollupItems(prev => [...prev, { action, reason, confidence: conf }]);
         return;
+      }
+      if (autoConf) {
+        // Auto-applied today — mirror into the rollup as "already done · undo".
+        const autoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+        setRollupAuto(prev => [...prev, { action, summary: actionSummary(action), snap: autoSnap }]);
       }
     }
 
@@ -5612,6 +5904,8 @@ function App() {
           if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'complete', fromStatus: target.status, toStatus: 'done', metadata: { title: target.title, subject: target.subject } }, user.id);
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
           recordExecution('complete_task', `"${target.title}"`);
+          // Time payout — recovered time as information, not celebration.
+          postAssistantNote(payoutLine(target));
           pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
           break;
         }
@@ -6874,7 +7168,16 @@ function App() {
       executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
-    setToastMsg('Added ' + steps.length + ' tasks from plan');
+    // 24-hour plan rule: point at the first thing, not a confirmation toast.
+    const dated = steps.map(s => ({ title: s.title, date: s.date || today() })).sort((a, b) => a.date.localeCompare(b.date));
+    const first = dated[0];
+    if (first) {
+      const da = daysUntil(first.date);
+      if (da <= 1) postAssistantNote(`Plan's live. First up — "${first.title}", ${whenLabel(da, first.date)}.`);
+      else postAssistantNote(`Plan's live, but the first task isn't for ${da} days (${first.date}) — slow start.`);
+    } else {
+      setToastMsg('Added ' + steps.length + ' tasks from plan');
+    }
   }
 
   async function handleApplyIntentPlan(idx, plan, skipConflicts = false) {
@@ -6907,12 +7210,27 @@ function App() {
 
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     pushUndoToast(`Undo: applied study plan (${taskCount} tasks, ${blockCount} blocks)`, undoSnap);
-    setToastMsg(`Applied plan — added ${taskCount} tasks and ${blockCount} recurring blocks`);
+
+    // ── 24-Hour Plan Rule ──
+    // The flow ends by pointing at the first block, not a confirmation toast.
+    // If nothing lands within 24h the plan opens degraded — no silent survival.
+    const first = computeFirstPlanBlock(plan);
+    const within24h = !!first && first.daysAway <= 1;
+    const appliedStatus = within24h ? 'active' : 'slipping';
+    if (first && within24h) {
+      postAssistantNote(`Plan's live. First block — ${first.activity}, ${whenLabel(first.daysAway, first.date)}.`);
+    } else if (first) {
+      postAssistantNote(`Plan's live, but the first block (${first.activity}) isn't for ${first.daysAway} days — it's slipping out of the gate.`);
+    } else {
+      postAssistantNote(`Plan's live — nothing scheduled within 24 hours, so it's already slipping.`);
+    }
 
     if (user) {
       const isRevision = !!plan._revision_of_plan_id;
+      let resolvedPlanId = null;
       if (isRevision) {
-        const patch = { plan_json: plan, applied_at: new Date().toISOString(), total_tasks: (plan.milestone_tasks||[]).length };
+        resolvedPlanId = plan._revision_of_plan_id;
+        const patch = { plan_json: plan, applied_at: new Date().toISOString(), total_tasks: (plan.milestone_tasks||[]).length, status: appliedStatus };
         syncOp(() => dbUpdateStudyPlan(plan._revision_of_plan_id, patch, user.id));
         setStudyPlans(prev => prev.map(p => p.id === plan._revision_of_plan_id ? { ...p, ...patch } : p));
         if (createdTaskIds.length > 0) {
@@ -6921,18 +7239,34 @@ function App() {
       } else {
         const planId = await dbSaveStudyPlan(plan, user.id);
         if (planId) {
+          resolvedPlanId = planId;
           if (createdTaskIds.length > 0) {
             await sb.from('tasks').update({ study_plan_id: planId }).in('id', createdTaskIds).eq('user_id', user.id);
           }
+          if (!within24h) syncOp(() => dbUpdateStudyPlan(planId, { status: 'slipping' }, user.id));
           const newPlan = {
             id: planId, title: (plan.summary||'').slice(0,120)||'Study Plan',
             created_at: new Date().toISOString(), applied_at: new Date().toISOString(),
-            status: 'active', plan_json: plan,
+            status: appliedStatus, plan_json: plan,
             total_tasks: (plan.milestone_tasks||[]).length,
             review_cadence_days: plan.review_cadence?.every_n_days || null,
           };
           setStudyPlans(prev => [newPlan, ...prev]);
         }
+      }
+
+      // Instrument plans-created vs started-within-24h. Tied to the first
+      // milestone task (task_events requires a task or event reference).
+      if (createdTaskIds.length > 0) {
+        dbInsertTaskEvent({
+          taskId: createdTaskIds[0], eventType: 'plan_applied', toStatus: appliedStatus,
+          metadata: {
+            plan_id: resolvedPlanId,
+            first_block: first ? { activity: first.activity, date: first.date, kind: first.kind } : null,
+            within_24h: within24h,
+            task_count: taskCount, block_count: blockCount,
+          },
+        }, user.id);
       }
     }
   }
@@ -8630,6 +8964,9 @@ function App() {
             onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
+            focusSession={focusSession}
+            onFocusContinue={continueFocusSession}
+            onFocusStop={stopFocusSession}
             tasks={tasks}
             events={events}
             notes={notes}
@@ -9447,6 +9784,25 @@ function App() {
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {showOnboarding && <Onboarding firstName={onboardingName} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} />}
+      {gateOpen && !showOnboarding && (
+        <HomeDecisionGate
+          rankedTasks={gateRankedTasks()}
+          clearBoard={gateRankedTasks().length === 0}
+          onStart={handleGateStart}
+          onPass={handleGatePass}
+          onDismiss={handleGateDismiss}
+          onFallThrough={handleGateFallThrough}
+        />
+      )}
+      {rollupOpen && !showOnboarding && !gateOpen && (
+        <DecisionRollup
+          items={rollupItems}
+          auto={rollupAuto}
+          onApply={applyRollup}
+          onUndoAuto={undoRollupAuto}
+          onDismiss={dismissRollup}
+        />
+      )}
       {savedChatUndo&&(
         <div className="sos-saved-chat-undo" role="status">
           <span>Deleted “{savedChatUndo.chat.title || 'Saved chat'}”</span>

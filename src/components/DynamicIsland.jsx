@@ -32,23 +32,55 @@ function ThinkingDots() {
   );
 }
 
+const miniBtn = {
+  border: '1px solid rgba(255,255,255,0.22)',
+  background: 'rgba(255,255,255,0.08)',
+  color: 'inherit',
+  borderRadius: 8,
+  padding: '2px 8px',
+  fontSize: 11,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+function fmtRemaining(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
 export default function DynamicIsland({
   aiThinking = false,
   syncStatus,
   nextEvent,
   deadlineWarning,
+  focusSession = null,
+  onFocusContinue,
+  onFocusStop,
 }) {
   const [expanded, setExpanded] = useState(false);
+
+  // Live tick for the focus-session countdown (only while running).
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!focusSession || focusSession.status !== 'running') return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [focusSession]);
 
   // Collapse when AI starts thinking
   useEffect(() => {
     if (aiThinking) setExpanded(false);
   }, [aiThinking]);
 
-  // Derive mode from props
+  // Derive mode from props. Focus session sits just below "thinking" — it is
+  // the student's active work, so it outranks ambient deadline/next hints.
   let mode;
   if (aiThinking) {
     mode = { id: 'thinking', label: 'sos is thinking', accent: 'accent' };
+  } else if (focusSession) {
+    mode = { id: 'focus', accent: focusSession.status === 'expired' ? 'warning' : 'success' };
   } else if (deadlineWarning) {
     mode = { id: 'deadline', label: deadlineWarning, accent: 'warning' };
   } else if (nextEvent) {
@@ -57,10 +89,42 @@ export default function DynamicIsland({
     mode = { id: 'idle', label: 'all clear', accent: 'idle' };
   }
 
-  const expandable = mode.id !== 'idle' && mode.id !== 'thinking';
+  const expandable = mode.id !== 'idle' && mode.id !== 'thinking' && mode.id !== 'focus';
+
+  function renderFocus() {
+    const remaining = focusSession.endsAt - Date.now();
+    const expired = focusSession.status === 'expired' || remaining <= 0;
+    return (
+      <div className="di-stack" style={{ minWidth: 0 }}>
+        <span className="di-label">{expired ? '10 min up' : 'focusing'}</span>
+        {expired ? (
+          <span className="di-focus-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span className="di-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90, whiteSpace: 'nowrap' }}>{focusSession.title}</span>
+            <button
+              className="di-mini-btn"
+              onClick={(e) => { e.stopPropagation(); onFocusContinue && onFocusContinue(); }}
+              style={miniBtn}
+            >keep going</button>
+            <button
+              className="di-mini-btn"
+              onClick={(e) => { e.stopPropagation(); onFocusStop && onFocusStop(); }}
+              style={{ ...miniBtn, opacity: 0.7 }}
+            >stop</button>
+          </span>
+        ) : (
+          <span className="di-title">
+            {focusSession.title}
+            <span style={{ marginLeft: 8, fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>{fmtRemaining(remaining)}</span>
+          </span>
+        )}
+      </div>
+    );
+  }
 
   function renderPayload() {
     switch (mode.id) {
+      case 'focus':
+        return renderFocus();
       case 'idle':
         return <span className="di-status">{mode.label}</span>;
       case 'thinking':
