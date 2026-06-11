@@ -90,6 +90,9 @@ export default function StudioSidebar({
   syncStatus,
   nextEvent,
   deadlineWarning,
+  focusSession = null,
+  onFocusContinue,
+  onFocusStop,
   tasks = [],
   events = [],
   notes = [],
@@ -110,6 +113,9 @@ export default function StudioSidebar({
         syncStatus={syncStatus}
         nextEvent={nextEvent}
         deadlineWarning={deadlineWarning}
+        focusSession={focusSession}
+        onFocusContinue={onFocusContinue}
+        onFocusStop={onFocusStop}
       />
 
       <div className="sb-section">
