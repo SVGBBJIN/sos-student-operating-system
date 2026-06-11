@@ -442,8 +442,8 @@ export type ActionName = keyof typeof ACTION_SCHEMAS;
 // terse enough to fit Gemini's tool-prompt budget but explicit on the rules
 // the model previously violated (placeholders, dates, ask_clarification escape).
 const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
-  add_event: "Add a calendar event (tests, quizzes, practices, games, appointments). Title/date must be the student's exact wording. Infer subject from the title; if any required field is missing or ambiguous, call ask_clarification. Optionally include `confidence` (0..1) and `status` ('tentative' or 'confirmed'). When the student's wording is hedged ('I think', 'maybe', 'might be', 'around', 'somewhere'), or the date is inferred rather than verbatim, set status='tentative' and confidence below 0.7 — the client routes those to a review rail instead of auto-applying them.",
-  add_task: "Add a homework/todo task. Use task_name as the student said it; resolve due_date against today; ask_clarification when uncertain. Use 'personal' subject for non-academic tasks. Optionally include `confidence` (0..1) and `commitment` ('tentative' or 'confirmed'). Use commitment='tentative' and confidence below 0.7 when the student's wording is hedged or the due_date is inferred rather than explicit — the client routes those to a review rail.",
+  add_event: "Add a calendar event (tests, quizzes, games, appointments). Use exact title/date from the student's words; infer subject from title. Set status='tentative' and confidence<0.7 when wording is hedged or date is inferred. Call ask_clarification if required fields are missing.",
+  add_task: "Add a homework/todo task. Use exact task_name from the student's words; resolve due_date against today. Use 'personal' for non-academic. Set commitment='tentative' and confidence<0.7 when wording is hedged or due_date is inferred. Call ask_clarification if required fields are missing.",
   delete_event: "Cancel/remove an event from the calendar by title.",
   delete_task: "Remove a task from the to-do list by title.",
   update_event: "Update an existing event — change new_title, date, event_type, or subject. `title` must match an event already on the calendar.",
@@ -452,11 +452,11 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   delete_block: "Remove a time block from the schedule.",
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
-  ask_clarification: "Ask the student for ONE missing or ambiguous detail before running an action. Set context_action to the target tool name (e.g. 'add_event'), missing_fields to the exact field(s) you need, and known_fields to every value already extracted from the student's message (e.g. {title:'Chem test', date:'2026-05-20'}). This lets the frontend merge the answer without a second AI roundtrip. Use up to 6 short options when helpful; omit for free-form answers.",
-  read_calendar: "Read-only lookup of the schedule. Set end_date to match the timeframe the user stated (e.g. 'next month', 'this week', 'next 3 days'). If no timeframe is given, omit end_date — the client defaults to a one-week window. Never combine with mutating tools unless the student explicitly asked.",
-  set_timer: "Start a countdown timer. `label` must be the student's wording (e.g. 'laundry', 'pomodoro'). Provide EXACTLY ONE of: duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro=25min, short_break=5min, long_break=15min). Convert phrases like '20 minutes' → duration_seconds=1200, '1 hour' → 3600. NEVER guess a duration. If the student says 'set a timer' without a length, you MUST call ask_clarification with missing_fields=['duration_seconds'].",
+  ask_clarification: "Ask for ONE missing or ambiguous required field before running an action. Set context_action (target tool name), missing_fields (needed fields), known_fields (already extracted values, e.g. {title:'Chem test'}). Up to 6 short options when helpful.",
+  read_calendar: "Read-only schedule lookup. Set end_date to the stated timeframe; omit for default one-week window. Never combine with mutating tools.",
+  set_timer: "Start a countdown. label = student's exact words. Exactly one of: duration_seconds (1..86400), fire_at (ISO 8601+tz), or preset (pomodoro/short_break/long_break). Convert '20 minutes'→1200, '1 hour'→3600. If no duration given, call ask_clarification.",
   cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
-  add_note: "Create a note in the student's notebook. `subject` becomes the folder it lives in. Ask one missing field at a time via ask_clarification with context_action='add_note': first subject (missing_fields=['subject']), then source (missing_fields=['source'], options=['I will write it','Paste/import','AI write']), then title. Use source='ai_generated' if the student asked you to write it.",
+  add_note: "Create a note. subject = folder. Ask one missing field at a time: subject first, then source (options: 'I will write it'/'Paste/import'/'AI write'), then title. Use source='ai_generated' if the student asked you to draft it.",
   prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Only call this when the student explicitly asks what to do next, what matters most, or which task to prioritize. Never combine with mutating tools.",
   plan_intent: "Convert a student goal or intent into a structured multi-week plan with recurring blocks, milestone tasks, and a review cadence. Use for goals like 'survive finals week', 'improve Chinese speaking', or 'balance coding and school'. `horizon` must be one of: week, month, semester. If no deadline or subject is stated, omit those fields — do not guess.",
   revise_plan: "Revise an existing saved study plan by re-running the intent plan pipeline with the student's correction instructions. Requires plan_id (UUID of the saved plan) and instructions (what to change, e.g. 'make the plan lighter' or 'add 2 more study sessions per week'). Only call this when the student explicitly asks to revise, adjust, or change a saved plan.",
@@ -484,6 +484,23 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
 
 export function buildActionToolDefs(): ToolDef[] {
   return (Object.keys(ACTION_SCHEMAS) as ActionName[]).map((name) => ({
+    name,
+    description: ACTION_DESCRIPTIONS[name],
+    parameters: zodToGeminiSchema(ACTION_SCHEMAS[name]),
+  }));
+}
+
+export function buildChatToolDefs(): ToolDef[] {
+  const CHAT_TOOLS: ActionName[] = [
+    "ask_clarification",
+    "read_calendar",
+    "read_tasks",
+    "read_notes",
+    "read_study_sets",
+    "read_project",
+    "prioritize_tasks",
+  ];
+  return CHAT_TOOLS.map((name) => ({
     name,
     description: ACTION_DESCRIPTIONS[name],
     parameters: zodToGeminiSchema(ACTION_SCHEMAS[name]),

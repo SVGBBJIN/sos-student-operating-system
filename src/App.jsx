@@ -7607,6 +7607,7 @@ function App() {
         input_tokens_est: promptPayload.estimatedInputTokens,
         clientTasks: clientTasksPayload,
         clientCalendarDensity: clientCalendarDensityPayload,
+        intentType: inferredIntentType,
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
         ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
