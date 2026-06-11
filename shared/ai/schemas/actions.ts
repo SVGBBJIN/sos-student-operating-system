@@ -307,6 +307,16 @@ export const ReadTasksSchema = z.object({
 });
 export type ReadTasksInput = z.infer<typeof ReadTasksSchema>;
 
+// Server-internal retrieval tool. The handler executes it against the
+// memory_embeddings store and feeds the results back to the model — it is
+// stripped from the actions returned to the client (never client-executed).
+export const SearchMemorySchema = z.object({
+  type: z.literal("search_memory").optional(),
+  query: z.string().min(1).max(200),
+  sources: z.array(z.string().min(1).max(40)).max(6).optional(),
+});
+export type SearchMemoryInput = z.infer<typeof SearchMemorySchema>;
+
 export const UpdateBlockSchema = z
   .object({
     type: z.literal("update_block").optional(),
@@ -415,6 +425,7 @@ export const ACTION_SCHEMAS = {
   read_study_sets: ReadStudySetsSchema,
   read_project: ReadProjectSchema,
   read_tasks: ReadTasksSchema,
+  search_memory: SearchMemorySchema,
   update_block: UpdateBlockSchema,
   postpone_task: PostponeTaskSchema,
   bulk_complete: BulkCompleteSchema,
@@ -460,6 +471,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   read_study_sets: "Read and list all flashcard decks the student has saved. Posts a summary to chat with deck titles and card counts. Call when the student asks what study sets or flashcard decks they have.",
   read_project: "Read all content (tasks, events, notes, study sets) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
   read_tasks: "List the student's tasks with optional filters: subject, status (not_started/in_progress/done), or tasks due within N days. Posts a formatted list to chat. Call when the student asks what tasks they have, wants to see pending work, or asks about tasks for a specific subject.",
+  search_memory: "Search the student's saved memories, notes, and past context by meaning (semantic search). Call this ONLY when answering needs background the student mentioned earlier or stored previously — e.g. 'what did I say about my history essay?', 'remind me what my goals were'. `query` is the keywords/phrase to search for. Do NOT call for simple scheduling or task actions. The results come back to you to use in your answer.",
   update_block: "Modify an existing time block — rename it, change its time, or change its category. Identify the block by date + start time OR date + activity name. Provide at least one of new_activity, new_start, new_end, or new_category. NEVER guess times — call ask_clarification if the student didn't state them.",
   postpone_task: "Push a task's due date to a later date. Identify by title (fuzzy match). new_due_date must be a valid YYYY-MM-DD date. Increments the task's postpone count for behavioral tracking.",
   bulk_complete: "Mark multiple tasks done in one shot. Filter by subject (e.g. 'Math') and/or a list of titles. At least one of subject or titles is required. Common at end of study sessions ('mark all my English tasks as done').",

@@ -11,10 +11,13 @@ const FPS_SAMPLE_MS = 2000;       // measure FPS over this window
 const FPS_LOW_THRESHOLD = 30;     // below this → drop a tier
 const FPS_HIGH_THRESHOLD = 55;    // above this for N consecutive windows → raise a tier
 const CONSECUTIVE_HIGH_TO_PROMOTE = 3; // windows of good FPS before promoting
+const MAX_CALIBRATION_WINDOWS = 6; // stop the rAF loop after ~12s of calibration
 const TIER_ORDER = ['low', 'mid', 'full'];
 
 let currentTier = 'full';
 let consecutiveHighWindows = 0;
+let windowsSampled = 0;
+let calibrationDone = false;
 let rafId = null;
 let lastFrameTime = null;
 let frameCount = 0;
@@ -66,6 +69,15 @@ function tick(ts) {
     evaluateFPS(fps);
     sampleStart = ts;
     frameCount = 0;
+    windowsSampled++;
+    // Calibration is a startup task, not a forever-loop: once we've sampled
+    // enough windows to correct any mis-detection, stop the rAF monitor so it
+    // costs nothing for the rest of the session.
+    if (windowsSampled >= MAX_CALIBRATION_WINDOWS) {
+      calibrationDone = true;
+      stopPerfAdjuster();
+      return;
+    }
   }
 
   lastFrameTime = ts;
@@ -98,13 +110,12 @@ function evaluateFPS(fps) {
 
 /** Start the adjuster. Call once after React mounts. */
 export function startPerfAdjuster() {
-  // 1. Check for user override in localStorage
+  // 1. Check for user override in localStorage. When the tier is pinned we never
+  //    auto-adjust, so there's no reason to run the FPS monitor at all.
   const override = localStorage.getItem(STORAGE_KEY);
   if (override && TIER_ORDER.includes(override)) {
     applyTier(override, 'override');
-    // Still monitor FPS, but don't auto-adjust when override is set
-    active = true;
-    rafId = requestAnimationFrame(tick);
+    calibrationDone = true;
     return;
   }
 
@@ -113,7 +124,10 @@ export function startPerfAdjuster() {
   const initialTier = scoreToTier(score);
   applyTier(initialTier, 'init');
 
-  // 3. Start FPS monitor
+  // 3. Start the FPS monitor for a short calibration window, then it self-stops.
+  windowsSampled = 0;
+  consecutiveHighWindows = 0;
+  calibrationDone = false;
   active = true;
   rafId = requestAnimationFrame(tick);
 }
@@ -156,7 +170,9 @@ export function isPerfOverridden() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopPerfAdjuster();
-  } else {
+  } else if (!calibrationDone) {
+    // Only resume the monitor if we're still calibrating; once calibration is
+    // done the loop stays off for the rest of the session.
     active = true;
     lastFrameTime = null;
     rafId = requestAnimationFrame(tick);

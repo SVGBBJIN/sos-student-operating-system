@@ -34,7 +34,7 @@ function WeekStrip({ weekDates, events, onDayClick }) {
   const today = toISODate(new Date());
   return (
     <div className="cw-strip">
-      {weekDates.map(day => {
+      {weekDates.map((day, dayIdx) => {
         const dateStr = toISODate(day);
         const isToday = dateStr === today;
         const dayEvents = events.filter(e => e.date === dateStr);
@@ -44,6 +44,7 @@ function WeekStrip({ weekDates, events, onDayClick }) {
           <div
             key={dateStr}
             className={'cw-strip-day' + (isToday ? ' cw-strip-today' : '')}
+            style={{ '--cw-day-hue': `${195 + (dayIdx * 24)}deg` }}
             onClick={() => onDayClick()}
           >
             <span className="cw-strip-abbr">{DAY_ABBR[day.getDay()]}</span>
