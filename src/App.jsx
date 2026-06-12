@@ -4922,40 +4922,6 @@ function App() {
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
 
-  // ── Open the Home Decision Gate on the first open of the day ──
-  // Once per calendar day, after data is loaded and not mid-onboarding. The
-  // gate reads live tasks so a momentary pre-load render never shows a stale
-  // "clear board". Skips entirely if already shown today.
-  useEffect(() => {
-    if (gateCheckedRef.current) return;
-    if (!dataLoaded || !user || showOnboarding) return;
-    gateCheckedRef.current = true;
-    let last = null;
-    try { last = localStorage.getItem('sos_gate_last_shown'); } catch (_) {}
-    if (last === today()) return;
-    setGateOpen(true);
-    try { localStorage.setItem('sos_gate_last_shown', today()); } catch (_) {}
-  }, [dataLoaded, user, showOnboarding]);
-
-  // ── Surface the End-of-Day Decision Rollup once daily (evening) ──
-  // Fires only when there is something to review and never mid-day, so the
-  // day stays quiet. Skipped items simply carry over to the next evening.
-  useEffect(() => {
-    if (!dataLoaded || !user) return;
-    if (rollupOpen || gateOpen || showOnboarding) return;
-    const t = today();
-    if (rollupShownRef.current === t) return;
-    if ((rollupItems.length + rollupAuto.length) === 0) return;
-    let last = null;
-    try { last = localStorage.getItem('sos_rollup_last_shown'); } catch (_) {}
-    if (last === t) { rollupShownRef.current = t; return; }
-    if (new Date().getHours() >= 18) {
-      setRollupOpen(true);
-      rollupShownRef.current = t;
-      try { localStorage.setItem('sos_rollup_last_shown', t); } catch (_) {}
-    }
-  }, [dataLoaded, user, gateOpen, showOnboarding, rollupOpen, rollupItems, rollupAuto]);
-
   // ── Notification scheduling: re-run whenever tasks, events, or prefs change ──
   useEffect(() => {
     if (!dataLoaded) return;
@@ -5067,6 +5033,40 @@ function App() {
   const [rollupAuto, setRollupAuto] = useState([]);   // [{ action, summary, snap }]
   const [rollupOpen, setRollupOpen] = useState(false);
   const rollupShownRef = useRef(null);
+
+  // ── Open the Home Decision Gate on the first open of the day ──
+  // Once per calendar day, after data is loaded and not mid-onboarding. The
+  // gate reads live tasks so a momentary pre-load render never shows a stale
+  // "clear board". Skips entirely if already shown today.
+  useEffect(() => {
+    if (gateCheckedRef.current) return;
+    if (!dataLoaded || !user || showOnboarding) return;
+    gateCheckedRef.current = true;
+    let last = null;
+    try { last = localStorage.getItem('sos_gate_last_shown'); } catch (_) {}
+    if (last === today()) return;
+    setGateOpen(true);
+    try { localStorage.setItem('sos_gate_last_shown', today()); } catch (_) {}
+  }, [dataLoaded, user, showOnboarding]);
+
+  // ── Surface the End-of-Day Decision Rollup once daily (evening) ──
+  // Fires only when there is something to review and never mid-day, so the
+  // day stays quiet. Skipped items simply carry over to the next evening.
+  useEffect(() => {
+    if (!dataLoaded || !user) return;
+    if (rollupOpen || gateOpen || showOnboarding) return;
+    const t = today();
+    if (rollupShownRef.current === t) return;
+    if ((rollupItems.length + rollupAuto.length) === 0) return;
+    let last = null;
+    try { last = localStorage.getItem('sos_rollup_last_shown'); } catch (_) {}
+    if (last === t) { rollupShownRef.current = t; return; }
+    if (new Date().getHours() >= 18) {
+      setRollupOpen(true);
+      rollupShownRef.current = t;
+      try { localStorage.setItem('sos_rollup_last_shown', t); } catch (_) {}
+    }
+  }, [dataLoaded, user, gateOpen, showOnboarding, rollupOpen, rollupItems, rollupAuto]);
 
   const scheduleTimerFire = useCallback((timer) => {
     const existing = timerTimeoutsRef.current.get(timer.id);
