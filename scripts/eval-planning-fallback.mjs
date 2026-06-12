@@ -72,7 +72,7 @@ const SCENARIOS = [
     name: "pro-fails-flash-recovers",
     handler: async (req) => {
       if (req.model === "gemini-2.5-pro") throw new Error("simulated 503 on Pro");
-      if (req.model === "gemini-3-flash") return req.tools?.length ? buildToolCallResponse() : buildPlain("ok");
+      if (req.model === "gemini-2.5-flash") return req.tools?.length ? buildToolCallResponse() : buildPlain("ok");
       throw new Error(`unexpected model ${req.model}`);
     },
     assert: (result) => {

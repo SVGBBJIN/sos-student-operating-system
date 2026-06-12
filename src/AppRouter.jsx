@@ -7,11 +7,12 @@ import App from './App.jsx';
 const Landing      = React.lazy(() => import('./pages/Landing.jsx'));
 const Library      = React.lazy(() => import('./pages/Library.jsx'));
 const CalendarPage = React.lazy(() => import('./pages/CalendarPage.jsx'));
+const ProjectsPage = React.lazy(() => import('./pages/ProjectsPage.jsx'));
 
 /**
  * AppRouter — thin router wrapper.
  * Handles auth state and redirects between public (Landing) and
- * protected (/studio, /calendar, /library) routes.
+ * protected (/studio, /calendar, /library, /projects) routes.
  */
 export default function AppRouter() {
   // undefined = loading, null = unauthenticated, object = authenticated user
@@ -67,6 +68,12 @@ export default function AppRouter() {
         <Route
           path="/calendar"
           element={user ? <CalendarPage /> : <Navigate to="/" replace />}
+        />
+
+        {/* Protected — projects browser */}
+        <Route
+          path="/projects"
+          element={user ? <ProjectsPage /> : <Navigate to="/" replace />}
         />
 
         {/* Library — auth handled internally */}

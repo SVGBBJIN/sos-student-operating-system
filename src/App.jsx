@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DOMPurify from 'dompurify';
-import * as pdfjsLib from 'pdfjs-dist';
-import { sb, SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
+import { extractPdfText } from './lib/pdf';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import { dbInsertTaskEvent } from './lib/dataHandlers';
@@ -14,7 +14,7 @@ import * as sfx from './lib/sfx';
 import StudyTopBar from './components/StudyTopBar';
 import { srsCardKey, srsRate } from './lib/srs';
 import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
-import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getNudge, getPriority } from './lib/dateUtils';
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority } from './lib/dateUtils';
 import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
@@ -29,18 +29,11 @@ import ConnectorsSettings from './components/ConnectorsSettings';
 import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
-import { inferSubjectFromTitle, SUBJECT_LIST } from '../shared/subjects.js';
+import { SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
-import { MODEL_DEEP, MODEL_FAST } from './lib/aiClient.js';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 import HomeDecisionGate from './components/HomeDecisionGate';
 import DecisionRollup from './components/DecisionRollup';
-
-// Configure pdfjs worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
 
 const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
 
@@ -216,23 +209,6 @@ function mapGoogleCalItems(items) {
   }));
 }
 
-/* ─── Category Colors ─── */
-const CAT_COLORS = {
-  school:'var(--accent)', swim:'var(--teal)', debate:'var(--orange)',
-  'free time':'var(--green)', sleep:'var(--blue)', other:'var(--pink)',
-  homework:'var(--accent)', test:'var(--danger)', practice:'var(--teal)',
-  event:'var(--orange)'
-};
-function catColor(cat) { return CAT_COLORS[cat?.toLowerCase()] || 'var(--accent)'; }
-
-/* ─── Weather Icons ─── */
-function weatherEmoji(code) {
-  if (code <= 1) return Icon.sun(18); if (code <= 3) return Icon.cloud(18);
-  if (code <= 48) return Icon.cloudFog(18); if (code <= 67) return Icon.cloudRain(18);
-  if (code <= 77) return Icon.cloudSnow(18); if (code <= 82) return Icon.cloudDrizzle(18);
-  return Icon.cloudLightning(18);
-}
-
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 10;
 
@@ -279,7 +255,7 @@ async function uploadPhotoToStorage(base64, userId) {
     for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
     const blob = new Blob([ab], { type: 'image/jpeg' });
     const path = userId + '/' + Date.now() + '-' + uid() + '.jpg';
-    const { data, error } = await sb.storage.from('chat-photos').upload(path, blob, { contentType: 'image/jpeg' });
+    const { error } = await sb.storage.from('chat-photos').upload(path, blob, { contentType: 'image/jpeg' });
     if (error) { console.error('Photo upload error:', error); return null; }
     const { data: urlData } = sb.storage.from('chat-photos').getPublicUrl(path);
     return urlData?.publicUrl || null;
@@ -389,15 +365,11 @@ async function loadAllFromSupabase(userId) {
     });
     const blocks = { recurring, dates };
 
-    const weatherCoords = profileRes.data
-      ? { lat: profileRes.data.weather_lat || 42.33, lon: profileRes.data.weather_lon || -71.21 }
-      : { lat: 42.33, lon: -71.21 };
-
     const studyPlans = studyPlansRes.error ? [] : (studyPlansRes.data || []);
     // `onboarding_completed` may be absent on older DBs; treat missing as false.
     const onboardingCompleted = !!(profileRes.data && profileRes.data.onboarding_completed);
 
-    return { tasks, events, notes, messages, blocks, weatherCoords, studyPlans, onboardingCompleted };
+    return { tasks, events, notes, messages, blocks, studyPlans, onboardingCompleted };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -618,12 +590,6 @@ async function migrateLocalStorage(userId) {
         });
       });
       if (rows.length > 0) await sb.from('date_blocks').upsert(rows, { onConflict: 'user_id,block_date,time_slot' });
-    }
-
-    // Weather coords
-    const localCoords = JSON.parse(localStorage.getItem('cc_weather_coords') || 'null');
-    if (localCoords) {
-      await sb.from('profiles').update({ weather_lat: localCoords.lat, weather_lon: localCoords.lon }).eq('id', userId);
     }
 
     localStorage.setItem('sos_migrated_' + userId, 'true');
@@ -902,39 +868,10 @@ function parseDocId(input) {
 }
 
 /* ─── Multi-model message classifier ─── */
-const CONTENT_TYPES = ['create_flashcards','create_outline','create_summary','create_quiz','create_project_breakdown','make_plan','make_intent_plan','make_study_pack'];
 const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 const INTENT_PLAN_REGEX = /\b(survive\s+finals|finals\s+week|help\s+me\s+(survive|balance|prepare|get\s+through)|improve\s+(my\s+)?(?:chinese|mandarin|spanish|french|korean|japanese|german|language|speaking|math|coding|programming)|build\s+a\s+routine|create\s+a\s+routine|set\s+up\s+(?:a\s+)?routine|balance\s+(?:my\s+)?(?:life|school|work|coding)|plan\s+(?:my\s+)?(?:week|month|semester)|semester\s+plan|weekly\s+(?:routine|schedule|plan))\b/i;
-
-function isStringArray(value, min = 0) {
-  return Array.isArray(value) && value.length >= min && value.every(v => typeof v === 'string' && v.trim().length > 0);
-}
-
-function isValidContentAction(action) {
-  if (!action || typeof action !== 'object' || !CONTENT_TYPES.includes(action.type)) return false;
-  switch (action.type) {
-    case 'create_flashcards':
-      return Array.isArray(action.cards) && action.cards.length > 0 && action.cards.every(c => typeof c?.q === 'string' && typeof c?.a === 'string');
-    case 'create_quiz':
-      return Array.isArray(action.questions) && action.questions.length > 0 && action.questions.every(q => typeof q?.q === 'string' && isStringArray(q?.choices, 2) && typeof q?.answer === 'string');
-    case 'create_outline':
-      return Array.isArray(action.sections) && action.sections.length > 0 && action.sections.every(s => typeof s?.heading === 'string' && isStringArray(s?.points, 1));
-    case 'create_summary':
-      return isStringArray(action.bullets, 1);
-    case 'create_project_breakdown':
-      return Array.isArray(action.phases) && action.phases.length > 0 && action.phases.every(p => typeof p?.phase === 'string' && isStringArray(p?.tasks, 1));
-    case 'make_plan':
-      return typeof action.title === 'string' && Array.isArray(action.steps) && action.steps.length > 0 && action.steps.every(s => typeof s?.title === 'string');
-    case 'make_study_pack':
-      return typeof action.title === 'string'
-        && Array.isArray(action.flashcards) && action.flashcards.length > 0 && action.flashcards.every(c => typeof c?.q === 'string' && typeof c?.a === 'string')
-        && Array.isArray(action.quiz) && action.quiz.length > 0 && action.quiz.every(q => typeof q?.q === 'string' && isStringArray(q?.choices, 2) && typeof q?.answer === 'string');
-    default:
-      return false;
-  }
-}
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
 function inferActionFromMessage(text) {
@@ -1715,10 +1652,6 @@ function MultiFieldClarificationCard({ clarification, onSubmit, onSkip, savedAns
   const currentField = missing_fields[stepIdx];
   const currentValue = fieldValues[currentField];
   const currentFilled = currentValue !== undefined && currentValue !== null && String(currentValue).trim().length > 0;
-  const allFilled = missing_fields.every(f => {
-    const v = fieldValues[f];
-    return v !== undefined && v !== null && String(v).trim().length > 0;
-  });
   const isLast = stepIdx === totalSteps - 1;
 
   function submitAll(values) {
@@ -2419,7 +2352,6 @@ function QuizDisplay({ data, onSave, onDismiss }) {
   if (questions.length === 0) return <ContentCard icon={Icon.fileText(16)} title={data.title||'Quiz'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No questions generated.</div></ContentCard>;
 
   const q = questions[qIdx];
-  const isCorrect = selected === q?.answer;
 
   function checkAnswer() {
     if (!selected || revealed) return;
@@ -3408,20 +3340,8 @@ function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, o
   async function importPdf(source) {
     setPdfLoading(true); setErr(null);
     try {
-      const lib = pdfjsLib;
-      if (!lib) throw new Error('PDF library is still loading — wait a moment and try again.');
-      let loadingTask;
-      let filename = source.name ? source.name.replace(/\.pdf$/i, '') : 'Imported PDF';
-      const buf = await source.arrayBuffer();
-      loadingTask = lib.getDocument({ data: buf });
-      const pdf = await loadingTask.promise;
-      let full = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const tc = await page.getTextContent();
-        full += tc.items.map(item => item.str).join(' ') + '\n\n';
-      }
-      const trimmed = full.trim();
+      const filename = source.name ? source.name.replace(/\.pdf$/i, '') : 'Imported PDF';
+      const trimmed = await extractPdfText(source);
       if (!trimmed) throw new Error('No readable text found in this PDF. Scanned/image-only PDFs cannot be parsed.');
       // Truncate very large docs with a note
       const maxChars = 50000;
@@ -3884,274 +3804,6 @@ function LmsSetupModal({ onClose, onToast }) {
       </div>
     </>
   );
-}
-
-/* ═══════════════════════════════════════════════
-   SCHEDULE PEEK PANEL (with fullscreen calendar)
-   ═══════════════════════════════════════════════ */
-function SchedulePeek({ tasks, blocks, events, weatherData, onClose, embedded = false, recentlyCompleted = new Set() }) {
-  const todayKey = today(); const todayDow = new Date().getDay();
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [calView, setCalView] = useState('month');
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-
-  const timeline = useMemo(() => {
-    const result = {};
-    (blocks.recurring || []).forEach(rb => {
-      if (rb.days.includes(todayDow)) {
-        const [sh,sm]=rb.start.split(':').map(Number); const [eh,em]=rb.end.split(':').map(Number);
-        let ch=sh,cm=sm;
-        while(ch<eh||(ch===eh&&cm<em)){const key=String(ch).padStart(2,'0')+':'+String(cm).padStart(2,'0');result[key]={name:rb.name,category:rb.category};cm+=30;if(cm>=60){ch++;cm=0;}}
-      }
-    });
-    const ov = blocks.dates?.[todayKey]||{};
-    Object.entries(ov).forEach(([k,v])=>{if(v===null)delete result[k];else result[k]=v;});
-    return result;
-  },[blocks,todayKey,todayDow]);
-
-  const condensed = useMemo(()=>{
-    const sorted=Object.entries(timeline).sort(([a],[b])=>a.localeCompare(b));const bl=[];let cur=null;
-    sorted.forEach(([time,data])=>{if(cur&&cur.name===data.name&&cur.category===data.category){cur.end=time;cur.slots++}else{if(cur)bl.push(cur);cur={start:time,end:time,name:data.name,category:data.category,slots:1}}});
-    if(cur)bl.push(cur);
-    return bl.map(b=>{const[eh,em]=b.end.split(':').map(Number);let nm=em+30,nh=eh;if(nm>=60){nh++;nm=0}return{...b,endDisplay:String(nh).padStart(2,'0')+':'+String(nm).padStart(2,'0')}});
-  },[timeline]);
-
-  const overduePeekTasks=useMemo(()=>tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).sort((a,b)=>daysUntil(a.dueDate)-daysUntil(b.dueDate)),[tasks]);
-  const activeTasks=useMemo(()=>{
-    const completing = tasks.filter(t => recentlyCompleted.has(t.id));
-    const active = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)>=0).sort((a,b)=>getPriority(a)-getPriority(b)).slice(0,5);
-    // prepend any completing tasks not already in list
-    const completing2 = completing.filter(t => !active.some(a => a.id === t.id));
-    return [...completing2, ...active];
-  },[tasks, recentlyCompleted]);
-  const upcomingEvents=useMemo(()=>events.filter(ev=>{const d=daysUntil(ev.date);return d>=0&&d<=7}).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4),[events]);
-  const currentHour=new Date().getHours();
-  const greeting=currentHour<12?'Good morning':currentHour<17?'Good afternoon':'Good evening';
-
-  // ── Month calendar grid ──
-  const calendarDays = useMemo(() => {
-    const firstDay = new Date(calYear, calMonth, 1);
-    const lastDay = new Date(calYear, calMonth + 1, 0);
-    const startDow = firstDay.getDay();
-    const daysInMonth = lastDay.getDate();
-    const prevMonthLast = new Date(calYear, calMonth, 0).getDate();
-
-    const cells = [];
-    // Previous month trailing days
-    for (let i = startDow - 1; i >= 0; i--) {
-      const d = prevMonthLast - i;
-      const dt = new Date(calYear, calMonth - 1, d);
-      cells.push({ date: dt, day: d, isCurrentMonth: false });
-    }
-    // Current month days
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dt = new Date(calYear, calMonth, d);
-      cells.push({ date: dt, day: d, isCurrentMonth: true });
-    }
-    // Next month leading days
-    const remaining = 7 - (cells.length % 7);
-    if (remaining < 7) {
-      for (let d = 1; d <= remaining; d++) {
-        const dt = new Date(calYear, calMonth + 1, d);
-        cells.push({ date: dt, day: d, isCurrentMonth: false });
-      }
-    }
-    return cells;
-  }, [calYear, calMonth]);
-
-  // Build a map of date → items for the calendar
-  const dateItemsMap = useMemo(() => {
-    const map = {};
-    function addItem(dateStr, item) {
-      if (!map[dateStr]) map[dateStr] = [];
-      if (item.cls === 'block' && map[dateStr].some(i => i.cls === 'block' && i.title === item.title)) return;
-      map[dateStr].push(item);
-    }
-    tasks.forEach(t => {
-      if (!t.dueDate) return;
-      const cls = t.status === 'done' ? 'task' : (daysUntil(t.dueDate) < 0 ? 'overdue' : 'task');
-      addItem(t.dueDate, { title: t.title, cls });
-    });
-    events.forEach(ev => {
-      if (!ev.date) return;
-      addItem(ev.date, { title: ev.title, cls: 'event' });
-    });
-    (blocks.recurring || []).forEach(rb => {
-      calendarDays.forEach(cell => {
-        if (rb.days.includes(cell.date.getDay())) {
-          const ds = toDateStr(cell.date);
-          addItem(ds, { title: rb.name, cls: 'block' });
-        }
-      });
-    });
-    Object.entries(blocks.dates || {}).forEach(([dateStr, slots]) => {
-      const seen = new Set();
-      Object.values(slots).forEach(slot => {
-        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); addItem(dateStr, { title: slot.name, cls: 'block' }); }
-      });
-    });
-    return map;
-  }, [tasks, events, blocks, calendarDays]);
-
-  function prevMonth() { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }
-  function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
-  function goToday() { setCalYear(new Date().getFullYear()); setCalMonth(new Date().getMonth()); }
-
-  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-  // ── Weekly view data ──
-  const weekDays = useMemo(() => {
-    const now = new Date();
-    const sunday = new Date(now); sunday.setDate(now.getDate() - now.getDay()); sunday.setHours(0,0,0,0);
-    return Array.from({length:7}, (_, i) => { const d = new Date(sunday); d.setDate(sunday.getDate() + i); return d; });
-  }, []);
-
-  const weekDayItems = useMemo(() => {
-    return weekDays.map(day => {
-      const ds = toDateStr(day);
-      const dow = day.getDay();
-      const dayBlocks = [];
-      const seen = new Set();
-      (blocks.recurring || []).forEach(rb => {
-        if (rb.days.includes(dow) && !seen.has(rb.name)) { seen.add(rb.name); dayBlocks.push({ title: rb.name, cls: 'block' }); }
-      });
-      Object.entries(blocks.dates?.[ds] || {}).forEach(([, slot]) => {
-        if (slot && slot.name && !seen.has(slot.name)) { seen.add(slot.name); dayBlocks.push({ title: slot.name, cls: 'block' }); }
-      });
-      const dayTasks = tasks.filter(t => t.dueDate === ds && t.status !== 'done').map(t => ({ title: t.title, cls: daysUntil(t.dueDate) < 0 ? 'overdue' : 'task' }));
-      const dayEvents = events.filter(ev => ev.date === ds).map(ev => ({ title: ev.title, cls: 'event' }));
-      return { date: day, ds, items: [...dayBlocks, ...dayTasks, ...dayEvents] };
-    });
-  }, [weekDays, blocks, tasks, events]);
-
-  return (<>
-    {!embedded && <div className="peek-overlay" onClick={onClose}/>}
-    <div className={'peek-panel' + (embedded ? ' embedded' : '') + (isFullscreen && !embedded ? ' fullscreen' : '')}>
-      {!isFullscreen && <div className="peek-handle"/>}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-        <div><div style={{fontSize:'1.1rem',fontWeight:700}}>{greeting}</div><div style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>{fmtFull(new Date())}</div></div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
-          {weatherData?.current&&<div style={{display:'flex',alignItems:'center',gap:6,marginRight:4}}><span style={{display:'flex',color:'var(--teal)'}}>{weatherEmoji(weatherData.current.weathercode)}</span><span style={{fontWeight:700}}>{Math.round(weatherData.current.temperature_2m)}°F</span></div>}
-          <button className="notes-fs-btn" onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen calendar'}>
-            {isFullscreen ? Icon.minimize(16) : Icon.maximize(16)}
-          </button>
-          {!embedded && <button className="g-modal-close" onClick={onClose}>{Icon.x(16)}</button>}
-        </div>
-      </div>
-
-      {/* ── Fullscreen: View Tabs + Calendar ── */}
-      {isFullscreen && (
-        <div style={{marginBottom:16}}>
-          {/* View toggle tabs */}
-          <div style={{display:'flex',gap:6,marginBottom:12}}>
-            {['month','week'].map(v => (
-              <button key={v} onClick={()=>setCalView(v)}
-                style={{padding:'5px 14px',borderRadius:8,border:'1px solid',fontSize:'0.8rem',fontWeight:600,cursor:'pointer',transition:'all .15s',
-                  borderColor: calView===v ? 'var(--accent)' : 'var(--border)',
-                  background: calView===v ? 'rgba(108,99,255,0.18)' : 'transparent',
-                  color: calView===v ? 'var(--accent)' : 'var(--text-dim)'}}>
-                {v.charAt(0).toUpperCase()+v.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {calView === 'month' && (<>
-            <div className="cal-month-nav">
-              <button className="cal-nav-btn" onClick={prevMonth}>{Icon.chevronLeft(16)}</button>
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <span className="cal-month-title">{monthNames[calMonth]} {calYear}</span>
-                <button className="cal-nav-btn" onClick={goToday} style={{fontSize:'0.75rem',padding:'4px 10px'}}>Today</button>
-              </div>
-              <button className="cal-nav-btn" onClick={nextMonth}>{Icon.chevronRight(16)}</button>
-            </div>
-            <div className="cal-grid">
-              {dayHeaders.map(d => (<div key={d} className="cal-day-header">{d}</div>))}
-              {calendarDays.map((cell, i) => {
-                const dateStr = toDateStr(cell.date);
-                const isToday = dateStr === todayKey;
-                const items = dateItemsMap[dateStr] || [];
-                const maxShow = 2;
-                return (
-                  <div key={i} className={'cal-cell' + (cell.isCurrentMonth ? '' : ' other-month') + (isToday ? ' today' : '')}>
-                    <div className="cal-cell-date" style={isToday ? {color:'var(--accent)'} : {}}>{cell.day}</div>
-                    {items.slice(0, maxShow).map((item, j) => (
-                      <div key={j} className={'cal-cell-event ' + item.cls} title={item.title}>{item.title}</div>
-                    ))}
-                    {items.length > maxShow && <div className="cal-cell-more">+{items.length - maxShow} more</div>}
-                  </div>
-                );
-              })}
-            </div>
-          </>)}
-
-          {calView === 'week' && (
-            <div>
-              <div style={{textAlign:'center',fontWeight:600,marginBottom:10,color:'var(--text-dim)',fontSize:'0.85rem'}}>
-                Week of {weekDays[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {weekDays[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
-                {weekDayItems.map(({date, ds, items}) => {
-                  const isToday = ds === todayKey;
-                  return (
-                    <div key={ds} style={{background: isToday ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.05)', border: isToday ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius:10, padding:'6px 4px', minHeight:90}}>
-                      <div style={{textAlign:'center',marginBottom:4}}>
-                        <div style={{fontSize:'0.7rem',color:'var(--text-dim)',textTransform:'uppercase',fontWeight:600}}>{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]}</div>
-                        <div style={{fontSize:'0.85rem',fontWeight:700,color: isToday ? 'var(--accent)' : 'var(--text)'}}>{date.getDate()}</div>
-                      </div>
-                      {items.length === 0 && <div style={{fontSize:'0.62rem',color:'var(--text-dim)',textAlign:'center',marginTop:4}}>free</div>}
-                      {items.map((item, j) => (
-                        <div key={j} className={'cal-cell-event ' + item.cls} title={item.title} style={{marginBottom:2}}>{item.title}</div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Regular peek content ── */}
-      <div className="peek-section">
-        <div className="peek-section-title">Today's Schedule</div>
-        {condensed.length===0?<div style={{fontSize:'0.85rem',color:'var(--text-dim)',padding:'8px 0'}}>Wide open! Your future self will thank you 🗓️</div>:
-        condensed.map((block,i)=>(
-          <div key={i} className="peek-timeline-slot"><div className="peek-timeline-time">{fmtTime(...block.start.split(':').map(Number))}</div>
-          <div className="peek-timeline-block" style={{background:catColor(block.category)+'20',borderLeft:'3px solid '+catColor(block.category)}}>{block.name}<span style={{fontSize:'0.72rem',color:'var(--text-dim)',marginLeft:8}}>{block.slots*30}min</span></div></div>
-        ))}
-      </div>
-      {overduePeekTasks.length>0&&<div className="peek-section">
-        <div className="peek-section-title" style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:4}}>{Icon.alertTriangle(14)} Overdue ({overduePeekTasks.length})</div>
-        {overduePeekTasks.map(task=>(<div key={task.id} className="peek-task-item">
-          <div className="peek-task-dot" style={{background:'var(--danger)'}}/>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:600,color:'var(--danger)'}}>{task.title}</div>
-            <div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{Math.abs(daysUntil(task.dueDate))}d overdue{' · '+(task.estTime||30)+'min'}</div>
-          </div>
-          <div style={{color:'var(--danger)',display:'flex'}}>{task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div>
-        </div>))}
-      </div>}
-      {activeTasks.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Tasks ({activeTasks.filter(t=>t.status!=='done').length})</div>
-        {activeTasks.map(task=>{
-          const completing = recentlyCompleted.has(task.id);
-          const d=daysUntil(task.dueDate);
-          const dotColor=completing?'var(--success)':d<=1?'var(--warning)':d<=3?'var(--accent)':'var(--text-dim)';
-          const lmsBadge = task.completionSource === 'lms'
-            ? (task.lmsAssignmentRef?.lms === 'canvas' ? 'Canvas'
-              : task.lmsAssignmentRef?.lms === 'schoology' ? 'Schoology'
-              : task.lmsAssignmentRef?.lms === 'custom' ? (task.lmsAssignmentRef.custom_host || 'LMS')
-              : 'Classroom')
-            : null;
-          return(<div key={task.id} className={'peek-task-item'+(completing?' task-completing':'')} style={completing?{background:'rgba(46,213,115,0.08)',borderRadius:10,padding:'4px 6px',transition:'all .3s'}:{}}><div className="peek-task-dot" style={{background:dotColor}}/><div style={{flex:1}}><div style={{fontWeight:500,color:completing?'var(--success)':undefined,display:'flex',alignItems:'center',gap:6}}>{task.title}{lmsBadge&&<span title={`Auto-completed from ${lmsBadge}${typeof task.completionConfidence==='number'?` · ${task.completionConfidence}% confidence`:''}`} style={{fontSize:'0.62rem',fontWeight:600,padding:'1px 6px',borderRadius:8,background:'rgba(46,213,115,0.15)',color:'var(--success)',letterSpacing:'0.02em'}}>via {lmsBadge}</span>}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{task.subject&&task.subject+' · '}{completing?'Completed! 🎉':d===0?'Today':d===1?'Tomorrow':fmt(task.dueDate)}{!completing&&' · '+(task.estTime||30)+'min'}</div></div><div style={{color:completing?'var(--success)':dotColor,display:'flex'}}>{completing?Icon.checkCircle(14):task.status==='in_progress'?Icon.circleDot(14):Icon.circle(14)}</div></div>)
-        })}
-      </div>}
-      {upcomingEvents.length>0&&<div className="peek-section"><div className="peek-section-title">Upcoming Events</div>
-        {upcomingEvents.map(ev=>(<div key={ev.id} className="peek-task-item"><div className="peek-task-dot" style={{background:catColor(ev.type)}}/><div><div style={{fontWeight:500}}>{ev.title}</div><div style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>{fmt(ev.date)}{ev.subject&&' · '+ev.subject}</div></div></div>))}
-      </div>}
-    </div>
-  </>);
 }
 
 /* ═══════════════════════════════════════════════
@@ -4696,28 +4348,6 @@ const AutoApproveIndicator = ({ status }) => {
 };
 
 /* ═══════════════════════════════════════════════
-   ACTIVE TIMER PILL — small floating chip rendered per active timer
-   ═══════════════════════════════════════════════ */
-function ActiveTimerPill({ timer, onDismiss }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, timer.fireAt - Date.now()));
-  useEffect(() => {
-    const id = setInterval(() => setRemaining(Math.max(0, timer.fireAt - Date.now())), 1000);
-    return () => clearInterval(id);
-  }, [timer.fireAt]);
-  const secs = Math.floor(remaining / 1000);
-  const mm = Math.floor(secs / 60);
-  const ss = secs % 60;
-  const display = mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : `${ss}s`;
-  return (
-    <button type="button" className="sos-active-timer" onClick={onDismiss} title="Dismiss timer">
-      <span style={{fontSize:'0.85rem'}}>⏱</span>
-      <span>{timer.label}</span>
-      <span style={{opacity:0.8}}>{display}</span>
-    </button>
-  );
-}
-
-/* ═══════════════════════════════════════════════
    SOS MAIN APP
    ═══════════════════════════════════════════════ */
 function App() {
@@ -4745,8 +4375,6 @@ function App() {
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
-  const [weatherData, setWeatherData] = useState(null);
-  const [weatherCoords, setWeatherCoords] = useState({ lat:42.33, lon:-71.21 });
   // Floating widgets summoned from chat ("set a timer", "what's my schedule").
   // null = hidden. Each widget renders only when explicitly invoked.
   const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false });
@@ -4763,7 +4391,6 @@ function App() {
   const [chatError, setChatError] = useState(null);
   const [autoApproveStatus, setAutoApproveStatus] = useState(null);
   const [contextTrimInfo, setContextTrimInfo] = useState(null); // { shown, total } when tasks trimmed
-  const [recentlyCompleted, setRecentlyCompleted] = useState(new Set()); // task IDs completing right now
   // Unified AI-pending state — one object for everything the AI surfaces after a response.
   const PENDING_INITIAL = {
     actions: [],            // action cards awaiting user approval [{ action, timestamp }]
@@ -4780,7 +4407,6 @@ function App() {
       ...prev,
       ...(typeof patch === "function" ? patch(prev) : patch),
     }));
-  const clearPending = () => setPending(PENDING_INITIAL);
   const {
     actions: pendingActions,
     content: pendingContent,
@@ -4799,13 +4425,12 @@ function App() {
   const setPendingProposal = (v) => updatePending(typeof v === "function" ? (p) => ({ proposal: v(p.proposal) }) : { proposal: v });
   const setPendingQueue = (v) => updatePending(typeof v === "function" ? (p) => ({ queue: v(p.queue) }) : { queue: v });
   const [aiAutoApprove, setAiAutoApprove] = useState(() => localStorage.getItem('sos_ai_auto_approve') === 'true');
-  const [showPeek, setShowPeek] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showNotes, setShowNotes] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(() => localStorage.getItem('sos_show_analytics') === 'true');
-  const [rpmSnapshot, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
+  const [, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
-  const [modelFallbackUsed, setModelFallbackUsed] = useState(false);
+  const [, setModelFallbackUsed] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
   });
@@ -4820,17 +4445,11 @@ function App() {
   const getWorkspaceContext = useCallback(() => {
     return activePanel === 'chat' ? 'chat' : 'none';
   }, [activePanel]);
-  const workspaceContext = getWorkspaceContext();
-  const workspaceModeLabel = workspaceContext === 'schedule'
-    ? 'Schedule mode'
-    : workspaceContext === 'notes'
-      ? 'Notes mode'
-      : null;
   const [toastMsg, setToastMsg] = useState(null);
   const [lmsPendingConfirm, setLmsPendingConfirm] = useState(null); // {taskId, taskTitle, lmsName}
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
-  const [contentGenUsed, setContentGenUsed] = useState(0);
+  const [, setContentGenUsed] = useState(0);
   const DAILY_CONTENT_LIMIT = 5;
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
@@ -4991,15 +4610,7 @@ function App() {
     setHomePrefs(prev => ({ ...prev, [key]: value }));
   }
 
-  // ── Alternating welcome screen content ──
-  const welcomeVariants = useMemo(() => [
-    { greeting: "Hey, I'm Your Study Sidekick", desc: "Tell me what's on your plate and I'll help you figure it out. I know your tasks, schedule, and events — so just talk to me like a friend.", chips: ['I have a math test on Friday','What should I work on?','Make me flashcards for biology','Quiz me on chapter 3'] },
-    { greeting: "What's the Move Today?", desc: "Drop your homework, tests, or deadlines on me and I'll help you stay on top of everything. No stress, just vibes.", chips: ['I need to study for finals','Break down my science project','What\'s on my schedule?','Summarize my notes'] },
-    { greeting: "Ready When You Are", desc: "Tell me about your classes, assignments, or anything school-related. I'll organize it, remind you, and even quiz you when you need it.", chips: ['Add a homework assignment','Make a study plan for this week','I have practice at 4pm','Create an outline for my essay'] },
-    { greeting: "Let's Get You Ahead", desc: "I can track your tasks, manage your schedule, create flashcards, and help you study smarter. Just tell me what you need.", chips: ['What\'s due this week?','Quiz me on vocabulary','I finished my essay','Help me plan my study time'] },
-    { greeting: "Your Schedule, Simplified", desc: "Think of me as your personal planner that actually talks back. Tell me what's coming up and I'll handle the rest.", chips: ['I have a test tomorrow','Show me my tasks','Make flashcards for history','What should I prioritize?'] },
-  ], []);
-  const welcomeIdx = 0; // Pinned to first variant for a stable, consistent first impression
+  const welcomeIdx = 0; // Pinned to first placeholder variant for a stable, consistent first impression
 
   // ── Auth handler ──
   async function handleAuth(authUser, showWelcome = false) {
@@ -5042,7 +4653,6 @@ function App() {
       setEvents(data.events);
       setMessages(data.messages);
       setDbMessageCount(data.messages.length); // P1.4
-      setWeatherCoords(data.weatherCoords);
       setStudyPlans(data.studyPlans || []);
     }
 
@@ -5345,41 +4955,6 @@ function App() {
       try { localStorage.setItem('sos_rollup_last_shown', t); } catch (_) {}
     }
   }, [dataLoaded, user, gateOpen, showOnboarding, rollupOpen, rollupItems, rollupAuto]);
-
-  // ── Weather fetch ──
-  const [weatherCity, setWeatherCity] = useState(null);
-  const fetchWeather = useCallback(async (coords, city) => {
-    try {
-      const { lat, lon } = coords || weatherCoords;
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
-      const res = await fetch(url); if (!res.ok) throw new Error('Weather fetch failed');
-      const data = await res.json();
-      setWeatherData({ current:data.current, daily:data.daily, city: city || weatherCity, fetchedAt:Date.now() });
-    } catch(e) { console.error('Weather fetch error:', e); }
-  }, [weatherCoords, weatherCity]);
-  // IP-based geolocation on first load (only when using default Boston coords)
-  useEffect(() => {
-    if (!dataLoaded) return;
-    const isDefault = weatherCoords.lat === 42.33 && weatherCoords.lon === -71.21;
-    if (isDefault) {
-      fetch('https://ipapi.co/json/')
-        .then(r => r.json())
-        .then(d => {
-          if (d.latitude && d.longitude) {
-            const coords = { lat: d.latitude, lon: d.longitude };
-            setWeatherCoords(coords);
-            setWeatherCity(d.city || null);
-            fetchWeather(coords, d.city || null);
-          } else {
-            fetchWeather();
-          }
-        })
-        .catch(() => fetchWeather());
-    } else {
-      const stale = !weatherData?.fetchedAt || (Date.now() - weatherData.fetchedAt > 3600000);
-      if (stale) fetchWeather();
-    }
-  }, [dataLoaded]);
 
   // ── Notification scheduling: re-run whenever tasks, events, or prefs change ──
   useEffect(() => {
@@ -5899,8 +5474,6 @@ function App() {
           }
           const completedAt = new Date().toISOString();
           updateTask(target.id, { status:'done', completedAt });
-          setRecentlyCompleted(prev => { const n = new Set(prev); n.add(target.id); return n; });
-          setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(target.id); return n; }), 900);
           if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'complete', fromStatus: target.status, toStatus: 'done', metadata: { title: target.title, subject: target.subject } }, user.id);
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
           recordExecution('complete_task', `"${target.title}"`);
@@ -6118,18 +5691,15 @@ function App() {
             }
           }
           const content = action.content || '';
-          let savedNote = null;
           setNotes(prev => {
             const existing = prev.findIndex(n => !n.is_folder && n.name.toLowerCase() === tabName.toLowerCase());
             if (existing >= 0) {
               const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString(), parent_id: folderId || n.parent_id } : n);
               if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
-              savedNote = updated[existing];
               return updated;
             }
             const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString(), is_folder: false, parent_id: folderId };
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
-            savedNote = newNote;
             return [...prev, newNote];
           });
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note', source });
@@ -6838,8 +6408,6 @@ function App() {
           const completedAt = new Date().toISOString();
           targets.forEach(t => {
             updateTask(t.id, { status: 'done', completedAt });
-            setRecentlyCompleted(prev => { const n = new Set(prev); n.add(t.id); return n; });
-            setTimeout(() => setRecentlyCompleted(prev => { const n = new Set(prev); n.delete(t.id); return n; }), 900);
             if (user) dbInsertTaskEvent({ taskId: t.id, eventType: 'complete', fromStatus: t.status, toStatus: 'done', metadata: { title: t.title, subject: t.subject } }, user.id);
           });
           postAssistantNote(`Marked ${targets.length} task${targets.length !== 1 ? 's' : ''} as done.`);
@@ -8455,7 +8023,7 @@ function App() {
       } else {
         // Never leak raw provider JSON / stack traces to the student. If the message
         // looks structured (JSON-ish, very long, or obviously a provider error) suppress it.
-        const looksLikeProviderError = raw.length > 120 || /[{}\[\]"]/.test(raw) || /Groq|Gemini|openai|tool_use_failed/i.test(raw);
+        const looksLikeProviderError = raw.length > 120 || /[{}[\]"]/.test(raw) || /Groq|Gemini|openai|tool_use_failed/i.test(raw);
         friendlyMsg = looksLikeProviderError ? "hmm, something hiccuped — want to try again?" : (raw || "hmm, that hiccuped — want to try again?");
       }
       setChatError(friendlyMsg);
@@ -8587,22 +8155,6 @@ function App() {
     if(input.trim()) sfx.send();
     sendMessage(input);
   }
-  function sendChip(text) {
-    const normalizedText = text === 'Make flashcards'
-      ? (notes.length > 0 ? 'Create flashcards from my notes for the topic I should study next.' : 'Create flashcards for the topic I should study next.')
-      : text === 'Quiz me'
-        ? (notes.length > 0 ? 'Create a quiz from my notes and ask me one question at a time.' : 'Create a quiz for the topic I should study next and ask me one question at a time.')
-        : text;
-    if(!user){
-      if(guestMsgCount >= GUEST_DEMO_LIMIT){ setInput(normalizedText); setShowAuthModal(true); return; }
-      incrementGuestCount();
-      setInput('');
-      sendMessage(normalizedText);
-      return;
-    }
-    setInput(''); sendMessage(normalizedText);
-  }
-
   async function handlePhotoSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -8636,15 +8188,7 @@ function App() {
     let text = '';
     try {
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        const ab = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-        const pages = [];
-        for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          pages.push(content.items.map(item => item.str).join(' '));
-        }
-        text = pages.join('\n\n');
+        text = await extractPdfText(file, { maxPages: 20 });
       } else {
         text = await file.text();
       }
@@ -8896,13 +8440,11 @@ function App() {
         setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showPeek)setShowPeek(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showPeek,showNotes,showChatSidebar,showGlobalSearch,activePanel]);
+  },[showNotes,showChatSidebar,showGlobalSearch,activePanel]);
 
-  const activeTaskCount = tasks.filter(t=>t.status!=='done').length;
-  const overdueCount = tasks.filter(t=>t.status!=='done'&&daysUntil(t.dueDate)<0).length;
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (

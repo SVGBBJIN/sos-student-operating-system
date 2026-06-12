@@ -78,10 +78,10 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 **Models** (never reference these strings outside `router.ts`):
 - Tier 0 — `gemini-embedding-002` — embeddings (memory, semantic search, clustering). Gemini stays here; Groq has no embedding model.
 - Tier 1 (flash) — `openai/gpt-oss-20b` on Groq — chat, action_routing, summarize, proofread_classify, rerank.
-- Tier 1 fallback — `gemini-3-flash` (cross-provider when Groq fails).
+- Tier 1 fallback — `gemini-2.5-flash` (cross-provider when Groq fails).
 - Tier 2 (pro) — `openai/gpt-oss-120b` on Groq — studio, planning, proofread_specialist.
 - Tier 2 fallback — `gemini-2.5-pro` (cross-provider when Groq fails).
-- Vision override — `meta-llama/llama-4-scout-17b-16e-instruct` on Groq, applied in chat-core when a request carries image attachments. Fallback: `gemini-3-flash`.
+- Vision override — `meta-llama/llama-4-scout-17b-16e-instruct` on Groq, applied in chat-core when a request carries image attachments. Fallback: `gemini-2.5-flash`.
 - Voice — `whisper-large-v3-turbo` on Groq via `shared/ai/voice.ts` (bypasses callModel).
 
 **callModel()** in `chat-core.ts` takes `{ intent, messages, ... }`, routes the intent through `router.ts`, dispatches to the provider, applies retry/circuit breaker, validates tool outputs against the Zod schemas, and (when streaming) yields chunks through `onChunk`.

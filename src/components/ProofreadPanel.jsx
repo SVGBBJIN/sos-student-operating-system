@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import { sb, SUPABASE_ANON_KEY, PROOFREAD_FN_URL } from '../lib/supabase.js';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
+import { extractPdfText } from '../lib/pdf.js';
 
 const SEVERITY_COLORS = {
   info:  'var(--muted-foreground)',
@@ -37,17 +32,6 @@ function fileToBase64(file) {
   });
 }
 
-async function extractPdfText(file) {
-  const ab = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-  const pages = [];
-  for (let i = 1; i <= Math.min(pdf.numPages, MAX_PDF_PAGES); i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(content.items.map(item => item.str).join(' '));
-  }
-  return pages.join('\n\n').trim();
-}
 
 function ClassificationBadge({ classification }) {
   if (!classification) return null;
@@ -294,7 +278,7 @@ export default function ProofreadPanel() {
         if (photo?.previewUrl) URL.revokeObjectURL(photo.previewUrl);
         setPhoto({ base64, mimeType: file.type || 'image/jpeg', name: file.name, previewUrl });
       } else if (isPdf) {
-        const extracted = await extractPdfText(file);
+        const extracted = await extractPdfText(file, { maxPages: MAX_PDF_PAGES });
         if (!extracted) {
           setError("Couldn't extract text from that PDF — try a typed PDF or paste manually.");
           return;
