@@ -29,55 +29,6 @@ const KIND_META = {
 
 const Q3_PLACEHOLDER = 'touching grass';
 
-function parseMin(t) {
-  const [h, m] = String(t).split(':').map(Number);
-  return h * 60 + (m || 0);
-}
-function lastEnd(blocks) {
-  return blocks.reduce((mx, b) => Math.max(mx, parseMin(b.end)), 15 * 60 + 30);
-}
-
-function BlockChip({ block, animateIn, index, removable, onRemove }) {
-  const meta = KIND_META[block.kind] || KIND_META.focus;
-  return (
-    <div
-      className={animateIn ? 'sos-onb-block' : undefined}
-      style={{
-        '--i': index,
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '9px 12px', borderRadius: 12,
-        background: meta.tint,
-        border: `1px solid ${meta.color}`,
-        borderLeft: `3px solid ${meta.color}`,
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)' }}>{block.name}</span>
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: 'JetBrains Mono, monospace' }}>
-          {block.start}–{block.end}
-        </span>
-      </div>
-      {block.committed ? (
-        <span style={{ fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: meta.color, opacity: 0.85 }}>
-          locked in
-        </span>
-      ) : removable ? (
-        <button
-          onClick={onRemove}
-          title="Drop this block"
-          style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', padding: 2 }}
-        >
-          {Icon.x(15)}
-        </button>
-      ) : (
-        <span style={{ fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: meta.color, opacity: 0.65 }}>
-          draft
-        </span>
-      )}
-    </div>
-  );
-}
-
 const BUILD_MSGS = [
   'Locking in your commitments…',
   'Placing study windows…',

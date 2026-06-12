@@ -42,7 +42,7 @@ export default function ProjectPanel({ subject, tasks = [], events = [], notes =
     const projNotes  = notes.filter(n => !n.is_folder && ((n.subject || n.tab_name || '').toLowerCase() === sl));
     const projDecks  = flashcardDecks.filter(d => d.title.toLowerCase().includes(sl));
     return { tasks: projTasks, events: projEvents, notes: projNotes, decks: projDecks };
-  }, [subject, tasks, events, notes, flashcardDecks, sl]);
+  }, [tasks, events, notes, flashcardDecks, sl]);
 
   const allItems = useMemo(() => [
     ...proj.tasks.map(t  => ({ id: t.id, _type: 'task',  _label: t.title || 'Untitled', _meta: t.dueDate || '' })),

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import './CalendarWindow.css';
 import { useCalendarSize } from './useCalendarSize.js';
 import { useDraggable }    from './useDraggable.js';

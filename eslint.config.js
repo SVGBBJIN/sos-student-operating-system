@@ -43,7 +43,7 @@ export default [
       'react/jsx-uses-vars': 'error',
       'react/jsx-uses-react': 'off', // new JSX transform — no React import needed
       // Helpful but non-blocking on a large legacy file.
-      'no-unused-vars': ['warn', { args: 'none', varsIgnorePattern: '^(_|React)', ignoreRestSiblings: true }],
+      'no-unused-vars': ['warn', { args: 'none', varsIgnorePattern: '^(_|React)', caughtErrorsIgnorePattern: '^(_|e(rr)?)$', ignoreRestSiblings: true }],
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-useless-escape': 'warn',
       'no-cond-assign': ['error', 'except-parens'],
