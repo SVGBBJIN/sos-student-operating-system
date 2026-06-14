@@ -31,6 +31,13 @@ import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import {
+  START_LATENCY_EXPERIMENT_KEY,
+  assignArm,
+  isValidArm,
+  getMechanism,
+  computeStartLatencyMs,
+} from '../shared/experiments/start-latency.ts';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 import HomeDecisionGate from './components/HomeDecisionGate';
 import DecisionRollup from './components/DecisionRollup';
@@ -286,6 +293,7 @@ function dbTaskToApp(row) {
     completionConfidence: row.completion_confidence == null ? null : Number(row.completion_confidence),
     startSource: row.start_source || null,
     startedAt: row.started_at || null,
+    pledgedStartAt: row.pledged_start_at || null,
     lmsAssignmentRef: row.lms_assignment_ref || null,
     lmsPendingClose: row.lms_pending_close || false,
     lmsPendingCloseAt: row.lms_pending_close_at || null,
@@ -304,6 +312,7 @@ function appTaskToDb(t, userId) {
     completion_confidence: typeof t.completionConfidence === 'number' ? t.completionConfidence : null,
     start_source: t.startSource || null,
     started_at: t.startedAt || null,
+    pledged_start_at: t.pledgedStartAt || null,
     lms_assignment_ref: t.lmsAssignmentRef || null,
   };
 }
@@ -4355,6 +4364,9 @@ function App() {
   const [searchParams] = useSearchParams();
   const { agenticMode, setAgenticMode } = useAgenticMode();
   const [user, setUser] = useState(null);
+  // Start-latency experiment: which intervention arm this user is pinned to.
+  // null until resolved from experiment_assignments (see ensureExperimentArm).
+  const [experimentArm, setExperimentArm] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
@@ -4666,6 +4678,11 @@ function App() {
         const { data: gradesData } = await sb.from('grades').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(500);
         setGrades(gradesData || []);
       } catch (e) { console.error('Failed to load grades:', e); }
+
+    // Resolve the user's start-latency experiment arm: read the pinned
+    // assignment, or seed one deterministically on first load. Best-effort —
+    // a failure just leaves the arm at control behavior (no mechanism fires).
+    ensureExperimentArm(authUser.id);
 
     // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
     // whose fire_at is already past (laptop slept, tab closed, etc.).
@@ -5115,6 +5132,34 @@ function App() {
     });
   }
 
+  // ── Start-latency experiment ──
+  // Pin the user to one intervention arm and keep it stable across sessions.
+  // Reads the persisted assignment first; if none exists, seeds one from the
+  // deterministic hash and writes it back. Either way `experimentArm` ends up
+  // set so the pledge/start flow can apply (or skip) the right mechanism.
+  async function ensureExperimentArm(userId) {
+    if (!userId) return;
+    const seeded = assignArm(userId);
+    try {
+      const { data } = await sb.from('experiment_assignments')
+        .select('arm')
+        .eq('user_id', userId)
+        .eq('experiment_key', START_LATENCY_EXPERIMENT_KEY)
+        .maybeSingle();
+      if (data && isValidArm(data.arm)) { setExperimentArm(data.arm); return; }
+      // No row yet — persist the seed. On unique-constraint races, fall back to
+      // the seed value locally; the row that won the race uses the same hash.
+      await sb.from('experiment_assignments').insert({
+        user_id: userId,
+        experiment_key: START_LATENCY_EXPERIMENT_KEY,
+        arm: seeded,
+      });
+    } catch (e) {
+      console.warn('[experiment] arm resolve failed, using seed:', e);
+    }
+    setExperimentArm(seeded);
+  }
+
   // ── Start primitive ──
   // One invocable launcher (gate today, other surfaces later). Non-committal:
   // gather any linked materials, surface them, run a 10-minute ambient timer,
@@ -5144,10 +5189,20 @@ function App() {
       startedAt: new Date(startedAt).toISOString(),
     });
 
-    // Behavioral telemetry — feeds plans-created vs started-within-24h.
+    // Behavioral telemetry — feeds plans-created vs started-within-24h, and the
+    // start-latency experiment: if the student had pledged a start time, log the
+    // gap (intention → action) and their arm so start_latency_by_arm() can rank
+    // which mechanism cut the delay most.
+    const startLatencyMs = computeStartLatencyMs(task.pledgedStartAt, new Date(startedAt).toISOString());
     if (user) dbInsertTaskEvent({
       taskId: task.id, eventType: 'start', fromStatus: task.status, toStatus: 'in_progress',
-      metadata: { title: task.title, subject: task.subject, source, study_plan_id: task.study_plan_id || null },
+      metadata: {
+        title: task.title, subject: task.subject, source,
+        study_plan_id: task.study_plan_id || null,
+        ...(task.pledgedStartAt ? { pledged_start_at: task.pledgedStartAt } : {}),
+        ...(startLatencyMs != null ? { start_latency_ms: startLatencyMs } : {}),
+        ...(experimentArm ? { experiment_arm: experimentArm } : {}),
+      },
     }, user.id);
 
     // Gather linked materials (best-effort, bounded). No links → skip silently.
@@ -6389,6 +6444,37 @@ function App() {
           if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'postpone', fromStatus: target.status, toStatus: target.status, metadata: { title: target.title, subject: target.subject, from_due: target.dueDate, to_due: rawDate, days_diff: daysDiff } }, user.id);
           postAssistantNote(`Postponed **${target.title}** to ${rawDate}.`);
           pushUndoToast(`Undo: postponed "${target.title}"`, undoSnap);
+          break;
+        }
+        case 'pledge_start': {
+          const target = resolveTask(action.title, tasks);
+          if (!target) {
+            postAssistantNote(`I couldn't find a task called "${action.title}" to pledge a start time for.`);
+            break;
+          }
+          const pledgeAt = (action.start_at || '').trim();
+          const parsed = pledgeAt ? new Date(pledgeAt) : null;
+          if (!parsed || Number.isNaN(parsed.getTime())) {
+            postAssistantNote(`I need a valid start time to lock that in.`);
+            break;
+          }
+          const pledgedIso = parsed.toISOString();
+          updateTask(target.id, { pledgedStartAt: pledgedIso });
+          // Intention side of the start-latency metric, tagged with the arm so
+          // the readout can compare pledge→start gaps across mechanisms.
+          if (user) dbInsertTaskEvent({
+            taskId: target.id, eventType: 'pledge', fromStatus: target.status, toStatus: target.status,
+            metadata: { title: target.title, subject: target.subject, pledged_start_at: pledgedIso, experiment_arm: experimentArm || null },
+          }, user.id);
+          // Apply the assigned mechanism. Active arms send their follow-up
+          // prompt; control / not-yet-wired arms just confirm the pledge.
+          const mech = getMechanism(experimentArm || 'control');
+          const when = parsed.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+          if (mech.active && mech.pledgePrompt) {
+            postAssistantNote(mech.pledgePrompt(target.title));
+          } else {
+            postAssistantNote(`Locked in — you'll start **${target.title}** ${when}.`);
+          }
           break;
         }
         case 'bulk_complete': {

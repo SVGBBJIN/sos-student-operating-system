@@ -383,6 +383,16 @@ export const LogGradeSchema = z.object({
 });
 export type LogGradeInput = z.infer<typeof LogGradeSchema>;
 
+export const PledgeStartSchema = z.object({
+  type: z.literal("pledge_start").optional(),
+  title: titleLikeString("title"),
+  // When the student says they'll START the task — ISO 8601 with timezone.
+  // This is the intention side of the start-latency experiment; the action side
+  // is the existing start primitive (tasks.started_at).
+  start_at: isoDateTimeString,
+});
+export type PledgeStartInput = z.infer<typeof PledgeStartSchema>;
+
 export const UpdateStudySetSchema = z.object({
   type: z.literal("update_study_set").optional(),
   title: titleLikeString("title"),
@@ -434,6 +444,7 @@ export const ACTION_SCHEMAS = {
   create_folder: CreateFolderSchema,
   log_grade: LogGradeSchema,
   update_study_set: UpdateStudySetSchema,
+  pledge_start: PledgeStartSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -480,6 +491,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   create_folder: "Create a new folder in the student's notes. name is the folder title. Optionally nest it under a parent_folder. Does not create duplicate folders.",
   log_grade: "Record a grade for an assignment or exam. subject, assignment name, and grade (0–100) are required. grade_type can be 'exam', 'quiz', 'homework', 'project', or 'other'. Posts the logged grade and the updated subject average to chat.",
   update_study_set: "Edit an existing flashcard deck — rename it, add new cards, or remove cards by question text. At least one of new_title, cards_to_add, or cards_to_remove must be provided. Identify the deck by title (fuzzy match).",
+  pledge_start: "Record WHEN the student intends to START a task (not when it's due). Call this whenever the student commits to a start time — 'I'll start my essay at 7', 'I'll get to chem after dinner', 'gonna do calc tonight'. Identify the task by title (fuzzy match); start_at is the resolved ISO 8601 datetime with timezone. This powers the start-latency experiment that measures intention vs. actual start.",
 };
 
 export function buildActionToolDefs(): ToolDef[] {
