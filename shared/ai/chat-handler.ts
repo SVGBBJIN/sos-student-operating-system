@@ -405,6 +405,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
         attachments,
         toolSet: "chat",
         maxOutputTokens,
+        groundTitles: true,
         onChunk,
       });
 
