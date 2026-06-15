@@ -75,5 +75,10 @@ as $$
   group by t.arm;
 $$;
 
--- Expose the aggregate to clients; the underlying tables stay RLS-protected.
-grant execute on function experiment_arm_performance(text, int) to anon, authenticated;
+-- Expose the aggregate to SIGNED-IN clients only (anon never needs it); the
+-- underlying tables stay RLS-protected. This is intentionally callable by
+-- authenticated users — it returns counts + median latency only, no PII — so
+-- each client can compute its own adaptive allocation. The linter warning for
+-- a SECURITY DEFINER function being authenticated-executable is accepted here.
+revoke all on function experiment_arm_performance(text, int) from public, anon;
+grant execute on function experiment_arm_performance(text, int) to authenticated;

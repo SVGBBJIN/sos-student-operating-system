@@ -53,6 +53,7 @@ create or replace function start_latency_by_arm(window_days int default 14)
 returns table (arm text, n bigint, median_minutes numeric, p90_minutes numeric)
 language sql
 stable
+set search_path = public
 as $$
   select
     a.arm,
