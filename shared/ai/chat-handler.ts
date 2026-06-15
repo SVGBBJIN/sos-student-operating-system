@@ -403,7 +403,7 @@ export async function handleChatRequest(input: HandleChatInput): Promise<ChatOut
         dynamicContext: ctx,
         messages,
         attachments,
-        toolSet: "action",
+        toolSet: "chat",
         maxOutputTokens,
         onChunk,
       });

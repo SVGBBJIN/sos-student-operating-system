@@ -405,6 +405,73 @@ export const UpdateStudySetSchema = z.object({
 });
 export type UpdateStudySetInput = z.infer<typeof UpdateStudySetSchema>;
 
+// ── Consolidated follow-up task verb ────────────────────────────────────────
+// One tool that covers the four follow-up operations on an existing task:
+// update / delete / complete / postpone. The create verbs (add_task, add_event,
+// add_block) stay distinct — they lead turns and route better standalone. This
+// merge is for the *chat menu only*: programmatic/forced callers keep calling
+// the individual schemas directly. After validation, `expandManageTask` rewrites
+// it into the canonical per-operation action type so the client executor (and
+// brain_dump / eval paths) never has to learn a new action shape.
+const taskOperationEnum = z.enum(["update", "delete", "complete", "postpone"]);
+
+export const ManageTaskSchema = z
+  .object({
+    type: z.literal("manage_task").optional(),
+    operation: taskOperationEnum,
+    // Identify the task. task_id (UUID) is update-only; title is a fuzzy match
+    // usable by every operation.
+    task_id: z.string().uuid().optional(),
+    title: titleLikeString("title").optional(),
+    // update fields
+    new_title: titleLikeString("new_title").optional(),
+    due: dateString.optional(),
+    estimated_minutes: z.number().int().min(1).max(480).optional(),
+    commitment: taskCommitmentField,
+    confidence: confidenceField,
+    // postpone field
+    new_due_date: dateString.optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.operation === "update") {
+      if (!v.task_id && !v.title) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: "Provide task_id or title to identify the task" });
+      }
+      if (!v.new_title && !v.due && v.estimated_minutes === undefined && !v.commitment) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["new_title"], message: "Provide at least one of new_title, due, estimated_minutes, or commitment to update" });
+      }
+    } else if (v.operation === "postpone") {
+      if (!v.title) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: "Provide title to identify the task to postpone" });
+      if (!v.new_due_date) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["new_due_date"], message: "Provide new_due_date (YYYY-MM-DD) to postpone the task" });
+    } else {
+      // delete | complete — title is the only identifier
+      if (!v.title) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: `Provide title to identify the task to ${v.operation}` });
+    }
+  });
+export type ManageTaskInput = z.infer<typeof ManageTaskSchema>;
+
+// Rewrite a validated manage_task call into the canonical per-operation action
+// type the client executor already understands. Keeps the wire action types
+// (update_task / delete_task / complete_task / postpone_task) stable.
+export function expandManageTask(data: Record<string, unknown>): Record<string, unknown> & { type: string } {
+  switch (String(data.operation)) {
+    case "complete":
+      return { type: "complete_task", title: data.title };
+    case "delete":
+      return { type: "delete_task", title: data.title };
+    case "postpone":
+      return { type: "postpone_task", title: data.title, new_due_date: data.new_due_date };
+    case "update":
+    default: {
+      const out: Record<string, unknown> & { type: string } = { type: "update_task" };
+      for (const k of ["task_id", "title", "new_title", "due", "estimated_minutes", "commitment", "confidence"] as const) {
+        if (data[k] !== undefined) out[k] = data[k];
+      }
+      return out;
+    }
+  }
+}
+
 export const ACTION_SCHEMAS = {
   add_event: AddEventSchema,
   add_task: AddTaskSchema,
@@ -445,6 +512,7 @@ export const ACTION_SCHEMAS = {
   log_grade: LogGradeSchema,
   update_study_set: UpdateStudySetSchema,
   pledge_start: PledgeStartSchema,
+  manage_task: ManageTaskSchema,
 } as const;
 
 export type ActionName = keyof typeof ACTION_SCHEMAS;
@@ -492,31 +560,49 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   log_grade: "Record a grade for an assignment or exam. subject, assignment name, and grade (0–100) are required. grade_type can be 'exam', 'quiz', 'homework', 'project', or 'other'. Posts the logged grade and the updated subject average to chat.",
   update_study_set: "Edit an existing flashcard deck — rename it, add new cards, or remove cards by question text. At least one of new_title, cards_to_add, or cards_to_remove must be provided. Identify the deck by title (fuzzy match).",
   pledge_start: "Record WHEN the student intends to START a task (not when it's due). Call this whenever the student commits to a start time — 'I'll start my essay at 7', 'I'll get to chem after dinner', 'gonna do calc tonight'. Identify the task by title (fuzzy match); start_at is the resolved ISO 8601 datetime with timezone. This powers the start-latency experiment that measures intention vs. actual start.",
+  manage_task: "Modify an EXISTING task. Set operation to 'update', 'complete', 'delete', or 'postpone'. Identify the task by title (fuzzy match) — or task_id (UUID) for 'update'. operation='update' needs at least one of new_title, due, estimated_minutes, or commitment. operation='postpone' needs new_due_date (YYYY-MM-DD). 'complete' and 'delete' need only the title. Use add_task (not this) to create a new task. If the task can't be identified, call ask_clarification.",
 };
 
-export function buildActionToolDefs(): ToolDef[] {
-  return (Object.keys(ACTION_SCHEMAS) as ActionName[]).map((name) => ({
+// manage_task is a chat-menu-only consolidation — programmatic / forced callers
+// (brain_dump, planning, eval) keep using the individual follow-up task verbs,
+// so it is excluded from the full action set.
+const FULL_SET_EXCLUDED: ReadonlySet<ActionName> = new Set(["manage_task"]);
+
+function toolDef(name: ActionName): ToolDef {
+  return {
     name,
     description: ACTION_DESCRIPTIONS[name],
     parameters: zodToGeminiSchema(ACTION_SCHEMAS[name]),
-  }));
+  };
 }
 
+export function buildActionToolDefs(): ToolDef[] {
+  return (Object.keys(ACTION_SCHEMAS) as ActionName[])
+    .filter((name) => !FULL_SET_EXCLUDED.has(name))
+    .map(toolDef);
+}
+
+// Slim menu for a live chat turn — only the verbs a turn actually picks among.
+// Capture verbs stay distinct (they lead turns); the four follow-up task verbs
+// collapse into manage_task; deep recall is the on-demand search_memory tool;
+// ask_clarification is the escape hatch. The long tail of rare edit/convert/
+// folder/grade verbs is reachable through forced modes or keyword routing, not
+// this menu.
+const CHAT_TOOLS: ActionName[] = [
+  // Capture verbs — lead turns, route better standalone, never consolidated.
+  "add_task", "add_event", "add_block", "add_recurring_event", "add_note",
+  // Read verbs — schedule / tasks / notes / study-set lookups.
+  "read_calendar", "read_tasks", "read_notes", "read_study_sets", "read_project",
+  // Consolidated follow-up task CRUD (update / delete / complete / postpone).
+  "manage_task",
+  // Other single-entity verbs that genuinely lead default-chat turns.
+  "set_timer", "cancel_timer", "plan_intent", "prioritize_tasks", "break_task",
+  // On-demand semantic recall + clarification escape.
+  "search_memory", "ask_clarification",
+];
+
 export function buildChatToolDefs(): ToolDef[] {
-  const CHAT_TOOLS: ActionName[] = [
-    "ask_clarification",
-    "read_calendar",
-    "read_tasks",
-    "read_notes",
-    "read_study_sets",
-    "read_project",
-    "prioritize_tasks",
-  ];
-  return CHAT_TOOLS.map((name) => ({
-    name,
-    description: ACTION_DESCRIPTIONS[name],
-    parameters: zodToGeminiSchema(ACTION_SCHEMAS[name]),
-  }));
+  return CHAT_TOOLS.map(toolDef);
 }
 
 export function validateAction(name: string, args: unknown): { ok: true; data: Record<string, unknown> } | { ok: false; issues: z.ZodIssue[] } {

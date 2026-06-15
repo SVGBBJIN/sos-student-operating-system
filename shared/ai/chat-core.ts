@@ -26,6 +26,7 @@ import type {
 import {
   buildActionToolDefs,
   buildChatToolDefs,
+  expandManageTask,
   validateAction,
   type ActionName,
 } from "./schemas/actions.js";
@@ -579,6 +580,14 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
       if (!isContentTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
+      continue;
+    }
+    // manage_task is the chat-menu consolidation of the four follow-up task
+    // verbs — expand it back into the canonical per-operation action so the
+    // client executor never sees the merged shape.
+    if (name === "manage_task") {
+      actions.push(expandManageTask(v.data as Record<string, unknown>));
+      validated.push(name);
       continue;
     }
     const actionType = (v.data as { type?: string }).type ?? name;
