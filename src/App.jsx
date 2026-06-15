@@ -36,8 +36,10 @@ import {
   assignArm,
   isValidArm,
   getMechanism,
+  getActiveArms,
   computeStartLatencyMs,
 } from '../shared/experiments/start-latency.ts';
+import { adaptiveAssign } from '../shared/experiments/allocation.ts';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 import HomeDecisionGate from './components/HomeDecisionGate';
 import DecisionRollup from './components/DecisionRollup';
@@ -5150,14 +5152,51 @@ function App() {
     });
   }
 
-  // ── Start-latency experiment ──
+  // ── Start-latency experiment (adaptive) ──
   // Pin the user to one intervention arm and keep it stable across sessions.
-  // Reads the persisted assignment first; if none exists, seeds one from the
-  // deterministic hash and writes it back. Either way `experimentArm` ends up
-  // set so the pledge/start flow can apply (or skip) the right mechanism.
+  // Existing assignments are honored as-is (stability). New users are routed by
+  // the adaptive allocator: it reads aggregate per-arm performance and shifts
+  // traffic toward whatever's cutting the pledge→start gap, while keeping an
+  // exploration floor so the experiment keeps learning. Falls back to uniform
+  // assignment whenever the signal isn't available yet.
+  async function resolveAdaptiveArm(userId) {
+    const activeArms = getActiveArms();
+    try {
+      // Graduation short-circuit: once a winner is declared, route new users to
+      // it directly (existing users keep their arm).
+      const { data: exp } = await sb.from('experiments')
+        .select('started_at,status,graduated_arm')
+        .eq('key', START_LATENCY_EXPERIMENT_KEY)
+        .maybeSingle();
+      if (exp?.status === 'graduated' && isValidArm(exp.graduated_arm)) {
+        return exp.graduated_arm;
+      }
+      const daysSinceStart = exp?.started_at
+        ? (Date.now() - new Date(exp.started_at).getTime()) / 86_400_000
+        : 0;
+      // Aggregate-only RPC (SECURITY DEFINER) — safe to call from the client.
+      const { data: stats } = await sb.rpc('experiment_arm_performance', {
+        p_experiment_key: START_LATENCY_EXPERIMENT_KEY,
+        p_window_days: 14,
+      });
+      const normalized = (stats || [])
+        .filter(s => isValidArm(s.arm))
+        .map(s => ({
+          arm: s.arm,
+          pledges: Number(s.pledges) || 0,
+          starts: Number(s.starts) || 0,
+          medianLatencyMin: s.median_latency_min == null ? null : Number(s.median_latency_min),
+        }));
+      const { arm } = adaptiveAssign(userId, normalized, { daysSinceStart }, activeArms);
+      return isValidArm(arm) ? arm : assignArm(userId, activeArms);
+    } catch (e) {
+      console.warn('[experiment] adaptive resolve failed, using uniform:', e);
+      return assignArm(userId, activeArms);
+    }
+  }
+
   async function ensureExperimentArm(userId) {
     if (!userId) return;
-    const seeded = assignArm(userId);
     try {
       const { data } = await sb.from('experiment_assignments')
         .select('arm')
@@ -5165,17 +5204,19 @@ function App() {
         .eq('experiment_key', START_LATENCY_EXPERIMENT_KEY)
         .maybeSingle();
       if (data && isValidArm(data.arm)) { setExperimentArm(data.arm); return; }
-      // No row yet — persist the seed. On unique-constraint races, fall back to
-      // the seed value locally; the row that won the race uses the same hash.
+      // No assignment yet — let the adaptive allocator pick, then persist. On a
+      // unique-constraint race the local value still applies the right mechanism.
+      const arm = await resolveAdaptiveArm(userId);
       await sb.from('experiment_assignments').insert({
         user_id: userId,
         experiment_key: START_LATENCY_EXPERIMENT_KEY,
-        arm: seeded,
+        arm,
       });
+      setExperimentArm(arm);
     } catch (e) {
-      console.warn('[experiment] arm resolve failed, using seed:', e);
+      console.warn('[experiment] arm resolve failed, using uniform seed:', e);
+      setExperimentArm(assignArm(userId, getActiveArms()));
     }
-    setExperimentArm(seeded);
   }
 
   // ── Start primitive ──

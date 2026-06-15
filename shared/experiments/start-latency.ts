@@ -133,19 +133,37 @@ export function isValidArm(value: unknown): value is StartLatencyArm {
   );
 }
 
-// Deterministic arm assignment from a user id. FNV-1a (32-bit) is fast, has no
-// dependencies, and gives a stable, well-distributed bucket — so the client,
-// Vercel, and Deno all derive the same arm before the DB row is even written.
-// The persisted experiment_assignments row is authoritative; this just seeds it.
-export function assignArm(userId: string): StartLatencyArm {
+// The arms that actually do something right now. Only these should receive new
+// assignments — an inactive arm (e.g. timed_nudge) would silently behave like
+// control while logging under its own name, polluting the readout.
+export function getActiveArms(): StartLatencyArm[] {
+  return START_LATENCY_ARMS.filter((a) => MECHANISMS[a].active);
+}
+
+// FNV-1a (32-bit) → unsigned int. Fast, dependency-free, well-distributed, and
+// identical across Node / Deno / browser, so any runtime derives the same value
+// for a given string. `salt` lets callers get an independent stream from the
+// same id (e.g. bucket assignment vs. the sampling draw).
+export function hashString(str: string, salt = ""): number {
+  const s = salt + str;
   let hash = 0x811c9dc5;
-  for (let i = 0; i < userId.length; i++) {
-    hash ^= userId.charCodeAt(i);
-    // hash * 16777619, kept in 32-bit range via Math.imul.
-    hash = Math.imul(hash, 0x01000193);
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // * 16777619, kept in 32-bit range
   }
-  const bucket = (hash >>> 0) % START_LATENCY_ARMS.length;
-  return START_LATENCY_ARMS[bucket]!;
+  return hash >>> 0;
+}
+
+// Deterministic UNIFORM assignment over a set of arms (defaults to active arms).
+// Stable per user; the persisted experiment_assignments row is authoritative.
+// This is the fallback when there's no adaptive signal yet — the adaptive
+// allocator (see allocation.ts) takes over once results accumulate.
+export function assignArm(
+  userId: string,
+  arms: StartLatencyArm[] = getActiveArms()
+): StartLatencyArm {
+  const pool = arms.length > 0 ? arms : [...START_LATENCY_ARMS];
+  return pool[hashString(userId) % pool.length]!;
 }
 
 // Latency in ms between pledge and actual start. Returns null when there was no
