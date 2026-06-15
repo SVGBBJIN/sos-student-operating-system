@@ -5036,6 +5036,24 @@ function App() {
   const [focusSession, setFocusSession] = useState(null); // { taskId, title, startedAt, endsAt, status }
   const focusTimeoutRef = useRef(null);
 
+  // ── Commitment-lock countdown (start-latency experiment arm) ──
+  // Set when a commitment_lock user pledges a start time. Shown as a live
+  // "starts in X min" banner on the home screen until the time passes or they
+  // actually start the task. Cleared on task start or manual dismiss.
+  const [pledgeCountdown, setPledgeCountdown] = useState(null); // { taskId, title, pledgedAt }
+  // Tick the countdown label each second; clear when past.
+  const pledgeCountdownRef = useRef(null);
+  useEffect(() => {
+    if (!pledgeCountdown) return;
+    const tick = () => {
+      const ms = new Date(pledgeCountdown.pledgedAt).getTime() - Date.now();
+      if (ms < -60_000) setPledgeCountdown(null); // auto-clear >1 min past
+    };
+    tick();
+    pledgeCountdownRef.current = setInterval(tick, 1000);
+    return () => clearInterval(pledgeCountdownRef.current);
+  }, [pledgeCountdown]);
+
   // ── Home Decision Gate ──
   // Shown once on the first open of the day: one decision, three doors, never
   // forced work. Ranked candidates computed live from the priority engine.
@@ -5179,6 +5197,8 @@ function App() {
     if (!task) return;
     const startedAt = Date.now();
     const endsAt = startedAt + FOCUS_SESSION_MS;
+    // Clear commitment-lock countdown for this task once they actually start.
+    setPledgeCountdown(prev => (prev && prev.taskId === task.id) ? null : prev);
 
     // Flip to in_progress + stamp provenance. Undoable via the next mutation's
     // snapshot is not applicable here (no destructive change), but the status
@@ -6460,17 +6480,39 @@ function App() {
           }
           const pledgedIso = parsed.toISOString();
           updateTask(target.id, { pledgedStartAt: pledgedIso });
-          // Intention side of the start-latency metric, tagged with the arm so
-          // the readout can compare pledge→start gaps across mechanisms.
           if (user) dbInsertTaskEvent({
             taskId: target.id, eventType: 'pledge', fromStatus: target.status, toStatus: target.status,
             metadata: { title: target.title, subject: target.subject, pledged_start_at: pledgedIso, experiment_arm: experimentArm || null },
           }, user.id);
-          // Apply the assigned mechanism. Active arms send their follow-up
-          // prompt; control / not-yet-wired arms just confirm the pledge.
+
           const mech = getMechanism(experimentArm || 'control');
           const when = parsed.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-          if (mech.active && mech.pledgePrompt) {
+
+          // ── Per-arm mechanisms ──
+          if (!mech.active) {
+            // Inactive arms (timed_nudge) fall back to a simple confirmation.
+            postAssistantNote(`Locked in — you'll start **${target.title}** ${when}.`);
+          } else if (mech.arm === 'commitment_lock') {
+            // Show a visible home-screen countdown banner. No chat copy — the
+            // visual commitment surface is the mechanism.
+            setPledgeCountdown({ taskId: target.id, title: target.title, pledgedAt: pledgedIso });
+            postAssistantNote(`Locked in — your countdown to **${target.title}** is up on the home screen.`);
+          } else if (mech.arm === 'micro_deadline') {
+            // Schedule a real timer at the pledged start time using the existing
+            // timer infra so the chime fires exactly when they said they'd start.
+            const msUntil = parsed.getTime() - Date.now();
+            if (msUntil > 0 && msUntil <= 86400 * 1000) {
+              const timerId = uid();
+              const timerLabel = `Start ${target.title}`;
+              const timerObj = { id: timerId, label: timerLabel, fireAt: parsed.getTime(), startedAt: Date.now(), userId: user?.id };
+              setActiveTimers(prev => [...prev, timerObj]);
+              scheduleTimerFire(timerObj);
+              setActiveWidgets(w => ({ ...w, pomodoro: true }));
+              if (user) syncOp(() => sb.from('timers').insert({ id: timerId, user_id: user.id, label: timerLabel, fire_at: pledgedIso }));
+            }
+            postAssistantNote(mech.pledgePrompt(target.title));
+          } else if (mech.pledgePrompt) {
+            // implementation_intention, two_minute_starter, temptation_bundle.
             postAssistantNote(mech.pledgePrompt(target.title));
           } else {
             postAssistantNote(`Locked in — you'll start **${target.title}** ${when}.`);
@@ -9412,6 +9454,40 @@ function App() {
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {showOnboarding && <Onboarding firstName={onboardingName} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} />}
+      {/* Commitment-lock pledge countdown — shown for the commitment_lock arm
+          whenever the user has an active pledge they haven't started yet. */}
+      {pledgeCountdown && (() => {
+        const ms = new Date(pledgeCountdown.pledgedAt).getTime() - Date.now();
+        const isOverdue = ms < 0;
+        const absMins = Math.abs(Math.round(ms / 60000));
+        const label = isOverdue
+          ? `${absMins}m past`
+          : absMins < 1 ? 'now' : `in ${absMins}m`;
+        return (
+          <div style={{
+            position:'fixed', top:12, left:'50%', transform:'translateX(-50%)',
+            zIndex:1200, background:'var(--card-bg,#1a1a2e)', border:'1px solid var(--accent)',
+            borderRadius:10, padding:'8px 16px', display:'flex', alignItems:'center',
+            gap:12, boxShadow:'0 4px 20px rgba(0,0,0,0.4)', maxWidth:'90vw',
+            color: isOverdue ? 'var(--warn,#ff6b6b)' : 'var(--text)',
+          }}>
+            <span style={{fontSize:'0.8rem', color:'var(--accent)', letterSpacing:'0.04em', fontWeight:700}}>
+              {isOverdue ? '⚡' : '⏳'}
+            </span>
+            <span style={{fontSize:'0.85rem'}}>
+              <strong>{pledgeCountdown.title}</strong>
+              {' — '}
+              <span style={{color: isOverdue ? 'var(--warn,#ff6b6b)' : 'var(--text-dim)'}}>starts {label}</span>
+            </span>
+            <button
+              onClick={() => setPledgeCountdown(null)}
+              style={{marginLeft:4,background:'none',border:'none',cursor:'pointer',
+                color:'var(--text-dim)',fontSize:'0.85rem',padding:0,lineHeight:1}}
+              aria-label="Dismiss pledge countdown"
+            >✕</button>
+          </div>
+        );
+      })()}
       {gateOpen && !showOnboarding && (
         <HomeDecisionGate
           rankedTasks={gateRankedTasks()}

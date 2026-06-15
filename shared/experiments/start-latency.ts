@@ -68,13 +68,14 @@ const MECHANISMS: Record<StartLatencyArm, MechanismSpec> = {
   two_minute_starter: {
     arm: "two_minute_starter",
     label: "Two-minute starter",
-    active: false,
+    active: true,
     summary:
       "Reframe the task into a trivial first action so 'starting' is " +
-      "frictionless ('just open the doc and write one line').",
+      "frictionless. The only commitment is to open it.",
     pledgePrompt: (task) =>
-      `Got it. When the time comes, you're only doing the first 2 minutes of ` +
-      `${task} — just open it. That's the whole job.`,
+      `Locked in. One rule: when the time comes, you're only doing the first ` +
+      `2 minutes of **${task}** — just open it and read the first line. ` +
+      `That's the whole job. You can stop after that.`,
   },
   timed_nudge: {
     arm: "timed_nudge",
@@ -88,33 +89,36 @@ const MECHANISMS: Record<StartLatencyArm, MechanismSpec> = {
   commitment_lock: {
     arm: "commitment_lock",
     label: "Commitment lock",
-    active: false,
+    active: true,
     summary:
-      "Pre-commit with a visible home-screen countdown + streak stake. " +
-      "Frontend-heavy — stubbed until the surface ships.",
+      "Pre-commit with a visible home-screen countdown to the pledged start " +
+      "time. Makes the intention public to yourself.",
+    // pledgePrompt is null — the visual countdown on the home screen is the
+    // mechanism. The pledge_start executor adds a brief confirmation instead.
     pledgePrompt: null,
   },
   micro_deadline: {
     arm: "micro_deadline",
     label: "Micro-deadline",
-    active: false,
+    active: true,
     summary:
-      "Offer a tight self-imposed deadline ('start within 10 min') to create " +
-      "urgency without changing the real due date.",
+      "Lock in a 10-minute countdown starting now so the pledged time has " +
+      "genuine time pressure, not just intention.",
     pledgePrompt: (task) =>
-      `Want to make it stick? Try starting ${task} within the next 10 minutes ` +
-      `— short bursts beat 'later'.`,
+      `Starting the clock. You've got until your pledged time to kick off ` +
+      `**${task}** — a reminder will fire then. Short window beats an open-ended 'later'.`,
   },
   temptation_bundle: {
     arm: "temptation_bundle",
     label: "Temptation bundle",
-    active: false,
+    active: true,
     summary:
-      "Pair the task with something enjoyable ('your focus playlist') so the " +
-      "start carries a built-in reward (Milkman).",
+      "Pair the task with something enjoyable so the start carries a " +
+      "built-in reward (Milkman). Only available while working.",
     pledgePrompt: (task) =>
-      `Pair it: queue up your focus playlist or favorite drink, then start ${task}. ` +
-      `The treat is only for while you work.`,
+      `Here's the deal: pick one thing you enjoy — your focus playlist, a ` +
+      `good drink, whatever — and it's yours *only* while you're on ` +
+      `**${task}**. Queue it up before you start so it's waiting for you.`,
   },
 };
 
