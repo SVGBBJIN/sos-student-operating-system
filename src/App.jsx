@@ -31,6 +31,15 @@ import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import {
+  START_LATENCY_EXPERIMENT_KEY,
+  assignArm,
+  isValidArm,
+  getMechanism,
+  getActiveArms,
+  computeStartLatencyMs,
+} from '../shared/experiments/start-latency.ts';
+import { adaptiveAssign } from '../shared/experiments/allocation.ts';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 import HomeDecisionGate from './components/HomeDecisionGate';
 import DecisionRollup from './components/DecisionRollup';
@@ -286,6 +295,7 @@ function dbTaskToApp(row) {
     completionConfidence: row.completion_confidence == null ? null : Number(row.completion_confidence),
     startSource: row.start_source || null,
     startedAt: row.started_at || null,
+    pledgedStartAt: row.pledged_start_at || null,
     lmsAssignmentRef: row.lms_assignment_ref || null,
     lmsPendingClose: row.lms_pending_close || false,
     lmsPendingCloseAt: row.lms_pending_close_at || null,
@@ -304,6 +314,7 @@ function appTaskToDb(t, userId) {
     completion_confidence: typeof t.completionConfidence === 'number' ? t.completionConfidence : null,
     start_source: t.startSource || null,
     started_at: t.startedAt || null,
+    pledged_start_at: t.pledgedStartAt || null,
     lms_assignment_ref: t.lmsAssignmentRef || null,
   };
 }
@@ -4355,6 +4366,9 @@ function App() {
   const [searchParams] = useSearchParams();
   const { agenticMode, setAgenticMode } = useAgenticMode();
   const [user, setUser] = useState(null);
+  // Start-latency experiment: which intervention arm this user is pinned to.
+  // null until resolved from experiment_assignments (see ensureExperimentArm).
+  const [experimentArm, setExperimentArm] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalInitialMode, setAuthModalInitialMode] = useState('login');
@@ -4666,6 +4680,11 @@ function App() {
         const { data: gradesData } = await sb.from('grades').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(500);
         setGrades(gradesData || []);
       } catch (e) { console.error('Failed to load grades:', e); }
+
+    // Resolve the user's start-latency experiment arm: read the pinned
+    // assignment, or seed one deterministically on first load. Best-effort —
+    // a failure just leaves the arm at control behavior (no mechanism fires).
+    ensureExperimentArm(authUser.id);
 
     // Rehydrate active timers — re-schedule unfired rows; fire-immediately any
     // whose fire_at is already past (laptop slept, tab closed, etc.).
@@ -5019,6 +5038,24 @@ function App() {
   const [focusSession, setFocusSession] = useState(null); // { taskId, title, startedAt, endsAt, status }
   const focusTimeoutRef = useRef(null);
 
+  // ── Commitment-lock countdown (start-latency experiment arm) ──
+  // Set when a commitment_lock user pledges a start time. Shown as a live
+  // "starts in X min" banner on the home screen until the time passes or they
+  // actually start the task. Cleared on task start or manual dismiss.
+  const [pledgeCountdown, setPledgeCountdown] = useState(null); // { taskId, title, pledgedAt }
+  // Tick the countdown label each second; clear when past.
+  const pledgeCountdownRef = useRef(null);
+  useEffect(() => {
+    if (!pledgeCountdown) return;
+    const tick = () => {
+      const ms = new Date(pledgeCountdown.pledgedAt).getTime() - Date.now();
+      if (ms < -60_000) setPledgeCountdown(null); // auto-clear >1 min past
+    };
+    tick();
+    pledgeCountdownRef.current = setInterval(tick, 1000);
+    return () => clearInterval(pledgeCountdownRef.current);
+  }, [pledgeCountdown]);
+
   // ── Home Decision Gate ──
   // Shown once on the first open of the day: one decision, three doors, never
   // forced work. Ranked candidates computed live from the priority engine.
@@ -5115,6 +5152,73 @@ function App() {
     });
   }
 
+  // ── Start-latency experiment (adaptive) ──
+  // Pin the user to one intervention arm and keep it stable across sessions.
+  // Existing assignments are honored as-is (stability). New users are routed by
+  // the adaptive allocator: it reads aggregate per-arm performance and shifts
+  // traffic toward whatever's cutting the pledge→start gap, while keeping an
+  // exploration floor so the experiment keeps learning. Falls back to uniform
+  // assignment whenever the signal isn't available yet.
+  async function resolveAdaptiveArm(userId) {
+    const activeArms = getActiveArms();
+    try {
+      // Graduation short-circuit: once a winner is declared, route new users to
+      // it directly (existing users keep their arm).
+      const { data: exp } = await sb.from('experiments')
+        .select('started_at,status,graduated_arm')
+        .eq('key', START_LATENCY_EXPERIMENT_KEY)
+        .maybeSingle();
+      if (exp?.status === 'graduated' && isValidArm(exp.graduated_arm)) {
+        return exp.graduated_arm;
+      }
+      const daysSinceStart = exp?.started_at
+        ? (Date.now() - new Date(exp.started_at).getTime()) / 86_400_000
+        : 0;
+      // Aggregate-only RPC (SECURITY DEFINER) — safe to call from the client.
+      const { data: stats } = await sb.rpc('experiment_arm_performance', {
+        p_experiment_key: START_LATENCY_EXPERIMENT_KEY,
+        p_window_days: 14,
+      });
+      const normalized = (stats || [])
+        .filter(s => isValidArm(s.arm))
+        .map(s => ({
+          arm: s.arm,
+          pledges: Number(s.pledges) || 0,
+          starts: Number(s.starts) || 0,
+          medianLatencyMin: s.median_latency_min == null ? null : Number(s.median_latency_min),
+        }));
+      const { arm } = adaptiveAssign(userId, normalized, { daysSinceStart }, activeArms);
+      return isValidArm(arm) ? arm : assignArm(userId, activeArms);
+    } catch (e) {
+      console.warn('[experiment] adaptive resolve failed, using uniform:', e);
+      return assignArm(userId, activeArms);
+    }
+  }
+
+  async function ensureExperimentArm(userId) {
+    if (!userId) return;
+    try {
+      const { data } = await sb.from('experiment_assignments')
+        .select('arm')
+        .eq('user_id', userId)
+        .eq('experiment_key', START_LATENCY_EXPERIMENT_KEY)
+        .maybeSingle();
+      if (data && isValidArm(data.arm)) { setExperimentArm(data.arm); return; }
+      // No assignment yet — let the adaptive allocator pick, then persist. On a
+      // unique-constraint race the local value still applies the right mechanism.
+      const arm = await resolveAdaptiveArm(userId);
+      await sb.from('experiment_assignments').insert({
+        user_id: userId,
+        experiment_key: START_LATENCY_EXPERIMENT_KEY,
+        arm,
+      });
+      setExperimentArm(arm);
+    } catch (e) {
+      console.warn('[experiment] arm resolve failed, using uniform seed:', e);
+      setExperimentArm(assignArm(userId, getActiveArms()));
+    }
+  }
+
   // ── Start primitive ──
   // One invocable launcher (gate today, other surfaces later). Non-committal:
   // gather any linked materials, surface them, run a 10-minute ambient timer,
@@ -5134,6 +5238,8 @@ function App() {
     if (!task) return;
     const startedAt = Date.now();
     const endsAt = startedAt + FOCUS_SESSION_MS;
+    // Clear commitment-lock countdown for this task once they actually start.
+    setPledgeCountdown(prev => (prev && prev.taskId === task.id) ? null : prev);
 
     // Flip to in_progress + stamp provenance. Undoable via the next mutation's
     // snapshot is not applicable here (no destructive change), but the status
@@ -5144,10 +5250,20 @@ function App() {
       startedAt: new Date(startedAt).toISOString(),
     });
 
-    // Behavioral telemetry — feeds plans-created vs started-within-24h.
+    // Behavioral telemetry — feeds plans-created vs started-within-24h, and the
+    // start-latency experiment: if the student had pledged a start time, log the
+    // gap (intention → action) and their arm so start_latency_by_arm() can rank
+    // which mechanism cut the delay most.
+    const startLatencyMs = computeStartLatencyMs(task.pledgedStartAt, new Date(startedAt).toISOString());
     if (user) dbInsertTaskEvent({
       taskId: task.id, eventType: 'start', fromStatus: task.status, toStatus: 'in_progress',
-      metadata: { title: task.title, subject: task.subject, source, study_plan_id: task.study_plan_id || null },
+      metadata: {
+        title: task.title, subject: task.subject, source,
+        study_plan_id: task.study_plan_id || null,
+        ...(task.pledgedStartAt ? { pledged_start_at: task.pledgedStartAt } : {}),
+        ...(startLatencyMs != null ? { start_latency_ms: startLatencyMs } : {}),
+        ...(experimentArm ? { experiment_arm: experimentArm } : {}),
+      },
     }, user.id);
 
     // Gather linked materials (best-effort, bounded). No links → skip silently.
@@ -6389,6 +6505,59 @@ function App() {
           if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'postpone', fromStatus: target.status, toStatus: target.status, metadata: { title: target.title, subject: target.subject, from_due: target.dueDate, to_due: rawDate, days_diff: daysDiff } }, user.id);
           postAssistantNote(`Postponed **${target.title}** to ${rawDate}.`);
           pushUndoToast(`Undo: postponed "${target.title}"`, undoSnap);
+          break;
+        }
+        case 'pledge_start': {
+          const target = resolveTask(action.title, tasks);
+          if (!target) {
+            postAssistantNote(`I couldn't find a task called "${action.title}" to pledge a start time for.`);
+            break;
+          }
+          const pledgeAt = (action.start_at || '').trim();
+          const parsed = pledgeAt ? new Date(pledgeAt) : null;
+          if (!parsed || Number.isNaN(parsed.getTime())) {
+            postAssistantNote(`I need a valid start time to lock that in.`);
+            break;
+          }
+          const pledgedIso = parsed.toISOString();
+          updateTask(target.id, { pledgedStartAt: pledgedIso });
+          if (user) dbInsertTaskEvent({
+            taskId: target.id, eventType: 'pledge', fromStatus: target.status, toStatus: target.status,
+            metadata: { title: target.title, subject: target.subject, pledged_start_at: pledgedIso, experiment_arm: experimentArm || null },
+          }, user.id);
+
+          const mech = getMechanism(experimentArm || 'control');
+          const when = parsed.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+
+          // ── Per-arm mechanisms ──
+          if (!mech.active) {
+            // Inactive arms (timed_nudge) fall back to a simple confirmation.
+            postAssistantNote(`Locked in — you'll start **${target.title}** ${when}.`);
+          } else if (mech.arm === 'commitment_lock') {
+            // Show a visible home-screen countdown banner. No chat copy — the
+            // visual commitment surface is the mechanism.
+            setPledgeCountdown({ taskId: target.id, title: target.title, pledgedAt: pledgedIso });
+            postAssistantNote(`Locked in — your countdown to **${target.title}** is up on the home screen.`);
+          } else if (mech.arm === 'micro_deadline') {
+            // Schedule a real timer at the pledged start time using the existing
+            // timer infra so the chime fires exactly when they said they'd start.
+            const msUntil = parsed.getTime() - Date.now();
+            if (msUntil > 0 && msUntil <= 86400 * 1000) {
+              const timerId = uid();
+              const timerLabel = `Start ${target.title}`;
+              const timerObj = { id: timerId, label: timerLabel, fireAt: parsed.getTime(), startedAt: Date.now(), userId: user?.id };
+              setActiveTimers(prev => [...prev, timerObj]);
+              scheduleTimerFire(timerObj);
+              setActiveWidgets(w => ({ ...w, pomodoro: true }));
+              if (user) syncOp(() => sb.from('timers').insert({ id: timerId, user_id: user.id, label: timerLabel, fire_at: pledgedIso }));
+            }
+            postAssistantNote(mech.pledgePrompt(target.title));
+          } else if (mech.pledgePrompt) {
+            // implementation_intention, two_minute_starter, temptation_bundle.
+            postAssistantNote(mech.pledgePrompt(target.title));
+          } else {
+            postAssistantNote(`Locked in — you'll start **${target.title}** ${when}.`);
+          }
           break;
         }
         case 'bulk_complete': {
@@ -9326,6 +9495,40 @@ function App() {
       )}
       {showAuthModal && <AuthModal onAuth={(u)=>{handleAuth(u);setShowAuthModal(false);setAuthModalInitialMode('login');}} onClose={()=>{setShowAuthModal(false);setAuthModalInitialMode('login');}} initialMode={authModalInitialMode} />}
       {showOnboarding && <Onboarding firstName={onboardingName} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} />}
+      {/* Commitment-lock pledge countdown — shown for the commitment_lock arm
+          whenever the user has an active pledge they haven't started yet. */}
+      {pledgeCountdown && (() => {
+        const ms = new Date(pledgeCountdown.pledgedAt).getTime() - Date.now();
+        const isOverdue = ms < 0;
+        const absMins = Math.abs(Math.round(ms / 60000));
+        const label = isOverdue
+          ? `${absMins}m past`
+          : absMins < 1 ? 'now' : `in ${absMins}m`;
+        return (
+          <div style={{
+            position:'fixed', top:12, left:'50%', transform:'translateX(-50%)',
+            zIndex:1200, background:'var(--card-bg,#1a1a2e)', border:'1px solid var(--accent)',
+            borderRadius:10, padding:'8px 16px', display:'flex', alignItems:'center',
+            gap:12, boxShadow:'0 4px 20px rgba(0,0,0,0.4)', maxWidth:'90vw',
+            color: isOverdue ? 'var(--warn,#ff6b6b)' : 'var(--text)',
+          }}>
+            <span style={{fontSize:'0.8rem', color:'var(--accent)', letterSpacing:'0.04em', fontWeight:700}}>
+              {isOverdue ? '⚡' : '⏳'}
+            </span>
+            <span style={{fontSize:'0.85rem'}}>
+              <strong>{pledgeCountdown.title}</strong>
+              {' — '}
+              <span style={{color: isOverdue ? 'var(--warn,#ff6b6b)' : 'var(--text-dim)'}}>starts {label}</span>
+            </span>
+            <button
+              onClick={() => setPledgeCountdown(null)}
+              style={{marginLeft:4,background:'none',border:'none',cursor:'pointer',
+                color:'var(--text-dim)',fontSize:'0.85rem',padding:0,lineHeight:1}}
+              aria-label="Dismiss pledge countdown"
+            >✕</button>
+          </div>
+        );
+      })()}
       {gateOpen && !showOnboarding && (
         <HomeDecisionGate
           rankedTasks={gateRankedTasks()}
