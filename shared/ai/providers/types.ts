@@ -91,6 +91,9 @@ export interface EmbedRequest {
     | "CLASSIFICATION"
     | "CLUSTERING";
   dim?: number;
+  // Embedding model id. Defaults to the provider's primary embed model. The
+  // string originates in router.ts (embedModel()) — never hardcode it elsewhere.
+  model?: string;
   signal?: AbortSignal;
 }
 

@@ -48,6 +48,25 @@ const MODEL_BY_TIER: Record<Tier, string> = {
   pro: "openai/gpt-oss-120b",
 };
 
+// Two embedding models share the work so we double the request budget (the
+// scarce resource: 100 RPM / 1k RPD per model, vs. abundant 30K TPM).
+//   - primary   → the persisted RAG/memory store. Its vectors must all live in
+//                 one model's space, so retrieval + upserts stay pinned here.
+//   - secondary → ephemeral, self-contained similarity (e.g. name grounding,
+//                 which embeds both sides in the same request and never compares
+//                 against the persisted store). Free to use the other model, so
+//                 it never spends the primary's budget.
+const EMBED_MODELS = {
+  primary: "gemini-embedding-002",
+  secondary: "gemini-embedding-001",
+} as const;
+
+export type EmbedRole = keyof typeof EMBED_MODELS;
+
+export function embedModel(role: EmbedRole = "primary"): string {
+  return EMBED_MODELS[role];
+}
+
 // Cross-provider fallback: when the Groq primary fails, fall back to the
 // equivalent Gemini model. Embed has no fallback (single provider).
 const FALLBACK_BY_TIER: Record<Tier, string | null> = {

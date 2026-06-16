@@ -75,8 +75,8 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 
 **Adding/changing an AI tool**: edit the Zod schema in `shared/ai/schemas/actions.ts` (or `studio.ts`) → the tool def + JSON Schema + validator are generated from there. Add a case in `executeAction()` in `src/App.jsx` if it's a new action type.
 
-**Models** (never reference these strings outside `router.ts`):
-- Tier 0 — `gemini-embedding-002` — embeddings (memory, semantic search, clustering). Gemini stays here; Groq has no embedding model.
+**Models** (never reference these strings outside `router.ts` — use `embedModel(role)` for embeds):
+- Tier 0 — embeddings (memory, semantic search, clustering). Gemini stays here; Groq has no embedding model. Two models split the request budget (each capped ~100 RPM / 1k RPD, but ~30K TPM): `embedModel("primary")` = `gemini-embedding-002` backs the persisted RAG/memory store (all stored vectors must live in one model's space, so retrieval + upserts pin here); `embedModel("secondary")` = `gemini-embedding-001` serves ephemeral self-contained similarity (name grounding) so it never spends the primary's budget. `embedCoalesced()` in `rag/embeddings.ts` merges concurrent same-`(model,taskType,dim)` embed calls within a 15ms window into one upstream request (token-rich, request-poor).
 - Tier 1 (flash) — `openai/gpt-oss-20b` on Groq — chat, action_routing, summarize, proofread_classify, rerank.
 - Tier 1 fallback — `gemini-2.5-flash` (cross-provider when Groq fails).
 - Tier 2 (pro) — `openai/gpt-oss-120b` on Groq — studio, planning, proofread_specialist.

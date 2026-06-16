@@ -21,7 +21,8 @@
 // A failed check is non-destructive: the action is pulled and replaced with a
 // soft clarification so the student confirms the name. We ask, never guess.
 
-import { embedBatch } from "./rag/embeddings.js";
+import { embedCoalesced } from "./rag/embeddings.js";
+import { embedModel } from "./router.js";
 import type { Message } from "./providers/types.js";
 
 // Unambiguous "I don't know yet" fillers. Deliberately tight — words that could
@@ -34,9 +35,25 @@ const FILLER_TOKENS = new Set([
 
 // Below this cosine, the name has no strong association with anything the
 // student said. Conservative on purpose — we want to catch fantasy, not squash
-// creative-but-valid names. Related short texts on gemini-embedding-002 sit well
-// above this; unrelated ones fall below.
+// creative-but-valid names. Related short texts sit well above this; unrelated
+// ones fall below.
 const MIN_VECTOR_SIM = 0.4;
+
+// Free pre-gate before spending an embedding request. If this fraction of a
+// name's content words already appear verbatim in the student's recent
+// messages, it's clearly grounded — skip the embed entirely. Only genuinely
+// novel-looking names pay for a vector check. This is what keeps the embedding
+// request count near zero on the common "add chem test friday" turn.
+const MIN_LEXICAL_OVERLAP = 0.6;
+
+// Common words that carry no grounding signal — excluded from the overlap ratio
+// so a name isn't deemed "grounded" just because it shares "the"/"my" with the
+// message.
+const STOPWORDS = new Set([
+  "a", "an", "the", "my", "our", "your", "of", "for", "to", "and", "or", "in",
+  "on", "at", "with", "this", "that", "is", "are", "be", "do", "i", "me", "we",
+  "add", "new", "set", "up", "it",
+]);
 
 // Embedding dimension for the ad-hoc similarity check. Smaller than the 1536-d
 // persisted store (cheaper/faster); both sides of the comparison use the same
@@ -62,6 +79,17 @@ export function lexicalUngroundedToken(title: string, historyTokens: Set<string>
     if (FILLER_TOKENS.has(tok) && !historyTokens.has(tok)) return tok;
   }
   return null;
+}
+
+// Free pre-gate — fraction of the name's content words (non-stopword) that
+// appear in the student's recent messages. 1 when every meaningful word echoes
+// the conversation; 0 when none do. Returns 0 when the name has no content
+// words (e.g. all stopwords) so those fall through to the vector check.
+export function lexicalOverlap(title: string, historyTokens: Set<string>): number {
+  const content = tokenize(title).filter((t) => !STOPWORDS.has(t));
+  if (content.length === 0) return 0;
+  const hit = content.filter((t) => historyTokens.has(t)).length;
+  return hit / content.length;
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -159,7 +187,13 @@ export async function groundActionNames<T extends Record<string, unknown>>(opts:
       }
     }
     if (VECTOR_CHECKED.has(type)) {
-      vectorPending.push({ action, type, field: named.field, value: named.value });
+      // Free pre-gate: a name whose words already echo the conversation is
+      // grounded — don't spend an embedding request on it.
+      if (lexicalOverlap(named.value, historyTokens) >= MIN_LEXICAL_OVERLAP) {
+        kept.push(action);
+      } else {
+        vectorPending.push({ action, type, field: named.field, value: named.value });
+      }
     } else {
       kept.push(action);
     }
@@ -170,12 +204,20 @@ export async function groundActionNames<T extends Record<string, unknown>>(opts:
     return { kept, flagged };
   }
 
-  // Single batched embed: [...candidate names, ...recent student messages].
+  // Single coalesced embed: [...candidate names, ...recent student messages].
+  // Routed to the secondary embedding model — this similarity is self-contained
+  // (both sides embedded together, never compared against the persisted store),
+  // so it never spends the primary model's RAG/memory request budget. The
+  // coalescer further merges concurrent grounding turns into one upstream call.
   let vectors: number[][] | null = null;
   try {
     const names = vectorPending.map((p) => p.value);
     vectors = await withTimeout(
-      embedBatch([...names, ...userMsgs], "SEMANTIC_SIMILARITY", SIM_DIM),
+      embedCoalesced([...names, ...userMsgs], {
+        taskType: "SEMANTIC_SIMILARITY",
+        dim: SIM_DIM,
+        model: embedModel("secondary"),
+      }),
       opts.timeoutMs ?? 2500
     );
   } catch {
