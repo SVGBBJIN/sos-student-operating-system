@@ -5,7 +5,6 @@
   "outputDirectory": "dist",
   "functions": {
     "api/chat.ts":      { "maxDuration": 60 },
-    "api/proofread.ts": { "maxDuration": 60 },
     "api/embed.ts":     { "maxDuration": 30 }
   },
   "headers": [

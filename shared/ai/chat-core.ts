@@ -162,12 +162,61 @@ function preEnrichSubject(toolName: string, args: Record<string, unknown>): Reco
   return args;
 }
 
+// Human-readable label for an action, used in clarification copy so we never
+// leak the internal tool name (e.g. "ask_clarification") to the student.
+const ACTION_HUMAN_LABEL: Record<string, string> = {
+  add_event: "this event",
+  add_task: "this task",
+  add_block: "this time block",
+  add_recurring_event: "this recurring event",
+  add_note: "this note",
+  update_event: "this update",
+  update_task: "this update",
+  delete_event: "this event",
+  delete_task: "this task",
+  set_timer: "this timer",
+};
+
+// Only fields that map to a clean, student-facing question are surfaced. Any
+// field without a friendly question/label is treated as internal and never
+// shown — this is what stops raw keys like "known_fields" from leaking.
+const FIELD_QUESTION: Record<string, string> = {
+  title: "What should the title be?",
+  task_name: "What should I name this task?",
+  date: "What date should I use?",
+  due_date: "When is it due?",
+  time: "What time? (e.g. 2:30pm) — or leave blank for all-day.",
+  start: "What time does it start? (e.g. 4:00pm)",
+  end: "What time does it end? (e.g. 5:00pm)",
+  subject: "Which subject is this for?",
+  activity: "What should I call this block?",
+  new_title: "What should I change it to?",
+  days: "Which days should it repeat on?",
+  start_date: "What date should it start?",
+  end_date: "What date should it end?",
+  duration_seconds: "How long should the timer run?",
+};
+
 function clarificationFromIssues(
   toolName: string,
   issues: Array<{ path: (string | number)[]; message: string }>,
   args: Record<string, unknown>
 ): ClarificationCard {
-  const missingFields = [...new Set(issues.map((i) => String(i.path[0] ?? "")).filter(Boolean))];
+  // If ask_clarification itself failed to validate, never expose its internals.
+  // Salvage a question the model may have written; otherwise ask a clean,
+  // generic follow-up. We never turn its schema fields into "missing fields".
+  if (toolName === "ask_clarification") {
+    const salvaged = typeof args.question === "string" && args.question.trim().length > 0
+      ? args.question.trim()
+      : "Could you give me a little more detail on what you'd like me to do?";
+    const opts = Array.isArray(args.options)
+      ? args.options.filter((o): o is string => typeof o === "string").slice(0, 4)
+      : [];
+    return { reason: null, question: salvaged, options: opts, multi_select: false, severity: "soft" };
+  }
+
+  // Keep only fields we have a friendly question for; everything else is internal.
+  const missingFields = [...new Set(issues.map((i) => String(i.path[0] ?? "")).filter((f) => f && f in FIELD_QUESTION))];
   const knownFields: Record<string, unknown> = {};
   const KNOWN = ["title", "task_name", "activity", "date", "due_date", "time", "start", "end", "subject", "event_type"];
   for (const f of KNOWN) {
@@ -181,25 +230,13 @@ function clarificationFromIssues(
     if (inferred) suggested_defaults.subject = inferred;
   }
   const remaining = missingFields.filter((f) => !suggested_defaults[f]);
-  const questionFor = (f: string): string => {
-    switch (f) {
-      case "title": return "What should the title be?";
-      case "task_name": return "What should I name this task?";
-      case "date": case "due_date": return "What date should I use? (e.g. next Friday)";
-      case "time": return "What time? (e.g. 14:30) — or leave blank for all-day.";
-      case "start": return "What start time? (HH:MM)";
-      case "end": return "What end time? (HH:MM)";
-      case "subject": return "Which subject is this for?";
-      case "activity": return "What activity should I schedule?";
-      case "new_title": return "What would you like to update this event to?";
-      default: return `Can you share the ${f.replace(/_/g, " ")}?`;
-    }
-  };
+  const labelFor = (f: string) => (FIELD_QUESTION[f] ? f.replace(/_/g, " ") : f);
   const question = remaining.length === 1
-    ? questionFor(remaining[0]!)
+    ? FIELD_QUESTION[remaining[0]!]!
     : remaining.length > 1
-    ? `I still need: ${remaining.map((f) => f.replace(/_/g, " ")).join(", ")}. Can you share them in one reply?`
-    : `Can you clarify the details for ${toolName}?`;
+    ? `Just need a couple details: ${remaining.map(labelFor).join(" and ")}.`
+    : "Could you give me a little more detail?";
+  const human = ACTION_HUMAN_LABEL[toolName] ?? "this";
   const TOOL_REQUIRED: Record<string, string[]> = {
     add_event: ["title", "date"],
     add_task: ["task_name", "due_date"],
@@ -208,11 +245,12 @@ function clarificationFromIssues(
     update_event: ["title"],
     delete_event: ["title"],
     delete_task: ["title"],
-    clear_all: ["confirm"],
   };
   const blocking = (TOOL_REQUIRED[toolName] ?? []).some((f) => remaining.includes(f));
   return {
-    reason: remaining.length === 0 ? null : `I need a couple details before I can run ${toolName}.`,
+    // Friendly lead-in that names the THING, never the tool. Single-field asks
+    // skip the lead-in entirely so the question stands on its own.
+    reason: remaining.length <= 1 ? null : `Almost there on ${human}.`,
     question,
     options: [],
     multi_select: false,
@@ -602,14 +640,14 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
         clarifications.push(clarificationFromIssues(name, v.issues, tc.args));
         continue;
       }
-      const data = v.data as { question: string; reason?: string; context_action?: string; missing_fields?: string[]; options?: string[]; multi_select?: boolean };
+      // The model only authors { question, options }. No internal routing
+      // fields, so nothing internal can ever reach the student-facing card.
+      const data = v.data as { question: string; options?: string[] };
       clarifications.push({
-        reason: data.reason ?? null,
+        reason: null,
         question: data.question,
-        options: Array.isArray(data.options) ? data.options : [],
-        multi_select: Boolean(data.multi_select),
-        context_action: data.context_action ?? null,
-        missing_fields: Array.isArray(data.missing_fields) ? data.missing_fields : [],
+        options: Array.isArray(data.options) ? data.options.slice(0, 4) : [],
+        multi_select: false,
       });
       validated.push(name);
       continue;

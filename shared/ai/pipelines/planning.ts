@@ -29,8 +29,12 @@ export interface PlanningPipelineOutput {
 function summarizePlan(actions: ChatAction[]): string {
   const plan = actions[0]!;
   const stepLines = Array.isArray(plan.steps)
-    ? (plan.steps as Array<{ title?: string; estimated_minutes?: number; date?: string }>)
-      .map((s, i) => `${i + 1}. ${s.title ?? ""}${s.estimated_minutes ? ` (~${s.estimated_minutes}min)` : ""}${s.date ? ` [${s.date}]` : ""}`)
+    ? (plan.steps as Array<{ title?: string; kind?: string; estimated_minutes?: number; date?: string; time?: string; end_time?: string }>)
+      .map((s, i) => {
+        const when = s.date ? ` [${s.date}${s.time ? ` ${s.time}${s.end_time ? `-${s.end_time}` : ""}` : ""}]` : "";
+        const tag = s.kind ? ` <${s.kind}>` : "";
+        return `${i + 1}. ${s.title ?? ""}${tag}${s.estimated_minutes ? ` (~${s.estimated_minutes}min)` : ""}${when}`;
+      })
       .join("; ")
     : "";
   return `Plan title: ${plan.title ?? "(untitled)"}\nSteps: ${stepLines}`;
@@ -49,9 +53,9 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
     logName: "[planning-pipeline]",
     fail: (stage, cause) => new PlanningPipelineError(stage, cause),
     hints: {
-      draft: "\n\nPLANNING PASS: DRAFT — Write a complete first-draft plan using make_plan. Cover the topic with enough steps to be realistic. Don't hold back.",
-      critique: "\n\nPLANNING PASS: CRITIQUE — A drafted plan is shown. Respond in plain text (no tool call) identifying gaps: missing prerequisites, unrealistic time allocations, missing review steps, ordering issues. Be direct and concrete. 2-4 sentences max.",
-      refine: "\n\nPLANNING PASS: REFINE — You have the draft and a critique. Produce the final improved plan using make_plan, incorporating the critique's suggestions. Make it actionable and time-realistic.",
+      draft: "\n\nPLANNING PASS: DRAFT — Write a complete first-draft plan using make_plan. Cover the topic with enough steps to be realistic. Don't hold back. Categorize every step: study/work/break/meal/exercise/leisure sessions and timed exams are kind='block' (give date, time, end_time so they appear on the calendar); hard due items are kind='deadline' (give a date). Resolve all dates from the DATE MAP in context — never compute dates yourself.",
+      critique: "\n\nPLANNING PASS: CRITIQUE — A drafted plan is shown. Respond in plain text (no tool call) identifying gaps: missing prerequisites, unrealistic time allocations, missing review steps, missing breaks/downtime, ordering issues. Be direct and concrete. 2-4 sentences max.",
+      refine: "\n\nPLANNING PASS: REFINE — You have the draft and a critique. Produce the final improved plan using make_plan, incorporating the critique's suggestions. Keep each step categorized as kind='block' (with date/time/end_time) or kind='deadline' (with date). Make it actionable and time-realistic, with real breaks so the week isn't all grind.",
     },
     labels: {
       analyzing: "Analyzing your request…",

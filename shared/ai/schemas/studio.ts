@@ -53,8 +53,14 @@ export const CreateProjectBreakdownSchema = z.object({
 
 export const MakePlanStepSchema = z.object({
   title: z.string().min(1).max(200),
+  // Two calendar categories. "block" = a time commitment that visually appears
+  // on the calendar (study sessions, breaks, meals, exercise, gaming, review,
+  // and timed exams) — give it date + time (+ end_time). "deadline" = a hard
+  // due item with no fixed time (essays, problem sets) — give it date only.
+  kind: z.enum(["block", "deadline"]).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  end_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   estimated_minutes: z.number().positive().max(720).optional(),
 });
 
@@ -82,7 +88,7 @@ const STUDIO_DESCRIPTIONS: Record<StudioToolName, string> = {
   create_outline: "Create a topic outline with sections and bullet points.",
   create_summary: "Create a concise bullet-point summary.",
   create_project_breakdown: "Break a project into phases with concrete tasks.",
-  make_plan: "Create an actionable multi-step plan suitable for adding tasks.",
+  make_plan: "Create an actionable multi-step plan. Each step is either a 'block' (study/work/break/meal/exercise/gaming/review session, or a timed exam — set kind='block' with date, time, and end_time so it shows on the calendar) or a 'deadline' (a hard due item like an essay or problem set — set kind='deadline' with a date). Default ambiguous steps to 'block' with a sensible time so the week visibly fills in.",
 };
 
 export function buildStudioToolDefs(): ToolDef[] {

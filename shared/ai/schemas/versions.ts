@@ -5,7 +5,6 @@ export const SCHEMA_VERSIONS = {
   action_tools: "v7-2026-05",
   studio_tools: "v3-2026-05",
   planning: "v2-2026-05",
-  proofread: "v2-2026-05",
   intent_plan: "v1-2026-05",
   study_pack: "v1-2026-05",
   reference_search: "v1-2026-05",

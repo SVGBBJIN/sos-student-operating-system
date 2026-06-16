@@ -15,7 +15,6 @@ export { getProvider, type ProviderName } from "./providers/index.js";
 export type { LlmProvider, ChatRequest, ChatResponse, StreamChunk, Message, ToolCall } from "./providers/types.js";
 export { runPlanningPipeline, PlanningPipelineError } from "./pipelines/planning.js";
 export { runIntentPlanPipeline, IntentPlanPipelineError } from "./pipelines/intent_plan.js";
-export { runProofread, PROOFREAD_BUCKETS } from "./pipelines/proofread.js";
 export { embedBatch, embedQuery } from "./rag/embeddings.js";
 export { retrieve } from "./rag/retrieve.js";
 export { assembleContext } from "./context/assembler.js";

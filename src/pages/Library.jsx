@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { sb } from '../lib/supabase.js';
 import DOMPurify from 'dompurify';
 import CalendarWindow from '../components/CalendarWindow/CalendarWindow.jsx';
-import ProofreadPanel from '../components/ProofreadPanel.jsx';
 import StudioSidebar from '../components/StudioSidebar.jsx';
 import StudyTopBar from '../components/StudyTopBar.jsx';
 
@@ -844,7 +843,6 @@ export default function Library() {
           onNew={() => navigate('/studio')}
           onDelete={() => {}}
           onAuthAction={user ? handleLogout : () => navigate('/studio')}
-          onProofread={() => setActiveView('proofread')}
           aiThinking={false}
           syncStatus="saved"
           tasks={tasks}
@@ -870,7 +868,6 @@ export default function Library() {
               />
             </div>
           )}
-          {activeView === 'proofread' && <ProofreadPanel />}
         </div>
 
       </div>

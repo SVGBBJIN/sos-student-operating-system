@@ -26,7 +26,6 @@ import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import ConnectorsSettings from './components/ConnectorsSettings';
-import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
@@ -90,7 +89,7 @@ function buildNotifications(tasks, events, prefs) {
   }
   if (prefs.daily) {
     const dailyHour = parseInt(localStorage.getItem('sos-notif-daily-hour') || '8', 10);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = today();
     const fireAt = atDate(todayStr, dailyHour);
     if (fireAt > now) {
       notes.push({ title: '📋 Good morning — here\'s your plan', body: `You have ${tasks.filter(t=>t.status!=='done').length} active tasks today.`, fireAt, tag: 'daily-plan' });
@@ -131,7 +130,9 @@ function summarizeBlockSlots(slotMap) {
 function addDaysISO(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  // Local-timezone formatting — toISOString() would shift the day across the
+  // UTC boundary for some timezones.
+  return toDateStr(d);
 }
 
 function buildBlocksForDate(blocks, dateStr) {
@@ -219,7 +220,7 @@ function mapGoogleCalItems(items) {
 }
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
-const GUEST_DEMO_LIMIT = 10;
+const GUEST_DEMO_LIMIT = 15;
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -631,16 +632,17 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For add_block specifically: NEVER generate or infer start/end times — the student must state exact times; if either is absent, call ask_clarification with missing_fields containing the absent fields. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
-  clarification_style: 'Execute when the student\'s message clearly contains all required fields. Use ask_clarification whenever a required field is missing, ambiguous, or only partially given.',
+  clarification: "Missing-field handling: just attempt the matching action. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where you can't pick a sensible default — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
+  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', or 'I don't even know what to do' — FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then name the SINGLE highest-priority task and tell them to do just that for 25 minutes. Offer a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title). Be warm and encouraging — one concrete next step, never a lecture, and never a bare unlabeled timer.",
+  destructive: "Destructive requests ('delete everything', 'wipe it all', 'clear everything', 'start over', 'nuke my schedule') MUST call clear_all with confirm=true so the student gets a confirmation card — never silently refuse or deflect to opening a widget. To remove a single item, use the matching delete/manage verb.",
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
-  date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
+  date_resolution: 'Resolve every weekday, "today", "tomorrow", and "next week" by reading the DATE MAP in context — never compute a date yourself. Weekday references mean the current or next upcoming occurrence, never a past date. When the student asks about "this week", cover through the coming weekend.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
-  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, call ask_clarification with missing_fields=['duration_seconds']. Anything longer than 24h belongs as an event, not a timer. To stop/cancel a running timer use cancel_timer with the label shown in ACTIVE TIMERS. If no timers are running and the student asks to cancel, say so — don't call cancel_timer.",
-  notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
+  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, ask how long in one short question. Anything longer than 24h belongs as an event, not a timer. To stop/cancel a running timer use cancel_timer with the label shown in ACTIVE TIMERS. If no timers are running and the student asks to cancel, say so — don't call cancel_timer.",
+  notes_flow: "For add_note (create a note): always set `subject` (it becomes the folder). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it. If subject/source/title are missing the app will ask — just attempt the note.",
 };
 
 
@@ -651,6 +653,17 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
+
+  // Explicit weekday → date lookup for the next 10 days, computed in the
+  // student's LOCAL timezone. The model must never do weekday arithmetic itself
+  // (that caused "Friday" → wrong date off-by-one bugs) — it reads the map.
+  const dateMapLines = [];
+  for (let i = 0; i < 10; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const rel = i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : '';
+    dateMapLines.push(d.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' }) + ' = ' + toDateStr(d) + rel);
+  }
+  const dateMap = dateMapLines.join('\n');
 
   const todayBlocks = {};
   const todayDow = new Date().getDay();
@@ -732,6 +745,8 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
+    'DATE MAP (resolve weekdays/"tomorrow" by reading this — never compute dates yourself):',
+    dateMap,
     '',
     'TODAY\'S SCHEDULE:',
     capLines(summarizeBlockSlots(todayBlocks), CONTEXT_SECTION_BUDGETS.schedule, 'schedule blocks') || '(nothing scheduled)',
@@ -798,6 +813,8 @@ If student asks about note content, reference only available notes and ask a foc
     const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
     const dynamicTier1 = `DYNAMIC CONTEXT:
 TODAY: ${todayStr}
+DATE MAP (resolve weekdays/"tomorrow" by reading this — never compute dates yourself):
+${dateMap}
 TODAY'S SCHEDULE: ${scheduleStr}
 COMPLETED THIS WEEK: ${doneThisWeek} task${doneThisWeek !== 1 ? 's' : ''}
 ${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
@@ -811,7 +828,8 @@ NOTES: ${noteNames}`;
     POLICY_MODULES.no_hallucination,
     POLICY_MODULES.workspace,
     POLICY_MODULES.clarification,
-    POLICY_MODULES.clarification_style,
+    POLICY_MODULES.overwhelm,
+    POLICY_MODULES.destructive,
   ];
   const intentModules = intentType === 'chat'
     ? [
@@ -2578,7 +2596,7 @@ const PLAN_TEMPLATES = [
         { title: 'Create outline with thesis and key points', estimated_minutes: 25 },
         { title: 'Write first draft', estimated_minutes: 60 },
         { title: 'Revise and strengthen arguments', estimated_minutes: 40 },
-        { title: 'Proofread and final edits', estimated_minutes: 20 },
+        { title: 'Final edits and polish', estimated_minutes: 20 },
       ]
     }
   },
@@ -4569,7 +4587,7 @@ function App() {
     try {
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = today();
       const clientTasksPayload = tasks
         .filter(t => t.status !== 'done')
         .slice(0, 50)
@@ -4607,7 +4625,7 @@ function App() {
     if (!user || briefingFetchedRef.current) return;
     let last = '';
     try { last = localStorage.getItem('sos-last-briefing') || ''; } catch (_) {}
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = today();
     if (last === todayStr) return;
     briefingFetchedRef.current = true;
     // Small delay so initial Supabase fetches (tasks, events) populate first.
@@ -4743,7 +4761,7 @@ function App() {
     const focus = searchParams.get('focus');
     const target = panel || focus;
     if (!target) return;
-    if (['chat', 'home', 'settings', 'proofread'].includes(target)) setActivePanel(target);
+    if (['chat', 'home', 'settings'].includes(target)) setActivePanel(target);
     else if (target === 'tasks' || target === 'calendar') setActivePanel('chat');
   }, [searchParams]);
 
@@ -6131,7 +6149,9 @@ function App() {
           break;
         case 'read_calendar': {
           const startD = action.start_date || today();
-          const endD = action.end_date || (() => { const d = new Date(startD + 'T12:00:00'); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); })();
+          // Default to a two-week window so "this week" read-backs always reach
+          // through the weekend instead of stopping mid-week.
+          const endD = action.end_date || addDaysISO(startD, 13);
           const isSingleDay = startD === endD;
           const isMonthRange = !isSingleDay && (() => {
             const diffDays = Math.round((new Date(endD + 'T00:00:00') - new Date(startD + 'T00:00:00')) / 86400000);
@@ -6289,8 +6309,7 @@ function App() {
         case 'prioritize_tasks': {
           const horizonDays = Number(action.horizon_days) || 7;
           const limit = Number(action.limit) || 5;
-          const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + horizonDays);
-          const cutoffStr = cutoff.toISOString().slice(0, 10);
+          const cutoffStr = addDaysISO(today(), horizonDays);
           const active = tasks
             .filter(t => t.status !== 'done' && t.dueDate <= cutoffStr)
             .slice(0, 50);
@@ -6308,7 +6327,11 @@ function App() {
             const dayLabel = isPast ? `(overdue — was due ${t.dueDate})` : `due ${t.dueDate}`;
             return `${i + 1}. **${t.title}** ${dayLabel}${t.subject ? ' · ' + t.subject : ''} — ${r.explanation}`;
           }).filter(Boolean);
-          const msg = `here's what matters most right now:\n\n${lines.join('\n')}`;
+          const topTask = ranked.length ? taskById[ranked[0].taskId] : null;
+          const focusLine = topTask
+            ? `\n\n👉 Don't overthink it — just start **${topTask.title}** and give it 25 focused minutes. That's the whole job right now. Want me to start a timer?`
+            : '';
+          const msg = `here's what matters most right now:\n\n${lines.join('\n')}${focusLine}`;
           postAssistantNote(msg);
           recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
@@ -6420,8 +6443,7 @@ function App() {
           let filtered = statusFilter ? tasks.filter(t => t.status === statusFilter) : tasks.filter(t => t.status !== 'done');
           if (subj) filtered = filtered.filter(t => (t.subject || '').toLowerCase().includes(subj));
           if (action.due_within_days) {
-            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + action.due_within_days);
-            const cutoffStr = cutoff.toISOString().slice(0, 10);
+            const cutoffStr = addDaysISO(today(), action.due_within_days);
             filtered = filtered.filter(t => t.dueDate <= cutoffStr);
           }
           if (filtered.length === 0) {
@@ -6901,19 +6923,42 @@ function App() {
   }
   function handleDismissContent(idx) { setPendingContent(prev => prev.filter((_,i) => i !== idx)); }
   function handleApplyPlan(idx, steps) {
+    // Two calendar categories: a step is a BLOCK (visible time commitment on the
+    // calendar) when it carries a start time or is tagged kind='block'; otherwise
+    // it's a DEADLINE (a due-dated task). This is what makes the plan's study
+    // sessions, breaks, and timed exams actually appear on the calendar instead
+    // of flattening into a pile of "due:" items.
+    const addMinutesToHM = (hm, mins) => {
+      const [h, m] = String(hm).split(':').map(Number);
+      const total = Math.min(24 * 60 - 1, (h * 60 + (m || 0)) + mins);
+      return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+    };
+    let blockCount = 0, taskCount = 0;
     steps.forEach(step => {
-      executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
+      const stepDate = step.date || today();
+      const isBlock = step.kind === 'block' || (!!step.time && step.kind !== 'deadline');
+      if (isBlock && step.time) {
+        const end = step.end_time || addMinutesToHM(step.time, step.estimated_minutes || 60);
+        executeAction({ type:'add_block', date:stepDate, start:step.time, end, activity:step.title, category:'school' });
+        blockCount++;
+      } else {
+        executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:stepDate, estimated_minutes:step.estimated_minutes||30 });
+        taskCount++;
+      }
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     // 24-hour plan rule: point at the first thing, not a confirmation toast.
-    const dated = steps.map(s => ({ title: s.title, date: s.date || today() })).sort((a, b) => a.date.localeCompare(b.date));
+    const dated = steps
+      .map(s => ({ title: s.title, date: s.date || today(), time: s.time || '' }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const first = dated[0];
     if (first) {
       const da = daysUntil(first.date);
-      if (da <= 1) postAssistantNote(`Plan's live. First up — "${first.title}", ${whenLabel(da, first.date)}.`);
-      else postAssistantNote(`Plan's live, but the first task isn't for ${da} days (${first.date}) — slow start.`);
+      const when = first.time ? `${whenLabel(da, first.date)} at ${first.time}` : whenLabel(da, first.date);
+      if (da <= 1) postAssistantNote(`Plan's live — ${blockCount} block${blockCount !== 1 ? 's' : ''} on your calendar, ${taskCount} deadline${taskCount !== 1 ? 's' : ''} tracked. First up: "${first.title}", ${when}.`);
+      else postAssistantNote(`Plan's live, but the first item isn't for ${da} days (${first.date}) — slow start.`);
     } else {
-      setToastMsg('Added ' + steps.length + ' tasks from plan');
+      setToastMsg('Added ' + steps.length + ' items from plan');
     }
   }
 
@@ -7657,8 +7702,7 @@ function App() {
       const token = session?.data?.session?.access_token;
 
       // Build clientTasks payload for priority engine (non-done, due within 30 days).
-      const thirtyDaysOut = new Date(); thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
-      const thirtyDaysStr = thirtyDaysOut.toISOString().slice(0, 10);
+      const thirtyDaysStr = addDaysISO(today(), 30);
       const clientTasksPayload = tasks
         .filter(t => t.status !== 'done' && t.dueDate <= thirtyDaysStr)
         .slice(0, 50)
@@ -8672,7 +8716,6 @@ function App() {
             onNew={startNewChat}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-            onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
             focusSession={focusSession}
@@ -8976,19 +9019,6 @@ function App() {
               <span style={{color:'var(--border)'}}>|</span>
               <a href="/terms" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
             </div>
-          </div>
-        </div>
-      ) : activePanel === 'proofread' ? (
-        <div className="settings-fullscreen">
-          <div className="settings-fullscreen-inner">
-            <div className="settings-fullscreen-header">
-              <div>
-                <div className="settings-title">Proofread</div>
-                <div className="settings-sub">Drop an essay, math worksheet, or PDF. The AI flags issues and suggests fixes.</div>
-              </div>
-              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
-            </div>
-            <ProofreadPanel />
           </div>
         </div>
       ) : selectedProject ? (

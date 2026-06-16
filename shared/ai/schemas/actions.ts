@@ -130,17 +130,15 @@ export const ClearAllSchema = z.object({
   confirm: z.literal(true, { errorMap: () => ({ message: "confirm must be true to wipe everything" }) }),
 });
 
+// Minimal by design: the model only authors a plain-language question and up to
+// a few short options. The internal routing fields (context_action,
+// missing_fields, known_fields) are derived SERVER-SIDE from schema-validation
+// failures — never authored by the model — so they can never leak into the
+// student-facing card and the tool stays cheap to call.
 export const AskClarificationSchema = z.object({
   type: z.literal("ask_clarification").optional(),
-  question: z.string().min(1).max(500),
-  reason: z.string().max(5000).optional(),
-  context_action: z.string().max(100).optional(),
-  missing_fields: z.array(z.string()).optional(),
-  // Fields already extracted from the student's message — the frontend merges
-  // these with the user's clarification answer so nothing gets lost on re-ask.
-  known_fields: z.record(z.string(), z.unknown()).optional(),
-  options: z.array(z.string()).max(6).optional(),
-  multi_select: z.boolean().optional(),
+  question: z.string().min(1).max(300),
+  options: z.array(z.string()).max(4).optional(),
 });
 
 export const ReadCalendarSchema = z.object({
@@ -527,16 +525,16 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   delete_task: "Remove a task from the to-do list by title.",
   update_event: "Update an existing event — change new_title, date, event_type, or subject. `title` must match an event already on the calendar.",
   complete_task: "Mark a task done.",
-  add_block: "Add a time block to the schedule. NEVER infer, estimate, or generate start/end times. If the student did not state exact start and end times, call ask_clarification with missing_fields=['start','end']. All four fields (date, start, end, activity) must appear verbatim in the student's message.",
+  add_block: "Add a time block to the schedule. NEVER infer, estimate, or generate start/end times. If the student didn't state exact start and end times, leave them out — the app will ask. All four fields (date, start, end, activity) must come from the student's message.",
   delete_block: "Remove a time block from the schedule.",
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
-  ask_clarification: "Ask for ONE missing or ambiguous required field before running an action. Set context_action (target tool name), missing_fields (needed fields), known_fields (already extracted values, e.g. {title:'Chem test'}). Up to 6 short options when helpful.",
+  ask_clarification: "Ask ONE short, plain-language question when the request is genuinely ambiguous and you can't pick a sensible default. Optionally give up to 4 short answer options. Prefer just attempting the action — missing required fields are asked for automatically. Never use for study-content generation.",
   read_calendar: "Read-only schedule lookup. Set end_date to the stated timeframe; omit for default one-week window. Never combine with mutating tools.",
   set_timer: "Start a countdown. label = student's exact words. Exactly one of: duration_seconds (1..86400), fire_at (ISO 8601+tz), or preset (pomodoro/short_break/long_break). Convert '20 minutes'→1200, '1 hour'→3600. If no duration given, call ask_clarification.",
   cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
   add_note: "Create a note. subject = folder. Ask one missing field at a time: subject first, then source (options: 'I will write it'/'Paste/import'/'AI write'), then title. Use source='ai_generated' if the student asked you to draft it.",
-  prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Only call this when the student explicitly asks what to do next, what matters most, or which task to prioritize. Never combine with mutating tools.",
+  prioritize_tasks: "Read-only: return a ranked list of the student's most important tasks to tackle right now. Call this when the student asks what to do next / what matters most / which task to prioritize, OR when they sound overwhelmed, paralyzed, or procrastinating ('where do I start', 'I don't even know what to do', 'I don't wanna do any of it'). Never combine with mutating tools.",
   plan_intent: "Convert a student goal or intent into a structured multi-week plan with recurring blocks, milestone tasks, and a review cadence. Use for goals like 'survive finals week', 'improve Chinese speaking', or 'balance coding and school'. `horizon` must be one of: week, month, semester. If no deadline or subject is stated, omit those fields — do not guess.",
   revise_plan: "Revise an existing saved study plan by re-running the intent plan pipeline with the student's correction instructions. Requires plan_id (UUID of the saved plan) and instructions (what to change, e.g. 'make the plan lighter' or 'add 2 more study sessions per week'). Only call this when the student explicitly asks to revise, adjust, or change a saved plan.",
   update_task: "Update an existing task's title, due date, or estimated time. Identify the task by task_id (UUID) or title (fuzzy match). Provide at least one of new_title, due, or estimated_minutes. If the task cannot be found, ask_clarification.",
@@ -597,6 +595,9 @@ const CHAT_TOOLS: ActionName[] = [
   "manage_task",
   // Other single-entity verbs that genuinely lead default-chat turns.
   "set_timer", "cancel_timer", "plan_intent", "prioritize_tasks", "break_task",
+  // Destructive wipe — must be reachable so "delete everything" routes to the
+  // confirmation card instead of being silently deflected. Schema forces confirm=true.
+  "clear_all",
   // On-demand semantic recall + clarification escape.
   "search_memory", "ask_clarification",
 ];
