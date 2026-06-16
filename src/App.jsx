@@ -381,7 +381,20 @@ async function loadAllFromSupabase(userId) {
     // `onboarding_completed` may be absent on older DBs; treat missing as false.
     const onboardingCompleted = !!(profileRes.data && profileRes.data.onboarding_completed);
 
-    return { tasks, events, notes, messages, blocks, studyPlans, onboardingCompleted };
+    // Supabase resolves per-query errors into `.error` rather than throwing, so a
+    // single failed table would otherwise load as an empty array — making real
+    // data look gone and inviting the student to "re-add" or overwrite it. Flag
+    // any core-table failure so the caller can warn instead of showing a false
+    // empty state. (profile/study_plans are non-core and tolerate absence.)
+    const loadIncomplete = !!(tasksRes.error || eventsRes.error || notesRes.error || recurringRes.error || dateBlocksRes.error);
+    if (loadIncomplete) {
+      console.error('Partial Supabase load:', {
+        tasks: tasksRes.error, events: eventsRes.error, notes: notesRes.error,
+        recurring: recurringRes.error, dateBlocks: dateBlocksRes.error,
+      });
+    }
+
+    return { tasks, events, notes, messages, blocks, studyPlans, onboardingCompleted, loadIncomplete };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -4686,6 +4699,13 @@ function App() {
       setMessages(data.messages);
       setDbMessageCount(data.messages.length); // P1.4
       setStudyPlans(data.studyPlans || []);
+      if (data.loadIncomplete) {
+        // Some of your real data failed to load — warn loudly so an accidental
+        // empty view isn't mistaken for "nothing here" and overwritten.
+        setToastMsg('⚠️ Some of your data didn\'t load — refresh before adding or editing to avoid losing anything.');
+      }
+    } else {
+      setToastMsg('⚠️ Couldn\'t load your data right now — please refresh. Avoid adding anything until it loads.');
     }
 
     // Load flashcard decks for AI tool access (read_study_sets, delete_study_set, read_project)
@@ -5945,6 +5965,7 @@ function App() {
             }
             return updated;
           });
+          pushUndoToast('Undo: edited note', undoSnap);
           break;
         }
         case 'delete_note': {
@@ -5953,6 +5974,7 @@ function App() {
           if (user) {
             syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
           }
+          pushUndoToast('Undo: deleted note', undoSnap);
           break;
         }
         case 'break_task': {
@@ -6812,7 +6834,14 @@ function App() {
           })();
           break;
         }
-        default: console.warn('Unknown action type:', action.type);
+        default:
+          // Never silently swallow an action — an unhandled type means the model
+          // produced something the client can't run, and the student must know it
+          // didn't happen rather than seeing a phantom success.
+          console.warn('Unknown action type:', action.type);
+          setToastMsg("⚠️ I couldn't run that one — it's not something I can do yet.");
+          if (user) { try { trackEvent(user.id, 'action_unhandled', { action_type: action?.type || 'unknown' }); } catch (_) {} }
+          break;
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
   }
@@ -6971,15 +7000,35 @@ function App() {
       ? new Set(detectPlanConflicts(plan.recurring_blocks || [], blocks.recurring || []).map(c => c.activity))
       : new Set();
 
+    // Recurring blocks: expand each spec into concrete, visible time blocks on
+    // every matching weekday within its window. (executeAction has no
+    // 'add_recurring_event' case — calling it directly would silently no-op, so
+    // the whole plan's schedule vanished. add_block is handled and renders on
+    // the calendar, matching the Block category.)
+    const dayNameToIndex = { Sunday:0, Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6 };
+    const applyRecurringBlock = (spec) => {
+      const dayIdx = (spec.days || []).map(d => dayNameToIndex[d]).filter(d => d !== undefined);
+      if (!dayIdx.length || !spec.start || !spec.end) return 0;
+      const endDefault = new Date(); endDefault.setMonth(endDefault.getMonth() + 1);
+      const cursor = new Date((spec.start_date || today()) + 'T12:00:00');
+      const end = new Date((spec.end_date || toDateStr(endDefault)) + 'T12:00:00');
+      let made = 0;
+      while (cursor <= end && made < 120) {
+        if (dayIdx.includes(cursor.getDay())) {
+          executeAction({ type:'add_block', date:toDateStr(cursor), start:spec.start, end:spec.end, activity:spec.activity, category:spec.category || 'school' });
+          made++;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return made;
+    };
+
     (plan.recurring_blocks || []).forEach(b => {
       if (skipConflicts && conflictSet.has(b.activity)) return;
-      executeAction({ type:'add_recurring_event', title:b.activity, event_type:'other', subject:b.category||'school', days:b.days, start_date:b.start_date, end_date:b.end_date });
-      blockCount++;
+      if (applyRecurringBlock(b) > 0) blockCount++;
     });
     if (plan.review_cadence?.review_block) {
-      const rb = plan.review_cadence.review_block;
-      executeAction({ type:'add_recurring_event', title:rb.activity, event_type:'other', subject:rb.category||'school', days:rb.days, start_date:rb.start_date, end_date:rb.end_date });
-      blockCount++;
+      if (applyRecurringBlock(plan.review_cadence.review_block) > 0) blockCount++;
     }
     (plan.milestone_tasks || []).forEach(t => {
       const taskId = uid();
