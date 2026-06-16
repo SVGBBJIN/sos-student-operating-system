@@ -29,6 +29,7 @@ import ConnectorsSettings from './components/ConnectorsSettings';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
+import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
@@ -221,6 +222,14 @@ function mapGoogleCalItems(items) {
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 15;
+
+// Schema-version guard. The server stamps every response with the action-tool
+// schema version it was built against. We compare the MAJOR token ("v7" in
+// "v7-2026-05"): a major mismatch means a breaking shape change this client
+// can't read safely (e.g. a renamed field), so we refuse to execute its actions
+// and tell the student to refresh. Date-only differences are non-breaking.
+const EXPECTED_ACTION_SCHEMA = SCHEMA_VERSIONS.action_tools;
+const schemaMajor = (v) => String(v || '').split('-')[0];
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -618,6 +627,11 @@ async function migrateLocalStorage(userId) {
     }
 
     localStorage.setItem('sos_migrated_' + userId, 'true');
+    // Clear the guest cache now that it's in the account — prevents this work
+    // from re-importing into a different account on a later guest→signup.
+    ['cc_tasks', 'cc_events', 'cc_notes', 'cc_blocks', 'cc_chat'].forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
     if (import.meta.env.DEV) console.log('Migration complete');
     return true;
   } catch (e) {
@@ -4785,13 +4799,45 @@ function App() {
     else if (target === 'tasks' || target === 'calendar') setActivePanel('chat');
   }, [searchParams]);
 
+  // Guests have no DB, so their work lives only in React state — which an OAuth
+  // redirect or a reload wipes before they ever sign up. Persist it to the same
+  // cc_* localStorage keys migrateLocalStorage() already imports on first login,
+  // so guest work survives the round-trip and gets migrated into the new account.
+  const guestHydratedRef = useRef(false);
+  function hydrateGuestData() {
+    try {
+      const t = JSON.parse(localStorage.getItem('cc_tasks') || '[]');
+      const e = JSON.parse(localStorage.getItem('cc_events') || '[]');
+      const n = JSON.parse(localStorage.getItem('cc_notes') || '[]');
+      const b = JSON.parse(localStorage.getItem('cc_blocks') || '{"recurring":[],"dates":{}}');
+      if (Array.isArray(t) && t.length) setTasks(t);
+      if (Array.isArray(e) && e.length) setEvents(e);
+      if (Array.isArray(n) && n.length) setNotes(n);
+      if (b && (b.recurring?.length || Object.keys(b.dates || {}).length)) setBlocks(b);
+    } catch (_) { /* corrupt cache — ignore */ }
+    guestHydratedRef.current = true;
+  }
+
   // ── Check for existing session on mount ──
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) handleAuth(session.user);
+      else hydrateGuestData(); // no session — restore any in-progress guest work
       setAuthChecked(true);
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist guest work to localStorage as it changes (only once hydrated, and
+  // never while authed — authed writes go straight to Supabase via syncOp).
+  useEffect(() => {
+    if (user || !authChecked || !guestHydratedRef.current) return;
+    try {
+      localStorage.setItem('cc_tasks', JSON.stringify(tasks));
+      localStorage.setItem('cc_events', JSON.stringify(events));
+      localStorage.setItem('cc_notes', JSON.stringify(notes));
+      localStorage.setItem('cc_blocks', JSON.stringify(blocks));
+    } catch (_) { /* quota / disabled storage — best effort */ }
+  }, [user, authChecked, tasks, events, notes, blocks]);
 
   // ── Listen for auth state changes (logout, token refresh, OAuth redirect) ──
   useEffect(() => {
@@ -4993,6 +5039,32 @@ function App() {
     try { localStorage.setItem('sos-notif-prefs', JSON.stringify(next)); } catch(_) {}
   }
 
+  // After a failed write, converge the client back to DB truth so optimistic
+  // state can't keep showing changes that never persisted. Read-only (no writes,
+  // so it can't loop), single-flight, debounced, and skipped while offline (the
+  // soft message already covers that case and a reload would just fail too).
+  function reconcileAfterSyncFailure() {
+    if (!user) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (reconcileAfterSyncFailure._timer) clearTimeout(reconcileAfterSyncFailure._timer);
+    reconcileAfterSyncFailure._timer = setTimeout(async () => {
+      if (reconcileAfterSyncFailure._running) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      reconcileAfterSyncFailure._running = true;
+      try {
+        const data = await loadAllFromSupabase(user.id);
+        if (data && !data.loadIncomplete) {
+          setTasks(data.tasks);
+          setEvents(data.events);
+          setBlocks(data.blocks);
+          setNotes((data.notes || []).filter(n => !(n.name && n.name.startsWith('[chat-save]'))));
+          setSyncStatus('saved');
+        }
+      } catch (_) { /* still offline / failing — leave the soft message in place */ }
+      finally { reconcileAfterSyncFailure._running = false; }
+    }, 4000);
+  }
+
   // ── Sync helper: wraps a DB write with sync status ──
   async function syncOp(fn, label = '') {
     setSyncStatus('saving');
@@ -5002,9 +5074,10 @@ function App() {
     } catch (e) {
       console.error('Sync error:', e);
       setSyncStatus('error');
-      // Surface a single soft error in the chat so the student knows persistence failed.
-      // We do not rollback the local state — a subsequent save attempt (or a reload
-      // after reconnecting) will resync. Debouncing prevents a flood of toasts.
+      // Surface a single soft error in the chat so the student knows persistence
+      // failed, then reconcile to DB truth so we don't keep showing unsaved data.
+      // Debouncing prevents a flood of toasts.
+      reconcileAfterSyncFailure();
       const now = Date.now();
       if (!syncOp._lastErrorAt || now - syncOp._lastErrorAt > 8000) {
         syncOp._lastErrorAt = now;
@@ -5040,9 +5113,61 @@ function App() {
     undoTimerRef.current = setTimeout(() => setUndoToast(null), 8000);
   }
 
+  // Make an undo durable: reconcile the DB back to `snap` so the restore
+  // survives a reload / realtime echo (previously undo only touched React state,
+  // so any undo silently reverted on the next sync). Diff-based and scoped: we
+  // upsert every snapshot row (restores deletes + edits) and delete only the IDs
+  // that exist now but weren't in the snapshot (removes creates). Blocks are
+  // only touched when they actually changed.
+  async function persistSnapshotToDb(snap, cur) {
+    if (!user) return; // guests have no DB rows to reconcile
+    const ops = [];
+    const diffTable = (table, snapRows, curRows, toDb) => {
+      const snapIds = new Set((snapRows || []).map(r => r.id));
+      const created = (curRows || []).map(r => r.id).filter(id => !snapIds.has(id));
+      if (created.length) ops.push(sb.from(table).delete().eq('user_id', user.id).in('id', created));
+      if ((snapRows || []).length) ops.push(sb.from(table).upsert((snapRows).map(toDb), { onConflict: 'id' }));
+    };
+    diffTable('tasks', snap.tasks, cur.tasks, t => appTaskToDb(t, user.id));
+    diffTable('events', snap.events, cur.events, e => appEventToDb(e, user.id));
+    diffTable('notes', snap.notes, cur.notes, n => appNoteToDb(n, user.id));
+    if (snap.grades) diffTable('grades', snap.grades, cur.grades, g => ({ ...g, user_id: user.id }));
+    if (snap.flashcardDecks) diffTable('flashcard_decks', snap.flashcardDecks, cur.flashcardDecks, d => ({ ...d, user_id: user.id }));
+
+    // Blocks: only reconcile when they actually differ (most undos don't touch them).
+    if (JSON.stringify(snap.blocks) !== JSON.stringify(cur.blocks)) {
+      const snapRec = snap.blocks?.recurring || [];
+      const curRec = cur.blocks?.recurring || [];
+      const snapRecIds = new Set(snapRec.map(r => r.id));
+      const recDeletes = curRec.map(r => r.id).filter(id => !snapRecIds.has(id));
+      if (recDeletes.length) ops.push(sb.from('recurring_blocks').delete().eq('user_id', user.id).in('id', recDeletes));
+      if (snapRec.length) ops.push(sb.from('recurring_blocks').upsert(
+        snapRec.map(rb => ({ id: rb.id, user_id: user.id, name: rb.name, category: rb.category || 'school', start_time: rb.start || '00:00', end_time: rb.end || '01:00', days: rb.days || [] })),
+        { onConflict: 'id' }
+      ));
+      // Date overrides: upsert every snapshot slot; null out slots that exist now but not in the snapshot.
+      const snapDates = snap.blocks?.dates || {};
+      const curDates = cur.blocks?.dates || {};
+      Object.entries(snapDates).forEach(([date, slots]) => {
+        Object.entries(slots || {}).forEach(([slot, data]) => {
+          ops.push(dbUpsertDateBlock(date, slot, data, user.id));
+        });
+      });
+      Object.entries(curDates).forEach(([date, slots]) => {
+        Object.entries(slots || {}).forEach(([slot]) => {
+          if (!(snapDates[date] && slot in snapDates[date])) ops.push(dbUpsertDateBlock(date, slot, null, user.id));
+        });
+      });
+    }
+    await Promise.all(ops);
+  }
+
   function doUndo() {
     if (!undoToast) return;
     const { snap } = undoToast;
+    // Capture current state BEFORE the setters so the DB reconcile can diff
+    // against what's actually live right now.
+    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
     setTasks(snap.tasks);
     setEvents(snap.events);
     setNotes(snap.notes);
@@ -5051,6 +5176,7 @@ function App() {
     if (snap.grades) setGrades(snap.grades);
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
     postAssistantNote("Done — I've undone that action.");
   }
 
@@ -5485,10 +5611,12 @@ function App() {
   }
   function undoRollupAuto(autoItem) {
     const snap = autoItem.snap;
+    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
     setTasks(snap.tasks); setEvents(snap.events); setNotes(snap.notes); setBlocks(snap.blocks);
     if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
     if (snap.grades) setGrades(snap.grades);
     setRollupAuto(prev => prev.filter(x => x !== autoItem));
+    if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
   }
 
   // ── Action executor (writes to Supabase) ──
@@ -7846,6 +7974,16 @@ function App() {
         });
       }
       if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
+
+      // ── Schema-version guard ──
+      // On a breaking (major) mismatch, neutralize actions/clarifications so we
+      // never misread a renamed field, but keep the assistant's text. The student
+      // gets a clear "refresh" nudge instead of silent data corruption.
+      if (chatData?.schema_version && schemaMajor(chatData.schema_version) !== schemaMajor(EXPECTED_ACTION_SCHEMA)) {
+        console.warn('Schema version mismatch — server:', chatData.schema_version, 'client:', EXPECTED_ACTION_SCHEMA);
+        setToastMsg('⚠️ The app just updated — refresh the page so I can run actions correctly (your data is safe).');
+        chatData = { ...chatData, actions: [], clarification: null, clarifications: [] };
+      }
 
       // ── Planning pipeline response: show proposed plan in propose mode ──
       if (chatData?.orchestration?.mode === 'planning') {
