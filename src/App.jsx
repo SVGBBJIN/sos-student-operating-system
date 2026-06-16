@@ -30,7 +30,7 @@ import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
-import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import { rankTasks, rankForQuickStart, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
   assignArm,
@@ -274,34 +274,6 @@ function smallestNextStep(task) {
   if (/project|build|design|create|\bmake\b/.test(s))
     return "open a doc and jot the first 3 bullets of what it needs.";
   return "open whatever you need for it and poke at it for 2 minutes — no pressure to finish.";
-}
-
-/* ── Streak + XP — the reward, made first-class ──────────────────────
-   You already schedule fun; this sells the payoff back to the student.
-   Device-local (one student per device); award on start + completion. */
-const GAME_STATE_KEY = 'sos_game_state_v1';
-const XP_PER_START = 5;
-const XP_PER_COMPLETE = 15;
-
-function loadGameState() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(GAME_STATE_KEY) || '{}');
-    return {
-      xp: raw.xp || 0,
-      streak: raw.streak || 0,
-      bestStreak: raw.bestStreak || 0,
-      lastActiveDay: raw.lastActiveDay || null,
-    };
-  } catch { return { xp: 0, streak: 0, bestStreak: 0, lastActiveDay: null }; }
-}
-function saveGameState(s) {
-  try { localStorage.setItem(GAME_STATE_KEY, JSON.stringify(s)); } catch { /* private mode */ }
-}
-// What the streak becomes if the student logs activity on `t` (YYYY-MM-DD):
-// same day → unchanged; yesterday → +1; older/none → reset to 1.
-function projectStreak(prev, t) {
-  if (prev.lastActiveDay === t) return prev.streak || 1;
-  return prev.lastActiveDay === addDaysISO(t, -1) ? (prev.streak || 0) + 1 : 1;
 }
 
 /* ─── Map raw Google Calendar API items → app event shape ─── */
@@ -755,7 +727,7 @@ const POLICY_MODULES = {
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
   clarification: "Missing-field handling: just attempt the matching action with your BEST GUESS — prefer a sensible default over a question. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. A tired or lazy student won't fill out a form, so default rather than interrogate. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where no reasonable default exists — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
-  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', 'I don't even know what to do', or 'I don't wanna' — NEVER reply with a bare acknowledgement like 'got it'. FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then name the SINGLE highest-priority task and break it down to a trivially-startable 2-minute first step ('open the doc and write the title', 'do just the first problem'). Procrastination is about starting, not planning. Start a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title) rather than asking how long. Sell the reward — finishing a couple blocks frees up their evening/weekend. Be warm and encouraging — one concrete next step, never a lecture, never a bare unlabeled timer.",
+  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', 'I don't even know what to do', or 'I don't wanna' — NEVER reply with a bare acknowledgement like 'got it'. FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then pick ONE task to start — not necessarily the highest-priority one, but the most STARTABLE task that still matters (short, concrete, low-effort), since the goal is breaking the freeze, not optimizing the schedule. LEAD with a trivially-startable 2-minute first step ('open the doc and write the title', 'do just the first problem') before you even name the task. Procrastination is about starting, not planning. Start a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title) rather than asking how long. Be warm and encouraging — one concrete next step, never a lecture, never a bare unlabeled timer. Do NOT use points, streaks, XP, or other gamification.",
   destructive: "Destructive requests ('delete everything', 'wipe it all', 'clear everything', 'start over', 'nuke my schedule') MUST call clear_all with confirm=true so the student gets a confirmation card — never silently refuse or deflect to opening a widget. To remove a single item, use the matching delete/manage verb.",
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
@@ -5295,38 +5267,6 @@ function App() {
   // in the DynamicIsland ambient tier. Distinct from set_timer so its expiry
   // can offer continue/stop instead of a generic chime.
   const [focusSession, setFocusSession] = useState(null); // { taskId, title, startedAt, endsAt, status }
-
-  // ── Streak + XP reward state ──
-  // Reward made first-class: starting and finishing both pay out. Surfaced as a
-  // pill above the chat input and folded into start/completion messages.
-  const [gameState, setGameState] = useState(() => loadGameState());
-
-  // Award XP + advance the daily streak. Returns the post-update snapshot (plus
-  // xpDelta) so callers can fold "+15 XP · 🔥 4-day streak" into their message.
-  function recordProgress(kind) {
-    const t = today();
-    const prev = gameState;
-    const streak = projectStreak(prev, t);
-    const xpDelta = kind === 'complete' ? XP_PER_COMPLETE : XP_PER_START;
-    const next = {
-      xp: (prev.xp || 0) + xpDelta,
-      streak,
-      bestStreak: Math.max(prev.bestStreak || 0, streak),
-      lastActiveDay: t,
-    };
-    setGameState(next);
-    saveGameState(next);
-    return { ...next, xpDelta, kind };
-  }
-
-  // The payoff framing — sell the free time back to the student.
-  function rewardLine(activeCount) {
-    if (activeCount <= 1) return "Clear this one and your board's empty — that's the whole list.";
-    const dow = new Date().getDay(); // Thu/Fri → the weekend is the prize.
-    if ((dow === 4 || dow === 5) && activeCount >= 3) return `Clear your top 3 blocks and the weekend's actually yours.`;
-    if (activeCount <= 3) return `Knock out this + ${activeCount - 1} more and you're done for the stretch.`;
-    return `Start at the top — ${activeCount} things shrink fast once you're moving.`;
-  }
   const focusTimeoutRef = useRef(null);
 
   // ── Commitment-lock countdown (start-latency experiment arm) ──
@@ -5886,15 +5826,8 @@ function App() {
           if (user) dbInsertTaskEvent({ taskId: target.id, eventType: 'complete', fromStatus: target.status, toStatus: 'done', metadata: { title: target.title, subject: target.subject } }, user.id);
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'complete_task' });
           recordExecution('complete_task', `"${target.title}"`);
-          // Time payout — recovered time as information, not celebration —
-          // plus the reward: XP and a daily streak the student is building.
-          {
-            const progress = recordProgress('complete');
-            const streakBit = progress.streak > 1
-              ? `\n\n🔥 ${progress.streak}-day streak · +${progress.xpDelta} XP`
-              : `\n\n+${progress.xpDelta} XP`;
-            postAssistantNote(payoutLine(target) + streakBit);
-          }
+          // Time payout — recovered time as information, not celebration.
+          postAssistantNote(payoutLine(target));
           pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
           break;
         }
@@ -7924,8 +7857,8 @@ function App() {
 
     // ── Deterministic "just start me" path ──
     // Paralysis / "I don't wanna" language never goes to the model. We name the
-    // single top task, hand over a 2-minute first step, auto-start a labeled
-    // timer (best-guess, no form), and frame the reward. Never a bare "got it."
+    // single most-startable task, lead with a 2-minute first step, and
+    // auto-start a labeled timer (best-guess, no form). Never a bare "got it."
     if (!fromClarification && !photo && detectJustStart(msgContent)) {
       const userMsg = { role:'user', content:msgContent, timestamp:Date.now() };
       setMessages(prev => { const n=[...prev,userMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -7942,20 +7875,21 @@ function App() {
         // Nothing on the board — reassure, don't invent work.
         reply = "Your board's actually clear right now — nothing's hanging over you. If something's looming, just tell me what it is and I'll get it down so it's off your head.";
       } else {
+        // Pick the optimum of two dimensions — priority AND startability — not
+        // the single highest-priority task. The most important thing is usually
+        // the most daunting; the on-ramp is the easiest-to-start task that still
+        // matters, so momentum can carry the student into the bigger work.
         const density = buildCalendarDensity(pool, blocks.dates || {});
-        const ranked = rankTasks(pool, new Date(), density, undefined, 1);
+        const ranked = rankForQuickStart(pool, new Date(), density, undefined, 1);
         const top = pool.find(t => t.id === ranked[0]?.taskId) || pool[0];
         const step = smallestNextStep(top);
         // Auto-start a 25-min focus timer labeled with the task. No clarification —
         // a procrastinating student won't fill a form, so we just pick 25 min.
         executeAction({ type:'set_timer', label: top.title, duration_seconds: 25 * 60, __confirmed:true });
         setActiveWidgets(w => ({ ...w, pomodoro: true }));
-        const progress = recordProgress('start');
-        const reward = rewardLine(pool.length);
-        const streakBit = progress.streak > 1
-          ? ` 🔥 ${progress.streak}-day streak · +${progress.xpDelta} XP.`
-          : ` +${progress.xpDelta} XP.`;
-        reply = `Forget the pile — just **${top.title}**. Nothing else right now.\n\n▶ **2-minute version:** ${step}\n\nStarted a 25-min timer for it — when it chimes you can stop guilt-free. ${reward}${streakBit}`;
+        // Lead with the two-minute task — the on-ramp comes first, the task name
+        // second. Starting is the whole job; the rest can wait.
+        reply = `▶ **Start here (2 min):** ${step}\n\nThat's the on-ramp for **${top.title}** — ignore everything else for now. Started a 25-min timer; when it chimes you can stop guilt-free.`;
         if (user) trackEvent(user.id, 'just_start', { task: top.title });
       }
 
@@ -9731,23 +9665,6 @@ function App() {
         ) : (
           /* ── Normal chat input form ── */
           <>
-            {(gameState.streak > 0 || gameState.xp > 0) && (
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,padding:'4px 12px',fontSize:'0.76rem',color:'var(--text-dim)'}} title="Earned by starting and finishing tasks">
-                {gameState.streak > 0 && (
-                  <span style={{display:'inline-flex',alignItems:'center',gap:4,fontWeight:700,color:gameState.streak>=3?'var(--orange,#ff9f43)':'var(--text-dim)'}}>
-                    🔥 {gameState.streak}-day streak
-                  </span>
-                )}
-                {gameState.xp > 0 && (
-                  <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
-                    ⭐ {gameState.xp} XP
-                  </span>
-                )}
-                {gameState.bestStreak > gameState.streak && (
-                  <span style={{opacity:0.6}}>· best {gameState.bestStreak}</span>
-                )}
-              </div>
-            )}
             {messages.length >= 55 && (
               <div style={{fontSize:'0.76rem',color:'var(--warning)',marginBottom:8,padding:'6px 10px',background:'rgba(255,159,67,0.08)',borderRadius:10,border:'1px solid rgba(255,159,67,0.18)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
                 <span>Chat is getting long — consider starting fresh for better AI responses</span>

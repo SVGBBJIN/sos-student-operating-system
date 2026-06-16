@@ -154,6 +154,109 @@ export function rankTasks(
   return topN !== undefined ? results.slice(0, topN) : results;
 }
 
+// ── Startability: the second dimension ──────────────────────────────────────
+// Priority answers "what matters most"; startability answers "what's easiest to
+// begin right now". They are orthogonal — the most important task is often the
+// most daunting (a 5-page essay), which is exactly what a procrastinating
+// student bounces off. Startability scores how low the activation energy is:
+// short tasks, concrete/atomic work, and tasks that haven't been repeatedly
+// avoided are the easiest on-ramps. 0..1, higher = easier to start.
+
+export interface StartabilityFactors {
+  effort_ease: number;   // shorter estimated time → easier to begin
+  concreteness: number;  // atomic/well-defined work vs big ambiguous projects
+  freshness: number;     // not repeatedly postponed (postpones = avoidance)
+}
+
+// Work that is concrete and atomic — you can sit down and just do the next bit.
+const STARTABLE_KEYWORDS =
+  /\b(read|reading|review|practice|problem|pset|worksheet|quiz|flashcard|vocab|exercise|watch|outline|notes?|memoriz|drill|recap|skim)\b/i;
+// Big, open-ended deliverables with high activation energy.
+const DAUNTING_KEYWORDS =
+  /\b(essay|paper|project|presentation|research|thesis|dissertation|report|study\s*guide|portfolio|proposal|draft\s*a)\b/i;
+
+const STARTABILITY_WEIGHTS = {
+  effort_ease: 0.5,
+  concreteness: 0.35,
+  freshness: 0.15,
+} as const;
+
+export function computeStartability(task: TaskForScoring): {
+  score: number;
+  factors: StartabilityFactors;
+} {
+  // Effort: a 15-min task is trivially startable; a 2-hour one is a wall.
+  // Unknown estimate defaults to 30 min (a moderate on-ramp).
+  const est = typeof task.estTime === "number" && task.estTime > 0 ? task.estTime : 30;
+  const effort_ease = clamp(1 - (est - 15) / 105); // 15min→1.0, 120min→0.0
+
+  // Concreteness: keyword heuristic on title + subject.
+  const text = `${task.title ?? ""} ${task.subject ?? ""}`;
+  let concreteness = 0.6; // neutral default
+  if (DAUNTING_KEYWORDS.test(text)) concreteness = 0.3;
+  else if (STARTABLE_KEYWORDS.test(text)) concreteness = 0.9;
+
+  // Freshness: each postpone is evidence the task is hard to face.
+  const freshness = clamp(1 - (task.postponeCount ?? 0) * 0.2);
+
+  const score = clamp(
+    STARTABILITY_WEIGHTS.effort_ease * effort_ease +
+    STARTABILITY_WEIGHTS.concreteness * concreteness +
+    STARTABILITY_WEIGHTS.freshness * freshness
+  );
+
+  return {
+    score: Math.round(score * 1000) / 1000,
+    factors: { effort_ease, concreteness, freshness },
+  };
+}
+
+export interface QuickStartResult {
+  taskId: string;
+  priority: number;
+  startability: number;
+  quickStart: number;   // the blended objective the ranking optimizes
+  estMinutes: number;
+  explanation: string;
+}
+
+// How the two dimensions trade off for the "just start me" path. We lean toward
+// startability (the whole point is breaking the freeze with the easiest on-ramp)
+// while keeping priority as a guardrail so an urgent deadline can still surface.
+const QUICK_START_PRIORITY_WEIGHT = 0.4;
+const QUICK_START_STARTABILITY_WEIGHT = 0.6;
+
+// Rank tasks for the procrastination on-ramp: find the optimum of the two
+// dimensions rather than the single highest-priority task. Returns the blended
+// ranking with both component scores exposed.
+export function rankForQuickStart(
+  tasks: TaskForScoring[],
+  now: Date,
+  density: CalendarDensity,
+  signals?: BehavioralSignals,
+  topN?: number
+): QuickStartResult[] {
+  const active = tasks.filter((t) => t.status !== "done");
+  const results = active.map((t) => {
+    const p = computePriority(t, now, density, signals);
+    const s = computeStartability(t);
+    const quickStart = clamp(
+      QUICK_START_PRIORITY_WEIGHT * p.score +
+      QUICK_START_STARTABILITY_WEIGHT * s.score
+    );
+    return {
+      taskId: t.id,
+      priority: p.score,
+      startability: s.score,
+      quickStart: Math.round(quickStart * 1000) / 1000,
+      estMinutes: typeof t.estTime === "number" && t.estTime > 0 ? t.estTime : 30,
+      explanation: p.explanation,
+    };
+  });
+  results.sort((a, b) => b.quickStart - a.quickStart);
+  return topN !== undefined ? results.slice(0, topN) : results;
+}
+
 export function buildCalendarDensity(
   tasks: Array<{ dueDate: string; status: string; estTime?: number }>,
   blocks: Record<string, Record<string, unknown>>
