@@ -211,5 +211,11 @@ export async function runAgenticPipeline(cfg: AgenticConfig): Promise<AgenticRes
     console.warn(`${cfg.logName} skipping refine — pipeline budget nearly spent`);
   }
 
-  return { actions, critiqueText, iterations, draftContent: draftResp.content ?? "", shippedEmpty: false };
+  // The critique describes the DRAFT. Once a refine pass has folded it into a
+  // new plan, surfacing the old critique as "AI review" is stale and misleading
+  // (it complains about gaps the final plan already fixed). Only keep the
+  // critique when the shipped plan IS the draft it critiqued.
+  const surfacedCritique = iterations === 3 ? "" : critiqueText;
+
+  return { actions, critiqueText: surfacedCritique, iterations, draftContent: draftResp.content ?? "", shippedEmpty: false };
 }

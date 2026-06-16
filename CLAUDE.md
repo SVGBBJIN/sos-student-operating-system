@@ -25,11 +25,9 @@ src/App.jsx                       — Single 7800-line React component: state, c
 src/lib/streamChat.js             — SSE consumer for the chat endpoint
 
 api/chat.ts                       — Vercel transport adapter over handleChatRequest. SSE (default) or JSON.
-api/proofread.ts                  — Vercel handler for the proofread surface.
 api/embed.ts                      — Vercel handler for batched embeddings.
 
 supabase/functions/sos-chat/      — Edge Function (Deno) adapter over the same handleChatRequest.
-supabase/functions/sos-proofread/ — Edge Function mirror of api/proofread.ts.
 supabase/functions/sos-voice/     — Edge Function: Groq Whisper audio → text.
 supabase/functions/embed-batch/   — Server-side embedding upserter.
 
@@ -40,7 +38,7 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   providers/index.ts              — Provider registry.
   voice.ts                        — Groq Whisper transcription helper.
   router.ts                       — Tier routing (embed / flash / pro). ONLY place model strings appear.
-  schemas/                        — Zod schemas (actions, studio, plan, intent_plan, proofread, library, _helpers).
+  schemas/                        — Zod schemas (actions, studio, plan, intent_plan, library, _helpers).
   schemas/versions.ts             — Schema version pins per surface (action_tools=v6-2026-05).
   schemas/library.ts              — FlashcardDeckSchema + FlashcardSchema (persisted flashcard decks).
   schemas/intent_plan.ts          — MakeIntentPlanSchema + buildIntentPlanToolDefs + validateIntentPlan.
@@ -48,7 +46,7 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   context/enrich.ts               — enrichDynamicContext: parallel, best-effort, bounded context build.
   signals/behavioral.ts           — getBehavioralSignals, formatSignalsForContext (Supabase REST, hour-bucket cache).
   rag/                            — embeddings, retrieve (both abort-bounded).
-  pipelines/                      — planning.ts, proofread.ts, intent_plan.ts (each deadline-bounded).
+  pipelines/                      — planning.ts, intent_plan.ts (each deadline-bounded).
   telemetry.ts                    — Token counter, cost estimator, request log.
   resilience.ts                   — Retry classification + circuit breaker.
   chat-core.ts                    — callModel(): the single entry point for inference.
@@ -77,9 +75,9 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 
 **Models** (never reference these strings outside `router.ts` — use `embedModel(role)` for embeds):
 - Tier 0 — embeddings (memory, semantic search, clustering). Gemini stays here; Groq has no embedding model. Two models split the request budget (each capped ~100 RPM / 1k RPD, but ~30K TPM): `embedModel("primary")` = `gemini-embedding-002` backs the persisted RAG/memory store (all stored vectors must live in one model's space, so retrieval + upserts pin here); `embedModel("secondary")` = `gemini-embedding-001` serves ephemeral self-contained similarity (name grounding) so it never spends the primary's budget. `embedCoalesced()` in `rag/embeddings.ts` merges concurrent same-`(model,taskType,dim)` embed calls within a 15ms window into one upstream request (token-rich, request-poor).
-- Tier 1 (flash) — `openai/gpt-oss-20b` on Groq — chat, action_routing, summarize, proofread_classify, rerank.
+- Tier 1 (flash) — `openai/gpt-oss-20b` on Groq — chat, action_routing, summarize, rerank.
 - Tier 1 fallback — `gemini-2.5-flash` (cross-provider when Groq fails).
-- Tier 2 (pro) — `openai/gpt-oss-120b` on Groq — studio, planning, proofread_specialist.
+- Tier 2 (pro) — `openai/gpt-oss-120b` on Groq — studio, planning.
 - Tier 2 fallback — `gemini-2.5-pro` (cross-provider when Groq fails).
 - Vision override — `meta-llama/llama-4-scout-17b-16e-instruct` on Groq, applied in chat-core when a request carries image attachments. Fallback: `gemini-2.5-flash`.
 - Voice — `whisper-large-v3-turbo` on Groq via `shared/ai/voice.ts` (bypasses callModel).
@@ -106,7 +104,6 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 
 - Don't hardcode model strings — go through `router.ts`. The router is the only place tier→model decisions live. The vision override in `chat-core.ts` is the one exception (it depends on request payload, not static intent).
 - Don't bypass the Zod schemas in `shared/ai/schemas/`. They catch placeholder values, instruction-as-title, and generic subjects before they reach the user.
-- Don't add streaming to `api/proofread.ts` — it uses enforced JSON via `responseSchema`.
 - Don't use Node-only APIs (`Buffer`, `require`) in `shared/`. The same files run in Deno too.
 - Don't import from `@google/genai` outside `shared/ai/providers/gemini.ts`. The provider seam is intentional.
 - Don't import directly from `shared/ai/providers/groq.ts` either — go through `getProvider("groq")`.

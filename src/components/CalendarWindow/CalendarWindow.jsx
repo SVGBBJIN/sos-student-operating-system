@@ -26,7 +26,9 @@ function getWeekDates(baseDate) {
 }
 
 function toISODate(d) {
-  return d.toISOString().slice(0, 10);
+  // Local-timezone date string (YYYY-MM-DD). Never use toISOString() here — it
+  // converts to UTC first, which shifts the day for evening EST users.
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 /* ─── Widget Mode: 7-day strip ──────────────────────────────────── */

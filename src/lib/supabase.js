@@ -9,8 +9,4 @@ export const EDGE_FN_URL = window.location.hostname.includes('vercel.app')
   ? '/api/chat'
   : SUPABASE_URL + '/functions/v1/sos-chat';
 
-export const PROOFREAD_FN_URL = window.location.hostname.includes('vercel.app')
-  ? '/api/proofread'
-  : SUPABASE_URL + '/functions/v1/sos-proofread';
-
 export const CHAT_MAX_MESSAGES = 60;

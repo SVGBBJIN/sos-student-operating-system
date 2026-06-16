@@ -26,10 +26,10 @@ import GooglePermissionSummary from './components/GooglePermissionSummary';
 import { useAgenticMode } from './hooks/useSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import ConnectorsSettings from './components/ConnectorsSettings';
-import ProofreadPanel from './components/ProofreadPanel';
 import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
+import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
 import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
@@ -90,7 +90,7 @@ function buildNotifications(tasks, events, prefs) {
   }
   if (prefs.daily) {
     const dailyHour = parseInt(localStorage.getItem('sos-notif-daily-hour') || '8', 10);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = today();
     const fireAt = atDate(todayStr, dailyHour);
     if (fireAt > now) {
       notes.push({ title: '📋 Good morning — here\'s your plan', body: `You have ${tasks.filter(t=>t.status!=='done').length} active tasks today.`, fireAt, tag: 'daily-plan' });
@@ -131,7 +131,9 @@ function summarizeBlockSlots(slotMap) {
 function addDaysISO(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  // Local-timezone formatting — toISOString() would shift the day across the
+  // UTC boundary for some timezones.
+  return toDateStr(d);
 }
 
 function buildBlocksForDate(blocks, dateStr) {
@@ -219,7 +221,15 @@ function mapGoogleCalItems(items) {
 }
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
-const GUEST_DEMO_LIMIT = 10;
+const GUEST_DEMO_LIMIT = 15;
+
+// Schema-version guard. The server stamps every response with the action-tool
+// schema version it was built against. We compare the MAJOR token ("v7" in
+// "v7-2026-05"): a major mismatch means a breaking shape change this client
+// can't read safely (e.g. a renamed field), so we refuse to execute its actions
+// and tell the student to refresh. Date-only differences are non-breaking.
+const EXPECTED_ACTION_SCHEMA = SCHEMA_VERSIONS.action_tools;
+const schemaMajor = (v) => String(v || '').split('-')[0];
 
 /* ─── Photo utilities ─── */
 function resizeImage(file, maxDim = 1024, quality = 0.7) {
@@ -380,7 +390,20 @@ async function loadAllFromSupabase(userId) {
     // `onboarding_completed` may be absent on older DBs; treat missing as false.
     const onboardingCompleted = !!(profileRes.data && profileRes.data.onboarding_completed);
 
-    return { tasks, events, notes, messages, blocks, studyPlans, onboardingCompleted };
+    // Supabase resolves per-query errors into `.error` rather than throwing, so a
+    // single failed table would otherwise load as an empty array — making real
+    // data look gone and inviting the student to "re-add" or overwrite it. Flag
+    // any core-table failure so the caller can warn instead of showing a false
+    // empty state. (profile/study_plans are non-core and tolerate absence.)
+    const loadIncomplete = !!(tasksRes.error || eventsRes.error || notesRes.error || recurringRes.error || dateBlocksRes.error);
+    if (loadIncomplete) {
+      console.error('Partial Supabase load:', {
+        tasks: tasksRes.error, events: eventsRes.error, notes: notesRes.error,
+        recurring: recurringRes.error, dateBlocks: dateBlocksRes.error,
+      });
+    }
+
+    return { tasks, events, notes, messages, blocks, studyPlans, onboardingCompleted, loadIncomplete };
   } catch (e) {
     console.error('Failed to load from Supabase:', e);
     return null;
@@ -604,6 +627,11 @@ async function migrateLocalStorage(userId) {
     }
 
     localStorage.setItem('sos_migrated_' + userId, 'true');
+    // Clear the guest cache now that it's in the account — prevents this work
+    // from re-importing into a different account on a later guest→signup.
+    ['cc_tasks', 'cc_events', 'cc_notes', 'cc_blocks', 'cc_chat'].forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
     if (import.meta.env.DEV) console.log('Migration complete');
     return true;
   } catch (e) {
@@ -631,16 +659,17 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: 'If a required field for an action (title, date, due_date, subject, time, days, start, end) is missing or ambiguous, you MUST call the ask_clarification tool — never invent values, never use placeholders, never reply in plain text to ask. For add_block specifically: NEVER generate or infer start/end times — the student must state exact times; if either is absent, call ask_clarification with missing_fields containing the absent fields. For greetings, small talk, or non-action messages, respond naturally with no tool call.',
-  clarification_style: 'Execute when the student\'s message clearly contains all required fields. Use ask_clarification whenever a required field is missing, ambiguous, or only partially given.',
+  clarification: "Missing-field handling: just attempt the matching action. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where you can't pick a sensible default — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
+  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', or 'I don't even know what to do' — FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then name the SINGLE highest-priority task and tell them to do just that for 25 minutes. Offer a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title). Be warm and encouraging — one concrete next step, never a lecture, and never a bare unlabeled timer.",
+  destructive: "Destructive requests ('delete everything', 'wipe it all', 'clear everything', 'start over', 'nuke my schedule') MUST call clear_all with confirm=true so the student gets a confirmation card — never silently refuse or deflect to opening a widget. To remove a single item, use the matching delete/manage verb.",
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
   corrections: '"actually / wait / I meant / oops" updates the latest related item.',
   conversational_capabilities: 'You\'re backed by a system that can: add events/deadlines to the calendar, create and prioritize tasks, schedule study blocks, break big projects into steps, and generate flashcards, quizzes, or full study plans in Studio. When the student signals stress, a crunch, or an upcoming deadline — even just venting — acknowledge it AND name the specific thing you can do to help. Don\'t just sympathize and move on.',
-  date_resolution: 'Weekday references must resolve to current or next upcoming occurrence, never past dates.',
+  date_resolution: 'Resolve every weekday, "today", "tomorrow", and "next week" by reading the DATE MAP in context — never compute a date yourself. Weekday references mean the current or next upcoming occurrence, never a past date. When the student asks about "this week", cover through the coming weekend.',
   vision: 'For image input, describe what is visible first, then extract actionable details.',
-  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, call ask_clarification with missing_fields=['duration_seconds']. Anything longer than 24h belongs as an event, not a timer. To stop/cancel a running timer use cancel_timer with the label shown in ACTIVE TIMERS. If no timers are running and the student asks to cancel, say so — don't call cancel_timer.",
-  notes_flow: "For add_note (create a note): always populate `subject` — it becomes the folder. If the subject, source, or title is missing, call ask_clarification with context_action='add_note' for the FIRST missing field only (do not ask for multiple fields in one call). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it.",
+  timers: "For timer requests: use set_timer with `label` (the student's wording) and EXACTLY ONE of duration_seconds (1..86400), fire_at (ISO 8601 with timezone), or preset (pomodoro|short_break|long_break). Convert phrases — \"20 minutes\" → duration_seconds=1200, \"1 hour\" → 3600, \"half hour\" → 1800. NEVER guess a duration. If the student says \"set a timer\" with no length, ask how long in one short question. Anything longer than 24h belongs as an event, not a timer. To stop/cancel a running timer use cancel_timer with the label shown in ACTIVE TIMERS. If no timers are running and the student asks to cancel, say so — don't call cancel_timer.",
+  notes_flow: "For add_note (create a note): always set `subject` (it becomes the folder). Source values: 'user' = student writes it, 'imported' = pasting external content, 'ai_generated' = you draft it. If subject/source/title are missing the app will ask — just attempt the note.",
 };
 
 
@@ -651,6 +680,17 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const todayStr = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
   const todayKey = today();
   const currentHour = new Date().getHours();
+
+  // Explicit weekday → date lookup for the next 10 days, computed in the
+  // student's LOCAL timezone. The model must never do weekday arithmetic itself
+  // (that caused "Friday" → wrong date off-by-one bugs) — it reads the map.
+  const dateMapLines = [];
+  for (let i = 0; i < 10; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    const rel = i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : '';
+    dateMapLines.push(d.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' }) + ' = ' + toDateStr(d) + rel);
+  }
+  const dateMap = dateMapLines.join('\n');
 
   const todayBlocks = {};
   const todayDow = new Date().getDay();
@@ -732,6 +772,8 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const fullDynamicSections = [
     'DYNAMIC CONTEXT:',
     'TODAY: ' + todayStr + ' (' + (currentHour >= 12 ? 'afternoon' : 'morning') + ')',
+    'DATE MAP (resolve weekdays/"tomorrow" by reading this — never compute dates yourself):',
+    dateMap,
     '',
     'TODAY\'S SCHEDULE:',
     capLines(summarizeBlockSlots(todayBlocks), CONTEXT_SECTION_BUDGETS.schedule, 'schedule blocks') || '(nothing scheduled)',
@@ -798,6 +840,8 @@ If student asks about note content, reference only available notes and ask a foc
     const scheduleStr = summarizeBlockSlots(todayBlocks).join(', ') || 'nothing scheduled';
     const dynamicTier1 = `DYNAMIC CONTEXT:
 TODAY: ${todayStr}
+DATE MAP (resolve weekdays/"tomorrow" by reading this — never compute dates yourself):
+${dateMap}
 TODAY'S SCHEDULE: ${scheduleStr}
 COMPLETED THIS WEEK: ${doneThisWeek} task${doneThisWeek !== 1 ? 's' : ''}
 ${allClear ? 'STATUS: All clear — no overdue tasks, no upcoming events, nothing on the list.' : `ACTIVE TASKS: ${activeTasks.length} pending${overdueTasks.length > 0 ? ' (' + overdueTasks.length + ' overdue)' : ''}. UPCOMING EVENTS: ${upcomingEvents.length > 0 ? upcomingEvents.join(', ') : 'none'}.`}
@@ -811,7 +855,8 @@ NOTES: ${noteNames}`;
     POLICY_MODULES.no_hallucination,
     POLICY_MODULES.workspace,
     POLICY_MODULES.clarification,
-    POLICY_MODULES.clarification_style,
+    POLICY_MODULES.overwhelm,
+    POLICY_MODULES.destructive,
   ];
   const intentModules = intentType === 'chat'
     ? [
@@ -2578,7 +2623,7 @@ const PLAN_TEMPLATES = [
         { title: 'Create outline with thesis and key points', estimated_minutes: 25 },
         { title: 'Write first draft', estimated_minutes: 60 },
         { title: 'Revise and strengthen arguments', estimated_minutes: 40 },
-        { title: 'Proofread and final edits', estimated_minutes: 20 },
+        { title: 'Final edits and polish', estimated_minutes: 20 },
       ]
     }
   },
@@ -4569,7 +4614,7 @@ function App() {
     try {
       const session = await sb.auth.getSession();
       const token = session?.data?.session?.access_token;
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = today();
       const clientTasksPayload = tasks
         .filter(t => t.status !== 'done')
         .slice(0, 50)
@@ -4607,7 +4652,7 @@ function App() {
     if (!user || briefingFetchedRef.current) return;
     let last = '';
     try { last = localStorage.getItem('sos-last-briefing') || ''; } catch (_) {}
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = today();
     if (last === todayStr) return;
     briefingFetchedRef.current = true;
     // Small delay so initial Supabase fetches (tasks, events) populate first.
@@ -4668,6 +4713,13 @@ function App() {
       setMessages(data.messages);
       setDbMessageCount(data.messages.length); // P1.4
       setStudyPlans(data.studyPlans || []);
+      if (data.loadIncomplete) {
+        // Some of your real data failed to load — warn loudly so an accidental
+        // empty view isn't mistaken for "nothing here" and overwritten.
+        setToastMsg('⚠️ Some of your data didn\'t load — refresh before adding or editing to avoid losing anything.');
+      }
+    } else {
+      setToastMsg('⚠️ Couldn\'t load your data right now — please refresh. Avoid adding anything until it loads.');
     }
 
     // Load flashcard decks for AI tool access (read_study_sets, delete_study_set, read_project)
@@ -4743,17 +4795,49 @@ function App() {
     const focus = searchParams.get('focus');
     const target = panel || focus;
     if (!target) return;
-    if (['chat', 'home', 'settings', 'proofread'].includes(target)) setActivePanel(target);
+    if (['chat', 'home', 'settings'].includes(target)) setActivePanel(target);
     else if (target === 'tasks' || target === 'calendar') setActivePanel('chat');
   }, [searchParams]);
+
+  // Guests have no DB, so their work lives only in React state — which an OAuth
+  // redirect or a reload wipes before they ever sign up. Persist it to the same
+  // cc_* localStorage keys migrateLocalStorage() already imports on first login,
+  // so guest work survives the round-trip and gets migrated into the new account.
+  const guestHydratedRef = useRef(false);
+  function hydrateGuestData() {
+    try {
+      const t = JSON.parse(localStorage.getItem('cc_tasks') || '[]');
+      const e = JSON.parse(localStorage.getItem('cc_events') || '[]');
+      const n = JSON.parse(localStorage.getItem('cc_notes') || '[]');
+      const b = JSON.parse(localStorage.getItem('cc_blocks') || '{"recurring":[],"dates":{}}');
+      if (Array.isArray(t) && t.length) setTasks(t);
+      if (Array.isArray(e) && e.length) setEvents(e);
+      if (Array.isArray(n) && n.length) setNotes(n);
+      if (b && (b.recurring?.length || Object.keys(b.dates || {}).length)) setBlocks(b);
+    } catch (_) { /* corrupt cache — ignore */ }
+    guestHydratedRef.current = true;
+  }
 
   // ── Check for existing session on mount ──
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) handleAuth(session.user);
+      else hydrateGuestData(); // no session — restore any in-progress guest work
       setAuthChecked(true);
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist guest work to localStorage as it changes (only once hydrated, and
+  // never while authed — authed writes go straight to Supabase via syncOp).
+  useEffect(() => {
+    if (user || !authChecked || !guestHydratedRef.current) return;
+    try {
+      localStorage.setItem('cc_tasks', JSON.stringify(tasks));
+      localStorage.setItem('cc_events', JSON.stringify(events));
+      localStorage.setItem('cc_notes', JSON.stringify(notes));
+      localStorage.setItem('cc_blocks', JSON.stringify(blocks));
+    } catch (_) { /* quota / disabled storage — best effort */ }
+  }, [user, authChecked, tasks, events, notes, blocks]);
 
   // ── Listen for auth state changes (logout, token refresh, OAuth redirect) ──
   useEffect(() => {
@@ -4955,6 +5039,32 @@ function App() {
     try { localStorage.setItem('sos-notif-prefs', JSON.stringify(next)); } catch(_) {}
   }
 
+  // After a failed write, converge the client back to DB truth so optimistic
+  // state can't keep showing changes that never persisted. Read-only (no writes,
+  // so it can't loop), single-flight, debounced, and skipped while offline (the
+  // soft message already covers that case and a reload would just fail too).
+  function reconcileAfterSyncFailure() {
+    if (!user) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (reconcileAfterSyncFailure._timer) clearTimeout(reconcileAfterSyncFailure._timer);
+    reconcileAfterSyncFailure._timer = setTimeout(async () => {
+      if (reconcileAfterSyncFailure._running) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      reconcileAfterSyncFailure._running = true;
+      try {
+        const data = await loadAllFromSupabase(user.id);
+        if (data && !data.loadIncomplete) {
+          setTasks(data.tasks);
+          setEvents(data.events);
+          setBlocks(data.blocks);
+          setNotes((data.notes || []).filter(n => !(n.name && n.name.startsWith('[chat-save]'))));
+          setSyncStatus('saved');
+        }
+      } catch (_) { /* still offline / failing — leave the soft message in place */ }
+      finally { reconcileAfterSyncFailure._running = false; }
+    }, 4000);
+  }
+
   // ── Sync helper: wraps a DB write with sync status ──
   async function syncOp(fn, label = '') {
     setSyncStatus('saving');
@@ -4964,9 +5074,10 @@ function App() {
     } catch (e) {
       console.error('Sync error:', e);
       setSyncStatus('error');
-      // Surface a single soft error in the chat so the student knows persistence failed.
-      // We do not rollback the local state — a subsequent save attempt (or a reload
-      // after reconnecting) will resync. Debouncing prevents a flood of toasts.
+      // Surface a single soft error in the chat so the student knows persistence
+      // failed, then reconcile to DB truth so we don't keep showing unsaved data.
+      // Debouncing prevents a flood of toasts.
+      reconcileAfterSyncFailure();
       const now = Date.now();
       if (!syncOp._lastErrorAt || now - syncOp._lastErrorAt > 8000) {
         syncOp._lastErrorAt = now;
@@ -5002,9 +5113,61 @@ function App() {
     undoTimerRef.current = setTimeout(() => setUndoToast(null), 8000);
   }
 
+  // Make an undo durable: reconcile the DB back to `snap` so the restore
+  // survives a reload / realtime echo (previously undo only touched React state,
+  // so any undo silently reverted on the next sync). Diff-based and scoped: we
+  // upsert every snapshot row (restores deletes + edits) and delete only the IDs
+  // that exist now but weren't in the snapshot (removes creates). Blocks are
+  // only touched when they actually changed.
+  async function persistSnapshotToDb(snap, cur) {
+    if (!user) return; // guests have no DB rows to reconcile
+    const ops = [];
+    const diffTable = (table, snapRows, curRows, toDb) => {
+      const snapIds = new Set((snapRows || []).map(r => r.id));
+      const created = (curRows || []).map(r => r.id).filter(id => !snapIds.has(id));
+      if (created.length) ops.push(sb.from(table).delete().eq('user_id', user.id).in('id', created));
+      if ((snapRows || []).length) ops.push(sb.from(table).upsert((snapRows).map(toDb), { onConflict: 'id' }));
+    };
+    diffTable('tasks', snap.tasks, cur.tasks, t => appTaskToDb(t, user.id));
+    diffTable('events', snap.events, cur.events, e => appEventToDb(e, user.id));
+    diffTable('notes', snap.notes, cur.notes, n => appNoteToDb(n, user.id));
+    if (snap.grades) diffTable('grades', snap.grades, cur.grades, g => ({ ...g, user_id: user.id }));
+    if (snap.flashcardDecks) diffTable('flashcard_decks', snap.flashcardDecks, cur.flashcardDecks, d => ({ ...d, user_id: user.id }));
+
+    // Blocks: only reconcile when they actually differ (most undos don't touch them).
+    if (JSON.stringify(snap.blocks) !== JSON.stringify(cur.blocks)) {
+      const snapRec = snap.blocks?.recurring || [];
+      const curRec = cur.blocks?.recurring || [];
+      const snapRecIds = new Set(snapRec.map(r => r.id));
+      const recDeletes = curRec.map(r => r.id).filter(id => !snapRecIds.has(id));
+      if (recDeletes.length) ops.push(sb.from('recurring_blocks').delete().eq('user_id', user.id).in('id', recDeletes));
+      if (snapRec.length) ops.push(sb.from('recurring_blocks').upsert(
+        snapRec.map(rb => ({ id: rb.id, user_id: user.id, name: rb.name, category: rb.category || 'school', start_time: rb.start || '00:00', end_time: rb.end || '01:00', days: rb.days || [] })),
+        { onConflict: 'id' }
+      ));
+      // Date overrides: upsert every snapshot slot; null out slots that exist now but not in the snapshot.
+      const snapDates = snap.blocks?.dates || {};
+      const curDates = cur.blocks?.dates || {};
+      Object.entries(snapDates).forEach(([date, slots]) => {
+        Object.entries(slots || {}).forEach(([slot, data]) => {
+          ops.push(dbUpsertDateBlock(date, slot, data, user.id));
+        });
+      });
+      Object.entries(curDates).forEach(([date, slots]) => {
+        Object.entries(slots || {}).forEach(([slot]) => {
+          if (!(snapDates[date] && slot in snapDates[date])) ops.push(dbUpsertDateBlock(date, slot, null, user.id));
+        });
+      });
+    }
+    await Promise.all(ops);
+  }
+
   function doUndo() {
     if (!undoToast) return;
     const { snap } = undoToast;
+    // Capture current state BEFORE the setters so the DB reconcile can diff
+    // against what's actually live right now.
+    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
     setTasks(snap.tasks);
     setEvents(snap.events);
     setNotes(snap.notes);
@@ -5013,6 +5176,7 @@ function App() {
     if (snap.grades) setGrades(snap.grades);
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
     postAssistantNote("Done — I've undone that action.");
   }
 
@@ -5447,10 +5611,12 @@ function App() {
   }
   function undoRollupAuto(autoItem) {
     const snap = autoItem.snap;
+    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
     setTasks(snap.tasks); setEvents(snap.events); setNotes(snap.notes); setBlocks(snap.blocks);
     if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
     if (snap.grades) setGrades(snap.grades);
     setRollupAuto(prev => prev.filter(x => x !== autoItem));
+    if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
   }
 
   // ── Action executor (writes to Supabase) ──
@@ -5927,6 +6093,7 @@ function App() {
             }
             return updated;
           });
+          pushUndoToast('Undo: edited note', undoSnap);
           break;
         }
         case 'delete_note': {
@@ -5935,6 +6102,7 @@ function App() {
           if (user) {
             syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
           }
+          pushUndoToast('Undo: deleted note', undoSnap);
           break;
         }
         case 'break_task': {
@@ -6131,7 +6299,9 @@ function App() {
           break;
         case 'read_calendar': {
           const startD = action.start_date || today();
-          const endD = action.end_date || (() => { const d = new Date(startD + 'T12:00:00'); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); })();
+          // Default to a two-week window so "this week" read-backs always reach
+          // through the weekend instead of stopping mid-week.
+          const endD = action.end_date || addDaysISO(startD, 13);
           const isSingleDay = startD === endD;
           const isMonthRange = !isSingleDay && (() => {
             const diffDays = Math.round((new Date(endD + 'T00:00:00') - new Date(startD + 'T00:00:00')) / 86400000);
@@ -6289,8 +6459,7 @@ function App() {
         case 'prioritize_tasks': {
           const horizonDays = Number(action.horizon_days) || 7;
           const limit = Number(action.limit) || 5;
-          const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + horizonDays);
-          const cutoffStr = cutoff.toISOString().slice(0, 10);
+          const cutoffStr = addDaysISO(today(), horizonDays);
           const active = tasks
             .filter(t => t.status !== 'done' && t.dueDate <= cutoffStr)
             .slice(0, 50);
@@ -6308,7 +6477,11 @@ function App() {
             const dayLabel = isPast ? `(overdue — was due ${t.dueDate})` : `due ${t.dueDate}`;
             return `${i + 1}. **${t.title}** ${dayLabel}${t.subject ? ' · ' + t.subject : ''} — ${r.explanation}`;
           }).filter(Boolean);
-          const msg = `here's what matters most right now:\n\n${lines.join('\n')}`;
+          const topTask = ranked.length ? taskById[ranked[0].taskId] : null;
+          const focusLine = topTask
+            ? `\n\n👉 Don't overthink it — just start **${topTask.title}** and give it 25 focused minutes. That's the whole job right now. Want me to start a timer?`
+            : '';
+          const msg = `here's what matters most right now:\n\n${lines.join('\n')}${focusLine}`;
           postAssistantNote(msg);
           recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
@@ -6420,8 +6593,7 @@ function App() {
           let filtered = statusFilter ? tasks.filter(t => t.status === statusFilter) : tasks.filter(t => t.status !== 'done');
           if (subj) filtered = filtered.filter(t => (t.subject || '').toLowerCase().includes(subj));
           if (action.due_within_days) {
-            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + action.due_within_days);
-            const cutoffStr = cutoff.toISOString().slice(0, 10);
+            const cutoffStr = addDaysISO(today(), action.due_within_days);
             filtered = filtered.filter(t => t.dueDate <= cutoffStr);
           }
           if (filtered.length === 0) {
@@ -6790,7 +6962,14 @@ function App() {
           })();
           break;
         }
-        default: console.warn('Unknown action type:', action.type);
+        default:
+          // Never silently swallow an action — an unhandled type means the model
+          // produced something the client can't run, and the student must know it
+          // didn't happen rather than seeing a phantom success.
+          console.warn('Unknown action type:', action.type);
+          setToastMsg("⚠️ I couldn't run that one — it's not something I can do yet.");
+          if (user) { try { trackEvent(user.id, 'action_unhandled', { action_type: action?.type || 'unknown' }); } catch (_) {} }
+          break;
       }
     } catch(e) { console.error('Failed to execute action:', action, e); setToastMsg('❌ Couldn\'t complete that — try again'); }
   }
@@ -6901,19 +7080,42 @@ function App() {
   }
   function handleDismissContent(idx) { setPendingContent(prev => prev.filter((_,i) => i !== idx)); }
   function handleApplyPlan(idx, steps) {
+    // Two calendar categories: a step is a BLOCK (visible time commitment on the
+    // calendar) when it carries a start time or is tagged kind='block'; otherwise
+    // it's a DEADLINE (a due-dated task). This is what makes the plan's study
+    // sessions, breaks, and timed exams actually appear on the calendar instead
+    // of flattening into a pile of "due:" items.
+    const addMinutesToHM = (hm, mins) => {
+      const [h, m] = String(hm).split(':').map(Number);
+      const total = Math.min(24 * 60 - 1, (h * 60 + (m || 0)) + mins);
+      return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+    };
+    let blockCount = 0, taskCount = 0;
     steps.forEach(step => {
-      executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:step.date||today(), estimated_minutes:step.estimated_minutes||30 });
+      const stepDate = step.date || today();
+      const isBlock = step.kind === 'block' || (!!step.time && step.kind !== 'deadline');
+      if (isBlock && step.time) {
+        const end = step.end_time || addMinutesToHM(step.time, step.estimated_minutes || 60);
+        executeAction({ type:'add_block', date:stepDate, start:step.time, end, activity:step.title, category:'school' });
+        blockCount++;
+      } else {
+        executeAction({ type:'add_task', task_name:step.title, subject:step.subject||'', due_date:stepDate, estimated_minutes:step.estimated_minutes||30 });
+        taskCount++;
+      }
     });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
     // 24-hour plan rule: point at the first thing, not a confirmation toast.
-    const dated = steps.map(s => ({ title: s.title, date: s.date || today() })).sort((a, b) => a.date.localeCompare(b.date));
+    const dated = steps
+      .map(s => ({ title: s.title, date: s.date || today(), time: s.time || '' }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const first = dated[0];
     if (first) {
       const da = daysUntil(first.date);
-      if (da <= 1) postAssistantNote(`Plan's live. First up — "${first.title}", ${whenLabel(da, first.date)}.`);
-      else postAssistantNote(`Plan's live, but the first task isn't for ${da} days (${first.date}) — slow start.`);
+      const when = first.time ? `${whenLabel(da, first.date)} at ${first.time}` : whenLabel(da, first.date);
+      if (da <= 1) postAssistantNote(`Plan's live — ${blockCount} block${blockCount !== 1 ? 's' : ''} on your calendar, ${taskCount} deadline${taskCount !== 1 ? 's' : ''} tracked. First up: "${first.title}", ${when}.`);
+      else postAssistantNote(`Plan's live, but the first item isn't for ${da} days (${first.date}) — slow start.`);
     } else {
-      setToastMsg('Added ' + steps.length + ' tasks from plan');
+      setToastMsg('Added ' + steps.length + ' items from plan');
     }
   }
 
@@ -6926,15 +7128,35 @@ function App() {
       ? new Set(detectPlanConflicts(plan.recurring_blocks || [], blocks.recurring || []).map(c => c.activity))
       : new Set();
 
+    // Recurring blocks: expand each spec into concrete, visible time blocks on
+    // every matching weekday within its window. (executeAction has no
+    // 'add_recurring_event' case — calling it directly would silently no-op, so
+    // the whole plan's schedule vanished. add_block is handled and renders on
+    // the calendar, matching the Block category.)
+    const dayNameToIndex = { Sunday:0, Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6 };
+    const applyRecurringBlock = (spec) => {
+      const dayIdx = (spec.days || []).map(d => dayNameToIndex[d]).filter(d => d !== undefined);
+      if (!dayIdx.length || !spec.start || !spec.end) return 0;
+      const endDefault = new Date(); endDefault.setMonth(endDefault.getMonth() + 1);
+      const cursor = new Date((spec.start_date || today()) + 'T12:00:00');
+      const end = new Date((spec.end_date || toDateStr(endDefault)) + 'T12:00:00');
+      let made = 0;
+      while (cursor <= end && made < 120) {
+        if (dayIdx.includes(cursor.getDay())) {
+          executeAction({ type:'add_block', date:toDateStr(cursor), start:spec.start, end:spec.end, activity:spec.activity, category:spec.category || 'school' });
+          made++;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return made;
+    };
+
     (plan.recurring_blocks || []).forEach(b => {
       if (skipConflicts && conflictSet.has(b.activity)) return;
-      executeAction({ type:'add_recurring_event', title:b.activity, event_type:'other', subject:b.category||'school', days:b.days, start_date:b.start_date, end_date:b.end_date });
-      blockCount++;
+      if (applyRecurringBlock(b) > 0) blockCount++;
     });
     if (plan.review_cadence?.review_block) {
-      const rb = plan.review_cadence.review_block;
-      executeAction({ type:'add_recurring_event', title:rb.activity, event_type:'other', subject:rb.category||'school', days:rb.days, start_date:rb.start_date, end_date:rb.end_date });
-      blockCount++;
+      if (applyRecurringBlock(plan.review_cadence.review_block) > 0) blockCount++;
     }
     (plan.milestone_tasks || []).forEach(t => {
       const taskId = uid();
@@ -7657,8 +7879,7 @@ function App() {
       const token = session?.data?.session?.access_token;
 
       // Build clientTasks payload for priority engine (non-done, due within 30 days).
-      const thirtyDaysOut = new Date(); thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
-      const thirtyDaysStr = thirtyDaysOut.toISOString().slice(0, 10);
+      const thirtyDaysStr = addDaysISO(today(), 30);
       const clientTasksPayload = tasks
         .filter(t => t.status !== 'done' && t.dueDate <= thirtyDaysStr)
         .slice(0, 50)
@@ -7753,6 +7974,16 @@ function App() {
         });
       }
       if (typeof chatData?.fallback_used === 'boolean') setModelFallbackUsed(chatData.fallback_used);
+
+      // ── Schema-version guard ──
+      // On a breaking (major) mismatch, neutralize actions/clarifications so we
+      // never misread a renamed field, but keep the assistant's text. The student
+      // gets a clear "refresh" nudge instead of silent data corruption.
+      if (chatData?.schema_version && schemaMajor(chatData.schema_version) !== schemaMajor(EXPECTED_ACTION_SCHEMA)) {
+        console.warn('Schema version mismatch — server:', chatData.schema_version, 'client:', EXPECTED_ACTION_SCHEMA);
+        setToastMsg('⚠️ The app just updated — refresh the page so I can run actions correctly (your data is safe).');
+        chatData = { ...chatData, actions: [], clarification: null, clarifications: [] };
+      }
 
       // ── Planning pipeline response: show proposed plan in propose mode ──
       if (chatData?.orchestration?.mode === 'planning') {
@@ -8672,7 +8903,6 @@ function App() {
             onNew={startNewChat}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
-            onProofread={() => setActivePanel('proofread')}
             aiThinking={isLoading}
             syncStatus={syncStatus}
             focusSession={focusSession}
@@ -8976,19 +9206,6 @@ function App() {
               <span style={{color:'var(--border)'}}>|</span>
               <a href="/terms" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
             </div>
-          </div>
-        </div>
-      ) : activePanel === 'proofread' ? (
-        <div className="settings-fullscreen">
-          <div className="settings-fullscreen-inner">
-            <div className="settings-fullscreen-header">
-              <div>
-                <div className="settings-title">Proofread</div>
-                <div className="settings-sub">Drop an essay, math worksheet, or PDF. The AI flags issues and suggests fixes.</div>
-              </div>
-              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
-            </div>
-            <ProofreadPanel />
           </div>
         </div>
       ) : selectedProject ? (
