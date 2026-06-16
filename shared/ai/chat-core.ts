@@ -26,6 +26,7 @@ import type {
 import {
   buildActionToolDefs,
   buildChatToolDefs,
+  expandManageTask,
   validateAction,
   type ActionName,
 } from "./schemas/actions.js";
@@ -33,6 +34,7 @@ import { buildStudioToolDefs, validateStudio, type StudioToolName } from "./sche
 import { buildIntentPlanToolDefs, validateIntentPlan } from "./schemas/intent_plan.js";
 import { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
 import { formatZodIssuesForModel, PLACEHOLDER_SUBJECT_STRINGS } from "./schemas/_helpers.js";
+import { groundActionNames, type GroundingFlag } from "./grounding.js";
 import { SCHEMA_VERSIONS } from "./schemas/versions.js";
 import {
   circuitFallbackResponse,
@@ -87,6 +89,9 @@ export interface CallModelRequest {
   thinkingBudget?: number;
   budgetMs?: number;
   grounding?: { googleSearch?: boolean };
+  // When set, run the anti-hallucination name grounding pass over the validated
+  // actions (default-chat path only). Off for forced/programmatic callers.
+  groundTitles?: boolean;
   // When set, callModel will pump StreamChunks to the consumer in addition to
   // returning the aggregated final response.
   onChunk?: (chunk: StreamChunk) => void;
@@ -216,6 +221,28 @@ function clarificationFromIssues(
     suggested_defaults,
     known_fields: Object.keys(knownFields).length > 0 ? knownFields : null,
     severity: blocking ? "blocking" : "soft",
+  };
+}
+
+// Turn a grounding flag into a soft clarification: surface the name we were
+// about to save, carry the rest of the extracted fields forward as known_fields,
+// and let the student confirm or correct it. Never blocking — the action simply
+// waits for a yes/no instead of executing on an unverified name.
+function clarificationFromGroundingFlag(flag: GroundingFlag): ClarificationCard {
+  const knownFields: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(flag.action)) {
+    if (k === "type" || k === flag.field) continue;
+    if (v != null && String(v).trim().length > 0) knownFields[k] = v;
+  }
+  return {
+    reason: flag.reason,
+    question: `I want to save the right name — should this be "${flag.value}", or did you mean something else?`,
+    options: [],
+    multi_select: false,
+    context_action: flag.type,
+    missing_fields: [flag.field],
+    known_fields: Object.keys(knownFields).length > 0 ? knownFields : null,
+    severity: "soft",
   };
 }
 
@@ -457,6 +484,33 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     }
   }
 
+  // Anti-hallucination grounding — verify chat-proposed names are tied to the
+  // student's words (buried placeholder tokens + weak vector association). Pulls
+  // any drifted action and replaces it with a soft clarification. Default-chat
+  // only; bounded by the shared deadline and fails open on embed errors.
+  if (req.groundTitles && result.actions.length > 0) {
+    const remaining = deadline - Date.now();
+    if (remaining > MIN_ATTEMPT_MS) {
+      try {
+        const { kept, flagged } = await groundActionNames({
+          actions: result.actions,
+          messages: req.messages,
+          timeoutMs: Math.min(remaining - 500, 2500),
+        });
+        if (flagged.length > 0) {
+          result.actions = kept;
+          for (const f of flagged) {
+            result.clarifications.push(clarificationFromGroundingFlag(f));
+            result.validation_warnings.push({ tool: f.type, issues: [{ field: f.field, message: f.reason }] });
+          }
+          if (!result.clarification) result.clarification = result.clarifications[0] ?? null;
+        }
+      } catch {
+        // Grounding is best-effort — never let it break the response.
+      }
+    }
+  }
+
   // Enrich any actions that have a generic subject we can infer.
   result.actions = result.actions.map(enrichActionSubject);
 
@@ -579,6 +633,14 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
       if (!isContentTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
+      continue;
+    }
+    // manage_task is the chat-menu consolidation of the four follow-up task
+    // verbs — expand it back into the canonical per-operation action so the
+    // client executor never sees the merged shape.
+    if (name === "manage_task") {
+      actions.push(expandManageTask(v.data as Record<string, unknown>));
+      validated.push(name);
       continue;
     }
     const actionType = (v.data as { type?: string }).type ?? name;
