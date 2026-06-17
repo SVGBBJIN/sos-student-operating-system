@@ -30,7 +30,7 @@ import { buildOAuthRedirectUrl } from './lib/auth/oauthRedirect';
 import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared } from './lib/eventShape.js';
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
-import { rankTasks, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import { rankTasks, rankForQuickStart, buildCalendarDensity } from '../shared/scheduling/priority.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
   assignArm,
@@ -95,6 +95,24 @@ function buildNotifications(tasks, events, prefs) {
     if (fireAt > now) {
       notes.push({ title: '📋 Good morning — here\'s your plan', body: `You have ${tasks.filter(t=>t.status!=='done').length} active tasks today.`, fireAt, tag: 'daily-plan' });
     }
+  }
+  // Proactive next-block nudge: 5 minutes before a timed event/block starts,
+  // so the student gets a "you're up next" push instead of drifting past it.
+  if (prefs.tasks !== false) {
+    const todayStr = today();
+    const parseHM = (s) => {
+      const m = (s || '').match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      const h = +m[1], mm = +m[2];
+      return h > 23 || mm > 59 ? null : h * 60 + mm;
+    };
+    const dayStart = new Date(todayStr + 'T00:00:00').getTime();
+    events.filter(ev => ev && ev.date === todayStr && ev.status !== 'cancelled').forEach(ev => {
+      const startMin = parseHM(ev.start_time || ev.startTime || ev.time);
+      if (startMin == null) return;
+      const fireAt = dayStart + (startMin - 5) * 60000;
+      if (fireAt > now) notes.push({ title: '⏭️ Up next in 5 min', body: ev.title || 'your next block', fireAt, tag: 'next-' + ev.id });
+    });
   }
   return notes;
 }
@@ -207,6 +225,55 @@ function buildScheduleShortcutReply(message, tasks, events, blocks) {
   const label = target === 'tomorrow' ? 'tomorrow' : 'today';
   const summary = describeDate(dateStr, label);
   return `opened your schedule widget. ${summary}.`;
+}
+
+/* ── "Just start me" deterministic procrastination path ──────────────
+   A student mid-spiral doesn't want a plan — they want one task and a push.
+   We detect paralysis / "I don't wanna" language and skip the model entirely:
+   name the single top task, hand over a trivially-startable first step, and
+   auto-start a labeled focus timer. Procrastination is about starting, not
+   planning — so this path never asks a question and never replies "got it." */
+const JUST_START_REGEX = new RegExp([
+  "i\\s*(?:do\\s*n'?t|don'?t|dont)\\s*(?:even\\s*)?(?:wanna|want\\s*to|feel\\s*like)",
+  "(?:where|how|what)\\s*(?:do|should|the\\s*hell\\s*do|tf\\s*do)?\\s*i\\s*(?:even\\s*)?(?:start|begin)",
+  "i\\s*(?:do\\s*n'?t|don'?t|dont)\\s*(?:even\\s*)?know\\s*(?:where|what|how)\\s*to\\s*(?:start|begin|do)",
+  "idk\\s*(?:where|what|how)?\\s*(?:to\\s*)?(?:start|begin|do|even)",
+  "i\\s*(?:do\\s*n'?t|don'?t|dont)\\s*(?:even\\s*)?(?:wanna|want\\s*to)\\s*do\\s*(?:any|anything|this|it|my|the)",
+  "i\\s*(?:'?m|\\s*am)?\\s*(?:so\\s*|really\\s*)?(?:overwhelmed|paralyzed|drowning|burnt?\\s*out|so\\s+behind)",
+  "(?:too\\s*much|so\\s*much)\\s*(?:to\\s*do|work|going\\s*on|stuff)",
+  "i\\s*can'?t\\s*(?:do\\s*this|focus|deal|get\\s*started)",
+  "just\\s*(?:start|make)\\s*me",
+  "make\\s*me\\s*(?:start|do)",
+  "help\\s*me\\s*(?:start|focus|get\\s*started)",
+  "i\\s*(?:'?m|\\s*am)\\s*procrastinat",
+].join("|"), "i");
+
+function detectJustStart(message) {
+  const m = (message || "").trim();
+  if (!m) return false;
+  if (m.length > 160) return false; // long messages are usually a real request
+  return JUST_START_REGEX.test(m.toLowerCase());
+}
+
+// The "2-minute version": one trivially-startable physical first action for the
+// top task, chosen by keyword. The goal is to make starting frictionless.
+function smallestNextStep(task) {
+  const s = `${task?.title || ''} ${task?.subject || ''}`.toLowerCase();
+  if (/essay|paper|\bwrit|report|reflection|response|discussion\s*post|cover\s*letter|journal/.test(s))
+    return "open a blank doc and just type the title and one messy sentence — that's it.";
+  if (/read|chapter|textbook|article|\bpages?\b|annotat/.test(s))
+    return "open the reading and get through just the first page.";
+  if (/pset|problem\s*set|\bmath\b|calc|algebra|physics|chem|homework|worksheet|exercises?/.test(s))
+    return "open it and do only the first problem.";
+  if (/slides?|presentation|deck|powerpoint|keynote|poster/.test(s))
+    return "open the deck and make just the title slide.";
+  if (/\blab\b|\bcode\b|coding|program|debug|leetcode/.test(s))
+    return "open the file and get the first line down.";
+  if (/study|review|exam|test|quiz|midterm|final|flashcard|memoriz|vocab/.test(s))
+    return "pull up your notes and read the first section out loud.";
+  if (/project|build|design|create|\bmake\b/.test(s))
+    return "open a doc and jot the first 3 bullets of what it needs.";
+  return "open whatever you need for it and poke at it for 2 minutes — no pressure to finish.";
 }
 
 /* ─── Map raw Google Calendar API items → app event shape ─── */
@@ -659,8 +726,8 @@ const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
-  clarification: "Missing-field handling: just attempt the matching action. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where you can't pick a sensible default — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
-  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', or 'I don't even know what to do' — FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then name the SINGLE highest-priority task and tell them to do just that for 25 minutes. Offer a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title). Be warm and encouraging — one concrete next step, never a lecture, and never a bare unlabeled timer.",
+  clarification: "Missing-field handling: just attempt the matching action with your BEST GUESS — prefer a sensible default over a question. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. A tired or lazy student won't fill out a form, so default rather than interrogate. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where no reasonable default exists — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
+  overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', 'I don't even know what to do', or 'I don't wanna' — NEVER reply with a bare acknowledgement like 'got it'. FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then pick ONE task to start — not necessarily the highest-priority one, but the most STARTABLE task that still matters (short, concrete, low-effort), since the goal is breaking the freeze, not optimizing the schedule. LEAD with a trivially-startable 2-minute first step ('open the doc and write the title', 'do just the first problem') before you even name the task. Procrastination is about starting, not planning. Start a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title) rather than asking how long. Be warm and encouraging — one concrete next step, never a lecture, never a bare unlabeled timer. Do NOT use points, streaks, XP, or other gamification.",
   destructive: "Destructive requests ('delete everything', 'wipe it all', 'clear everything', 'start over', 'nuke my schedule') MUST call clear_all with confirm=true so the student gets a confirmation card — never silently refuse or deflect to opening a widget. To remove a single item, use the matching delete/manage verb.",
   action_tools: "When details are explicit, call the matching action tool — even when the student STATES rather than COMMANDS. \"I have a chem test Friday\", \"There's a paper due Monday\", \"I just got assigned a 5-page essay\", \"got a calc midterm next week\" are all implicit create-action requests, not casual chat. Treat them like \"add a chem test for Friday\". Pick add_event for tests/exams/quizzes/games/practices/meetings/appointments; pick add_task for homework/essays/projects/papers/assignments. If title or date is fully missing or ambiguous, use ask_clarification — but if the message names BOTH (even informally), execute. Use specific student-provided titles only — never make up names.",
   planning_guardrails: 'Protect sleep (avoid work past 10pm), rebalance overloaded days, and handle overdue work without guilt.',
@@ -7785,6 +7852,52 @@ function App() {
           localStorage.setItem('cc_chat', JSON.stringify(demoChat));
         } catch {}
       }
+      return;
+    }
+
+    // ── Deterministic "just start me" path ──
+    // Paralysis / "I don't wanna" language never goes to the model. We name the
+    // single most-startable task, lead with a 2-minute first step, and
+    // auto-start a labeled timer (best-guess, no form). Never a bare "got it."
+    if (!fromClarification && !photo && detectJustStart(msgContent)) {
+      const userMsg = { role:'user', content:msgContent, timestamp:Date.now() };
+      setMessages(prev => { const n=[...prev,userMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      setInput('');
+      if (user) dbInsertChatMsg('user', msgContent, user.id);
+      else { try { const dc = JSON.parse(localStorage.getItem('cc_chat') || '[]'); dc.push({ role:'user', content:msgContent }); localStorage.setItem('cc_chat', JSON.stringify(dc)); } catch {} }
+
+      const cutoff = addDaysISO(today(), 14);
+      const dueSoon = tasks.filter(t => t.status !== 'done' && (!t.dueDate || t.dueDate <= cutoff));
+      const pool = dueSoon.length ? dueSoon : tasks.filter(t => t.status !== 'done');
+
+      let reply;
+      if (pool.length === 0) {
+        // Nothing on the board — reassure, don't invent work.
+        reply = "Your board's actually clear right now — nothing's hanging over you. If something's looming, just tell me what it is and I'll get it down so it's off your head.";
+      } else {
+        // Pick the optimum of two dimensions — priority AND startability — not
+        // the single highest-priority task. The most important thing is usually
+        // the most daunting; the on-ramp is the easiest-to-start task that still
+        // matters, so momentum can carry the student into the bigger work.
+        const density = buildCalendarDensity(pool, blocks.dates || {});
+        const ranked = rankForQuickStart(pool, new Date(), density, undefined, 1);
+        const top = pool.find(t => t.id === ranked[0]?.taskId) || pool[0];
+        const step = smallestNextStep(top);
+        // Auto-start a 25-min focus timer labeled with the task. No clarification —
+        // a procrastinating student won't fill a form, so we just pick 25 min.
+        executeAction({ type:'set_timer', label: top.title, duration_seconds: 25 * 60, __confirmed:true });
+        setActiveWidgets(w => ({ ...w, pomodoro: true }));
+        // Lead with the two-minute task — the on-ramp comes first, the task name
+        // second. Starting is the whole job; the rest can wait.
+        reply = `▶ **Start here (2 min):** ${step}\n\nThat's the on-ramp for **${top.title}** — ignore everything else for now. Started a 25-min timer; when it chimes you can stop guilt-free.`;
+        if (user) trackEvent(user.id, 'just_start', { task: top.title });
+      }
+
+      const assistantMsg = { role:'assistant', content: reply, timestamp:Date.now() };
+      sfx.arrive();
+      setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+      if (user) dbInsertChatMsg('assistant', reply, user.id);
+      else { try { const dc = JSON.parse(localStorage.getItem('cc_chat') || '[]'); dc.push({ role:'assistant', content:reply }); localStorage.setItem('cc_chat', JSON.stringify(dc)); } catch {} }
       return;
     }
 
