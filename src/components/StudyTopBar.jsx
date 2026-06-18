@@ -30,6 +30,8 @@ export default function StudyTopBar({
   onAuthAction,
   onHome,
   onChat,
+  onDashboard,
+  activePanel,
   homeEnabled = false,
   queueCount = 0,
 }) {
@@ -107,6 +109,17 @@ export default function StudyTopBar({
               <Si name="moon" size={13} />
             </button>
           </div>
+        )}
+
+        {onDashboard && (
+          <button
+            className={'icon-btn' + (activePanel === 'dashboard' ? ' primary' : '')}
+            onClick={onDashboard}
+            title="Dashboard"
+            aria-label="Dashboard"
+          >
+            <Si name="home" size={15} />
+          </button>
         )}
 
         <button className="icon-btn" onClick={onSettings} title="Settings" aria-label="Settings">

@@ -20,6 +20,7 @@ import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import StudioSidebar from './components/StudioSidebar';
+import StudioDashboard from './components/StudioDashboard';
 import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
@@ -4565,7 +4566,7 @@ function App() {
     document.documentElement.setAttribute('data-theme', studioTheme);
     localStorage.setItem('sos_studio_theme', studioTheme);
   }, [studioTheme]);
-  const [activePanel, setActivePanel] = useState('chat');
+  const [activePanel, setActivePanel] = useState('dashboard');
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
   const getWorkspaceContext = useCallback(() => {
@@ -9005,6 +9006,8 @@ function App() {
         onTheme={setStudioTheme}
         onSettings={() => setActivePanel('settings')}
         onHome={() => navigate('/')}
+        onDashboard={() => setActivePanel('dashboard')}
+        activePanel={activePanel}
         queueCount={pendingQueue ? pendingQueue.length : 0}
       />
       <div className="studio-sidebar-col">
@@ -9077,7 +9080,20 @@ function App() {
       )}
 
 
-      {activePanel === 'home' ? (
+      {activePanel === 'dashboard' ? (
+        <StudioDashboard
+          user={user}
+          tasks={tasks}
+          events={events}
+          onAsk={(prompt) => {
+            setActivePanel('chat');
+            if (prompt && prompt.trim()) {
+              // defer so the chat panel mounts before the message streams in
+              setTimeout(() => sendMessage(prompt), 0);
+            }
+          }}
+        />
+      ) : activePanel === 'home' ? (
         <HomeScreen
           tasks={tasks}
           events={events}
