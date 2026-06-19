@@ -92,9 +92,12 @@ function useDashboardData(tasks, events) {
       })
       .sort((a, b) => (a.startMin ?? 0) - (b.startMin ?? 0));
 
-    // Mark the next upcoming event
+    // Mark the next upcoming event + minutes until it starts
     const upcoming = agenda.find(a => (a.startMin ?? 0) >= now && !a.done) || null;
-    if (upcoming) upcoming.next = true;
+    if (upcoming) {
+      upcoming.next = true;
+      upcoming.inMin = Math.max(0, (upcoming.startMin ?? now) - now);
+    }
 
     // Open tasks → due soon (sorted by dueDate)
     const open = (tasks || [])
@@ -130,24 +133,31 @@ function useDashboardData(tasks, events) {
       .slice(0, 6);
 
     // Stats
-    const doneToday = (tasks || []).filter(t => {
-      if (t.status !== 'done' || !t.completedAt) return false;
-      const c = new Date(t.completedAt);
-      return c.toDateString() === new Date().toDateString();
-    }).length;
+    const today = new Date().toDateString();
+    const completedToday = (tasks || []).filter(t =>
+      t.status === 'done' && t.completedAt && new Date(t.completedAt).toDateString() === today
+    );
+    const doneToday = completedToday.length;
     const totalToday = open.length + doneToday;
     const progress = totalToday ? Math.round((doneToday / totalToday) * 100) : 0;
 
-    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress };
+    // Focused time today — sum focusMinutes across tasks worked today
+    const focusedMin = completedToday.reduce((sum, t) => sum + (t.focusMinutes || t.focus_minutes || 0), 0);
+    const focused = focusedMin >= 60
+      ? `${(focusedMin / 60).toFixed(1)}h`
+      : `${focusedMin}m`;
+
+    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress, focused };
   }, [tasks, events]);
 }
 
 /* ── presentational pieces (data-driven) ──────────────────────── */
-function StatStrip({ progress, doneToday, eventsToday }) {
+function StatStrip({ progress, doneToday, eventsToday, focused }) {
   const stats = [
     { id: 'progress', icon: 'target', big: `${progress}%`, label: "today's progress", accent: true },
     { id: 'done', icon: 'check', big: String(doneToday), label: 'done today' },
     { id: 'events', icon: 'calendar', big: String(eventsToday), label: 'events' },
+    { id: 'focused', icon: 'clock', big: focused, label: 'focused' },
   ];
   return (
     <div className="stat-strip" style={{ gridTemplateColumns: `repeat(${stats.length}, 1fr)` }}>
@@ -188,10 +198,13 @@ function UpNext({ event, onAsk }) {
   if (!event) {
     return <div className="dash-empty">no more events today. nice — go rest or get ahead.</div>;
   }
+  const rel = event.inMin != null && event.inMin > 0
+    ? ` · in ${event.inMin >= 60 ? `${Math.round(event.inMin / 60)}h` : `${event.inMin} min`}`
+    : event.inMin === 0 ? ' · now' : '';
   return (
     <div className="upnext">
       <div className="upnext-top">
-        <span className="upnext-label"><span className="upnext-dot" />up next</span>
+        <span className="upnext-label"><span className="upnext-dot" />up next{rel}</span>
         <span className="upnext-time">{fmtClock(event.start)}</span>
       </div>
       <div className="upnext-title">{event.title}</div>
@@ -263,11 +276,12 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk }
           <QuickActions onPick={onAsk} />
         </header>
 
-        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} />
+        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} />
 
         <div className="bento">
           <div className="bento-agenda">
-            <Panel title="Today" icon="calendar" count={data.eventsToday}>
+            <Panel title="Today" icon="calendar" count={data.eventsToday}
+              action="Calendar" onAction={() => onAsk('Show my full calendar for today')}>
               <AgendaList events={data.agenda} />
             </Panel>
           </div>
@@ -282,7 +296,8 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk }
             </Panel>
           </div>
           <div className="bento-courses">
-            <Panel title="Courses" icon="book">
+            <Panel title="Courses" icon="book"
+              action="All" onAction={() => onAsk('Show all my courses and their progress')}>
               <CourseGrid courses={data.courses} />
             </Panel>
           </div>
