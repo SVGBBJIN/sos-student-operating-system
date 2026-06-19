@@ -100,6 +100,7 @@ export async function runIntentPlanPipeline(input: IntentPlanInput): Promise<Int
     draftLabel: "Draft intent plan",
     critiquePrompt: "Critique the draft plan above. Is it realistic and complete?",
     refineInstruction: "Now produce the final, improved intent plan.",
+    refineOnlyIfCritique: true,
     matchActions: (resp) => {
       const a = resp.actions.find((x) => x.type === "make_intent_plan") ?? resp.actions[0];
       return a ? [a] : [];

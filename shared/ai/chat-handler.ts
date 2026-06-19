@@ -112,7 +112,41 @@ function rpmExhaustedJson(tier: string, resetAtMs: number): ChatOutcome {
   };
 }
 
-export async function handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> {
+// ── Inflight request dedup ────────────────────────────────────────────────────
+// Prevents rapid duplicate submissions (double-click, network retry) from
+// spinning up multiple AI calls. Only applies to non-SSE (JSON) requests —
+// each SSE client needs its own ordered byte stream so they are never deduped.
+// The entry is removed when the promise settles, so a second identical request
+// after the first completes always triggers a fresh call.
+const inflightRequests = new Map<string, Promise<ChatOutcome>>();
+
+function dedupKey(userId: string | null, body: ChatBody, wantsSSE: boolean): string | null {
+  if (wantsSSE) return null;
+  const lastMsg = body.messages?.at(-1);
+  if (!lastMsg || lastMsg.role !== "user" || !lastMsg.content) return null;
+  // djb2-style hash — good enough for dedup, not a security primitive.
+  let h = 5381;
+  for (let i = 0; i < lastMsg.content.length; i++) {
+    h = (h * 33 ^ lastMsg.content.charCodeAt(i)) >>> 0;
+  }
+  return `${userId ?? "anon"}:${body.mode ?? "chat"}:${h}`;
+}
+
+export function handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> {
+  const key = dedupKey(input.userId, input.body, input.wantsSSE);
+  if (key) {
+    const existing = inflightRequests.get(key);
+    if (existing) return existing;
+  }
+  const p = _handleChatRequest(input);
+  if (key) {
+    inflightRequests.set(key, p);
+    void p.finally(() => inflightRequests.delete(key));
+  }
+  return p;
+}
+
+async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> {
   const { body, userId, wantsSSE } = input;
 
   // Cold-start env sanity check. GROQ_API_KEY drives chat + voice; GEMINI_API_KEY

@@ -69,6 +69,7 @@ export async function runPlanningPipeline(input: PlanningPipelineInput): Promise
     draftLabel: "Draft plan",
     critiquePrompt: "Critique the draft plan above. What is missing or unrealistic?",
     refineInstruction: "Now produce the final, improved plan.",
+    refineOnlyIfCritique: true,
     matchActions: (resp) => {
       const a = resp.actions.find((x) => x.type === "make_plan") ?? resp.actions[0];
       return a ? [a] : [];
