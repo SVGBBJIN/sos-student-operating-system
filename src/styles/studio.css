@@ -28,7 +28,7 @@
   --danger-line: rgba(248,113,113,0.45);
   --warning: #fbbf24;
   --warning-bg: rgba(251,191,36,0.14);
-  --font-display: 'Fraunces', Georgia, serif;
+  --font-display: 'Syne', system-ui, sans-serif;
   --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
   --r-sm: 6px;
@@ -202,6 +202,22 @@
 
 .studio .fade-up { animation: fadeUp 220ms var(--ease-out) both; }
 .studio .scale-in { animation: scaleIn 220ms var(--ease-out) both; }
+
+/* ── Sidebar nav (faithful to design kit) ────────────────── */
+.studio .nav { padding: 14px 12px 6px; display: flex; flex-direction: column; gap: 2px; }
+.studio .nav-item {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  padding: 9px 12px; border-radius: var(--r-md);
+  background: transparent; border: 1px solid transparent;
+  color: var(--fg-2); font-size: 13.5px; font-weight: 500; cursor: pointer; font-family: inherit;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.studio .nav-item svg { color: var(--fg-3); transition: color var(--t-fast); flex-shrink: 0; }
+.studio .nav-item:hover { background: var(--bg-3); color: var(--fg-1); }
+.studio .nav-item:hover svg { color: var(--fg-2); }
+.studio .nav-item.active { background: var(--accent-bg); color: var(--fg-1); border-color: var(--accent-line); }
+.studio .nav-item.active svg { color: var(--accent-strong); }
+.studio .nav-divider { height: 1px; background: var(--line); margin: 10px 14px; }
 
 /* ── Sidebar ─────────────────────────────────────────────── */
 .studio .sb-section { padding: 14px 14px 8px; }
@@ -886,4 +902,419 @@
 @media (max-width: 500px) {
   .studio .topbar { padding: 0 12px; }
   .studio .sync-pill { display: none; }
+}
+
+/* ============================================================
+   SOS Studio — info-first dashboard (from design system kit)
+   Dashboard component styles for the home bento layout:
+   greeting · ask bar · quick actions · stat strip · panels.
+   All selectors scoped under .studio.
+   ============================================================ */
+.studio .center-scroll { flex: 1; overflow-y: auto; }
+.studio .home, .studio .view {
+  width: 100%; max-width: 940px; margin: 0 auto;
+  padding: 28px 32px 40px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+/* Eyebrow / headings */
+.studio .eyebrow {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 6px;
+}
+.studio .home-greeting {
+  font-family: var(--font-display); font-size: 2rem; font-weight: 800;
+  letter-spacing: -0.03em; color: var(--fg-1); line-height: 1.05; margin: 0 0 18px;
+}
+.studio .home-greeting span { color: var(--accent); }
+.studio .home-head { display: flex; flex-direction: column; }
+
+/* ── Ask bar — the demoted AI ────────────────────────────────── */
+.studio .ask-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-3); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  padding: 8px 8px 8px 14px; box-shadow: var(--shadow-sm);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.studio .ask-bar:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-bg); }
+.studio .ask-spark { display: inline-flex; color: var(--accent); flex-shrink: 0; }
+.studio .ask-bar input {
+  flex: 1; border: none; outline: none; background: transparent;
+  color: var(--fg-1); font-size: 14px; padding: 6px 0;
+}
+.studio .ask-bar input::placeholder { color: var(--fg-3); }
+.studio .ask-send {
+  width: 34px; height: 34px; border-radius: var(--r-md); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--accent-line); background: var(--accent-bg); color: var(--accent-strong);
+  transition: opacity var(--t-fast), transform var(--t-fast);
+}
+.studio .ask-send:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--line); background: transparent; color: var(--fg-3); }
+.studio .ask-send:not(:disabled):hover { transform: translateY(-1px); }
+
+/* Quick actions */
+.studio .qa-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.studio .qa-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px; border-radius: var(--r-pill);
+  background: var(--bg-3); border: 1px solid var(--line); color: var(--fg-2);
+  font-size: 12.5px; font-weight: 500;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.studio .qa-chip svg { color: var(--fg-3); }
+.studio .qa-chip:hover { background: var(--bg-4); border-color: var(--line-2); color: var(--fg-1); }
+.studio .qa-chip:hover svg { color: var(--accent); }
+
+/* ── Stat strip ──────────────────────────────────────────────── */
+.studio .stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.studio .stat {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 12px 14px; position: relative;
+}
+.studio .stat-ic { position: absolute; top: 12px; right: 12px; color: var(--fg-3); }
+.studio .stat-big {
+  font-family: var(--font-display); font-weight: 800; font-size: 1.5rem;
+  letter-spacing: -0.02em; color: var(--fg-1); line-height: 1.1;
+}
+.studio .stat-label {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap;
+}
+
+/* ── Bento grid ──────────────────────────────────────────────── */
+.studio .bento {
+  display: grid; gap: 14px;
+  grid-template-columns: 1.55fr 1fr;
+  grid-template-areas:
+    "agenda upnext"
+    "agenda due"
+    "courses courses";
+  align-items: start;
+}
+.studio .bento-agenda { grid-area: agenda; }
+.studio .bento-upnext { grid-area: upnext; }
+.studio .bento-due { grid-area: due; }
+.studio .bento-courses { grid-area: courses; }
+
+/* ── Panel ───────────────────────────────────────────────────── */
+.studio .panel {
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: var(--r-lg);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.studio .panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px; border-bottom: 1px solid var(--line);
+}
+.studio .panel-head svg { color: var(--fg-3); }
+.studio .panel-title {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; color: var(--fg-2);
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.studio .panel-count {
+  font-family: var(--font-mono); font-size: 10px; color: var(--fg-3);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+  padding: 1px 7px;
+}
+.studio .panel-action {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: transparent; border: none; color: var(--fg-3);
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  transition: color var(--t-fast);
+}
+.studio .panel-action:hover { color: var(--accent); }
+.studio .panel-body { padding: 0; }
+
+/* ── Up next ─────────────────────────────────────────────────── */
+.studio .upnext { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.studio .upnext-top { display: flex; align-items: center; justify-content: space-between; }
+.studio .upnext-label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.studio .upnext-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.6s infinite; }
+.studio .upnext-time { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.studio .upnext-title { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; letter-spacing: -0.02em; color: var(--fg-1); margin-top: 2px; }
+.studio .upnext-meta { font-size: 12.5px; color: var(--fg-2); }
+.studio .upnext-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* Buttons */
+.studio .btn-mint, .studio .btn-ghost {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: var(--r-md); font-size: 12.5px; font-weight: 600;
+  border: 1px solid; transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+.studio .btn-mint { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent-strong); }
+.studio .btn-mint:hover { border-color: var(--accent); transform: translateY(-1px); }
+.studio .btn-ghost { background: transparent; border-color: var(--line); color: var(--fg-2); }
+.studio .btn-ghost:hover { border-color: var(--line-2); color: var(--fg-1); background: var(--bg-4); }
+.studio .btn-mint.lg, .studio .btn-ghost.lg { padding: 11px 20px; font-size: 14px; }
+
+/* ── Agenda list ─────────────────────────────────────────────── */
+.studio .agenda { padding: 6px; display: flex; flex-direction: column; }
+.studio .agenda-row {
+  display: grid; grid-template-columns: 52px 3px 1fr auto; align-items: center; gap: 11px;
+  padding: 8px 8px; border-radius: var(--r-sm);
+  transition: background var(--t-fast);
+}
+.studio .agenda-row:hover { background: var(--bg-4); }
+.studio .agenda-time { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); text-align: right; font-variant-numeric: tabular-nums; }
+.studio .agenda-stripe { width: 3px; height: 22px; border-radius: 3px; background: var(--line-2); }
+.studio .agenda-body { display: flex; flex-direction: column; min-width: 0; }
+.studio .agenda-title { font-size: 13px; font-weight: 500; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .agenda-meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .agenda-flag {
+  font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-line);
+  padding: 2px 7px; border-radius: 999px;
+}
+.studio .agenda-check { display: inline-flex; color: var(--success); }
+.studio .agenda-row.is-next { background: var(--accent-bg); }
+.studio .agenda-row.is-done .agenda-title { color: var(--fg-3); }
+.studio .agenda-row.is-done .agenda-stripe { opacity: 0.5; }
+
+.studio .agenda-row[data-tone="mint"]    .agenda-stripe { background: var(--success); }
+.studio .agenda-row[data-tone="blue"]    .agenda-stripe { background: #8fa8ff; }
+.studio .agenda-row[data-tone="purple"]  .agenda-stripe { background: #c084fc; }
+.studio .agenda-row[data-tone="warning"] .agenda-stripe { background: var(--warning); }
+.studio .agenda-row[data-tone="danger"]  .agenda-stripe { background: var(--danger); }
+.studio .agenda-row[data-tone="idle"]    .agenda-stripe { background: var(--line-2); }
+
+/* ── Due list ────────────────────────────────────────────────── */
+.studio .due { padding: 6px; display: flex; flex-direction: column; }
+.studio .due-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 11px; padding: 9px 8px; border-radius: var(--r-sm); transition: background var(--t-fast); }
+.studio .due-row:hover { background: var(--bg-4); }
+.studio .due-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.studio .due-body { display: flex; flex-direction: column; min-width: 0; }
+.studio .due-title { font-size: 12.5px; font-weight: 500; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .due-course { font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.studio .due-when { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); flex-shrink: 0; }
+.studio .due-row[data-level="danger"]  .due-mark { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.studio .due-row[data-level="danger"]  .due-when { color: var(--danger); }
+.studio .due-row[data-level="warning"] .due-mark { background: var(--warning); }
+.studio .due-row[data-level="warning"] .due-when { color: var(--warning); }
+
+/* ── Courses ─────────────────────────────────────────────────── */
+.studio .course-grid { padding: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.studio .course-card {
+  text-align: left; display: flex; flex-direction: column; gap: 9px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 12px 13px; transition: border-color var(--t-fast), background var(--t-fast);
+}
+.studio .course-card:hover { border-color: var(--line-2); background: var(--bg-4); }
+.studio .course-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.studio .course-name { font-size: 13.5px; font-weight: 600; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .course-pct { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+.studio .course-bar { height: 5px; border-radius: 999px; background: var(--bg-4); overflow: hidden; }
+.studio .course-bar span { display: block; height: 100%; border-radius: 999px; background: var(--fg-3); }
+.studio .course-next { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .course-card[data-tone="mint"]    .course-bar span { background: var(--success); }
+.studio .course-card[data-tone="blue"]    .course-bar span { background: #8fa8ff; }
+.studio .course-card[data-tone="pink"]    .course-bar span { background: #f9a8d4; }
+.studio .course-card[data-tone="warning"] .course-bar span { background: var(--warning); }
+
+.studio .stat-accent { border-color: var(--accent-line); background: linear-gradient(180deg, var(--accent-bg), transparent 90%); }
+.studio .stat-accent .stat-big { color: var(--accent); }
+.studio .stat-accent .stat-ic { color: var(--accent); }
+
+/* ── New-user welcome box ────────────────────────────────────── */
+.studio .home.home-new {
+  min-height: calc(100vh - 130px);
+  justify-content: center;
+  padding-top: 24px; padding-bottom: 24px;
+}
+.studio .welcome {
+  background: var(--bg-3); border: 1px solid var(--line-2); border-radius: var(--r-xl);
+  padding: 38px 40px; box-shadow: var(--shadow-md);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.studio .welcome-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.14em;
+}
+.studio .welcome-eyebrow svg { color: var(--accent); }
+.studio .welcome-title {
+  font-family: var(--font-display); font-weight: 800; font-size: 2.1rem;
+  letter-spacing: -0.03em; color: var(--fg-1); line-height: 1.08; margin: 4px 0 0;
+}
+.studio .welcome-title span { color: var(--accent); }
+.studio .welcome-lead { color: var(--fg-2); font-size: 14.5px; line-height: 1.6; max-width: 54ch; margin: 4px 0 14px; }
+.studio .welcome .ask-bar { margin-bottom: 4px; }
+.studio .welcome-starts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+.studio .start-card {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 13px 14px; border-radius: var(--r-md);
+  background: var(--bg); border: 1px solid var(--line); color: var(--fg-1);
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+.studio .start-card:hover { background: var(--bg-4); border-color: var(--accent-line); transform: translateY(-1px); }
+.studio .start-card > svg:last-child { color: var(--fg-3); margin-left: auto; }
+.studio .start-ic {
+  width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--accent-strong);
+}
+.studio .start-body { display: flex; flex-direction: column; min-width: 0; }
+.studio .start-t { font-size: 13.5px; font-weight: 600; color: var(--fg-1); }
+.studio .start-s { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.studio .welcome-skip {
+  align-self: center; margin-top: 16px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: none; color: var(--fg-3);
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  transition: color var(--t-fast);
+}
+.studio .welcome-skip:hover { color: var(--accent); }
+
+/* ── Getting-started grow grid ───────────────────────────────── */
+.studio .grow-grid {
+  display: grid; grid-template-columns: 1.55fr 1fr; gap: 14px; align-items: start;
+}
+.studio .grow-adds { display: flex; flex-direction: column; gap: 12px; }
+.studio .grow-hint {
+  font-family: var(--font-mono); font-size: 10px; color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.1em; padding: 2px 2px 0;
+}
+.studio .add-card {
+  display: flex; align-items: center; gap: 12px; text-align: left; width: 100%;
+  padding: 15px 14px; border-radius: var(--r-lg);
+  background: transparent; border: 1px dashed var(--line-2); color: var(--fg-2);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.studio .add-card:hover { background: var(--accent-bg); border-color: var(--accent-line); border-style: solid; color: var(--fg-1); }
+.studio .add-plus {
+  width: 30px; height: 30px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-3); border: 1px solid var(--line-2); color: var(--accent);
+}
+.studio .add-card:hover .add-plus { background: var(--accent-bg); border-color: var(--accent-line); }
+.studio .add-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.studio .add-t { font-size: 13.5px; font-weight: 600; color: var(--fg-1); }
+.studio .add-s { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.studio .add-ic { color: var(--fg-3); flex-shrink: 0; }
+
+/* ── Generic view layout ─────────────────────────────────────── */
+.studio .view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.studio .view-title { font-family: var(--font-display); font-size: 1.7rem; font-weight: 800; letter-spacing: -0.03em; color: var(--fg-1); margin: 0; }
+.studio .view-sub { font-size: 13px; color: var(--fg-2); margin-top: 4px; }
+.studio .two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+
+/* Week strip */
+.studio .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.studio .week-day {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 10px 6px; border-radius: var(--r-md);
+  background: var(--bg-3); border: 1px solid var(--line); color: var(--fg-2);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.studio .week-day:hover { border-color: var(--line-2); background: var(--bg-4); }
+.studio .week-dow { font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); }
+.studio .week-num { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--fg-1); }
+.studio .week-dots { display: flex; gap: 3px; height: 5px; }
+.studio .week-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--line-2); }
+.studio .week-day.today { background: var(--accent-bg); border-color: var(--accent-line); }
+.studio .week-day.today .week-dow { color: var(--accent); }
+.studio .week-day.today .week-dots i { background: var(--accent); }
+
+/* ── Review ──────────────────────────────────────────────────── */
+.studio .review-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  background: var(--bg-3); border: 1px solid var(--accent-line); border-radius: var(--r-lg);
+  padding: 22px 24px; box-shadow: 0 0 50px -20px var(--accent-bg);
+}
+.studio .review-big { font-family: var(--font-display); font-weight: 800; font-size: 3rem; letter-spacing: -0.04em; color: var(--accent); line-height: 1; }
+.studio .review-lbl { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+.studio .deck-list { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.studio .deck-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 10px; border-radius: var(--r-md);
+  background: transparent; border: 1px solid transparent;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.studio .deck-row:hover { background: var(--bg-4); border-color: var(--line); }
+.studio .deck-icon {
+  width: 34px; height: 34px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1px solid var(--line); color: var(--accent);
+}
+.studio .deck-body { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.studio .deck-name { font-size: 13.5px; font-weight: 600; color: var(--fg-1); }
+.studio .deck-course { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.studio .deck-due {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--warning);
+  background: var(--warning-bg); border: 1px solid var(--warning); border-radius: 999px;
+  padding: 2px 9px; flex-shrink: 0;
+}
+.studio .deck-due.done {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--success); background: var(--success-bg); border-color: var(--success-line);
+}
+
+/* ── Proofread ───────────────────────────────────────────────── */
+.studio .proof-text { padding: 16px 18px; margin: 0; font-size: 14px; line-height: 1.7; color: var(--fg-1); }
+.studio .sug-list { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.studio .sug-row {
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "type change" "type note";
+  gap: 2px 12px; padding: 10px; border-radius: var(--r-sm); transition: background var(--t-fast);
+}
+.studio .sug-row:hover { background: var(--bg-4); }
+.studio .sug-type {
+  grid-area: type; align-self: start;
+  font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 3px 8px; border-radius: 999px; height: fit-content;
+  background: var(--bg); border: 1px solid var(--line); color: var(--fg-3);
+}
+.studio .sug-row[data-type="grammar"] .sug-type { color: var(--danger); border-color: var(--danger-line); background: var(--danger-bg); }
+.studio .sug-row[data-type="word"]    .sug-type { color: var(--warning); border-color: var(--warning); background: var(--warning-bg); }
+.studio .sug-row[data-type="style"]   .sug-type { color: var(--accent); border-color: var(--accent-line); background: var(--accent-bg); }
+.studio .sug-change { grid-area: change; font-size: 13px; color: var(--fg-1); }
+.studio .sug-from { color: var(--fg-3); text-decoration: line-through; }
+.studio .sug-to { color: var(--success); font-weight: 500; }
+.studio .sug-note { grid-area: note; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+
+/* ── Chat view (entered feature, not the default) ────────────── */
+.studio .chat-head {
+  flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--bg);
+}
+.studio .chat-back {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px; border-radius: var(--r-md);
+  background: transparent; border: 1px solid var(--line); color: var(--fg-2);
+  font-size: 12.5px; font-weight: 500;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.studio .chat-back:hover { background: var(--bg-3); border-color: var(--line-2); color: var(--fg-1); }
+.studio .chat-back svg { color: var(--fg-3); }
+.studio .chat-head-title { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--fg-1); }
+
+/* ── Chat overlay head (X to collapse back to dashboard) ─── */
+.studio .studio-chat-head {
+  flex-shrink: 0; display: flex; align-items: center;
+  padding: 10px 16px; border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.studio .studio-chat-head-label {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+
+/* ── Responsive: collapse bento on narrow viewports ──────────── */
+@media (max-width: 880px) {
+  .studio .bento { grid-template-columns: 1fr; grid-template-areas: "upnext" "agenda" "due" "courses"; }
+  .studio .two-col, .studio .two-col.proof, .studio .grow-grid { grid-template-columns: 1fr; }
+  .studio .stat-strip { grid-template-columns: repeat(2, 1fr) !important; }
+  .studio .welcome-starts { grid-template-columns: 1fr; }
+}
+
+
+/* Dashboard empty states (data-driven panels) */
+.studio .dash-empty {
+  padding: 18px 14px;
+  font-size: 12.5px;
+  color: var(--fg-3);
+  font-style: italic;
+  text-align: center;
 }

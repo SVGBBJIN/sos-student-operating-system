@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { sb } from '../lib/supabase.js';
+import { TweaksPanel, TweakSection, TweakRow, TweakSlider, TweakColor, TweakToggle, useTweaks } from './TweaksPanel';
 
 const SWATCHES = [
   { name: 'Sage',     hex: '#5fa882' },
@@ -177,6 +178,21 @@ export default function AppearanceSettings({ user }) {
           />
         </div>
       </div>
+
+      {/* Design tweaks panel — dev feature */}
+      {process.env.NODE_ENV === 'development' && (
+        <TweaksPanel title="Design Tweaks">
+          <TweakSection label="Theme" />
+          <TweakColor label="Accent" value={activeHex}
+            options={SWATCHES.map(s => ({ label: s.name, value: s.hex }))}
+            onChange={(hex) => {
+              setActiveHex(hex);
+              setHexInput(hex);
+              localStorage.setItem('sos_accent', hex);
+              applyAccent(hex);
+            }} />
+        </TweaksPanel>
+      )}
     </div>
   );
 }

@@ -14,6 +14,16 @@ function PlusIcon() {
   );
 }
 
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={17} height={17} fill="none" stroke="currentColor"
+         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+    </svg>
+  );
+}
+
 function LogoutIcon() {
   return (
     <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
@@ -97,6 +107,8 @@ export default function StudioSidebar({
   notes = [],
   selectedProject = null,
   onSelectProject,
+  onDashboard,
+  activePanel,
 }) {
   const navigate = useNavigate();
   const today = savedChats.filter(c => isToday(c.savedAt));
@@ -116,6 +128,21 @@ export default function StudioSidebar({
         onFocusContinue={onFocusContinue}
         onFocusStop={onFocusStop}
       />
+
+      {onDashboard && (
+        <>
+          <nav className="nav">
+            <button
+              className={'nav-item' + (activePanel === 'dashboard' ? ' active' : '')}
+              onClick={onDashboard}
+            >
+              <HomeIcon />
+              <span>Home</span>
+            </button>
+          </nav>
+          <div className="nav-divider" />
+        </>
+      )}
 
       <div className="sb-section">
         <button className="sb-new" onClick={onNew}>

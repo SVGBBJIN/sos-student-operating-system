@@ -20,6 +20,7 @@ import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import StudioSidebar from './components/StudioSidebar';
+import StudioDashboard from './components/StudioDashboard';
 import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
@@ -4565,12 +4566,13 @@ function App() {
     document.documentElement.setAttribute('data-theme', studioTheme);
     localStorage.setItem('sos_studio_theme', studioTheme);
   }, [studioTheme]);
-  const [activePanel, setActivePanel] = useState('chat');
+  const [activePanel, setActivePanel] = useState('dashboard');
+  const [chatOpen, setChatOpen] = useState(false);
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
   const getWorkspaceContext = useCallback(() => {
-    return activePanel === 'chat' ? 'chat' : 'none';
-  }, [activePanel]);
+    return chatOpen ? 'chat' : 'none';
+  }, [chatOpen]);
   const [toastMsg, setToastMsg] = useState(null);
   const [lmsPendingConfirm, setLmsPendingConfirm] = useState(null); // {taskId, taskTitle, lmsName}
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
@@ -4862,8 +4864,8 @@ function App() {
     const focus = searchParams.get('focus');
     const target = panel || focus;
     if (!target) return;
-    if (['chat', 'home', 'settings'].includes(target)) setActivePanel(target);
-    else if (target === 'tasks' || target === 'calendar') setActivePanel('chat');
+    if (['home', 'settings'].includes(target)) setActivePanel(target);
+    else if (target === 'chat' || target === 'tasks' || target === 'calendar') { setActivePanel('dashboard'); setChatOpen(true); }
   }, [searchParams]);
 
   // Guests have no DB, so their work lives only in React state — which an OAuth
@@ -7718,6 +7720,7 @@ function App() {
     setMessages(chat.messages || []);
     setShowChatSidebar(false);
     setShowGlobalSearch(false);
+    setChatOpen(true);
   }
 
   function renameSavedChat(chatId) {
@@ -7777,6 +7780,7 @@ function App() {
     setPendingPhoto(null);
 
     if ((!text?.trim() && !photo) || isLoading) return;
+    setChatOpen(true);
     if (!fromClarification) {
       autoConfirmPending();
       setPendingProposal(null);
@@ -8922,7 +8926,7 @@ function App() {
 
   function startNewChat() {
     autoSaveCurrentChat();
-    setActivePanel('chat');
+    setChatOpen(true);
     clearChat();
   }
 
@@ -8946,14 +8950,14 @@ function App() {
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){
         e.preventDefault();
-        setActivePanel(prev => prev === 'settings' ? 'chat' : 'settings');
+        setActivePanel(prev => prev === 'settings' ? 'dashboard' : 'settings');
       }
       else if(key==='n'){
         e.preventDefault();
         setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(activePanel==='settings')setActivePanel('chat')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showNotes,showChatSidebar,showGlobalSearch,activePanel]);
@@ -9005,6 +9009,8 @@ function App() {
         onTheme={setStudioTheme}
         onSettings={() => setActivePanel('settings')}
         onHome={() => navigate('/')}
+        onDashboard={() => setActivePanel('dashboard')}
+        activePanel={activePanel}
         queueCount={pendingQueue ? pendingQueue.length : 0}
       />
       <div className="studio-sidebar-col">
@@ -9030,13 +9036,15 @@ function App() {
                 setSelectedProject(null);
               } else {
                 setSelectedProject(name);
-                if (activePanel !== 'chat') setActivePanel('chat');
+                setChatOpen(true);
               }
             }}
+            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); }}
+            activePanel={activePanel}
           />
         </div>
       <div className="studio-center-col studio-glass-card">
-      {activePanel === 'chat' && (activeWidgets.pomodoro || activeTimers.length > 0) && (
+      {chatOpen && (activeWidgets.pomodoro || activeTimers.length > 0) && (
         <PomodoroTimer
           sessionType={pomodoroSession}
           onSessionType={setPomodoroSession}
@@ -9045,7 +9053,7 @@ function App() {
           onClose={() => setActiveWidgets(w => ({ ...w, pomodoro: false }))}
         />
       )}
-      {activePanel === 'chat' && activeWidgets.schedule && (
+      {chatOpen && activeWidgets.schedule && (
         <ScheduleWidget
           events={events}
           blocks={blocks}
@@ -9077,12 +9085,24 @@ function App() {
       )}
 
 
-      {activePanel === 'home' ? (
+      {activePanel === 'dashboard' && !chatOpen ? (
+        <StudioDashboard
+          user={user}
+          tasks={tasks}
+          events={events}
+          onAsk={(prompt) => {
+            setChatOpen(true);
+            if (prompt && prompt.trim()) {
+              setTimeout(() => sendMessage(prompt), 0);
+            }
+          }}
+        />
+      ) : activePanel === 'home' ? (
         <HomeScreen
           tasks={tasks}
           events={events}
           prefs={homePrefs}
-          onOpenChat={() => setActivePanel('chat')}
+          onOpenChat={() => setChatOpen(true)}
         />
       ) : activePanel === 'settings' ? (
         <div className="settings-fullscreen">
@@ -9092,7 +9112,7 @@ function App() {
                 <div className="settings-title">Settings</div>
                 <div className="settings-sub">Customize Charles, notifications, and appearance.</div>
               </div>
-              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('chat')}>{Icon.x(14)} Close</button>
+              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('dashboard')}>{Icon.x(14)} Close</button>
             </div>
 
             {/* ── AI Assistant ── */}
@@ -9338,10 +9358,32 @@ function App() {
             });
           }}
         />
-      ) : (
-      <>
-      <div className="sos-chat-shell">
-      <div className="sos-chat-column">
+      ) : null}
+
+      {/* ── Chat overlay — always mounted to preserve state, shown when chatOpen ── */}
+      {(chatOpen || messages.length > 0 || isLoading) && (
+      <div className="sos-chat-overlay" style={{
+        position:'absolute', inset:0, zIndex:20,
+        display: chatOpen ? 'flex' : 'none',
+        flexDirection:'column',
+        background:'var(--bg)',
+      }}>
+      <div className="sos-chat-shell" style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
+      <div className="sos-chat-column" style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
+      {/* ── Chat close bar ── */}
+      <div className="studio-chat-head">
+        <span className="studio-chat-head-label">
+          {messages.length > 0 ? 'SOS Chat' : 'Ask SOS'}
+        </span>
+        <span style={{flex:1}}/>
+        <button
+          className="icon-btn"
+          onClick={() => setChatOpen(false)}
+          title="Back to dashboard"
+          aria-label="Close chat"
+          style={{color:'var(--fg-3)'}}
+        >{Icon.x(15)}</button>
+      </div>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
       <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
@@ -9739,7 +9781,7 @@ function App() {
       </div>
       </div>
       </div>
-      </>
+      </div>
       )}
       </div>
 
