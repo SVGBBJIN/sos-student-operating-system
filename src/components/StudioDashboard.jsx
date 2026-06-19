@@ -276,16 +276,32 @@ function CourseGrid({ courses }) {
 
 /* ── the dashboard ────────────────────────────────────────────── */
 export default function StudioDashboard({ user, tasks = [], events = [], onAsk }) {
+  const [skipWelcome, setSkipWelcome] = React.useState(() => {
+    try {
+      return localStorage.getItem(`sos_skip_welcome_${user?.id}`) === '1';
+    } catch (_) {
+      return false;
+    }
+  });
+
   const data = useDashboardData(tasks, events);
   const name = user?.email ? user.email.split('@')[0] : (user?.user_metadata?.full_name || 'friend');
 
-  const isNew = tasks.length === 0 && events.length === 0;
+  const hasData = tasks.length > 0 || events.length > 0;
+  const isNew = !hasData && !skipWelcome;
+
+  const handleSkipWelcome = () => {
+    try {
+      localStorage.setItem(`sos_skip_welcome_${user?.id}`, '1');
+    } catch (_) {}
+    setSkipWelcome(true);
+  };
 
   if (isNew) {
     return (
       <div className="center-scroll">
         <div className="home home-new">
-          <WelcomeBox user={{ name }} onAsk={onAsk} />
+          <WelcomeBox user={{ name }} onAsk={onAsk} onSkip={handleSkipWelcome} />
         </div>
       </div>
     );

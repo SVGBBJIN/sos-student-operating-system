@@ -212,7 +212,7 @@ export function StatStrip({ compact }) {
   );
 }
 
-export function WelcomeBox({ user, onAsk, onGrow }) {
+export function WelcomeBox({ user, onAsk, onGrow, onSkip }) {
   const starts = [
     { icon: 'calendar', t: 'Add your classes',    s: 'build your weekly calendar', q: 'Help me add my classes to my calendar' },
     { icon: 'book',     t: 'Set up a course',      s: 'track work + deadlines',     q: 'Help me set up a course with deadlines' },
@@ -220,7 +220,7 @@ export function WelcomeBox({ user, onAsk, onGrow }) {
     { icon: 'cards',    t: 'Make a flashcard set', s: 'review what you learn',       q: 'Help me make a flashcard set' },
   ];
   const handleStart = (q) => onAsk ? onAsk(q) : onGrow?.();
-  const handleSkip = () => onGrow ? onGrow() : onAsk?.('Show me around SOS');
+  const handleSkip = () => onSkip ? onSkip() : (onGrow ? onGrow() : onAsk?.('Show me around SOS'));
   return (
     <div className="welcome fade-up">
       <div className="welcome-eyebrow"><StudioIcon name="sparkles" size={13} />welcome to sos</div>
