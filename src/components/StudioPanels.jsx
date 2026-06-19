@@ -214,11 +214,13 @@ export function StatStrip({ compact }) {
 
 export function WelcomeBox({ user, onAsk, onGrow }) {
   const starts = [
-    { icon: 'calendar', t: 'Add your classes',   s: 'build your weekly calendar' },
-    { icon: 'book',     t: 'Set up a course',     s: 'track work + deadlines' },
-    { icon: 'edit',     t: 'Drop in an essay',    s: 'proofread + outline' },
-    { icon: 'cards',    t: 'Make a flashcard set', s: 'review what you learn' },
+    { icon: 'calendar', t: 'Add your classes',    s: 'build your weekly calendar', q: 'Help me add my classes to my calendar' },
+    { icon: 'book',     t: 'Set up a course',      s: 'track work + deadlines',     q: 'Help me set up a course with deadlines' },
+    { icon: 'edit',     t: 'Drop in an essay',     s: 'proofread + outline',         q: 'Help me proofread and outline my essay' },
+    { icon: 'cards',    t: 'Make a flashcard set', s: 'review what you learn',       q: 'Help me make a flashcard set' },
   ];
+  const handleStart = (q) => onAsk ? onAsk(q) : onGrow?.();
+  const handleSkip = () => onGrow ? onGrow() : onAsk?.('Show me around SOS');
   return (
     <div className="welcome fade-up">
       <div className="welcome-eyebrow"><StudioIcon name="sparkles" size={13} />welcome to sos</div>
@@ -227,7 +229,7 @@ export function WelcomeBox({ user, onAsk, onGrow }) {
       <AskBar onSubmit={onAsk} autoFocus />
       <div className="welcome-starts">
         {starts.map(x => (
-          <button key={x.t} className="start-card" onClick={onGrow}>
+          <button key={x.t} className="start-card" onClick={() => handleStart(x.q)}>
             <span className="start-ic"><StudioIcon name={x.icon} size={17} /></span>
             <span className="start-body">
               <span className="start-t">{x.t}</span>
@@ -237,7 +239,7 @@ export function WelcomeBox({ user, onAsk, onGrow }) {
           </button>
         ))}
       </div>
-      <button className="welcome-skip" onClick={onGrow}>or take a look around <StudioIcon name="arrowRight" size={13} /></button>
+      <button className="welcome-skip" onClick={handleSkip}>or take a look around <StudioIcon name="arrowRight" size={13} /></button>
     </div>
   );
 }

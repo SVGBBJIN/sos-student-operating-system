@@ -9036,6 +9036,8 @@ function App() {
                 if (activePanel !== 'chat') setActivePanel('chat');
               }
             }}
+            onDashboard={() => setActivePanel('dashboard')}
+            activePanel={activePanel}
           />
         </div>
       <div className="studio-center-col studio-glass-card">

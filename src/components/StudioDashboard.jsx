@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { StudioIcon } from './StudioIcons';
-import { Panel, AskBar, QuickActions } from './StudioPanels';
+import { Panel, AskBar, QuickActions, WelcomeBox } from './StudioPanels';
 
 /* ── helpers ──────────────────────────────────────────────────── */
 function todayKey() {
@@ -265,6 +265,18 @@ function CourseGrid({ courses }) {
 export default function StudioDashboard({ user, tasks = [], events = [], onAsk }) {
   const data = useDashboardData(tasks, events);
   const name = user?.email ? user.email.split('@')[0] : (user?.user_metadata?.full_name || 'friend');
+
+  const isNew = tasks.length === 0 && events.length === 0;
+
+  if (isNew) {
+    return (
+      <div className="center-scroll">
+        <div className="home home-new">
+          <WelcomeBox user={{ name }} onAsk={onAsk} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="center-scroll">
