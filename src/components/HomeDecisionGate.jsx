@@ -36,6 +36,7 @@ export default function HomeDecisionGate({
   onPass,
   onDismiss,
   onFallThrough,
+  onAddEvent,
 }) {
   const [idx, setIdx] = useState(0);
 
@@ -48,25 +49,32 @@ export default function HomeDecisionGate({
   };
   const labelStyle = { fontSize: 13, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', fontWeight: 500 };
 
-  // ── Clear board: one line, one door out, nothing else. ──
+  // ── Clear board: one line, two doors out. ──
   if (clearBoard || rankedTasks.length === 0) {
+    const ghostBtn = {
+      padding: '12px 28px', borderRadius: 999, cursor: 'pointer',
+      border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.05)',
+      color: 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: 500, letterSpacing: '0.02em',
+    };
     return (
       <div style={wrapStyle}>
         <div style={labelStyle}>Nothing on the board.</div>
-        <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
           <a
             href={ESCAPE_URL}
             target="_blank"
             rel="noreferrer noopener"
             onClick={onDismiss}
-            style={{
-              padding: '12px 28px', borderRadius: 999, textDecoration: 'none',
-              border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.05)',
-              color: 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: 500, letterSpacing: '0.02em',
-            }}
+            style={{ ...ghostBtn, textDecoration: 'none' }}
           >
-            Go do something else
+            yt
           </a>
+          <button
+            onClick={() => { onDismiss?.(); onAddEvent?.(); }}
+            style={ghostBtn}
+          >
+            Add event
+          </button>
         </div>
         <GateKeyframes />
       </div>
