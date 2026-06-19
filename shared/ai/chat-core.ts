@@ -387,6 +387,80 @@ async function invokeProvider(
   }
 }
 
+// ── Hedged provider dispatch ─────────────────────────────────────────────────
+// For non-streaming calls where both primary and fallback providers are
+// available, fire the primary immediately and start the fallback in parallel
+// after HEDGE_DELAY_MS. Take the first to succeed; ignore the slower one.
+// Streaming calls stay sequential — one ordered byte stream per client.
+// If primary fails before the timer fires, fallback starts immediately.
+
+const HEDGE_DELAY_MS = 2_000;
+
+async function raceProviders(
+  req: CallModelRequest,
+  primary: { model: string; provider: ProviderName },
+  fallback: { model: string; provider: ProviderName },
+  tier: Tier,
+  deadline: number,
+): Promise<{ response: ChatResponse; fallbackUsed: boolean; winner: ProviderName; attempts: number }> {
+  type Win = { response: ChatResponse; fallbackUsed: boolean; winner: ProviderName; attempts: number };
+  const primaryKey = `${primary.provider}:${tier}`;
+  const fallbackKey = `${fallback.provider}:${tier}`;
+  let totalAttempts = 1;
+
+  return new Promise<Win>((resolve, reject) => {
+    let settled = false;
+    let primaryFailed = false;
+    let fallbackFailed = false;
+    let primaryErr: unknown;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackStarted = false;
+
+    const tryFallback = () => {
+      if (fallbackStarted || settled) return;
+      if (circuitOpen(fallbackKey)) {
+        fallbackFailed = true;
+        if (primaryFailed) reject(primaryErr);
+        return;
+      }
+      fallbackStarted = true;
+      totalAttempts += 1;
+      recordRequest(tier);
+      invokeProvider(req, fallback.model, fallback.provider, deadline)
+        .then(({ response }) => {
+          if (settled) return;
+          settled = true;
+          recordSuccess(fallbackKey);
+          resolve({ response, fallbackUsed: true, winner: fallback.provider, attempts: totalAttempts });
+        })
+        .catch((err) => {
+          recordFailure(fallbackKey);
+          fallbackFailed = true;
+          if (primaryFailed) reject(primaryErr ?? err);
+        });
+    };
+
+    invokeProvider(req, primary.model, primary.provider, deadline)
+      .then(({ response }) => {
+        if (settled) return;
+        settled = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        recordSuccess(primaryKey);
+        resolve({ response, fallbackUsed: false, winner: primary.provider, attempts: totalAttempts });
+      })
+      .catch((err) => {
+        recordFailure(primaryKey);
+        primaryErr = err;
+        primaryFailed = true;
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+        tryFallback();
+        if (fallbackFailed) reject(err);
+      });
+
+    fallbackTimer = setTimeout(tryFallback, HEDGE_DELAY_MS);
+  });
+}
+
 // ── Top-level entrypoint ─────────────────────────────────────────────────────
 
 export async function callModel(req: CallModelRequest): Promise<CallModelResponse> {
@@ -460,25 +534,41 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
     return buildResponse(req, f, { fallbackUsed: false, attempts: 0, primaryModel: r.model, status: "error", causeCode: "circuit_open" });
   }
 
-  for (const attempt of attemptsLadder) {
-    attempts += 1;
-    const circuitKey = `${attempt.provider}:${r.tier}`;
-    if (circuitOpen(circuitKey)) {
-      // Fallback's own circuit is also open — skip without counting as a failure.
-      continue;
-    }
+  // Hedged dispatch: non-streaming + both providers available → race them.
+  // Streaming stays sequential so chunks arrive in one ordered stream per client.
+  if (!req.onChunk && attemptsLadder.length === 2) {
     try {
-      const { response: res } = await invokeProvider(req, attempt.model, attempt.provider, deadline, req.onChunk);
-      response = res;
-      fallbackUsed = attempt.model !== r.model || attempt.provider !== r.provider;
-      successfulProvider = attempt.provider;
-      recordSuccess(circuitKey);
-      break;
+      const hedged = await raceProviders(
+        req, attemptsLadder[0]!, attemptsLadder[1]!, r.tier, deadline,
+      );
+      response = hedged.response;
+      fallbackUsed = hedged.fallbackUsed;
+      successfulProvider = hedged.winner;
+      attempts = hedged.attempts;
     } catch (err) {
       lastError = err;
-      recordFailure(circuitKey);
-      void isRetryable(err);
-      // Continue to the next attempt in the ladder.
+      attempts = 2;
+    }
+  } else {
+    for (const attempt of attemptsLadder) {
+      attempts += 1;
+      const circuitKey = `${attempt.provider}:${r.tier}`;
+      if (circuitOpen(circuitKey)) {
+        // Fallback's own circuit is also open — skip without counting as a failure.
+        continue;
+      }
+      try {
+        const { response: res } = await invokeProvider(req, attempt.model, attempt.provider, deadline, req.onChunk);
+        response = res;
+        fallbackUsed = attempt.model !== r.model || attempt.provider !== r.provider;
+        successfulProvider = attempt.provider;
+        recordSuccess(circuitKey);
+        break;
+      } catch (err) {
+        lastError = err;
+        recordFailure(circuitKey);
+        void isRetryable(err);
+      }
     }
   }
 

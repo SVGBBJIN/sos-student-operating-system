@@ -5582,6 +5582,10 @@ function App() {
   function handleGateFallThrough() {
     setGateOpen(false);
   }
+  function handleGateAddEvent() {
+    setInput('Add event: ');
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }
 
   // ── Time payout on completion ──
   // Information, not celebration. Computes when today goes clear from the
@@ -9909,6 +9913,7 @@ function App() {
           onPass={handleGatePass}
           onDismiss={handleGateDismiss}
           onFallThrough={handleGateFallThrough}
+          onAddEvent={handleGateAddEvent}
         />
       )}
       {rollupOpen && !showOnboarding && !gateOpen && (
