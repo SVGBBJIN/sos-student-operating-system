@@ -116,19 +116,32 @@ function useDashboardData(tasks, events) {
     (tasks || []).forEach(t => {
       const s = t.subject;
       if (!s) return;
-      if (!bySubject.has(s)) bySubject.set(s, { name: s, total: 0, done: 0 });
+      if (!bySubject.has(s)) bySubject.set(s, { name: s, total: 0, done: 0, nextTitle: null, nextTs: Infinity });
       const c = bySubject.get(s);
       c.total += 1;
-      if (t.status === 'done') c.done += 1;
+      if (t.status === 'done') { c.done += 1; return; }
+      // track the soonest-due open task → "next milestone" hint
+      const due = t.dueDate || t.due_date;
+      const ts = due ? new Date(due).getTime() : Infinity;
+      if (ts < c.nextTs) {
+        c.nextTs = ts;
+        c.nextTitle = t.title || t.task_name || null;
+      }
     });
     const courses = [...bySubject.values()]
-      .map(c => ({
-        id: c.name,
-        name: c.name,
-        tone: toneFor(c.name),
-        prog: c.total ? c.done / c.total : 0,
-        tasks: c.total - c.done,
-      }))
+      .map(c => {
+        const next = c.nextTitle
+          ? `${c.nextTitle} · ${relativeDue(c.nextTs === Infinity ? null : c.nextTs).label}`
+          : null;
+        return {
+          id: c.name,
+          name: c.name,
+          tone: toneFor(c.name),
+          prog: c.total ? c.done / c.total : 0,
+          tasks: c.total - c.done,
+          next,
+        };
+      })
       .sort((a, b) => b.tasks - a.tasks)
       .slice(0, 6);
 
@@ -254,7 +267,7 @@ function CourseGrid({ courses }) {
             <span className="course-pct">{Math.round(c.prog * 100)}%</span>
           </div>
           <div className="course-bar"><span style={{ width: (c.prog * 100) + '%' }} /></div>
-          <div className="course-next">{c.tasks} open</div>
+          <div className="course-next">{c.tasks} open{c.next ? ` · ${c.next}` : ''}</div>
         </button>
       ))}
     </div>

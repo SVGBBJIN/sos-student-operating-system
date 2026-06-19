@@ -1108,7 +1108,7 @@
 .studio .course-pct { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
 .studio .course-bar { height: 5px; border-radius: 999px; background: var(--bg-4); overflow: hidden; }
 .studio .course-bar span { display: block; height: 100%; border-radius: 999px; background: var(--fg-3); }
-.studio .course-next { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+.studio .course-next { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .studio .course-card[data-tone="mint"]    .course-bar span { background: var(--success); }
 .studio .course-card[data-tone="blue"]    .course-bar span { background: #8fa8ff; }
 .studio .course-card[data-tone="pink"]    .course-bar span { background: #f9a8d4; }
