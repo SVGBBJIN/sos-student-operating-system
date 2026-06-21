@@ -32,6 +32,7 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
 import { rankTasks, rankForQuickStart, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import { classifyContentType } from '../shared/coaching/workcheck.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
   assignArm,
@@ -995,6 +996,31 @@ function parseDocId(input) {
 const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
 const CONTENT_GEN_REGEX = /flashcards?|outline|summar|quiz\s+me|make\s+(?:me\s+)?(?:a\s+)?quiz|create\s+(?:a\s+)?quiz|practice\s*questions?|project\s*breakdown|review\s*sheet|cheat\s*sheet/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
+// Hint & Work-Check surfaces. The clue is the forward "I'm stuck, get me
+// started" ask; the work-check is the backward "look at what I produced" ask.
+const WORK_CHECK_REGEX = /\b(check\s+my\s+(?:work|essay|answer|proof|solution|draft|paper|homework)|review\s+my\s+(?:work|essay|answer|proof|solution|draft|paper)|is\s+this\s+(?:right|correct|good)|did\s+i\s+(?:do|get)\s+this\s+right|proof\s?read|look\s+over\s+my|how'?s?\s+my\s+(?:essay|draft|answer|work|proof)|find\s+(?:the\s+)?(?:gaps?|mistakes?|errors?|weak\s+spots?)|where\s+(?:does|do)\s+(?:this|my\s+\w+)\s+(?:break|go\s+wrong)|grade\s+my)\b/i;
+const CLUE_REGEX = /\b(give\s+me\s+a\s+(?:hint|clue)|need\s+a\s+(?:hint|clue)|(?:a\s+)?hint\s+for|stuck\s+on|i'?m\s+stuck|im\s+stuck|where\s+do\s+i\s+(?:start|begin)|how\s+do\s+i\s+(?:start|begin|approach)|help\s+me\s+(?:start|begin|get\s+started)|don'?t\s+know\s+(?:how\s+to\s+start|where\s+to\s+start|how\s+to\s+begin))\b/i;
+// Proofread cap: 2 rounds per assignment, the window resets every 2 hours.
+// State lives client-side (no server session store) keyed by a coarse
+// assignment key; the server derives the round + terminal flag from the count
+// we pass. Mirrors shared/coaching/workcheck.ts proofreadState.
+const PROOFREAD_WINDOW_MS = 2 * 60 * 60 * 1000;
+const PROOFREAD_STORE_KEY = 'sos_proofread_hist';
+function loadProofreadHistory() {
+  try { return JSON.parse(localStorage.getItem(PROOFREAD_STORE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function saveProofreadHistory(hist) {
+  try { localStorage.setItem(PROOFREAD_STORE_KEY, JSON.stringify(hist)); } catch (_) {}
+}
+// Count rounds already used in the current window for a key, pruning stale ones.
+function proofreadRoundsUsedFor(hist, key) {
+  const now = Date.now();
+  const arr = (hist[key] || []).filter(t => typeof t === 'number' && now - t < PROOFREAD_WINDOW_MS);
+  hist[key] = arr;
+  return arr.length;
+}
+
 const INTENT_PLAN_REGEX = /\b(survive\s+finals|finals\s+week|help\s+me\s+(survive|balance|prepare|get\s+through)|improve\s+(my\s+)?(?:chinese|mandarin|spanish|french|korean|japanese|german|language|speaking|math|coding|programming)|build\s+a\s+routine|create\s+a\s+routine|set\s+up\s+(?:a\s+)?routine|balance\s+(?:my\s+)?(?:life|school|work|coding)|plan\s+(?:my\s+)?(?:week|month|semester)|semester\s+plan|weekly\s+(?:routine|schedule|plan))\b/i;
 
 /* ─── Fail-safe: extract action from user message if AI missed ─── */
@@ -3343,6 +3369,123 @@ function MyPlansPanel({ plans, tasks, onClose, onRevise, onArchive }) {
   );
 }
 
+/* ═══════════════════════════════════════════════
+   HINT & WORK-CHECK CARDS
+   ═══════════════════════════════════════════════ */
+const CONTENT_TYPE_LABEL = { procedure: 'Procedure', fact: 'Fact', argument: 'Argument' };
+
+// The forward clue: one nudge toward a checkable attempt. "Still stuck" never
+// yields a second clue — it routes the student to put down an attempt and run
+// the check. The deep fallback (a parallel problem) only appears when offered.
+function ClueCard({ data, onDismiss }) {
+  const ac = 'var(--blue)';
+  const [showStuck, setShowStuck] = useState(false);
+  const [showFallback, setShowFallback] = useState(false);
+  const typeLabel = CONTENT_TYPE_LABEL[data.content_type] || 'Clue';
+  return (
+    <div className="content-card" style={{borderLeftColor:ac}}>
+      <div className="content-card-header">
+        <div className="content-card-hdr-icon" style={{background:`color-mix(in srgb, ${ac} 10%, transparent)`,borderColor:`color-mix(in srgb, ${ac} 20%, transparent)`,color:ac}}>{Icon.helpCircle(16)}</div>
+        <div>
+          <div className="content-card-title">Clue</div>
+          <div className="content-card-subject">{typeLabel} · enough to attempt, not to solve</div>
+        </div>
+      </div>
+      <div className="content-card-body">
+        <div style={{fontSize:'0.9rem',lineHeight:1.5,color:'var(--text)'}}>{data.clue}</div>
+        {!showStuck ? (
+          <button onClick={() => setShowStuck(true)} style={{marginTop:12,background:'none',border:'none',color:ac,fontSize:'0.8rem',cursor:'pointer',padding:0,fontWeight:600}}>Still stuck?</button>
+        ) : (
+          <div style={{marginTop:12,padding:'10px 12px',borderRadius:8,background:'color-mix(in srgb, var(--blue) 8%, transparent)',fontSize:'0.84rem',lineHeight:1.45,color:'var(--text-dim)'}}>
+            {data.next_if_stuck}
+          </div>
+        )}
+        {data.deep_fallback?.parallel_problem && (
+          !showFallback ? (
+            <button onClick={() => setShowFallback(true)} style={{marginTop:8,display:'block',background:'none',border:'none',color:'var(--text-dim)',fontSize:'0.78rem',cursor:'pointer',padding:0}}>No attempt yet? Try a parallel problem →</button>
+          ) : (
+            <div style={{marginTop:8,padding:'10px 12px',borderRadius:8,border:'1px dashed var(--border)',fontSize:'0.84rem',lineHeight:1.45,color:'var(--text)'}}>
+              <div style={{fontSize:'0.7rem',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',color:'var(--text-dim)',marginBottom:6}}>Parallel problem</div>
+              {data.deep_fallback.parallel_problem}
+              <div style={{marginTop:6,fontStyle:'italic',color:'var(--text-dim)',fontSize:'0.76rem'}}>Re-derive this one — your original answer stays hidden.</div>
+            </div>
+          )
+        )}
+      </div>
+      <div className="content-card-actions">
+        <button className="content-card-dismiss" onClick={onDismiss}>Got it</button>
+      </div>
+    </div>
+  );
+}
+
+// The backward check: strengths first, ≤3 gaps, a coverage number that is never
+// a grade, and at the terminal proofread round it hands the work back for a
+// directed self-read instead of giving a verdict.
+function WorkCheckCard({ data, onDismiss }) {
+  const ac = 'var(--teal)';
+  const cards = Array.isArray(data.cards) ? data.cards : [];
+  const coverage = data.coverage || { addressed: 0, total: 0 };
+  const terminal = data.proofread?.terminal;
+  const typeLabel = CONTENT_TYPE_LABEL[data.content_type] || 'Work check';
+  return (
+    <div className="content-card" style={{borderLeftColor:ac}}>
+      <div className="content-card-header">
+        <div className="content-card-hdr-icon" style={{background:`color-mix(in srgb, ${ac} 10%, transparent)`,borderColor:`color-mix(in srgb, ${ac} 20%, transparent)`,color:ac}}>{Icon.checkCircle(16)}</div>
+        <div>
+          <div className="content-card-title">Work check</div>
+          <div className="content-card-subject">{typeLabel}{data.proofread ? ` · round ${data.proofread.round} of ${data.proofread.max}` : ''}</div>
+        </div>
+      </div>
+      <div className="content-card-body">
+        {coverage.total > 0 && (
+          <div style={{marginBottom:10,fontSize:'0.82rem',color:'var(--text-dim)'}}>
+            <span style={{fontWeight:700,color:'var(--text)'}}>{coverage.addressed} of {coverage.total} addressed</span>
+            <span style={{marginLeft:6,fontStyle:'italic'}}>— coverage, not a grade</span>
+          </div>
+        )}
+        {data.needs_rubric_nudge && (
+          <div style={{marginBottom:10,padding:'8px 10px',borderRadius:8,background:'color-mix(in srgb, var(--orange) 10%, transparent)',fontSize:'0.78rem',color:'var(--text-dim)'}}>
+            Paste your rubric or the prompt and I'll check against your real criteria.
+          </div>
+        )}
+        {data.error_class && (
+          <div style={{marginBottom:10,fontSize:'0.82rem',color:'var(--text-dim)'}}>
+            Likely class of issue: <span style={{color:'var(--text)'}}>{data.error_class}</span>
+          </div>
+        )}
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {cards.map((c, i) => {
+            const isStrength = c.kind === 'strength';
+            const isGrammar = c.lane === 'grammar';
+            const color = isStrength ? 'var(--teal)' : isGrammar ? 'var(--text-dim)' : 'var(--orange)';
+            const icon = isStrength ? Icon.checkCircle(14) : (c.hedged ? Icon.helpCircle(14) : Icon.alertTriangle(14));
+            return (
+              <div key={i} style={{display:'flex',gap:8,padding:'8px 10px',borderRadius:8,background:'var(--bg-soft, rgba(127,127,127,0.06))'}}>
+                <span style={{color,flexShrink:0,marginTop:1}}>{icon}</span>
+                <div style={{fontSize:'0.85rem',lineHeight:1.45,color:'var(--text)'}}>
+                  {c.text}
+                  {c.self_attest && <span style={{marginLeft:6,fontSize:'0.72rem',color:'var(--text-dim)',fontStyle:'italic'}}>· your teacher checks this</span>}
+                  {isGrammar && <span style={{marginLeft:6,fontSize:'0.72rem',color:'var(--text-dim)'}}>· grammar</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {terminal && (
+          <div style={{marginTop:12,padding:'10px 12px',borderRadius:8,border:`1px solid color-mix(in srgb, ${ac} 25%, transparent)`,fontSize:'0.84rem',lineHeight:1.45,color:'var(--text)'}}>
+            {data.unwritten_note && <div style={{marginBottom:6,color:'var(--text-dim)'}}>{data.unwritten_note}</div>}
+            That's the last check for now. Read it out loud — listen for any sentence you stumble on. It's yours from here.
+          </div>
+        )}
+      </div>
+      <div className="content-card-actions">
+        <button className="content-card-dismiss" onClick={onDismiss}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyIntentPlan, onApplyIntentPlanSkipConflicts, onStartPlanTask, onExportGoogleDocs, googleConnected, existingRecurring }) {
   switch (content.type) {
     case 'make_plan':
@@ -3364,6 +3507,10 @@ function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyInt
     }
     case 'make_study_pack':
       return <StudyPackCard data={content} onDismiss={onDismiss} />;
+    case 'make_clue':
+      return <ClueCard data={content} onDismiss={onDismiss} />;
+    case 'make_work_check':
+      return <WorkCheckCard data={content} onDismiss={onDismiss} />;
     default:
       return <GenericContentDisplay data={content} icon={Icon.zap(16)} label="Content" onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" />;
   }
@@ -4581,6 +4728,7 @@ function App() {
   const DAILY_CONTENT_LIMIT = 5;
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+  const proofreadHistoryRef = useRef(loadProofreadHistory()); // { [assignmentKey]: number[] }
   // Undo toast: shown for 8s after a destructive/mutating AI action
   const [undoToast, setUndoToast] = useState(null); // { label, snap: {tasks, events, notes, blocks} }
   const undoTimerRef = useRef(null);
@@ -7987,6 +8135,14 @@ function App() {
       const isStudyPackRequest = STUDY_PACK_REGEX.test(text || '');
       const isPlanningRequest = !isStudyPackRequest && PLANNING_REGEX.test(text || '');
       const isIntentPlanRequest = !isStudyPackRequest && !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
+      // Hint & Work-Check: the check wins over the clue when both could match
+      // (a "check my work" is a backward ask even if it mentions being stuck).
+      const isWorkCheckRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && WORK_CHECK_REGEX.test(text || '');
+      const isClueRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && !isWorkCheckRequest && CLUE_REGEX.test(text || '');
+      const coachingContentType = (isWorkCheckRequest || isClueRequest) ? classifyContentType({ text: msgContent }) : null;
+      const workCheckKey = `wc:${effectiveWorkspaceContext || 'global'}`;
+      const proofreadUsed = isWorkCheckRequest ? proofreadRoundsUsedFor(proofreadHistoryRef.current, workCheckKey) : 0;
+      const workCheckHasRubric = isWorkCheckRequest && /\b(rubric|grading\s+criteria|requirements?:|criteria:|prompt:)\b/i.test(msgContent);
       const promptPayload = buildSystemPrompt(tasks, blocks, events, notes, 2, {
         workspaceContext: effectiveWorkspaceContext,
         intentType: inferredIntentType,
@@ -8013,7 +8169,7 @@ function App() {
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : 1024,
+        maxTokens: isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024,
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -8024,6 +8180,8 @@ function App() {
         ...(isPlanningRequest ? { mode: 'planning' } : {}),
         ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
+        ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
+        ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric } : {}),
         // Caller-supplied mode override (e.g. brain_dump from voice transcripts).
         // Wins over the heuristics above.
         ...(opts.mode ? { mode: opts.mode } : {}),
@@ -8174,6 +8332,40 @@ function App() {
           setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
           setPendingContent(prev => [...prev, { ...proposal, _study_pack_id: packId }]);
+          return;
+        }
+      }
+
+      // ── Clue response: show the forward hint card ──
+      if (chatData?.orchestration?.mode === 'clue') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_clue') {
+          const introMsg = { role: 'assistant', content: "here's a clue to get you moving — try it, then paste your attempt and i'll show you where it breaks:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal }]);
+          return;
+        }
+      }
+
+      // ── Work-check response: surface gaps, record the proofread round ──
+      if (chatData?.orchestration?.mode === 'work_check') {
+        const proposal = chatData.actions?.[0];
+        if (proposal && proposal.type === 'make_work_check') {
+          // Record this round against the 2h proofread window for this assignment.
+          const arr = proofreadHistoryRef.current[workCheckKey] || [];
+          arr.push(Date.now());
+          proofreadHistoryRef.current[workCheckKey] = arr;
+          saveProofreadHistory(proofreadHistoryRef.current);
+          const terminal = proposal.proofread?.terminal;
+          const introMsg = { role: 'assistant', content: terminal
+            ? "last check for this one — here's where it stands, then it's back to you:"
+            : "here's where your work stands — strengths first, then the spots worth another look:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal }]);
           return;
         }
       }

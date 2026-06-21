@@ -33,6 +33,7 @@ import {
 import { buildStudioToolDefs, validateStudio, type StudioToolName } from "./schemas/studio.js";
 import { buildIntentPlanToolDefs, validateIntentPlan } from "./schemas/intent_plan.js";
 import { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
+import { buildCoachingToolDefs, validateCoaching } from "./schemas/coaching.js";
 import { formatZodIssuesForModel, PLACEHOLDER_SUBJECT_STRINGS } from "./schemas/_helpers.js";
 import { groundActionNames, type GroundingFlag } from "./grounding.js";
 import { SCHEMA_VERSIONS } from "./schemas/versions.js";
@@ -79,7 +80,7 @@ export interface CallModelRequest {
   dynamicContext?: string;
   messages: Message[];
   attachments?: Attachment[];
-  toolSet?: "action" | "chat" | "studio" | "intent_plan" | "study_pack" | "none" | "custom";
+  toolSet?: "action" | "chat" | "studio" | "intent_plan" | "study_pack" | "coaching" | "none" | "custom";
   customTools?: ToolDef[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
@@ -140,6 +141,8 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
       return buildIntentPlanToolDefs();
     case "study_pack":
       return buildStudyPackToolDefs();
+    case "coaching":
+      return buildCoachingToolDefs();
     case "custom":
       return req.customTools ?? [];
     case "none":
@@ -588,7 +591,7 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
   let result = parseResponse(req, response);
 
   // Schema repair retry — single shot, on action/chat/studio/intent_plan tool sets.
-  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === "chat" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan" || req.toolSet === "study_pack")) {
+  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === "chat" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "intent_plan" || req.toolSet === "study_pack" || req.toolSet === "coaching")) {
     const feedback = result.validation_warnings.flatMap((w) =>
       formatZodIssuesForModel(w.tool, w.issues.map((i) => ({
         code: "custom",
@@ -681,6 +684,7 @@ function schemaVersionForRequest(req: CallModelRequest): string {
   switch (req.toolSet) {
     case "studio": return SCHEMA_VERSIONS.studio_tools;
     case "study_pack": return SCHEMA_VERSIONS.study_pack;
+    case "coaching": return SCHEMA_VERSIONS.coaching;
     case "intent_plan": return SCHEMA_VERSIONS.intent_plan;
     case "action":
     case undefined:
@@ -749,7 +753,8 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
     const isStudioTool = req.toolSet === "studio";
     const isIntentPlanTool = req.toolSet === "intent_plan";
     const isStudyPackTool = req.toolSet === "study_pack";
-    const isContentTool = isStudioTool || isIntentPlanTool || isStudyPackTool;
+    const isCoachingTool = req.toolSet === "coaching";
+    const isContentTool = isStudioTool || isIntentPlanTool || isStudyPackTool || isCoachingTool;
     const enriched = isContentTool ? tc.args : preEnrichSubject(name, tc.args);
     const v = isStudioTool
       ? validateStudio(name, enriched)
@@ -757,7 +762,9 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
         ? validateIntentPlan(enriched)
         : isStudyPackTool
           ? validateStudyPack(name, enriched)
-          : validateAction(name as ActionName, enriched);
+          : isCoachingTool
+            ? validateCoaching(name, enriched)
+            : validateAction(name as ActionName, enriched);
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
       if (!isContentTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));
