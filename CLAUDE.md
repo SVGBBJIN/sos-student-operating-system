@@ -41,6 +41,8 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   schemas/                        — Zod schemas (actions, studio, plan, intent_plan, library, _helpers).
   schemas/versions.ts             — Schema version pins per surface (action_tools=v6-2026-05).
   schemas/library.ts              — FlashcardDeckSchema + FlashcardSchema (persisted flashcard decks).
+  schemas/coaching.ts             — MakeClueSchema + MakeWorkCheckSchema (Hint & Work-Check tools).
+  coaching.ts                     — clue/work-check system prompts + normalizeWorkCheckAction (post-validation invariants).
   schemas/intent_plan.ts          — MakeIntentPlanSchema + buildIntentPlanToolDefs + validateIntentPlan.
   context/                        — assembleContext (ranked tasks + behavioral signals), enrich.ts, ranker.
   context/enrich.ts               — enrichDynamicContext: parallel, best-effort, bounded context build.
@@ -54,6 +56,7 @@ shared/ai/                        — Hybrid Groq + Gemini service layer (TS).
   index.ts                        — Public exports.
 
 shared/scheduling/priority.ts     — computePriority, rankTasks, buildCalendarDensity (pure functions, no I/O).
+shared/coaching/workcheck.ts      — classifyContentType, normalizeCheckCards, computeCoverage, proofreadState (pure, no I/O).
 shared/{env,auth,rate-limit,sse}.ts — Cross-runtime helpers.
 
 supabase/migrations/20260514_add_pgvector.sql — pgvector + memory_embeddings + match_memories RPC.
@@ -93,6 +96,8 @@ eval/fixtures/                    — conversations.json (fixtures) + sample-run
 **Planning pipeline** (`shared/ai/pipelines/planning.ts`): three-pass agentic pipeline on Pro tier with `thinkingBudget: 4096`. Critique and refine degrade gracefully — if either fails, the draft ships. Errors surface as `PlanningPipelineError` with `.stage`. Accepts an optional `onProgress` callback that emits a `ProgressEvent` per pass (`analyzing`/`drafting`/`reviewing`/`finalizing`); the `reviewing` event carries the pass-1 `draft` so the UI can show an early preview.
 
 **Intent-plan pipeline** (`shared/ai/pipelines/intent_plan.ts`): same 3-pass pattern as planning, but produces `make_intent_plan` — recurring blocks + milestone tasks + review cadence. Triggered when the user says something like "help me survive finals week". Mode `"intent_plan"` in `api/chat.ts` / `sos-chat`. Surfaces as `IntentPlanCard` in the chat; "Apply" batch-creates blocks and tasks in one undoable snapshot. Also supports `onProgress` — the `reviewing` event's `draft` renders as a "preview · refining…" `IntentPlanCard` (~15s) that swaps for the refined plan on `done`.
+
+**Hint & Work-Check** (`shared/ai/coaching.ts` + `shared/coaching/workcheck.ts`): two surfaces per task. The **clue** (`mode:"clue"` → `make_clue`, Flash tier) gives one forward hint tuned to "enough to attempt"; "still stuck" routes to the check, never a second clue. The **check** (`mode:"work_check"` → `make_work_check`, Pro tier) evaluates the student's own work and surfaces only the highest-leverage gaps as cards. Both are forced single tool calls (like studio). Content-type routing (procedure/fact/argument) comes from `classifyContentType`. The deterministic invariants live in the pure `workcheck.ts` and are re-applied server-side by `normalizeWorkCheckAction` regardless of model output: strengths first, ≤3 gaps, ≤5 cards, no padding; the coverage number ("N of 5 addressed") counts only text-verifiable structural criteria and is never a grade; low-confidence/qualitative gaps hedge as questions; grammar is the only just-fix lane; self-attested items never count. The **proofread cap** (2 rounds / 2h, `proofreadState`) is tracked client-side (`proofreadHistoryRef`, localStorage) and passed as `proofreadRoundsUsed`; the terminal round hands the work back with a directed self-read instead of a verdict. Surfaces as `ClueCard` / `WorkCheckCard`. Triggered by `CLUE_REGEX` / `WORK_CHECK_REGEX` in `src/App.jsx`.
 
 **Priority engine** (`shared/scheduling/priority.ts`): pure-function, sync, no I/O. `computePriority(task, now, density, signals)` returns a score 0–1 from five weighted factors (urgency 35%, importance 25%, momentum 15%, deadline_density 15%, friction 10%). `rankTasks` runs it over a task list; `buildCalendarDensity` builds the density map from tasks + calendar blocks. Runs server-side inside `assembleContext` (top-3 snippet injected into AI context) and client-side for the `prioritize_tasks` action display.
 

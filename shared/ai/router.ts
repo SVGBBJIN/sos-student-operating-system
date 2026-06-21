@@ -26,6 +26,8 @@ export type Intent =
   | "planning"
   | "intent_plan"
   | "study_pack"
+  | "clue"
+  | "work_check"
   | "embed";
 
 const TIER_BY_INTENT: Record<Intent, Tier> = {
@@ -35,6 +37,11 @@ const TIER_BY_INTENT: Record<Intent, Tier> = {
   planning: "pro",
   intent_plan: "pro",
   study_pack: "pro",
+  // The forward clue is a light, single-shot hint — Flash is plenty. The
+  // backward check is the deep-reasoning surface (localizing the broken step /
+  // weak claim against a rubric) — it needs Pro.
+  clue: "flash",
+  work_check: "pro",
   embed: "embed",
 };
 

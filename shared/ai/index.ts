@@ -25,6 +25,26 @@ export { buildStudioToolDefs, validateStudio } from "./schemas/studio.js";
 export { buildIntentPlanToolDefs, validateIntentPlan } from "./schemas/intent_plan.js";
 export { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
 export type { MakeStudyPackInput } from "./schemas/study_pack.js";
+export { buildCoachingToolDefs, validateCoaching } from "./schemas/coaching.js";
+export type { MakeClueInput, MakeWorkCheckInput } from "./schemas/coaching.js";
+export {
+  CLUE_SYSTEM,
+  WORK_CHECK_SYSTEM,
+  buildClueContext,
+  buildWorkCheckContext,
+  normalizeWorkCheckAction,
+  resolveProofread,
+} from "./coaching.js";
+export {
+  classifyContentType,
+  normalizeCheckCards,
+  computeCoverage,
+  proofreadState,
+  type ContentType,
+  type CheckCard,
+  type Coverage,
+  type ProofreadState,
+} from "../coaching/workcheck.js";
 export type { BehavioralSignals } from "./signals/behavioral.js";
 export { getBehavioralSignals, formatSignalsForContext } from "./signals/behavioral.js";
 export type { StudySignals, WeakTopic } from "./signals/study.js";

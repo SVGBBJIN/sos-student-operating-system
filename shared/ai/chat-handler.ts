@@ -15,6 +15,15 @@ import { aggregateRpmStatus, overLimit } from "./rpm-tracker.js";
 import { route, type Intent } from "./router.js";
 import { enrichDynamicContext } from "./context/enrich.js";
 import { transcribeAudio } from "./voice.js";
+import {
+  CLUE_SYSTEM,
+  WORK_CHECK_SYSTEM,
+  buildClueContext,
+  buildWorkCheckContext,
+  normalizeWorkCheckAction,
+  resolveProofread,
+} from "./coaching.js";
+import type { ContentType } from "../coaching/workcheck.js";
 import type { StreamChunk, ProgressEvent } from "./providers/types.js";
 import { getEnv } from "../env.js";
 import { checkContentRateLimit } from "../rate-limit.js";
@@ -36,6 +45,14 @@ export interface ChatBody {
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
   intentType?: string;
+  // Hint & Work-Check surfaces.
+  contentType?: string;          // procedure | fact | argument (LMS task type hint)
+  proofreadRoundsUsed?: number;  // rounds already used in the current 2h window
+  hasRubric?: boolean;           // whether the student pasted a rubric/prompt
+}
+
+function coerceContentType(v?: string): ContentType | null {
+  return v === "procedure" || v === "fact" || v === "argument" ? v : null;
 }
 
 // Discriminated outcome. "json" → the adapter serializes it directly. "stream"
@@ -176,7 +193,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan" || body.mode === "study_pack") && userId) {
+    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan" || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
@@ -315,6 +332,65 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         const e = err as BrainDumpPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
       }
+    }
+
+    // ── Clue (forward hint): one nudge to get the student to a checkable attempt ──
+    if (body.mode === "clue") {
+      const contentType = coerceContentType(body.contentType);
+      const result = await callModel({
+        intent: "clue",
+        systemPrompt: (body.systemPrompt ? body.systemPrompt + "\n\n" : "") + CLUE_SYSTEM,
+        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
+        dynamicContext: (body.dynamicContext ?? "") + buildClueContext(contentType),
+        messages,
+        toolSet: "coaching",
+        toolChoice: "required",
+        maxOutputTokens: Math.min(Number(body.maxTokens) || 800, 1200),
+        temperature: 0.4,
+      });
+      const action = result.actions.find((a) => a.type === "make_clue") ?? result.actions[0] ?? null;
+      return {
+        kind: "json",
+        status: 200,
+        json: {
+          ...result,
+          actions: action ? [action] : [],
+          executed_actions: [],
+          orchestration: { mode: "clue", ...CLIENT_ORCH },
+        },
+      };
+    }
+
+    // ── Work-check (backward): evaluate the student's own work, surface gaps ──
+    if (body.mode === "work_check") {
+      const contentType = coerceContentType(body.contentType);
+      const proofread = resolveProofread(body.proofreadRoundsUsed);
+      const hasRubric = Boolean(body.hasRubric);
+      const result = await callModel({
+        intent: "work_check",
+        systemPrompt: (body.systemPrompt ? body.systemPrompt + "\n\n" : "") + WORK_CHECK_SYSTEM,
+        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
+        dynamicContext:
+          (body.dynamicContext ?? "") + buildWorkCheckContext({ contentType, proofread, hasRubric }),
+        messages,
+        toolSet: "coaching",
+        toolChoice: "required",
+        maxOutputTokens: Math.min(Number(body.maxTokens) || 2000, 3000),
+        temperature: 0.3,
+        thinkingBudget: 2048,
+      });
+      const raw = result.actions.find((a) => a.type === "make_work_check") ?? result.actions[0] ?? null;
+      const action = raw ? normalizeWorkCheckAction(raw, proofread) : null;
+      return {
+        kind: "json",
+        status: 200,
+        json: {
+          ...result,
+          actions: action ? [action] : [],
+          executed_actions: [],
+          orchestration: { mode: "work_check", terminal: proofread.terminal, ...CLIENT_ORCH },
+        },
+      };
     }
 
     // ── Daily briefing: structured rollup for today (or tomorrow when date='tomorrow') ──
