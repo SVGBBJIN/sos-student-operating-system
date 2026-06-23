@@ -18,6 +18,7 @@ import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority } from 
 import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
+import StartWidget from './components/StartWidget';
 import SosNotification from './components/SosNotification';
 import StudioSidebar from './components/StudioSidebar';
 import StudioDashboard from './components/StudioDashboard';
@@ -4652,7 +4653,7 @@ function App() {
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
   // Floating widgets summoned from chat ("set a timer", "what's my schedule").
   // null = hidden. Each widget renders only when explicitly invoked.
-  const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false });
+  const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false, start: false });
   const [pomodoroSession, setPomodoroSession] = useState('pomodoro');
   const [sosNotif, setSosNotif] = useState(null);
 
@@ -5797,6 +5798,30 @@ function App() {
   function handleGateAddEvent() {
     setInput('Add event: ');
     setTimeout(() => inputRef.current?.focus(), 80);
+  }
+
+  // ── Start Widget data ──
+  // Up to four startable tasks for the always-summonable widget. Uses the same
+  // quick-start ranking as the "just start me" chat path (priority + startability)
+  // so the easiest worthwhile on-ramps lead. Trajectory chips come from the same
+  // pure allocator the gate uses; no client signals loaded, so no fabricated %.
+  function startWidgetData() {
+    const horizon = new Date(); horizon.setDate(horizon.getDate() + 30);
+    const horizonStr = toDateStr(horizon);
+    const pool = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (pool.length === 0) return { tasks: [], chips: [] };
+    const density = buildCalendarDensity(pool, blocks.dates || {});
+    const now = new Date();
+    const ranked = rankForQuickStart(pool, now, density, undefined, 4);
+    const byId = Object.fromEntries(pool.map(t => [t.id, t]));
+    const picked = ranked.map(r => byId[r.taskId]).filter(Boolean);
+    return {
+      tasks: picked,
+      chips: picked.map(t => computeTrajectoryChip(t, now, density, undefined)),
+    };
+  }
+  function handleStartWidgetStart(task) {
+    startTask(task, 'widget');
   }
 
   // ── Time payout on completion ──
@@ -8131,6 +8156,11 @@ function App() {
     if (/(my\s+)?schedule\b|today'?s\s+(schedule|agenda|calendar)|what'?s\s+on\s+(my|the)\s+(schedule|agenda|calendar|day)|show\s+(me\s+)?(my\s+)?(schedule|agenda|calendar)|look\s+at\s+(my\s+)?(schedule|agenda|calendar)|agenda\b/.test(lower)) {
       setActiveWidgets(w => ({ ...w, schedule: true }));
     }
+    // "what should I work on" / "what can I start" / "show me tasks" pops the
+    // Start widget — the always-summonable list of up to four startable tasks.
+    if (/what\s+(should|can|could)\s+i\s+(work\s+on|do\s+next|tackle)|what'?s\s+next|tasks?\s+to\s+(start|do|work\s+on)|show\s+(me\s+)?(my\s+)?tasks?|what\s+can\s+i\s+start/.test(lower)) {
+      setActiveWidgets(w => ({ ...w, start: true }));
+    }
     const effectiveWorkspaceContext = getWorkspaceContext();
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
@@ -9321,6 +9351,18 @@ function App() {
           onClose={() => setActiveWidgets(w => ({ ...w, schedule: false }))}
         />
       )}
+      {chatOpen && activeWidgets.start && (() => {
+        const sw = startWidgetData();
+        return (
+          <StartWidget
+            tasks={sw.tasks}
+            chips={sw.chips}
+            solo={!activeWidgets.pomodoro && !activeWidgets.schedule}
+            onStart={handleStartWidgetStart}
+            onClose={() => setActiveWidgets(w => ({ ...w, start: false }))}
+          />
+        );
+      })()}
       {sosNotif && (
         <SosNotification
           label={sosNotif.label}
@@ -9646,7 +9688,7 @@ function App() {
       </div>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
-      <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
+      <div className={"sos-chat-area" + ((activeWidgets.schedule || activeWidgets.start) ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
           {messages.length === 0 && !pendingClarification && !pendingProposal && !isLoading && (
             <div className="sos-chat-empty">
               <div className="sos-chat-empty-stamp-wrap">
@@ -9923,7 +9965,7 @@ function App() {
         </div>
       )}
       {/* ── Input Area ── */}
-      <div className={"sos-input-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
+      <div className={"sos-input-area" + ((activeWidgets.schedule || activeWidgets.start) ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
         {contextTrimInfo&&(
           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
             showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context
