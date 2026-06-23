@@ -48,6 +48,9 @@ function TrajectoryChip({ chip }) {
       }}
     >
       <span>{chip.label}</span>
+      {typeof chip.reductionPct === 'number' && (
+        <span style={{ opacity: 0.8 }}>· clears ~{chip.reductionPct}% today</span>
+      )}
       {typeof chip.probabilityPct === 'number' && (
         <span style={{ opacity: 0.7 }}>· {chip.probabilityPct}% on time</span>
       )}

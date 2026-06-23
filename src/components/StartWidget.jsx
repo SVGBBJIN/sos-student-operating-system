@@ -26,9 +26,18 @@ function dueLabel(task) {
 }
 
 function ctaLabel(chip) {
-  if (!chip) return 'Start';
-  const pct = typeof chip.probabilityPct === 'number' ? ` · ${chip.probabilityPct}%` : '';
-  return `Start · ${chip.label}${pct}`;
+  // The CTA reads as a sentence: "Start on pace to finish by Thursday".
+  if (!chip?.label) return 'Start';
+  return `Start ${chip.label}`;
+}
+
+// A gain-framed incentive line: what starting now buys. Never loss/guilt.
+function incentiveLine(chip) {
+  if (!chip) return null;
+  const parts = [];
+  if (typeof chip.reductionPct === 'number') parts.push(`clears ~${chip.reductionPct}% of it today`);
+  if (typeof chip.probabilityPct === 'number') parts.push(`${chip.probabilityPct}% on time lately`);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 export default function StartWidget({ tasks = [], chips = [], solo = false, onStart, onClose }) {
@@ -52,6 +61,7 @@ export default function StartWidget({ tasks = [], chips = [], solo = false, onSt
         {rows.map((task, i) => {
           const chip = chips[i];
           const fit = chip?.tone === 'fit';
+          const incentive = incentiveLine(chip);
           return (
             <div key={task.id} className="stw-row">
               <div className="stw-title" title={task.title}>{task.title}</div>
@@ -64,6 +74,7 @@ export default function StartWidget({ tasks = [], chips = [], solo = false, onSt
               >
                 {ctaLabel(chip)}
               </button>
+              {incentive && <div className="stw-incentive">{incentive}</div>}
             </div>
           );
         })}

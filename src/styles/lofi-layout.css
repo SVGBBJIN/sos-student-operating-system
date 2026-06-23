@@ -1847,6 +1847,10 @@
   background: rgba(94,234,212,0.16); color: rgb(170,245,230);
 }
 .start-widget .stw-cta.fit:hover { background: rgba(94,234,212,0.24); }
+.start-widget .stw-incentive {
+  font-size: 10px; color: var(--studio-accent, #86efac);
+  letter-spacing: 0.02em; padding-left: 2px;
+}
 .start-widget .stw-empty {
   margin: 6px 2px; padding: 10px 12px;
   border: 1px dashed var(--border-subtle); border-radius: 8px;

@@ -56,10 +56,15 @@ function clamp01(v: number): number {
 }
 
 export interface TrajectoryChip {
-  // Terse, non-parental: "fits before Thursday", "tight for today".
+  // Pace fact, gain-framed: "on pace to finish by Thursday".
   label: string;
   // Whether the work still comfortably fits the runway. Drives styling only.
   tone: "fit" | "tight";
+  // The share of THIS task's work that starting today clears — today's slice of
+  // the allocator runway, 0..100, or null when it rounds to nothing. A real
+  // allocator fact (est + committed time), NOT a probability, so it's always
+  // safe to show. Gain-framed: "clears ~38% of it today".
+  reductionPct: number | null;
   // A real on-time rate, 0..100, or null when there isn't enough history to
   // show one honestly. Callers must treat null as "show nothing", never 0.
   probabilityPct: number | null;
@@ -86,12 +91,15 @@ export function computeTrajectoryChip(
   if (dueMidnight < start) return null; // overdue — no forward fact to state
 
   // Sum the unblocked capacity across every day from today through the due
-  // date, subtracting already-committed minutes the calendar reports.
+  // date, subtracting already-committed minutes the calendar reports. Track
+  // today's free capacity separately so we can say what starting NOW clears.
   let available = 0;
+  let todayFree = 0;
   const cursor = new Date(start);
   while (cursor <= dueMidnight) {
-    const blocked = density.blockedMinutesOnDate[fmtDate(cursor)] ?? 0;
-    available += Math.max(0, DEFAULT_DAILY_CAPACITY_MIN - blocked);
+    const free = Math.max(0, DEFAULT_DAILY_CAPACITY_MIN - (density.blockedMinutesOnDate[fmtDate(cursor)] ?? 0));
+    if (cursor.getTime() === start.getTime()) todayFree = free;
+    available += free;
     cursor.setDate(cursor.getDate() + 1);
   }
 
@@ -107,16 +115,28 @@ export function computeTrajectoryChip(
   else when = WEEKDAYS[due.getDay()]!;
 
   let label: string;
-  if (when === "today") label = fits ? "fits today" : "tight for today";
-  else if (when === "tomorrow") label = fits ? "fits by tomorrow" : "tight for tomorrow";
-  else label = fits ? `fits before ${when}` : `tight before ${when}`;
+  const verb = fits ? "on pace to finish" : "tight to finish";
+  if (when === "today") label = `${verb} today`;
+  else if (when === "tomorrow") label = `${verb} by tomorrow`;
+  else label = `${verb} by ${when}`;
+
+  // Workload cleared by starting today: today's free capacity as a share of the
+  // whole runway, applied to the task, capped at what fits today and at the
+  // whole task. Doing this slice now is what shrinks what's left.
+  let reductionPct: number | null = null;
+  if (available > 0) {
+    const runwayShare = todayFree / available;
+    const clearedToday = Math.min(est * runwayShare, todayFree, est);
+    const pct = Math.round((clearedToday / est) * 100);
+    reductionPct = pct >= 5 ? Math.min(100, pct) : null;
+  }
 
   let probabilityPct: number | null = null;
   if (signals && signals.total_events_30d >= MIN_HISTORY_FOR_PROBABILITY) {
     probabilityPct = Math.round(clamp01(signals.completion_rate_30d) * 100);
   }
 
-  return { label, tone, probabilityPct };
+  return { label, tone, reductionPct, probabilityPct };
 }
 
 // Whether the student is inside a committed block right now. `daySlots` is the
