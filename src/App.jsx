@@ -18,6 +18,7 @@ import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority } from 
 import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
+import StartWidget from './components/StartWidget';
 import SosNotification from './components/SosNotification';
 import StudioSidebar from './components/StudioSidebar';
 import StudioDashboard from './components/StudioDashboard';
@@ -32,6 +33,7 @@ import { dbEventToApp as dbEventToAppShared, appEventToDb as appEventToDbShared 
 import { SUBJECT_LIST } from '../shared/subjects.js';
 import { SCHEMA_VERSIONS } from '../shared/ai/schemas/versions.ts';
 import { rankTasks, rankForQuickStart, buildCalendarDensity } from '../shared/scheduling/priority.ts';
+import { GATE_TASK_QUOTA, computeTrajectoryChip, currentCommitment } from '../shared/scheduling/gate.ts';
 import { classifyContentType } from '../shared/coaching/workcheck.ts';
 import {
   START_LATENCY_EXPERIMENT_KEY,
@@ -4651,7 +4653,7 @@ function App() {
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
   // Floating widgets summoned from chat ("set a timer", "what's my schedule").
   // null = hidden. Each widget renders only when explicitly invoked.
-  const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false });
+  const [activeWidgets, setActiveWidgets] = useState({ pomodoro: false, schedule: false, start: false });
   const [pomodoroSession, setPomodoroSession] = useState('pomodoro');
   const [sosNotif, setSosNotif] = useState(null);
 
@@ -5438,9 +5440,14 @@ function App() {
   }, [pledgeCountdown]);
 
   // ── Home Decision Gate ──
-  // Shown once on the first open of the day: one decision, three doors, never
-  // forced work. Ranked candidates computed live from the priority engine.
+  // Shown once on the first open of the day: at most two tasks, each with
+  // start/swap/defer plus a footer escape, never forced work. The ranked
+  // candidate list is frozen at open time (ids), so the surfaced pair stays
+  // stable within a glance — swap/defer advance a cursor, nothing reshuffles.
   const [gateOpen, setGateOpen] = useState(false);
+  const [gateRanked, setGateRanked] = useState([]);    // frozen ranked task ids
+  const [gateSurfaced, setGateSurfaced] = useState([]); // indices into gateRanked currently shown
+  const [gateCursor, setGateCursor] = useState(0);      // next unshown candidate index
   const gateCheckedRef = useRef(false);
 
   // ── End-of-Day Decision Rollup ──
@@ -5455,7 +5462,10 @@ function App() {
   // ── Open the Home Decision Gate on the first open of the day ──
   // Once per calendar day, after data is loaded and not mid-onboarding. The
   // gate reads live tasks so a momentary pre-load render never shows a stale
-  // "clear board". Skips entirely if already shown today.
+  // "clear board". Skips if already shown today. Yields entirely during a
+  // committed block (school / sleep / lockdown / testing) — going dark for this
+  // load rather than threading the needle; a later open (after the block) can
+  // still surface it, since last-shown is only stamped once it actually opens.
   useEffect(() => {
     if (gateCheckedRef.current) return;
     if (!dataLoaded || !user || showOnboarding) return;
@@ -5463,6 +5473,13 @@ function App() {
     let last = null;
     try { last = localStorage.getItem('sos_gate_last_shown'); } catch (_) {}
     if (last === today()) return;
+    // Go dark inside committed time — no gate, no nag.
+    if (currentCommitment(buildBlocksForDate(blocks, today()), new Date())) return;
+    const ranked = gateRankedTasks();
+    setGateRanked(ranked.map(t => t.id));
+    const initial = ranked.slice(0, GATE_TASK_QUOTA).map((_, i) => i);
+    setGateSurfaced(initial);
+    setGateCursor(initial.length);
     setGateOpen(true);
     try { localStorage.setItem('sos_gate_last_shown', today()); } catch (_) {}
   }, [dataLoaded, user, showOnboarding]);
@@ -5706,33 +5723,105 @@ function App() {
     const byId = Object.fromEntries(active.map(t => [t.id, t]));
     return ranked.map(r => byId[r.taskId]).filter(Boolean);
   }
+  // The up-to-two task objects currently surfaced, resolved live from the frozen
+  // ranked id list. Filtered against current tasks so a task completed elsewhere
+  // can't linger on the gate.
+  function gateSurfacedTasks() {
+    return gateSurfaced
+      .map(i => tasks.find(t => t.id === gateRanked[i]))
+      .filter(t => t && t.status !== 'done');
+  }
+  // True allocator chips for the surfaced pair — same density the priority
+  // engine sees. No client behavioral signals are loaded, so probabilityPct
+  // stays null (we never fabricate a percentage).
+  function gateChips(surfaced) {
+    const active = tasks.filter(t => t.status !== 'done' && t.dueDate);
+    const density = buildCalendarDensity(active, blocks.dates || {});
+    const now = new Date();
+    return surfaced.map(t => computeTrajectoryChip(t, now, density, undefined));
+  }
+  // Replace the task in one slot with the next unshown candidate, keeping the
+  // other slot put. Returns true if a replacement was available.
+  function gateAdvanceSlot(slotIndex) {
+    let advanced = false;
+    setGateSurfaced(prev => {
+      if (gateCursor >= gateRanked.length) return prev;
+      const next = [...prev];
+      next[slotIndex] = gateCursor;
+      advanced = true;
+      return next;
+    });
+    if (gateCursor < gateRanked.length) setGateCursor(c => c + 1);
+    return advanced;
+  }
+  // Drop a slot entirely (no candidate left to fill it). Closes the gate once
+  // nothing is left to show — a defer never traps the student on an empty gate.
+  function gateDropSlot(slotIndex, slotPos) {
+    setGateSurfaced(prev => {
+      const next = prev.filter((_, p) => p !== slotPos);
+      if (next.length === 0) setGateOpen(false);
+      return next;
+    });
+  }
   function handleGateStart(task) {
     setGateOpen(false);
     startTask(task, 'gate');
   }
-  function handleGatePass(task, passNo) {
-    // Postpone-equivalent signal — looked, chose to skip this one.
+  function handleGateSwap(task, slotPos) {
+    // A soft skip — looked, wanted something else. Logged as a light postpone.
     if (user && task) dbInsertTaskEvent({
       taskId: task.id, eventType: 'postpone', fromStatus: task.status, toStatus: task.status,
-      metadata: { title: task.title, subject: task.subject, source: 'gate', gate_pass: passNo },
+      metadata: { title: task.title, subject: task.subject, source: 'gate', gate_action: 'swap' },
     }, user.id);
+    gateAdvanceSlot(gateSurfaced[slotPos]);
+  }
+  function handleGateDefer(task, slotPos) {
+    // Defer-for-now → a postpone signal. Refill the slot from the next
+    // candidate if one exists, else collapse it.
+    if (user && task) dbInsertTaskEvent({
+      taskId: task.id, eventType: 'postpone', fromStatus: task.status, toStatus: task.status,
+      metadata: { title: task.title, subject: task.subject, source: 'gate', gate_action: 'defer' },
+    }, user.id);
+    if (gateCursor < gateRanked.length) gateAdvanceSlot(gateSurfaced[slotPos]);
+    else gateDropSlot(gateSurfaced[slotPos], slotPos);
+  }
+  function handleGateEscape() {
+    // The student already did meaningful work of their own choosing. Credit it
+    // as a self-directed signal and pass — never force-complete a surfaced task.
+    setGateOpen(false);
+    if (user) trackEvent(user.id, 'gate_self_directed', { source: 'gate' });
+    postAssistantNote('Counted that.');
   }
   function handleGateDismiss() {
-    const top = gateRankedTasks()[0];
-    setGateOpen(false);
-    // Clear board → the escape door; no task to log and no follow-up copy.
-    if (!top) return;
-    if (user) dbInsertTaskEvent({
-      taskId: top.id, eventType: 'gate_dismiss', metadata: { source: 'gate', title: top.title },
-    }, user.id);
-    postAssistantNote('Noted.');
-  }
-  function handleGateFallThrough() {
     setGateOpen(false);
   }
   function handleGateAddEvent() {
     setInput('Add event: ');
     setTimeout(() => inputRef.current?.focus(), 80);
+  }
+
+  // ── Start Widget data ──
+  // Up to four startable tasks for the always-summonable widget. Uses the same
+  // quick-start ranking as the "just start me" chat path (priority + startability)
+  // so the easiest worthwhile on-ramps lead. Trajectory chips come from the same
+  // pure allocator the gate uses; no client signals loaded, so no fabricated %.
+  function startWidgetData() {
+    const horizon = new Date(); horizon.setDate(horizon.getDate() + 30);
+    const horizonStr = toDateStr(horizon);
+    const pool = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (pool.length === 0) return { tasks: [], chips: [] };
+    const density = buildCalendarDensity(pool, blocks.dates || {});
+    const now = new Date();
+    const ranked = rankForQuickStart(pool, now, density, undefined, 4);
+    const byId = Object.fromEntries(pool.map(t => [t.id, t]));
+    const picked = ranked.map(r => byId[r.taskId]).filter(Boolean);
+    return {
+      tasks: picked,
+      chips: picked.map(t => computeTrajectoryChip(t, now, density, undefined)),
+    };
+  }
+  function handleStartWidgetStart(task) {
+    startTask(task, 'widget');
   }
 
   // ── Time payout on completion ──
@@ -8067,6 +8156,11 @@ function App() {
     if (/(my\s+)?schedule\b|today'?s\s+(schedule|agenda|calendar)|what'?s\s+on\s+(my|the)\s+(schedule|agenda|calendar|day)|show\s+(me\s+)?(my\s+)?(schedule|agenda|calendar)|look\s+at\s+(my\s+)?(schedule|agenda|calendar)|agenda\b/.test(lower)) {
       setActiveWidgets(w => ({ ...w, schedule: true }));
     }
+    // "what should I work on" / "what can I start" / "show me tasks" pops the
+    // Start widget — the always-summonable list of up to four startable tasks.
+    if (/what\s+(should|can|could)\s+i\s+(work\s+on|do\s+next|tackle)|what'?s\s+next|tasks?\s+to\s+(start|do|work\s+on)|show\s+(me\s+)?(my\s+)?tasks?|what\s+can\s+i\s+start/.test(lower)) {
+      setActiveWidgets(w => ({ ...w, start: true }));
+    }
     const effectiveWorkspaceContext = getWorkspaceContext();
     const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
@@ -9257,6 +9351,18 @@ function App() {
           onClose={() => setActiveWidgets(w => ({ ...w, schedule: false }))}
         />
       )}
+      {chatOpen && activeWidgets.start && (() => {
+        const sw = startWidgetData();
+        return (
+          <StartWidget
+            tasks={sw.tasks}
+            chips={sw.chips}
+            solo={!activeWidgets.pomodoro && !activeWidgets.schedule}
+            onStart={handleStartWidgetStart}
+            onClose={() => setActiveWidgets(w => ({ ...w, start: false }))}
+          />
+        );
+      })()}
       {sosNotif && (
         <SosNotification
           label={sosNotif.label}
@@ -9582,7 +9688,7 @@ function App() {
       </div>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
-      <div className={"sos-chat-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
+      <div className={"sos-chat-area" + ((activeWidgets.schedule || activeWidgets.start) ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')} ref={chatAreaRef} style={{animation:'fadeIn .22s ease'}}>
           {messages.length === 0 && !pendingClarification && !pendingProposal && !isLoading && (
             <div className="sos-chat-empty">
               <div className="sos-chat-empty-stamp-wrap">
@@ -9859,7 +9965,7 @@ function App() {
         </div>
       )}
       {/* ── Input Area ── */}
-      <div className={"sos-input-area" + (activeWidgets.schedule ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
+      <div className={"sos-input-area" + ((activeWidgets.schedule || activeWidgets.start) ? ' widget-wide' : activeWidgets.pomodoro ? ' widget-narrow' : '')}>
         {contextTrimInfo&&(
           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:6,paddingLeft:4,opacity:0.7}}>
             showing {contextTrimInfo.shown} of {contextTrimInfo.total} tasks in AI context
@@ -10097,17 +10203,23 @@ function App() {
           </div>
         );
       })()}
-      {gateOpen && !showOnboarding && (
-        <HomeDecisionGate
-          rankedTasks={gateRankedTasks()}
-          clearBoard={gateRankedTasks().length === 0}
-          onStart={handleGateStart}
-          onPass={handleGatePass}
-          onDismiss={handleGateDismiss}
-          onFallThrough={handleGateFallThrough}
-          onAddEvent={handleGateAddEvent}
-        />
-      )}
+      {gateOpen && !showOnboarding && (() => {
+        const surfaced = gateSurfacedTasks();
+        return (
+          <HomeDecisionGate
+            tasks={surfaced}
+            chips={gateChips(surfaced)}
+            clearBoard={surfaced.length === 0}
+            canSwap={gateCursor < gateRanked.length}
+            onStart={handleGateStart}
+            onSwap={handleGateSwap}
+            onDefer={handleGateDefer}
+            onEscape={handleGateEscape}
+            onDismiss={handleGateDismiss}
+            onAddEvent={handleGateAddEvent}
+          />
+        );
+      })()}
       {rollupOpen && !showOnboarding && !gateOpen && (
         <DecisionRollup
           items={rollupItems}
