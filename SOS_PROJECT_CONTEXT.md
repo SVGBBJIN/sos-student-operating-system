@@ -39,7 +39,6 @@ Key goals:
 ├── api/                          # Vercel Node.js serverless handlers
 │   ├── chat.ts                   # Chat transport adapter (SSE or JSON)
 │   ├── embed.ts                  # Batch embeddings endpoint
-│   ├── proofread.ts              # Proofread surface
 │   ├── lms-courses.ts            # LMS course listing
 │   ├── lms-tracked-courses.ts    # User's tracked courses
 │   ├── lms-oauth-callback.ts     # Google Classroom OAuth redirect
@@ -63,7 +62,7 @@ Key goals:
 │   │   │   ├── intent_plan.ts    # make_intent_plan schema + MakeIntentPlanSchema
 │   │   │   ├── plan.ts           # make_plan schema
 │   │   │   ├── library.ts        # FlashcardDeckSchema + FlashcardSchema
-│   │   │   ├── proofread.ts      # Proofread schemas
+│   │   │   ├── coaching.ts       # Coaching schemas (make_clue, make_work_check)
 │   │   │   ├── lms.ts            # LMS action schemas
 │   │   │   ├── versions.ts       # Schema version pins per surface
 │   │   │   └── _helpers.ts       # Shared Zod primitives
@@ -71,12 +70,14 @@ Key goals:
 │   │   │   ├── planning.ts       # 3-pass plan generation pipeline
 │   │   │   ├── intent_plan.ts    # 3-pass intent-plan pipeline
 │   │   │   ├── brain_dump.ts     # 3-pass brain-dump → batch action pipeline
-│   │   │   └── proofread.ts      # Proofread pipeline
+│   │   │   └── agentic.ts        # Agentic reasoning pipeline (iterative problem-solving)
 │   │   ├── context/
+│   │   │   ├── assembler.ts      # assembleContext: aggregate behavioral, RAG, study signals
 │   │   │   ├── enrich.ts         # enrichDynamicContext: parallel best-effort enrichment
 │   │   │   └── ranker.ts         # Task ranking helpers
 │   │   ├── signals/
-│   │   │   └── behavioral.ts     # getBehavioralSignals, formatSignalsForContext
+│   │   │   ├── behavioral.ts     # getBehavioralSignals, formatSignalsForContext
+│   │   │   └── study.ts          # getStudySignals (mastery, quiz performance, weak topics)
 │   │   ├── rag/
 │   │   │   ├── retrieve.ts       # pgvector cosine retrieval (match_memories RPC)
 │   │   │   └── embeddings.ts     # Embedding utilities
@@ -98,33 +99,38 @@ Key goals:
 │   ├── AppRouter.jsx             # Route definitions
 │   ├── main.jsx                  # Entry point
 │   ├── components/
+│   │   ├── ActionCards.jsx
 │   │   ├── AppearanceSettings.jsx
-│   │   ├── BacklinksList.jsx
+│   │   ├── AuthScreen.jsx
 │   │   ├── BrandMark.jsx
-│   │   ├── CalendarWindow/       # Inline calendar widget
-│   │   ├── ColumnResizeHandles.jsx
+│   │   ├── ChatBubble.jsx
 │   │   ├── ConnectorsSettings.jsx
-│   │   ├── DynamicIsland.jsx     # Floating status/timer indicator
-│   │   ├── DynamicTopBar.jsx
+│   │   ├── DecisionRollup.jsx     # Decision tree UI widget
+│   │   ├── DynamicIsland.jsx      # Floating status/timer indicator
 │   │   ├── ErrorBoundary.jsx
+│   │   ├── FocusLauncher.jsx      # Quick-start focus launcher
+│   │   ├── FocusSession.jsx       # Focused study UI
 │   │   ├── FocusWidget.jsx
 │   │   ├── GooglePermissionSummary.jsx
+│   │   ├── HomeDecisionGate.jsx   # Home onboarding/gating flow
 │   │   ├── HomeScreen.jsx
-│   │   ├── LinkSuggestionCard.jsx
-│   │   ├── LofiLeftPanel.jsx     # Lofi layout left column
-│   │   ├── LofiRightPanel.jsx    # Lofi layout right column
+│   │   ├── Onboarding.jsx
 │   │   ├── PomodoroTimer.jsx
 │   │   ├── ProjectPanel.jsx
 │   │   ├── ProjectsBar.jsx
 │   │   ├── ProjectsTree.jsx
-│   │   ├── ProofreadPanel.jsx
 │   │   ├── RateLimitBanner.jsx
 │   │   ├── ScheduleWidget.jsx
+│   │   ├── SidebarNav.jsx         # Unified sidebar navigation
 │   │   ├── SosNotification.jsx
+│   │   ├── StartWidget.jsx        # New quick-start launcher
+│   │   ├── StudioDashboard.jsx    # Studio layout container
+│   │   ├── StudioHomeView.jsx     # Studio home variant
+│   │   ├── StudioIcons.jsx
+│   │   ├── StudioPanels.jsx       # Studio panel management
 │   │   ├── StudioSidebar.jsx
-│   │   ├── StudyBottomBar.jsx
 │   │   ├── StudyTopBar.jsx
-│   │   └── WikilinkAutocomplete.jsx
+│   │   └── TweaksPanel.jsx        # Settings/tweaks panel
 │   ├── pages/
 │   │   ├── Landing.jsx
 │   │   ├── Library.jsx
@@ -138,7 +144,6 @@ Key goals:
 │   ├── migrations/               # All DDL in chronological order
 │   └── functions/
 │       ├── sos-chat/             # Deno mirror of api/chat.ts
-│       ├── sos-proofread/        # Deno mirror of api/proofread.ts
 │       ├── sos-voice/            # Groq Whisper transcription
 │       ├── embed-batch/          # Server-side batch embedding upserter
 │       ├── sync-submissions/     # Cron: LMS submission reconciliation
@@ -177,13 +182,13 @@ Key goals:
 |--------|------|
 | `chat` | flash |
 | `action_routing` | flash |
-| `proofread_classify` | flash |
+| `clue` | flash |
 | `embed` | embed |
 | `studio` | pro |
 | `planning` | pro |
 | `intent_plan` | pro |
 | `study_pack` | pro |
-| `proofread_specialist` | pro |
+| `work_check` | pro |
 
 **Special cases:**
 - **Vision**: any request with image attachments → `meta-llama/llama-4-scout-17b-16e-instruct` on Groq (override in `chat-core.ts`, fallback: `gemini-2.5-flash`)
@@ -247,6 +252,31 @@ Converts messy voice transcripts or text dumps into a batch of tentative action 
 - `confidence >= 0.85` → verbatim from transcript, eligible for auto-apply
 - `confidence < 0.7` → inferred date/time, marked `tentative`, routes to review rail
 - `0.7 ≤ confidence < 0.85` → mixed signal, presented for confirmation
+
+#### Agentic Pipeline — `shared/ai/pipelines/agentic.ts`
+Iterative multi-turn reasoning pipeline for complex problem-solving:
+1. Stages through multiple passes with intermediate checkpoints
+2. Refines reasoning based on feedback at each stage
+3. Supports long-context conversations with state management
+- Used for deep reasoning tasks that benefit from iterative refinement
+- Integrates with `work_check` coaching intent for intermediate validation
+
+### Coaching System — `shared/ai/` + `shared/coaching/`
+
+Student-focused hint and feedback system with two intents:
+
+**`clue` intent (flash tier)** — Provides forward-looking hints
+- Input: student's question or partial work
+- Output: `make_clue` action with hint, direction, and optional scaffolding
+- No solution given; guides problem-solving process
+
+**`work_check` intent (pro tier)** — Evaluates student work with feedback
+- Input: student's attempted solution + optional rubric
+- Output: `make_work_check` action with breakdown, mistakes, and suggestions
+- Caps at 2 rounds per 2-hour window; third round triggers self-read instead
+- Tracks `proofreadRoundsUsed` in `App.jsx` to enforce limits
+
+**Integration**: Both intents route through the main chat (`chat-handler.ts`), dispatching via `clue` or `work_check` mode labels.
 
 ### callModel() — `shared/ai/chat-core.ts`
 
@@ -338,6 +368,12 @@ All action tools defined as Zod schemas. The same schema generates:
 `recurring_blocks`: activity, days (M–Su), start/end times, category, optional dates
 `milestone_tasks`: task_name, due_date, subject, estimated_minutes
 `review_cadence`: every_n_days (1–14), optional review_block, optional notes
+
+#### Coaching
+| Action | Output |
+|--------|--------|
+| `make_clue` | question_rephrased, hint, hint_category (conceptual\|procedural\|strategic), scaffolding? |
+| `make_work_check` | assessment, mistakes[], strengths[], next_steps[], rubric_match? |
 
 #### Grades
 | Action | Key fields |
@@ -550,6 +586,68 @@ user_id uuid, task_id uuid, dismissed_at timestamptz, expires_at timestamptz
 user_id uuid, event_type text, metadata jsonb, created_at timestamptz
 ```
 
+**study_attempts** — append-only log of quiz/lesson attempts for adaptive learning
+```sql
+id uuid PK, user_id uuid FK auth.users
+study_pack_id uuid FK study_packs, question_idx int, selected_choice int
+correct boolean, time_taken_seconds int
+created_at timestamptz
+-- Index: (user_id, study_pack_id, created_at)
+```
+
+**lms_providers** — catalog of supported LMS systems
+```sql
+provider_id text PK (e.g., "google_classroom", "canvas")
+display_name text, oauth_enabled boolean, oauth_client_id text, oauth_redirect_uri text
+scopes text[]
+```
+
+**user_integrations** — per-user OAuth tokens for LMS
+```sql
+id uuid PK, user_id uuid FK auth.users
+provider_id text FK lms_providers
+oauth_token text, oauth_refresh_token text, expires_at timestamptz
+created_at timestamptz, updated_at timestamptz
+-- Unique: (user_id, provider_id)
+```
+
+**tracked_courses** — courses the user wants synced
+```sql
+id uuid PK, user_id uuid FK auth.users
+provider_id text FK lms_providers
+lms_course_id text (provider-specific course ID)
+course_name text, enabled boolean DEFAULT true
+synced_at timestamptz, created_at timestamptz
+```
+
+**submissions** — normalized LMS submission records
+```sql
+id uuid PK, user_id uuid FK auth.users
+tracked_course_id uuid FK tracked_courses
+lms_assignment_id text, assignment_title text
+submission_status enum: not_started | submitted | graded | late
+submitted_at timestamptz, graded_at timestamptz, grade numeric(5,2)
+created_at timestamptz, updated_at timestamptz
+```
+
+**experiment_assignments** — stable per-user experiment arm assignment
+```sql
+user_id uuid PK FK auth.users
+experiment_id text, arm text
+assigned_at timestamptz
+-- Used for A/B testing feature allocation
+```
+
+**experiments** — experiment registry with status and graduation tracking
+```sql
+id text PK (unique experiment name)
+description text, status enum: planning | running | completed
+variant_a_arm text, variant_b_arm text
+start_date date, end_date date
+graduation_threshold numeric(5,2),
+created_at timestamptz, updated_at timestamptz
+```
+
 ---
 
 ## Frontend Architecture
@@ -572,10 +670,9 @@ The app supports four layout modes (switched via UI controls):
 ### Active Panels
 
 Within the main view area, `activePanel` switches between:
-- `chat` — main AI chat interface (default)
+- `chat` — main AI chat interface (default); includes coaching modes via `clue` and `work_check` intents
 - `home` — custom home screen with focus widget + optional background
 - `settings` — appearance, API connectors, notification preferences
-- `proofread` — dedicated proofreading surface
 
 ### Companion Panels (sidebar/lofi modes)
 
@@ -708,6 +805,21 @@ Pure, sync, no-I/O scorer. Used **server-side** (in `assembleContext`) and **cli
 Hour-bucket in-process cache prevents redundant queries within the same hour.
 `formatSignalsForContext(signals)` renders it as a ≤5-line string for the AI prompt.
 
+## Study Signals — `shared/ai/signals/study.ts`
+
+`getStudySignals(userId)` queries study performance data and returns:
+```typescript
+{
+  masteryBySubject: Record<string, number>,      // 0-1 mastery per subject
+  quizPerformanceBySubject: Record<string, number>,  // avg percentage score
+  weakTopics: string[],                          // topics with <60% performance
+  recentAttempts: number,                        // study_attempts count in last 7d
+  strugglePatterns: Record<string, number>,      // frequency of flagged topics
+}
+```
+
+Used to surface struggling topics and adaptive study recommendations.
+
 ---
 
 ## WikiLinks & Entity Linking
@@ -743,6 +855,29 @@ Browser extension (Chrome/Firefox) + backend confidence engine:
 ### OAuth Flow
 Google Classroom: `GET /api/lms-oauth-callback` → stores tokens in Supabase for background sync.
 
+### LMS Provider Expansion
+The LMS integration supports multiple platforms via the `lms_providers` catalog:
+- **Google Classroom** (primary)
+- **Canvas** (via `canvas_api.ts` helpers)
+- Extensible to other LMS platforms via provider registry
+
+User OAuth tokens stored in `user_integrations` with refresh token management.
+
+---
+
+## A/B Testing & Experiments
+
+The system supports feature experimentation via stable per-user arm assignment:
+
+**`experiment_assignments` table**: Each user assigned once to an experiment arm (e.g., `"variant_a"` or `"variant_b"`) on first encounter. Assignment stable across sessions.
+
+**`experiments` table**: Registry of active/completed experiments with:
+- `status`: planning | running | completed
+- `start_date` / `end_date`: experiment window
+- `graduation_threshold`: success metric threshold to graduate a variant
+
+**Usage**: In chat handler or frontend, check `experiment_assignments` to route user through feature variant. No rebalancing mid-experiment.
+
 ---
 
 ## API Endpoints
@@ -753,7 +888,6 @@ Google Classroom: `GET /api/lms-oauth-callback` → stores tokens in Supabase fo
 |----------|--------|-------------|
 | `/api/chat` | POST | Main chat endpoint; SSE or JSON based on `Accept` header |
 | `/api/embed` | POST | Batch embeddings (max 200 inputs) via `gemini-embedding-002` |
-| `/api/proofread` | POST | Proofread surface (enforced JSON, no streaming) |
 | `/api/lms-courses` | POST | List available LMS courses |
 | `/api/lms-tracked-courses` | POST | User's tracked course list |
 | `/api/lms-oauth-callback` | GET | Google Classroom OAuth redirect |
@@ -785,7 +919,6 @@ Auth: Bearer token extracted from `Authorization` header via `extractUserId()`.
 | Function | Description |
 |----------|-------------|
 | `sos-chat` | Deno mirror of `api/chat.ts` |
-| `sos-proofread` | Deno mirror of `api/proofread.ts` |
 | `sos-voice` | Groq Whisper audio → text |
 | `embed-batch` | Server-side embedding upserter |
 | `sync-submissions` | Cron: LMS reconciliation |
@@ -837,9 +970,7 @@ VITE_GOOGLE_CLIENT_ID     — LMS setup popup
 
 4. **Web APIs only in `shared/`** — no `Buffer`, no `require()`, no Node-only APIs. The same files run in Deno.
 
-5. **No streaming on proofread** — `api/proofread.ts` uses enforced JSON via `responseSchema`.
-
-6. **No direct provider imports** — import from `shared/ai/providers/index.ts` via `getProvider()`, never directly from `gemini.ts` or `groq.ts`.
+5. **No direct provider imports** — import from `shared/ai/providers/index.ts` via `getProvider()`, never directly from `gemini.ts` or `groq.ts`.
 
 7. **Graceful degradation everywhere** — pipelines ship the draft if critique/refine fail; enrichment skips failed signals; provider falls back to Gemini.
 
@@ -891,9 +1022,11 @@ npm run eval:planning # Planning pipeline regression eval
 | Grades tracking | `grades` table, `log_grade` action |
 | LMS submission sync | `lms_submission_events` table, browser extension, `sync-submissions` function |
 | Skill Hub (interactive lessons) | `lessons` + `skill_hub_sessions` tables |
-| Proofread surface | `api/proofread.ts`, `ProofreadPanel` component |
-| Lofi study layout | `layoutMode: 'lofi'`, `LofiLeftPanel`, `LofiRightPanel` |
-| Studio layout | `layoutMode: 'studio'`, `StudioSidebar` |
+| Coaching system (hints + feedback) | `shared/coaching/`, `clue` and `work_check` intents |
+| Agentic reasoning pipeline | `shared/ai/pipelines/agentic.ts` |
+| Study performance signals | `shared/ai/signals/study.ts`, mastery tracking |
+| A/B testing + experiments | `experiments` + `experiment_assignments` tables |
+| Studio layout | `layoutMode: 'studio'`, `StudioDashboard`, `StudioSidebar` |
 | Streaming AI with progress stepper | SSE frames + `pipelineProgress` state |
 | Confidence gating + review rail | `pending.actions[]` + `aiAutoApprove` setting |
 | Undo system | Snapshot stack in `App.jsx` |
