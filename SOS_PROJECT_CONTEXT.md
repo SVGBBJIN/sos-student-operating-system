@@ -52,6 +52,7 @@ Key goals:
 │   │   ├── router.ts             # ONLY place model strings live; tier → provider → model
 │   │   ├── chat-handler.ts       # Transport-agnostic chat orchestrator
 │   │   ├── chat-core.ts          # callModel(): single LLM call entry point
+│   │   ├── grounding.ts          # Anti-hallucination: lexical + vector grounding for names
 │   │   ├── voice.ts              # Groq Whisper transcription helper
 │   │   ├── resilience.ts         # Retry classification + circuit breaker
 │   │   ├── telemetry.ts          # Token counter, cost estimator, request log
@@ -89,6 +90,7 @@ Key goals:
 │   ├── scheduling/
 │   │   └── priority.ts           # computePriority, rankTasks, buildCalendarDensity
 │   ├── lms/                      # LMS integration helpers
+│   ├── subjects.js               # Canonical subject list, aliases, inference helpers
 │   ├── env.ts                    # Cross-runtime env var helper
 │   ├── auth.ts                   # JWT extraction
 │   ├── rate-limit.ts             # RPM + daily content-gen rate limiting
@@ -287,6 +289,18 @@ Single entry point for all LLM inference. Takes `{ intent, messages, tools?, onC
 4. Validates tool outputs against Zod schemas
 5. Yields chunks through `onChunk` when streaming
 
+### Name Grounding — `shared/ai/grounding.ts`
+
+Anti-hallucination system that validates proposed task/event names are grounded in student's actual words. Runs after schema validation on default chat path only (not brain_dump or studio pipelines).
+
+**Two layers:**
+1. **Lexical (sync, free)** — Rejects names containing filler tokens ("untitled", "tbd", "placeholder", etc.) unless the student explicitly used them
+2. **Vector (async, bounded)** — Validates proposed name has semantic association (cosine sim ≥ 0.4) with something student actually said; fails open (never blocks saves)
+
+**On failure**: Non-destructive. Pulls the action and replaces with soft clarification asking student to confirm the name.
+
+**Lexical overlap threshold**: ≥60% of content words from proposed name must appear verbatim in recent messages to skip embedding cost.
+
 ---
 
 ## Action Tool System
@@ -321,6 +335,7 @@ All action tools defined as Zod schemas. The same schema generates:
 | `update_task` | task_id or title + ≥1 of: new_title, due, estimated_minutes, confidence, commitment |
 | `delete_task` | task_id or title |
 | `complete_task` | task_id or title |
+| `manage_task` | task_id or title, operation (update\|delete\|complete\|postpone) + operation-specific fields (chat menu only; expands to canonical action) |
 | `break_task` | parent_title; subtasks[]{title, due, estimated_minutes} |
 | `prioritize_tasks` | horizon_days (1–30), limit (1–10) |
 | `postpone_task` | task_id or title |
@@ -856,12 +871,13 @@ Browser extension (Chrome/Firefox) + backend confidence engine:
 Google Classroom: `GET /api/lms-oauth-callback` → stores tokens in Supabase for background sync.
 
 ### LMS Provider Expansion
-The LMS integration supports multiple platforms via the `lms_providers` catalog:
-- **Google Classroom** (primary)
+The LMS integration supports multiple platforms via the `lms_providers` catalog and adapter pattern (`shared/lms/adapters/`):
+- **Google Classroom** (primary; OAuth enabled)
 - **Canvas** (via `canvas_api.ts` helpers)
-- Extensible to other LMS platforms via provider registry
+- **Schoology** (adapter available)
+- **Custom** (extensible via provider registry for self-hosted LMS)
 
-User OAuth tokens stored in `user_integrations` with refresh token management.
+User OAuth tokens stored in `user_integrations` with refresh token management. Provider registry (`shared/lms/adapters/registry.ts`) enables pluggable LMS adapters.
 
 ---
 
