@@ -6,7 +6,7 @@
 
 ## What this app is
 
-Chat-first AI student planner. All tasks, events, and notes are created through natural language. The AI parses intent into structured actions; the client executes them against Supabase. The current UI is a single **lofi** three-column layout (Calendar/Notes-Projects-Proofread on the left, chat in the center, widgets on the right). The non-lofi `sidebar` and `topbar` branches are dormant code.
+Chat-first AI student planner. All tasks, events, and notes are created through natural language. The AI parses intent into structured actions; the client executes them against Supabase. See CLAUDE.md for current feature list.
 
 ---
 
@@ -19,7 +19,7 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | AI fallback chain | `shared/ai/chat-core.ts` `callModel()` — in-tier (Flash 3 → 2.5 Flash) + tier downgrade (2.5 Pro → Flash 3) |
 | Planning pipeline (study plans) | `shared/ai/pipelines/planning.ts` — 3-pass draft→critique→refine, Pro tier with thinkingBudget=4096 |
 | Intent-plan pipeline | `shared/ai/pipelines/intent_plan.ts` — same 3-pass pattern; produces `make_intent_plan` (blocks + tasks + review cadence) |
-| Proofread pipeline | `shared/ai/pipelines/proofread.ts` — Flash classifier → Pro specialists per bucket |
+| Brain-dump pipeline | `shared/ai/pipelines/brain_dump.ts` — 3-pass transcript/text → batch actions with confidence scoring |
 | RAG / embeddings | `shared/ai/rag/` (`embeddings.ts`, `retrieve.ts`, `cache.ts`) + migration `20260514_add_pgvector.sql` |
 | Context assembly | `shared/ai/context/assembler.ts` (workspace + retrieved memories + ranked tasks + behavioral signals) |
 | Priority engine | `shared/scheduling/priority.ts` — `computePriority`, `rankTasks`, `buildCalendarDensity` (pure, sync, no I/O) |
@@ -42,14 +42,11 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 | Unified brand mark (S·bulb·S, inlined SVG) | `src/components/BrandMark.jsx` — used by `DynamicTopBar` + `Landing` |
 | Settings UI (all toggles) | `src/App.jsx` activePanel `'settings'` block |
 | Home screen (opt-in) | `src/components/HomeScreen.jsx` |
-| Wikilink autocomplete + popover | `src/components/WikilinkAutocomplete.jsx`, `src/lib/wikilinkSearch.js` |
-| Backlinks panel (always visible on notes) | `src/components/BacklinksList.jsx` |
 | Column resize + lock | `src/hooks/useColumnLayout.js`, `src/components/ColumnResizeHandles.jsx` |
 | Supabase client + constants | `src/lib/supabase.js` |
-| Vercel API handler | `api/chat.ts` (also `api/proofread.ts`, `api/embed.ts`) |
+| Vercel API handler | `api/chat.ts` (also `api/embed.ts` for batch embeddings) |
 | Supabase edge function | `supabase/functions/sos-chat/index.ts` |
-| Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` — Gemini Flash audio input |
-| Web search / lesson lookup | `supabase/functions/search-lesson/index.ts` — Gemini Pro + googleSearch grounding |
+| Voice transcription edge fn | `supabase/functions/sos-voice/index.ts` — Groq Whisper large-v3-turbo |
 | Embedding worker | `supabase/functions/embed-batch/index.ts` |
 | Regression eval (planning fallback) | `scripts/eval-planning-fallback.mjs` |
 
@@ -59,7 +56,7 @@ Chat-first AI student planner. All tasks, events, and notes are created through 
 
 - **Frontend** — React 18 + Vite SPA (`src/`). `App.jsx` owns state, chat, action execution. SSE consumer in `src/lib/streamChat.js`.
 - **Serverless** — Vercel `/api/chat` (Node TS) or Supabase Edge `sos-chat` (Deno TS); both import from `shared/ai/index.js`.
-- **AI** — Hybrid Groq + Gemini. Tier 1 (`openai/gpt-oss-20b` on Groq, fallback `gemini-2.5-flash`) handles chat, action routing, summarization, voice. Tier 2 (`openai/gpt-oss-120b` on Groq, fallback `gemini-2.5-pro`) handles planning, studio, proofread specialists. Tier 0 (`gemini-embedding-002` on Gemini) handles all embeddings.
+- **AI** — Hybrid Groq + Gemini. Tier 1 (Flash: `openai/gpt-oss-20b` on Groq, fallback `gemini-2.5-flash`) handles chat, action routing, summarization. Tier 2 (Pro: `openai/gpt-oss-120b` on Groq, fallback `gemini-2.5-pro`) handles planning, intent planning, study packs, work-check coaching. Tier 0 (Embed: `gemini-embedding-002` on Gemini) handles all embeddings for RAG.
 - **Storage** — Supabase Postgres + Auth + pgvector. Client writes directly via `sb` client after action execution.
 - **Shared core** — `shared/ai/index.ts` exports `callModel()`. Router (`shared/ai/router.ts`) is the only place model strings appear.
 
@@ -124,25 +121,7 @@ To add a new tool: add `ZodSchema` + entry in `ACTION_SCHEMAS` + description in 
 
 ## Layout
 
-```
-layoutMode === 'lofi'    → <div className="study-app">  3-column grid (resizable)
-layoutMode === 'sidebar' → dormant, kept for migration
-layoutMode === 'topbar'  → dormant, kept for migration
-```
-
-**Lofi render tree**:
-```
-StudyTopBar            ← src/components/StudyTopBar.jsx        (clock, settings, optional Home button)
-LofiLeftPanel          ← src/components/LofiLeftPanel.jsx      (Calendar / Projects / Proofread tabs)
-<div.study-center>     ← chat + settings + home (center column)
-LofiRightPanel         ← src/components/LofiRightPanel.jsx     (weather, saved, radio, timer)
-ColumnResizeHandles    ← src/components/ColumnResizeHandles.jsx (between columns 0/1 and 1/2 when unlocked)
-ColumnLockToggle       ← lock icon at bottom-right; double-click to reset to defaults
-```
-
-`StudyTopBar` props: `user, syncStatus, onNewChat, onImport, onSettings, onAuthAction, onSwitchLayout, onHome, homeEnabled, queueCount`. **Import button is no longer rendered in the lofi top bar**; import lives in the Projects tab folder header.
-
-`LofiLeftPanel` props: `events, blocks, tasks, entityLinks, userId, onEventUpdate, notes, onCreateNote, onUpdateNote, onDeleteNote, onImportClick`.
+Current UI supports dashboard, home, and settings panels via `activePanel` state. See `src/App.jsx` for main component layout.
 
 ---
 
@@ -173,18 +152,6 @@ Realtime: `App.jsx` subscribes to `postgres_changes` on `events`, `notes`, `task
 
 ---
 
-## WikiLinks
-
-Discoverable, approval-first.
-
-- **Autocomplete**: `useWikilinkAutocomplete` (in `WikilinkAutocomplete.jsx`) opens a popover when the user types `[[` in the chat input. Shows matching notes / events / tasks ranked by prefix match. ↑/↓ to navigate, ↵/Tab to commit, Esc to dismiss. On commit, inserts `[[Selected Name]]` and closes.
-- **Search**: `searchEntities()` in `src/lib/wikilinkSearch.js` ranks by exact > prefix > substring > word-prefix.
-- **Rendering**: existing `renderWikilinks()` in `src/lib/wikilinks.js` walks text nodes and wraps `[[Name]]` with `<a class="wikilink">`. Unresolved names get `.wikilink.unresolved`.
-- **Backlinks**: `BacklinksList.jsx` queries `entity_links` table via `findBacklinks()` and is always visible on note detail views (no toggle).
-- **Soft suggestions**: `LinkSuggestionCard` (existing) surfaces "Link this to `[[X]]`?" cards in chat. Approval is one tap; SOS never auto-links.
-
----
-
 ## Home screen (opt-in)
 
 `HomeScreen.jsx` — calm landing surface inside the studio. Disabled by default (`sos_home_enabled` localStorage key). When enabled, a Home button appears in the top bar and `activePanel === 'home'` renders the screen.
@@ -212,12 +179,10 @@ Persisted in `sos_home_*` localStorage keys; not in Supabase.
 | `blocks` | `{ recurring: [], dates: {} }` |
 | `notes` | array of note objects (each may have `parent_id`/`is_folder`) |
 | `events` | array of event objects (with `time`/`end_time`/`description`/`location`/`priority`) |
-| `entityLinks` | `entity_links` graph; powers backlinks + suggestions |
 | `messages` | chat history (capped at `CHAT_MAX_MESSAGES` = 60) |
 | `user` | Supabase auth user or null |
 | `syncStatus` | `'saving'|'saved'|'error'` |
-| `layoutMode` | `'lofi'` (current default; sidebar/topbar branches dormant) |
-| `activePanel` | `'chat'|'settings'|'home'` |
+| `activePanel` | `'dashboard'|'settings'|'home'` |
 | `isLoading` | true while awaiting AI response |
 | `pipelineProgress` | latest `ProgressEvent` from a streaming planning/intent_plan pipeline; drives `PipelineProgressIndicator` |
 | `previewPlanEntry` | pass-1 draft plan shown as a "preview · refining…" card until the refined plan arrives |
