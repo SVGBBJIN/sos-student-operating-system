@@ -31,11 +31,10 @@ src/lib/streamChat.js             — SSE consumer for the chat endpoint
 api/                              — Vercel Node.js serverless
   chat.ts                         — Chat transport adapter (SSE or JSON)
   embed.ts                        — Batch embeddings endpoint
-  proofread.ts                    — Proofread surface (JSON-only)
   lms-*.ts                        — LMS integration endpoints (courses, oauth, events, sync)
 
 supabase/functions/               — Deno Edge Functions (mirrors of api/* endpoints)
-  sos-chat/, sos-proofread/       — Chat and proofread
+  sos-chat/                       — Chat endpoint
   sos-voice/                      — Groq Whisper transcription
   embed-batch/                    — Server-side embedding upserter
   sync-submissions/               — Cron: LMS submission reconciliation
@@ -111,12 +110,11 @@ Transport-agnostic orchestrator. Mode dispatch:
 - `delta` — text chunk
 - `tool_call` — structured action invocation
 - `usage` — token counts
-- `grounding` — RAG sources
 - `progress` — pipeline phase (`{phase, label, step, totalSteps, draft?}`)
 - `done` — final result
 - `error` — error details
 
-The `progress` frame enables live steppers + early preview (~15s) before final result ships.
+The `progress` frame enables live steppers + early preview (~15s) before final result ships. Planning, intent_plan, and brain_dump pipelines emit progress events.
 
 ### 3-Pass Pipelines
 Pattern: graceful degradation if critique/refine fail or timeout.
@@ -214,17 +212,10 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 ### Single-Component Design
 `src/App.jsx` (~7800 lines): intentional monolith for tight coordination between async AI responses and UI state.
 
-### Layout Modes
-- `studio` — Default. Two-column: sidebar nav + center chat
-- `sidebar` — Classic sidebar + optional notes companion
-- `topbar` — Horizontal nav + full-width chat
-- `lofi` — Three-column study mode: schedule/tasks | chat | notes (resizable with drag handles)
-
 ### Active Panels
-- `chat` — Main AI chat
+- `dashboard` — Main chat interface (default)
 - `home` — Custom home with focus widget
-- `settings` — Appearance, connectors, notifications
-- `proofread` — Dedicated writing feedback surface
+- `settings` — Appearance, API connectors, notification preferences
 
 ### Key State Variables
 ```javascript
@@ -265,7 +256,6 @@ Before every LLM turn, server enriches context in parallel (all bounded 3s, grac
 
 1. **Behavioral signals** — 30-day completion rate, postpone rate by subject, time-of-day histogram, recent abandons (cached hourly)
 2. **RAG retrieval** — top-8 `memory_embeddings` matching query via pgvector cosine + recency
-3. **Study signals** — mastery levels, quiz performance, weak topics from `skill_hub_sessions`
 
 Assembled snippet injected into system prompt with task priority top-3, schedule density, and memory matches.
 
@@ -316,7 +306,6 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 - `events` — title, event_date, event_type, subject, status, confidence
 - `blocks` — activity, date, start_time/end_time, category
 - `notes` — title, content, subject, parent_id (folders), is_folder
-- `entity_links` — knowledge graph (source_type, target_type, origin: manual|wikilink|heuristic|llm|rejected)
 - `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata)
 
 **Behavioral signals**:
@@ -325,20 +314,17 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 **Timers & schedules**:
 - `timers` — label, fire_at, fired, dismissed_at
 - `study_plans` — title, plan_json, applied_at, review_cadence_days
-- `study_packs` — title, subject, status (generating|ready|mastered), artifacts, linked_event_id
+- `study_packs` — title, subject, status (generating|ready), artifacts, linked_event_id
 
 **Study**:
 - `flashcard_decks` — title, cards[], source (ai|manual), card_count
 - `grades` — subject, assignment, grade (0–100), grade_type
-- `skill_hub_sessions` — mode (cause-effect|interpretation|study), score, hints_used, struggled_topics
-- `lessons` — topic, subject, mode, screens, status, current_screen, score
 
 **LMS**:
 - `lms_submission_events` — evidence per assignment (lms, lms_course_id, evidence_kind, confidence_after)
 
 **Admin**:
 - `trigger_dismissals` — suppress re-suggestion (expires_at)
-- `analytics_events` — event_type, metadata, created_at
 
 **RPC**: `match_memories(query_embedding, user_id_in, match_count, source_filter, metadata_filter)`
 
@@ -349,7 +335,6 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 |----------|--------|-------------|
 | `/api/chat` | POST | Main chat (SSE or JSON) |
 | `/api/embed` | POST | Batch embeddings |
-| `/api/proofread` | POST | Proofread (JSON-only) |
 | `/api/lms-courses` | POST | List courses |
 | `/api/lms-tracked-courses` | POST | User's tracked courses |
 | `/api/lms-oauth-callback` | GET | Google OAuth redirect |
@@ -379,7 +364,6 @@ Auth: Bearer token from `Authorization` header via `extractUserId()`.
 | Function | Description |
 |----------|-------------|
 | `sos-chat` | Deno mirror of api/chat.ts |
-| `sos-proofread` | Deno mirror of api/proofread.ts |
 | `sos-voice` | Groq Whisper transcription |
 | `embed-batch` | Server-side embedding upserter |
 | `sync-submissions` | Cron: LMS reconciliation |
@@ -419,12 +403,11 @@ VITE_GNEWS_TOKEN          — optional (news widget)
 2. **Zod schemas = single source of truth** — schema generates tool def + validator + JSON Schema.
 3. **Transport agnosticism** — `chat-handler.ts` shared; both adapters are thin normalizers.
 4. **Web APIs only in `shared/`** — no Node-only APIs; Deno consumes same code.
-5. **No streaming on proofread** — enforced JSON via `responseSchema`.
-6. **No direct provider imports** — use `getProvider()` from `shared/ai/providers/index.ts`.
-7. **Graceful degradation everywhere** — pipelines ship draft on failure; enrichment skips failed signals; provider fallback to Gemini.
-8. **Confidence gating** — items below threshold route to review rail, never auto-apply.
-9. **RLS everywhere** — all tables restrict to `auth.uid() = user_id`.
-10. **Undo snapshots** — every action execution pushes snapshot before mutation.
+5. **No direct provider imports** — use `getProvider()` from `shared/ai/providers/index.ts`.
+6. **Graceful degradation everywhere** — pipelines ship draft on failure; enrichment skips failed signals; provider fallback to Gemini.
+7. **Confidence gating** — items below threshold route to review rail, never auto-apply.
+8. **RLS everywhere** — all tables restrict to `auth.uid() = user_id`.
+9. **Undo snapshots** — every action execution pushes snapshot before mutation.
 
 ## What NOT to do
 
