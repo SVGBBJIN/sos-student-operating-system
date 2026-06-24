@@ -47,6 +47,21 @@ import { adaptiveAssign } from '../shared/experiments/allocation.ts';
 import HomeScreen, { HOME_BACKGROUNDS, HOME_FOCUS_OPTIONS, getHomePrefs, setHomePref } from './components/HomeScreen';
 import HomeDecisionGate from './components/HomeDecisionGate';
 import DecisionRollup from './components/DecisionRollup';
+import FocusLauncher from './components/FocusLauncher';
+import FocusSession from './components/FocusSession';
+import {
+  buildSessionQueue,
+  activeAndOnDeck,
+  remainingCount,
+  sprintShouldClose,
+  isGoalMet,
+  decideBreak,
+  breakOfferLine,
+  computeFadeHour,
+  gapsFromTimestamps,
+  summaryLine,
+  DEFAULT_BREAK_MS,
+} from '../shared/scheduling/focus.ts';
 
 const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
 
@@ -5245,12 +5260,19 @@ function App() {
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
 
   // ── Notification scheduling: re-run whenever tasks, events, or prefs change ──
+  // While a focus session is running the home goes quiet — no scheduled
+  // notifications. The suppression is scoped to the session: it never touches
+  // notifPrefs, it just posts an empty schedule to the SW (clearing pending
+  // timers), and the moment the session ends this effect re-runs and the normal
+  // schedule is restored. Nothing persistent is mutated.
+  const focusSuppressing = !!focusRun && focusRun.status !== 'ended';
   useEffect(() => {
     if (!dataLoaded) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (focusSuppressing) { scheduleNotificationsToSW([]); return; }
     const notifications = buildNotifications(tasks, events, notifPrefs);
     scheduleNotificationsToSW(notifications);
-  }, [tasks, events, notifPrefs, dataLoaded]);
+  }, [tasks, events, notifPrefs, dataLoaded, focusSuppressing]);
 
   function updateNotifPref(key, val) {
     const next = { ...notifPrefs, [key]: val };
@@ -5420,6 +5442,18 @@ function App() {
   // can offer continue/stop instead of a generic chime.
   const [focusSession, setFocusSession] = useState(null); // { taskId, title, startedAt, endsAt, status }
   const focusTimeoutRef = useRef(null);
+
+  // ── Focus Sessions (Sprint & Marathon) ──
+  // A head-down session the student starts with one tap. Sprint is bound by the
+  // clock; Marathon is bound by a goal and loops sprints with breaks in the
+  // seams. Both share one engine (shared/scheduling/focus.ts). The run lives in
+  // memory only — ephemeral, reverts on reload, persists nothing but the task
+  // completions it drives. focusRun === null means no session.
+  const [focusLauncherOpen, setFocusLauncherOpen] = useState(false);
+  const [focusRun, setFocusRun] = useState(null);
+  // Soft-exit clock (sprint) and break auto-ignite (marathon) timers.
+  const sprintClockRef = useRef(null);
+  const breakTimeoutRef = useRef(null);
 
   // ── Commitment-lock countdown (start-latency experiment arm) ──
   // Set when a commitment_lock user pledges a start time. Shown as a live
@@ -5632,8 +5666,13 @@ function App() {
       setSosNotif({ label: '10 min up', body: `${title} — keep going or stop.`, accent: 'var(--text-dim)', duration: 9000 });
     }, FOCUS_SESSION_MS);
   }
-  async function startTask(task, source = 'manual') {
+  async function startTask(task, source = 'manual', opts = {}) {
     if (!task) return;
+    // `ambient` arms the non-committal 10-minute "just looking at it" clock and
+    // its sosNotif. A focus session (Sprint/Marathon) drives ignition itself and
+    // owns its own clock, so it fires the Start primitive with ambient:false —
+    // materials still open, status still flips, the start event still logs.
+    const ambient = opts.ambient !== false;
     const startedAt = Date.now();
     const endsAt = startedAt + FOCUS_SESSION_MS;
     // Clear commitment-lock countdown for this task once they actually start.
@@ -5691,12 +5730,14 @@ function App() {
       const list = materials.map(m => `• ${m.title}`).join('\n');
       postAssistantNote(`Pulled up for "${task.title}":\n${list}`);
     }
-    const matLine = materials.length ? ` ${materials.length} linked.` : '';
-    setSosNotif({ label: 'Just looking at it', body: `${task.title} · 10 min.${matLine}`, accent: 'var(--accent)', duration: 4000 });
+    if (ambient) {
+      const matLine = materials.length ? ` ${materials.length} linked.` : '';
+      setSosNotif({ label: 'Just looking at it', body: `${task.title} · 10 min.${matLine}`, accent: 'var(--accent)', duration: 4000 });
 
-    // Ambient countdown in the DynamicIsland focus tier.
-    setFocusSession({ taskId: task.id, title: task.title, startedAt, endsAt, status: 'running' });
-    armFocusExpiry(task.id, task.title);
+      // Ambient countdown in the DynamicIsland focus tier.
+      setFocusSession({ taskId: task.id, title: task.title, startedAt, endsAt, status: 'running' });
+      armFocusExpiry(task.id, task.title);
+    }
   }
   function continueFocusSession() {
     const fs = focusSession;
@@ -5822,6 +5863,245 @@ function App() {
   }
   function handleStartWidgetStart(task) {
     startTask(task, 'widget');
+  }
+
+  // ── Focus Sessions (Sprint & Marathon) ──
+  // Refs mirror the live run + task list so timer callbacks (sprint soft-exit,
+  // break auto-ignite) read current state, not their stale capture.
+  const focusRunRef = useRef(null);
+  const focusTasksRef = useRef(tasks);
+  useEffect(() => { focusRunRef.current = focusRun; }, [focusRun]);
+  useEffect(() => { focusTasksRef.current = tasks; }, [tasks]);
+  // Clear focus timers on unmount.
+  useEffect(() => () => {
+    if (sprintClockRef.current) clearTimeout(sprintClockRef.current);
+    if (breakTimeoutRef.current) clearTimeout(breakTimeoutRef.current);
+  }, []);
+
+  // The candidate pool for a session: active tasks inside the 30-day priority
+  // horizon (the convention the gate/widget use), in priority order.
+  function focusPool() {
+    const horizon = new Date(); horizon.setDate(horizon.getDate() + 30);
+    const horizonStr = toDateStr(horizon);
+    const pool = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (pool.length === 0) return [];
+    const density = buildCalendarDensity(pool, blocks.dates || {});
+    const order = buildSessionQueue(pool, new Date(), density, undefined);
+    const byId = Object.fromEntries(pool.map(t => [t.id, t]));
+    return order.map(id => byId[id]).filter(Boolean);
+  }
+
+  // Active + on-deck task objects for a run. tasks-status acts as a backstop so
+  // a task completed elsewhere can't linger as active.
+  function resolveFocusTasks(run) {
+    if (!run) return { activeTask: null, onDeckTask: null };
+    const list = focusTasksRef.current;
+    const byId = id => { const t = list.find(x => x.id === id); return t && t.status !== 'done' ? t : null; };
+    const { activeId, onDeckId } = activeAndOnDeck(run.queue, run.completedIds, run.skippedIds);
+    return { activeTask: byId(activeId), onDeckTask: byId(onDeckId) };
+  }
+
+  // Fire the Start primitive on the run's current active task — ignition without
+  // the ambient 10-min clock, since the session owns its own timing. No gap: the
+  // status flip is synchronous.
+  function igniteFocusRun(run) {
+    const { activeTask } = resolveFocusTasks(run);
+    if (activeTask) startTask(activeTask, run.mode, { ambient: false });
+    return activeTask;
+  }
+
+  // Best-effort fade hour from the student's own completion history. Cold start
+  // (no history) → stays null and the floor + in-session signals run alone.
+  async function loadFocusFadeHour(userId) {
+    try {
+      const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const { data } = await sb.from('task_events')
+        .select('occurred_at')
+        .eq('user_id', userId)
+        .eq('event_type', 'complete')
+        .gte('occurred_at', since);
+      const hist = Array(24).fill(0);
+      (data || []).forEach(r => { const h = new Date(r.occurred_at).getHours(); if (h >= 0 && h < 24) hist[h] += 1; });
+      const fade = computeFadeHour(hist);
+      if (fade != null) setFocusRun(prev => prev ? { ...prev, fadeHour: fade } : prev);
+    } catch (_) { /* fade hour is a bonus, never a blocker */ }
+  }
+
+  function openFocusLauncher() { setFocusLauncherOpen(true); }
+
+  function launchFocusSession({ mode, durationMs, goal }) {
+    let order = focusPool().map(t => t.id);
+    // Selection Marathon: keep priority order but restrict to the tapped tasks —
+    // those alone define "done". Sprint and count-Marathon never hand-pick.
+    if (mode === 'marathon' && goal && goal.kind === 'selection') {
+      const sel = new Set(goal.taskIds);
+      order = order.filter(id => sel.has(id));
+    }
+    if (order.length === 0) { setFocusLauncherOpen(false); return; }
+
+    const startedAt = Date.now();
+    const run = {
+      mode,
+      status: 'running',
+      queue: order,
+      completedIds: [],
+      skippedIds: [],
+      startedAt,
+      durationMs: mode === 'sprint' ? durationMs : null,
+      clockExpired: false,
+      goal: mode === 'marathon' ? goal : null,
+      sprintsCompleted: 0,
+      completionTimes: [],
+      frictionCount: 0,
+      fadeHour: null,
+      breakOffer: null,
+      breakEndsAt: null,
+      lastDecisionAt: null,
+      summary: '',
+    };
+    focusRunRef.current = run;
+    setFocusRun(run);
+    setFocusLauncherOpen(false);
+    igniteFocusRun(run);
+    if (user) trackEvent(user.id, 'focus_session_start', { mode, ...(mode === 'sprint' ? { duration_ms: durationMs } : { goal: goal?.kind }) });
+
+    // Sprint clock: arm the soft-exit. Expiry only flags — the bell never cuts a
+    // task; the session closes at the first completion after this fires.
+    if (mode === 'sprint') {
+      if (sprintClockRef.current) clearTimeout(sprintClockRef.current);
+      sprintClockRef.current = setTimeout(() => {
+        setFocusRun(prev => (prev && prev.status !== 'ended') ? { ...prev, clockExpired: true } : prev);
+      }, durationMs);
+    }
+    if (mode === 'marathon' && user) loadFocusFadeHour(user.id);
+  }
+
+  // The seam: complete the active task, then drive to the next with no gap.
+  function focusComplete(task) {
+    const run = focusRunRef.current;
+    if (!run || run.status !== 'running' || run.breakOffer) return;
+    const { activeTask } = resolveFocusTasks(run);
+    if (!activeTask || (task && task.id !== activeTask.id)) return;
+    const now = Date.now();
+
+    // Mark done — emits the normal task_events so the priority engine stays fed.
+    updateTask(activeTask.id, { status: 'done', completedAt: new Date(now).toISOString() });
+    if (user) dbInsertTaskEvent({ taskId: activeTask.id, eventType: 'complete', fromStatus: activeTask.status, toStatus: 'done', metadata: { title: activeTask.title, subject: activeTask.subject, source: run.mode } }, user.id);
+
+    const completedIds = [...run.completedIds, activeTask.id];
+    const completionTimes = [...run.completionTimes, now];
+    const next = { ...run, completedIds, completionTimes, sprintsCompleted: run.sprintsCompleted + 1 };
+
+    if (run.mode === 'sprint') {
+      // Soft exit: clock up → close at THIS completion; else next task, no gap.
+      if (sprintShouldClose(run.startedAt, run.durationMs, now) ||
+          remainingCount(next.queue, completedIds, next.skippedIds) === 0) {
+        endFocusSession(next); return;
+      }
+      focusRunRef.current = next;
+      setFocusRun(next);
+      igniteFocusRun(next);
+      return;
+    }
+
+    // Marathon: goal met or queue dry → stop offering sprints.
+    if (isGoalMet(run.goal, next.queue, completedIds) ||
+        remainingCount(next.queue, completedIds, next.skippedIds) === 0) {
+      endFocusSession(next); return;
+    }
+
+    // Break decision lives only in the seam — signal-driven off the floor.
+    const decision = decideBreak({
+      sprintsCompleted: next.sprintsCompleted,
+      sessionElapsedMs: now - run.startedAt,
+      completionGapsMs: gapsFromTimestamps(completionTimes),
+      frictionCount: run.frictionCount,
+      currentHour: new Date(now).getHours(),
+      fadeHour: run.fadeHour,
+      msSinceLastDecision: run.lastDecisionAt != null ? now - run.lastDecisionAt : null,
+    });
+    if (decision.offer) {
+      const offered = { ...next, breakOffer: { line: breakOfferLine(decision.reason), reason: decision.reason } };
+      focusRunRef.current = offered;
+      setFocusRun(offered);
+      return;
+    }
+    // No break — next sprint ignites immediately.
+    focusRunRef.current = next;
+    setFocusRun(next);
+    igniteFocusRun(next);
+  }
+
+  // Skip the active task — a soft postpone signal, never a reschedule. The task
+  // keeps its normal behavioral signal and due date; the student blows past.
+  function focusSkip(task) {
+    const run = focusRunRef.current;
+    if (!run || run.status !== 'running' || run.breakOffer) return;
+    const { activeTask } = resolveFocusTasks(run);
+    if (!activeTask || (task && task.id !== activeTask.id)) return;
+    if (user) dbInsertTaskEvent({ taskId: activeTask.id, eventType: 'postpone', fromStatus: activeTask.status, toStatus: activeTask.status, metadata: { title: activeTask.title, subject: activeTask.subject, source: run.mode, action: 'skip' } }, user.id);
+    const skippedIds = [...run.skippedIds, activeTask.id];
+    const next = { ...run, skippedIds, frictionCount: run.frictionCount + 1 };
+    if (remainingCount(next.queue, next.completedIds, skippedIds) === 0) { endFocusSession(next); return; }
+    focusRunRef.current = next;
+    setFocusRun(next);
+    igniteFocusRun(next);
+  }
+
+  function focusTakeBreak() {
+    const run = focusRunRef.current;
+    if (!run || !run.breakOffer) return;
+    const now = Date.now();
+    // Reset in-session fatigue counters so the NEXT offer needs fresh fatigue.
+    const next = { ...run, status: 'break', breakOffer: null, breakEndsAt: now + DEFAULT_BREAK_MS, lastDecisionAt: now, completionTimes: [now], frictionCount: 0 };
+    focusRunRef.current = next;
+    setFocusRun(next);
+    if (breakTimeoutRef.current) clearTimeout(breakTimeoutRef.current);
+    breakTimeoutRef.current = setTimeout(() => focusResumeNow(), DEFAULT_BREAK_MS);
+  }
+
+  function focusSkipBreak() {
+    // Declining is the zero-friction default — the next sprint ignites at once.
+    const run = focusRunRef.current;
+    if (!run || !run.breakOffer) return;
+    const now = Date.now();
+    const next = { ...run, breakOffer: null, lastDecisionAt: now, completionTimes: [now], frictionCount: 0 };
+    focusRunRef.current = next;
+    setFocusRun(next);
+    igniteFocusRun(next);
+  }
+
+  function focusResumeNow() {
+    if (breakTimeoutRef.current) { clearTimeout(breakTimeoutRef.current); breakTimeoutRef.current = null; }
+    const run = focusRunRef.current;
+    if (!run || run.status !== 'break') return;
+    const next = { ...run, status: 'running', breakEndsAt: null };
+    focusRunRef.current = next;
+    setFocusRun(next);
+    igniteFocusRun(next);
+  }
+
+  // End with the single factual line. Manual "End session" routes here too, so
+  // ending always yields the same dry summary — no score, no streak, no praise.
+  function endFocusSession(run) {
+    const r = run || focusRunRef.current;
+    if (sprintClockRef.current) { clearTimeout(sprintClockRef.current); sprintClockRef.current = null; }
+    if (breakTimeoutRef.current) { clearTimeout(breakTimeoutRef.current); breakTimeoutRef.current = null; }
+    if (!r) { setFocusRun(null); return; }
+    const elapsed = Date.now() - r.startedAt;
+    const cleared = r.completedIds.length;
+    const ended = { ...r, status: 'ended', breakOffer: null, breakEndsAt: null, summary: summaryLine(cleared, elapsed) };
+    focusRunRef.current = ended;
+    setFocusRun(ended);
+    if (user) trackEvent(user.id, 'focus_session_end', { mode: r.mode, cleared, elapsed_ms: elapsed });
+  }
+
+  // Dismiss the ended summary — closes the surface, restores notifications.
+  function closeFocusSession() {
+    if (sprintClockRef.current) { clearTimeout(sprintClockRef.current); sprintClockRef.current = null; }
+    if (breakTimeoutRef.current) { clearTimeout(breakTimeoutRef.current); breakTimeoutRef.current = null; }
+    focusRunRef.current = null;
+    setFocusRun(null);
   }
 
   // ── Time payout on completion ──
@@ -8150,6 +8430,16 @@ function App() {
     // page: "set a timer" pops the Pomodoro, "what's my schedule" pops
     // the day timeline. Widgets render only when explicitly invoked.
     const lower = msgContent.toLowerCase();
+    // Focus session (Sprint/Marathon) — one tap into head-down work. Opens the
+    // launcher and short-circuits the AI: the session surface is the response.
+    if (!focusRun && /\b(sprint|marathon|head\s*down|lock\s*in|deep\s*work|grind\s*session|focus\s*sprint)\b/.test(lower)) {
+      const uMsg = { role: 'user', content: msgContent, timestamp: Date.now() };
+      setMessages(prev => { const n = [...prev, uMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+      if (user) dbInsertChatMsg('user', msgContent, user.id);
+      setInput('');
+      openFocusLauncher();
+      return;
+    }
     if (/(\b|^)(start|set|run|begin)\s+(a\s+)?(pomodoro|timer|focus)\b|\bpomodoro\b|\bfocus session\b/.test(lower)) {
       setActiveWidgets(w => ({ ...w, pomodoro: true }));
     }
@@ -10217,6 +10507,44 @@ function App() {
             onEscape={handleGateEscape}
             onDismiss={handleGateDismiss}
             onAddEvent={handleGateAddEvent}
+          />
+        );
+      })()}
+      {focusLauncherOpen && !showOnboarding && !focusRun && (
+        <FocusLauncher
+          tasks={focusPool()}
+          onLaunch={launchFocusSession}
+          onClose={() => setFocusLauncherOpen(false)}
+        />
+      )}
+      {focusRun && !showOnboarding && (() => {
+        const { activeTask, onDeckTask } = resolveFocusTasks(focusRun);
+        const goalLabel = focusRun.mode === 'marathon' && focusRun.goal
+          ? (focusRun.goal.kind === 'count'
+              ? `${focusRun.completedIds.length}/${focusRun.goal.count}`
+              : `${focusRun.completedIds.length}/${focusRun.goal.taskIds.length}`)
+          : '';
+        return (
+          <FocusSession
+            mode={focusRun.mode}
+            status={focusRun.status}
+            activeTask={activeTask}
+            onDeckTask={onDeckTask}
+            sprintStartedAt={focusRun.startedAt}
+            sprintDurationMs={focusRun.durationMs}
+            clockExpired={focusRun.clockExpired}
+            remaining={remainingCount(focusRun.queue, focusRun.completedIds, focusRun.skippedIds)}
+            goalLabel={goalLabel}
+            breakOffer={focusRun.breakOffer}
+            breakEndsAt={focusRun.breakEndsAt}
+            summary={focusRun.summary}
+            onComplete={focusComplete}
+            onSkip={focusSkip}
+            onTakeBreak={focusTakeBreak}
+            onSkipBreak={focusSkipBreak}
+            onResumeNow={focusResumeNow}
+            onEnd={() => endFocusSession()}
+            onClose={closeFocusSession}
           />
         );
       })()}
