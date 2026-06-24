@@ -192,6 +192,8 @@ Key goals:
 | `study_pack` | pro |
 | `work_check` | pro |
 
+(Note: `clue` and `work_check` are coaching intents; not included in standard chat routing.)
+
 **Special cases:**
 - **Vision**: any request with image attachments → `meta-llama/llama-4-scout-17b-16e-instruct` on Groq (override in `chat-core.ts`, fallback: `gemini-2.5-flash`)
 - **Voice**: `whisper-large-v3-turbo` on Groq via `shared/ai/voice.ts`, bypasses `callModel()`
@@ -210,6 +212,8 @@ Transport-agnostic orchestrator shared by both Vercel and Supabase runtimes. Dis
 | `briefing` | Daily briefing rollup | Structured JSON (events + tasks + prep gaps) |
 | `studio` | Forced tool call for content generation | Flashcards / quiz / outline / summary |
 | `study_pack` | Bundled study artifact generation | Summary + concepts + flashcards + quiz |
+| `clue` | Forward-looking hint generation (flash tier) | `make_clue` action with hint + scaffolding |
+| `work_check` | Student work evaluation (pro tier) | `make_work_check` action with feedback |
 | `voice` | Groq Whisper transcription | `{ text: string }` |
 
 ### SSE Streaming Frame Types
@@ -301,6 +305,38 @@ Anti-hallucination system that validates proposed task/event names are grounded 
 
 **Lexical overlap threshold**: ≥60% of content words from proposed name must appear verbatim in recent messages to skip embedding cost.
 
+### Focus Sessions Engine — `shared/scheduling/focus.ts`
+
+Pure module for sprint & marathon focus sessions. Manages work-queue selection, break scheduling, and goal tracking.
+
+**Sprint mode**: Quick burst work (25 min focus + 5 min break); goal-driven, visible countdown.
+**Marathon mode**: Extended session (90+ min); multiple short breaks + stretch breaks; trajectory tracking.
+
+Exports: `focusQueueSelect()`, `focusBreakNext()`, `focusGoalShorthand()`, `pledgeAsMinutes()`.
+
+**Integration**: UI via `FocusLauncher.jsx`, `FocusSession.jsx` components. State in App.jsx: `focusSession`, `focusLauncherOpen`, `focusRun`, `pledgeCountdown`.
+
+### Gated Home Screen — `shared/scheduling/gate.ts`
+
+Decision-tree helpers for task prioritization on home screen. Surfaces top 2 tasks via trajectory chips (deadline urgency + momentum visualizations).
+
+Exports: `gateRankForHome()`, `gateTrajectoryChip()`, `gateMaybeSurface()`.
+
+**Home quota**: Max 2 tasks shown; "nudge" mechanism shows 3rd task if first 2 completed early.
+
+**Integration**: UI via `HomeDecisionGate.jsx`, `StartWidget.jsx`, `DecisionRollup.jsx`. State in App.jsx: `gateOpen`, `gateRanked`, `gateSurfaced`, `gateCursor`.
+
+### Impact Engine — `shared/scheduling/impact.ts`
+
+Calculates grade impact projections and deadline-pressure CTAs. Honest predictions (never fabricates low grades; respects confidence floor).
+
+**Grade projections**: Current avg + next_grade impact on final → shows realistic scenarios.
+**Deadline CTAs**: Days remaining + task complexity → pressure level (green → red).
+
+Exports: `projectGradeImpact()`, `projectEventDeadlineImpact()`.
+
+**Safety**: Won't display grade projections below confidence threshold; avoids anxiety-inducing false lows.
+
 ---
 
 ## Action Tool System
@@ -387,8 +423,13 @@ All action tools defined as Zod schemas. The same schema generates:
 #### Coaching
 | Action | Output |
 |--------|--------|
-| `make_clue` | question_rephrased, hint, hint_category (conceptual\|procedural\|strategic), scaffolding? |
-| `make_work_check` | assessment, mistakes[], strengths[], next_steps[], rubric_match? |
+| `make_clue` | question_rephrased, hint, hint_category (conceptual\|procedural\|strategic), scaffolding?, deep_fallback?, next_if_stuck? |
+| `make_work_check` | assessment, mistakes[], strengths[], next_steps[], coverage, rubric_match?, needs_rubric_nudge?, unwritten_note? |
+
+**Coaching state machine** (`shared/coaching/workcheck.ts`):
+- `make_clue`: Single-shot forward hint; no state tracking required.
+- `make_work_check`: Caps at 2 rounds per 2-hour window. Third round auto-triggers self-read (student reads own work silently).
+- Tracks rounds used via `proofreadHistoryRef` in App.jsx; resets after 2h window expires.
 
 #### Grades
 | Action | Key fields |
@@ -715,17 +756,26 @@ pending: {
   queue[],           // batch actions to execute
 }
 
-// Timers
-activeTimers[]     pomodoroSession    activeWidgets{}
+// Timers & focus sessions
+activeTimers[]            pomodoroSession       activeWidgets{}
+focusSession              focusLauncherOpen     focusRun           pledgeCountdown
+
+// Gated home screen
+gateOpen                  gateRanked            gateSurfaced       gateCursor
+rollupItems[]             rollupAuto
+
+// Coaching system
+proofreadHistoryRef       // tracks work_check rounds per 2h window
 
 // Settings (persisted in localStorage)
-aiAutoApprove      // confidence >= 0.85 auto-apply
-notifPrefs         // per-action notification settings
-contentGenUsed     // daily content-gen usage counter (resets at midnight)
+aiAutoApprove             // confidence >= 0.85 auto-apply
+notifPrefs                // per-action notification settings
+contentGenUsed            // daily content-gen usage counter (resets at midnight)
 
-// AI status
-currentModel       modelFallbackUsed  rpmSnapshot
-pipelineProgress   // { phase, label, step, totalSteps, draft? }
+// AI status & experiments
+currentModel              modelFallbackUsed     rpmSnapshot
+pipelineProgress          // { phase, label, step, totalSteps, draft? }
+experimentArm             // stable per-user experiment assignment
 ```
 
 ### localStorage Keys
@@ -757,7 +807,7 @@ Before every LLM turn, the server enriches context in parallel (all bounded at 3
 
 1. **Behavioral signals** (`getBehavioralSignals`): 30-day completion rate, postpone-rate by subject, time-of-day histogram, recent abandons — queried from `task_events` via Supabase REST; hour-bucket in-process cache.
 
-2. **RAG retrieval** (`retrieve`): top-8 `memory_embeddings` matching the intent query via pgvector cosine similarity + recency weighting.
+2. **RAG retrieval** (`retrieve`): top-8 `memory_embeddings` matching the intent query via hybrid search scoring: **0.7 × vector_sim + 0.3 × BM25 text search - 0.3 × negation_penalty** (default; fallback to pgvector cosine on BM25 unavailable). Uses `query_text` (fulltext), optional `negation_terms`, and recency weighting.
 
 3. **Study signals** (`getStudySignals`): mastery levels per subject, quiz performance, weak topics from `skill_hub_sessions`.
 
@@ -915,7 +965,7 @@ The system supports feature experimentation via stable per-user arm assignment:
 ### Chat request body (`ChatBody`)
 ```typescript
 {
-  mode?: string,            // "chat" | "planning" | "intent_plan" | "brain_dump" | "briefing" | "studio" | "study_pack" | "voice"
+  mode?: string,            // "chat" | "planning" | "intent_plan" | "brain_dump" | "briefing" | "studio" | "study_pack" | "clue" | "work_check" | "voice"
   systemPrompt?: string,
   messages: ChatMessage[],
   imageBase64?: string,
@@ -925,6 +975,9 @@ The system supports feature experimentation via stable per-user arm assignment:
   clientTasks?: Task[],
   clientCalendarDensity?: CalendarDensity,
   maxTokens?: number,
+  contentType?: string,           // "procedure" | "fact" | "argument" (LMS task type hint for coaching)
+  proofreadRoundsUsed?: number,   // Rounds already used in current 2h window
+  hasRubric?: boolean,            // Whether student pasted a rubric
 }
 ```
 
