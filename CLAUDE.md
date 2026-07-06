@@ -44,28 +44,35 @@ shared/ai/                        — Isomorphic AI service layer (runs in both 
   router.ts                       — ONLY file with model strings; tier routing (embed/flash/pro)
   chat-handler.ts                 — Transport-agnostic chat orchestrator (mode dispatch)
   chat-core.ts                    — callModel(): single LLM inference entry point
+  coaching.ts                     — Coaching system integration (clue/work-check state)
   voice.ts                        — Groq Whisper transcription helper
   resilience.ts                   — Retry classification + circuit breaker
   telemetry.ts                    — Token counter, cost estimator, request logging
   providers/{types,gemini,groq,index}.ts — LLM provider abstraction
   schemas/                        — All action schemas (Zod)
-    {actions,studio,study_pack,intent_plan,plan,library,proofread,lms}.ts
+    {actions,studio,study_pack,intent_plan,plan,library,coaching,lms}.ts
   pipelines/
     planning.ts                   — 3-pass planning pipeline (analyze/draft/review/refine)
     intent_plan.ts                — 3-pass goal → weekly schedule
     brain_dump.ts                 — 3-pass transcript/text → batch actions
-    proofread.ts                  — Writing feedback pipeline
+    agentic.ts                    — Iterative multi-turn reasoning pipeline
   context/
+    assembler.ts                  — Assemble context from signals, RAG, and behavioral data
     enrich.ts                     — Dynamic context enrichment (behavioral + RAG + study signals)
     ranker.ts                     — Task ranking helpers
   signals/
     behavioral.ts                 — Behavioral signals (completion rate, postpone rate, time histogram)
+    study.ts                      — Study signals (mastery, quiz performance, weak topics)
   rag/
     retrieve.ts                   — pgvector retrieval (match_memories RPC)
     embeddings.ts                 — Embedding utilities + coalescing
   lms/                            — LMS integration helpers
 
-shared/scheduling/priority.ts     — Priority engine (pure, no I/O, 0–1 scores)
+shared/scheduling/
+  priority.ts                     — Priority engine (pure, no I/O, 0–1 scores)
+  focus.ts                        — Focus Sessions Engine (sprint & marathon modes)
+  gate.ts                         — Gated Home Screen (task quota + trajectory chips)
+  impact.ts                       — Impact Engine (grade projections + deadline CTAs)
 shared/rate-limit.ts              — Content-gen + RPM rate limiting
 shared/{env,auth,sse}.ts          — Cross-runtime helpers
 
@@ -102,9 +109,12 @@ Transport-agnostic orchestrator. Mode dispatch:
 | `brain_dump` | 3-pass transcript/text → batch actions | Array of tentative actions |
 | `studio` | Content generation (forced single tool call) | Flashcards/quiz/outline/summary |
 | `study_pack` | Bundled exam prep artifacts | Summary + concepts + cards + quiz |
-| `proofread` | Writing feedback pipeline | Structured feedback |
+| `clue` | Coaching hint provision (flash tier) | `make_clue` action with hints + scaffolding |
+| `work_check` | Coaching assessment (pro tier, capped 2/2h) | `make_work_check` action with feedback |
 | `briefing` | Daily rollup | Events + tasks + prep gaps |
 | `voice` | Groq Whisper transcription | `{ text: string }` |
+
+(Note: `clue` and `work_check` are coaching intents, dispatched separately from standard chat routing.)
 
 ### SSE Streaming Frames
 - `delta` — text chunk
@@ -140,9 +150,23 @@ Pattern: graceful degradation if critique/refine fail or timeout.
 - `confidence < 0.7` → routes to review rail
 - `0.7 ≤ confidence < 0.85` → shown for confirmation
 
-**Proofread** (`shared/ai/pipelines/proofread.ts`):
-- Classify content type → route to specialist (Flash for quick, Pro for deep)
-- Cap: 2 rounds per 2h; terminal round triggers self-read instead of verdict
+**Agentic** (`shared/ai/pipelines/agentic.ts`):
+- Iterative multi-turn reasoning for complex problem-solving
+- Stages through multiple passes with intermediate checkpoints
+- Refines reasoning based on feedback at each stage
+- Supports long-context conversations with state management
+
+### Coaching System (`shared/ai/coaching.ts` + `shared/ai/schemas/coaching.ts`)
+
+Student-focused hint and feedback system with two intents:
+
+**`clue` intent (flash tier)** — Provides forward-looking hints
+- Input: student's question or partial work
+- Output: `make_clue` action with hints, hint_category, scaffolding, fallback strategies
+
+**`make_work_check` intent (pro tier)** — Assesses work and provides feedback  
+- Capped at 2 rounds per 2-hour window; third round auto-triggers self-read
+- Output: assessment, mistakes, strengths, next_steps, coverage, rubric_match, needs_rubric_nudge
 
 ### callModel() Entry Point (chat-core.ts)
 Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`:
@@ -193,6 +217,12 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 | `make_study_pack` | summary + concepts + cards + quiz | — |
 | `make_intent_plan` | recurring blocks + milestones + review | — |
 
+### Coaching
+| Action | Output |
+|--------|--------|
+| `make_clue` | question_rephrased, hint, hint_category, scaffolding, deep_fallback, next_if_stuck |
+| `make_work_check` | assessment, mistakes[], strengths[], next_steps[], coverage, rubric_match, needs_rubric_nudge |
+
 ### Grades & Study Sets
 - `log_grade` — subject, assignment, grade (0–100), grade_type
 - `read_study_sets` — list flashcard decks
@@ -233,10 +263,28 @@ pending: {
   queue[]                 // batch to execute
 }
 
+// Focus Sessions (scheduling)
+focusSession,             // { mode, startTime, duration, taskId, status }
+focusLauncherOpen,        // boolean
+focusRun,                 // current focus run state
+pledgeCountdown,          // timer for active focus session
+
+// Gated Home Screen
+gateOpen,                 // boolean (home screen gate modal)
+gateRanked,               // ranked task list with trajectory
+gateSurfaced,             // surface tasks for 2-task quota
+gateCursor,               // current position in queue
+rollupItems,              // [events, tasks, prep gaps]
+
+// Coaching System
+proofreadHistoryRef,      // track work_check rounds per 2h window
+proofreadRoundsUsed,      // counter for current 2h window
+
 // Settings (localStorage)
 aiAutoApprove             // auto-apply confidence >= 0.85
 notifPrefs                // per-action notifications
 contentGenUsed            // daily counter (resets midnight)
+experimentArm,            // stable per-user assignment (A/B testing)
 
 // AI status
 currentModel, modelFallbackUsed, rpmSnapshot, pipelineProgress
@@ -259,7 +307,9 @@ Before every LLM turn, server enriches context in parallel (all bounded 3s, grac
 
 Assembled snippet injected into system prompt with task priority top-3, schedule density, and memory matches.
 
-## Priority Engine (shared/scheduling/priority.ts)
+## Scheduling System (shared/scheduling/)
+
+### Priority Engine (priority.ts)
 
 Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **client-side** (for `prioritize_tasks` display).
 
@@ -272,6 +322,29 @@ Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **clie
 | Momentum | 15% | Per-subject postpone rate; high postpone → higher score |
 | Deadline Density | 15% | Fraction of 5 tasks sharing same due date |
 | Friction | 10% | `postpone_count × 0.15` |
+
+### Focus Sessions Engine (focus.ts)
+
+Sprint and marathon mode scheduling for deep work:
+- **Sprint**: Short, intense focus blocks (15–45 min)
+- **Marathon**: Long sustained sessions (60–180 min)
+- Queue selection and automatic break scheduling
+- Integrates with focus surface in App.jsx
+
+### Gated Home Screen (gate.ts)
+
+Task prioritization with trajectory incentives:
+- 2-task daily quota with swap/defer/escape options
+- Trajectory chips showing impact on grade/deadline
+- Ranked by priority engine with behavioral signals
+- Surfaces events + tasks + study prep gaps
+
+### Impact Engine (impact.ts)
+
+Grade projections and deadline pressure CTAs:
+- Calculates grade trajectory impact per task
+- Deadline pressure signals for upcoming deadlines
+- Motivational CTAs (gain-framed: "unlock", "save", "boost")
 
 ## LMS Integration
 
