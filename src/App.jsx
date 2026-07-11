@@ -70,6 +70,7 @@ import ProposalCard from './components/ProposalCard';
 import RecurringEventPopup from './components/RecurringEventPopup';
 import { PlanTemplateSelector, detectPlanConflicts, IntentPlanCard } from './components/PlanCards';
 import MyPlansPanel from './components/MyPlansPanel';
+import DeadlinesPanel from './components/DeadlinesPanel';
 import ContentTypeRouter from './components/ContentTypeRouter';
 import GoogleImportModal from './components/GoogleImportModal';
 import LmsSetupModal from './components/LmsSetupModal';
@@ -1159,6 +1160,7 @@ function App() {
   const [flashcardDecks, setFlashcardDecks] = useState([]);
   const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
+  const [showDeadlines, setShowDeadlines] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
@@ -2382,6 +2384,23 @@ function App() {
     startTask(task, 'widget');
   }
 
+  // ── Deadlines panel: "ongoing" tab ranking ──
+  function deadlinesOngoingData() {
+    const horizonStr = addDaysISO(today(), 30);
+    const pool = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (pool.length === 0) return [];
+    const density = buildCalendarDensity(pool, blocks.dates || {});
+    const ranked = rankTasks(pool, new Date(), density, undefined, 20);
+    const byId = Object.fromEntries(pool.map(t => [t.id, t]));
+    return ranked.map(r => ({ ...r, title: byId[r.taskId]?.title || '(untitled)' })).filter(r => byId[r.taskId]);
+  }
+
+  function handleBreakTaskFromDeadlines(task) {
+    setShowDeadlines(false);
+    setChatOpen(true);
+    sendMessage(`Break down "${task.title}" (due ${task.dueDate}) into a day-by-day plan.`);
+  }
+
   // ── Focus Sessions (Sprint & Marathon) ──
   // Refs mirror the live run + task list so timer callbacks (sprint soft-exit,
   // break auto-ignite) read current state, not their stale capture.
@@ -3223,7 +3242,9 @@ function App() {
             return;
           }
           const newTasks = validSubtasks.map(st => ({
-            id:uid(), title:st._title, subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+            id:uid(), title:st._title, subject:action.parent_title||'',
+            dueDate: st.due || (typeof st.day_offset === 'number' ? addDaysISO(today(), st.day_offset) : today()),
+            estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
           }));
           setTasks(prev => [...prev, ...newTasks]);
           if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
@@ -6081,10 +6102,11 @@ function App() {
         setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
+      else if(key==='d'){e.preventDefault();setShowDeadlines(p=>!p)}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showNotes,showChatSidebar,showGlobalSearch,activePanel]);
+  },[showNotes,showChatSidebar,showGlobalSearch,showDeadlines,activePanel]);
 
   // ── Global search: semantic backend augments the instant local filter ──
   // Debounced so we don't fire an embed+RPC round-trip on every keystroke.
@@ -6192,6 +6214,7 @@ function App() {
             }}
             onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); }}
             activePanel={activePanel}
+            onOpenDeadlines={() => setShowDeadlines(true)}
           />
         </div>
       <div className="studio-center-col studio-glass-card">
@@ -6949,6 +6972,7 @@ function App() {
       </div>
 
       {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showDeadlines&&<DeadlinesPanel tasks={tasks} events={events} blocks={blocks} ongoing={deadlinesOngoingData()} onClose={()=>setShowDeadlines(false)} onBreakTask={handleBreakTaskFromDeadlines} onOpenChat={()=>setChatOpen(true)}/>}
       {showMyPlans && user && <MyPlansPanel plans={studyPlans} tasks={tasks} onClose={()=>setShowMyPlans(false)} onRevise={(planId)=>{ const plan = studyPlans.find(p=>p.id===planId); setShowMyPlans(false); setPendingRevisionPlanId(planId); postAssistantNote(`What changes should I make to "${plan?.title||'your plan'}"? (e.g. "make the schedule lighter", "add 2 more study sessions per week")`); }} onArchive={(planId)=>{ syncOp(()=>dbUpdateStudyPlan(planId,{status:'archived'},user.id)); setStudyPlans(prev=>prev.map(p=>p.id===planId?{...p,status:'archived'}:p)); }}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}

@@ -231,6 +231,10 @@ export type DeleteNoteInput = z.infer<typeof DeleteNoteSchema>;
 export const SubtaskSchema = z.object({
   title: titleLikeString("title"),
   due: dateString.optional(),
+  // Days from today, used to stagger subtasks across the runway to the
+  // deadline (day 0: outline, day 1: draft, ...) when `due` isn't given
+  // explicitly. Ignored when `due` is present.
+  day_offset: z.number().int().min(0).max(60).optional(),
   estimated_minutes: z.number().int().min(1).max(480).optional(),
 });
 
@@ -533,7 +537,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   update_task: "Update an existing task's title, due date, or estimated time. Identify the task by task_id (UUID) or title (fuzzy match). Provide at least one of new_title, due, or estimated_minutes. If the task cannot be found, ask_clarification.",
   edit_note: "Replace the full content of an existing note. note_id must be the exact UUID of the note. new_content replaces the current body entirely.",
   delete_note: "Permanently delete a note by its UUID. Only call when the student explicitly asks to delete or remove a note.",
-  break_task: "Split a task into 2–10 smaller subtasks. parent_title is the original task's name (used as subject context). Each subtask must have a real title; due and estimated_minutes are optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
+  break_task: "Break a deadline into a day-by-day plan of 2–10 smaller subtasks (e.g. day 0: outline, day 1: draft, day 2: revise). parent_title is the original task's name (used as subject context). Each subtask must have a real title. Prefer setting day_offset (days from today, staggered across the runway to the deadline) over a fixed `due` date so the breakdown fits how many days are actually left — only set `due` directly when the student specifies exact dates. estimated_minutes is optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
   convert_event_to_block: "Convert a calendar event into a time block on the schedule. Identify the event by title or event_id. Optionally override date, start, end, and category; if omitted, the client infers from the event. NEVER guess start/end — call ask_clarification if the student didn't state them.",
   convert_block_to_event: "Convert a time block into a calendar event. date, start, and end identify the block to remove. title, event_type, and subject are optional — the client falls back to the block's name if title is omitted.",
   delete_study_set: "Permanently delete a flashcard deck / study set by title. Uses fuzzy title matching. Only call when the student explicitly asks to delete or remove a flashcard deck or study set.",
