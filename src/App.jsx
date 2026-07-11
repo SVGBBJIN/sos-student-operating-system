@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES, queueEmbedSync } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
 import { extractPdfText } from './lib/pdf';
+import { classifyPlanShape } from './lib/planShape';
+import { plainTextFromHtml } from './lib/text';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import { dbInsertTaskEvent } from './lib/dataHandlers';
@@ -68,6 +70,7 @@ import ProposalCard from './components/ProposalCard';
 import RecurringEventPopup from './components/RecurringEventPopup';
 import { PlanTemplateSelector, detectPlanConflicts, IntentPlanCard } from './components/PlanCards';
 import MyPlansPanel from './components/MyPlansPanel';
+import DeadlinesPanel from './components/DeadlinesPanel';
 import ContentTypeRouter from './components/ContentTypeRouter';
 import GoogleImportModal from './components/GoogleImportModal';
 import LmsSetupModal from './components/LmsSetupModal';
@@ -428,6 +431,7 @@ function dbNoteToApp(row) {
     updatedAt: row.updated_at,
     parent_id: row.parent_id || null,
     is_folder: !!row.is_folder,
+    type: row.type || 'note',
   };
 }
 function appNoteToDb(n, userId) {
@@ -439,6 +443,7 @@ function appNoteToDb(n, userId) {
     updated_at: n.updatedAt || new Date().toISOString(),
     parent_id: n.parent_id || null,
     is_folder: !!n.is_folder,
+    type: n.type || 'note',
   };
 }
 
@@ -564,6 +569,16 @@ async function dbDeleteEvent(eventId, userId) {
 async function dbUpsertNote(note, userId) {
   const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
   if (error) console.error('Note upsert error:', error);
+}
+// Best-effort: index saved work into the RAG store so it becomes retrievable
+// via semantic search. Fire-and-forget — never awaited by callers.
+async function syncEmbed(items) {
+  try {
+    const session = await sb.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) return;
+    await queueEmbedSync(items, token);
+  } catch (_) { /* best-effort */ }
 }
 async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
   const row = { user_id: userId, role, content };
@@ -1145,6 +1160,7 @@ function App() {
   const [flashcardDecks, setFlashcardDecks] = useState([]);
   const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
+  const [showDeadlines, setShowDeadlines] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
@@ -1285,6 +1301,7 @@ function App() {
   useEffect(() => () => { if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current); }, []);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [semanticSearchResults, setSemanticSearchResults] = useState([]);
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -1416,7 +1433,7 @@ function App() {
       const regularNotes = [];
       const chatSaves = [];
       (data.notes || []).forEach(n => {
-        if (n.name && n.name.startsWith('[chat-save]')) {
+        if (n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'))) {
           try {
             const parsed = JSON.parse(n.content);
             chatSaves.push({ id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 });
@@ -1625,9 +1642,21 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
           const n = dbNoteToApp(payload.new);
+          // Saved chats live in the `notes` table too (type: 'saved_chat') but
+          // must never leak into the regular Notes panel — mirrors the split
+          // already done at initial load (loadAllFromSupabase).
+          if (n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'))) {
+            try {
+              const parsed = JSON.parse(n.content);
+              const chatEntry = { id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 };
+              setSavedChats(prev => { const idx = prev.findIndex(c => c.id === chatEntry.id); return idx >= 0 ? prev.map((c, i) => i === idx ? chatEntry : c) : [chatEntry, ...prev]; });
+            } catch (_) { /* malformed saved-chat payload — drop it, don't leak into notes */ }
+            return;
+          }
           setNotes(prev => { const idx = prev.findIndex(x => x.id === n.id); return idx >= 0 ? prev.map((x, i) => i === idx ? n : x) : [...prev, n]; });
         } else if (payload.eventType === 'DELETE') {
           setNotes(prev => prev.filter(x => x.id !== payload.old.id));
+          setSavedChats(prev => prev.filter(c => c.id !== payload.old.id));
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_blocks', filter: `user_id=eq.${user.id}` }, () => {
@@ -1780,7 +1809,15 @@ function App() {
           setTasks(data.tasks);
           setEvents(data.events);
           setBlocks(data.blocks);
-          setNotes((data.notes || []).filter(n => !(n.name && n.name.startsWith('[chat-save]'))));
+          const isSavedChatNote = n => n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'));
+          setNotes((data.notes || []).filter(n => !isSavedChatNote(n)));
+          const reconciledChats = (data.notes || []).filter(isSavedChatNote).map(n => {
+            try {
+              const parsed = JSON.parse(n.content);
+              return { id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 };
+            } catch (_) { return null; }
+          }).filter(Boolean);
+          setSavedChats(reconciledChats);
           setSyncStatus('saved');
         }
       } catch (_) { /* still offline / failing — leave the soft message in place */ }
@@ -2345,6 +2382,23 @@ function App() {
   }
   function handleStartWidgetStart(task) {
     startTask(task, 'widget');
+  }
+
+  // ── Deadlines panel: "ongoing" tab ranking ──
+  function deadlinesOngoingData() {
+    const horizonStr = addDaysISO(today(), 30);
+    const pool = tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate <= horizonStr);
+    if (pool.length === 0) return [];
+    const density = buildCalendarDensity(pool, blocks.dates || {});
+    const ranked = rankTasks(pool, new Date(), density, undefined, 20);
+    const byId = Object.fromEntries(pool.map(t => [t.id, t]));
+    return ranked.map(r => ({ ...r, title: byId[r.taskId]?.title || '(untitled)' })).filter(r => byId[r.taskId]);
+  }
+
+  function handleBreakTaskFromDeadlines(task) {
+    setShowDeadlines(false);
+    setChatOpen(true);
+    sendMessage(`Break down "${task.title}" (due ${task.dueDate}) into a day-by-day plan.`);
   }
 
   // ── Focus Sessions (Sprint & Marathon) ──
@@ -3050,10 +3104,12 @@ function App() {
             if (existing >= 0) {
               const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString(), parent_id: folderId || n.parent_id } : n);
               if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
+              syncEmbed([{ source: 'note', source_id: updated[existing].id, text: tabName + '\n' + plainTextFromHtml(updated[existing].content), metadata: { note_type: 'note' } }]);
               return updated;
             }
             const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString(), is_folder: false, parent_id: folderId };
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
+            syncEmbed([{ source: 'note', source_id: newNote.id, text: tabName + '\n' + plainTextFromHtml(content), metadata: { note_type: 'note' } }]);
             return [...prev, newNote];
           });
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note', source });
@@ -3186,7 +3242,9 @@ function App() {
             return;
           }
           const newTasks = validSubtasks.map(st => ({
-            id:uid(), title:st._title, subject:action.parent_title||'', dueDate:st.due||today(), estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
+            id:uid(), title:st._title, subject:action.parent_title||'',
+            dueDate: st.due || (typeof st.day_offset === 'number' ? addDaysISO(today(), st.day_offset) : today()),
+            estTime:st.estimated_minutes||20, status:'not_started', focusMinutes:0, createdAt:new Date().toISOString()
           }));
           setTasks(prev => [...prev, ...newTasks]);
           if (user && newTasks.length > 0) syncOp(() => Promise.all(newTasks.map(t => dbUpsertTask(t, user.id))));
@@ -3959,7 +4017,7 @@ function App() {
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
                 body: {
-                  mode: 'intent_plan',
+                  mode: 'plan',
                   systemPrompt: promptPayload2.prompt,
                   staticSystemPrompt: promptPayload2.stablePrompt,
                   dynamicContext: promptPayload2.dynamicContext,
@@ -3972,8 +4030,8 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              if (proposal && proposal.type === 'make_intent_plan') {
-                const critique = typeof intentData.intent_plan_critique === 'string' ? intentData.intent_plan_critique : '';
+              if (proposal && classifyPlanShape(proposal) === 'routine') {
+                const critique = typeof intentData.plan_critique === 'string' ? intentData.plan_critique : '';
                 postAssistantNote(`here's a plan for "${goal}" — review it and hit Apply to add the blocks and tasks, or Dismiss to skip:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critique, _goal: goal }]);
               } else {
@@ -4011,7 +4069,7 @@ function App() {
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
                 body: {
-                  mode: 'intent_plan',
+                  mode: 'plan',
                   systemPrompt: promptPayload2.prompt,
                   staticSystemPrompt: promptPayload2.stablePrompt,
                   dynamicContext: promptPayload2.dynamicContext,
@@ -4022,7 +4080,7 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              if (proposal && proposal.type === 'make_intent_plan') {
+              if (proposal && classifyPlanShape(proposal) === 'routine') {
                 postAssistantNote(`here's a revised plan — review it and hit Apply to replace the old version:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _revision_of_plan_id: planId }]);
               } else {
@@ -4121,12 +4179,13 @@ function App() {
           return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
         case 'create_project_breakdown':
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
-        case 'make_plan':
+        case 'make_plan': {
+          if (classifyPlanShape(c) === 'routine') {
+            const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
+            const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
+            return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
+          }
           return '# ' + (c.title||'Plan') + '\n\n' + (c.summary ? c.summary + '\n\n' : '') + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
-        case 'make_intent_plan': {
-          const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
-          const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
-          return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
         }
         default: return JSON.stringify(c, null, 2);
       }
@@ -4142,6 +4201,8 @@ function App() {
       if (deckId) {
         console.log('[sos] flashcard deck saved:', deckId);
         setFlashcardDecks(prev => [{ id: deckId, title: c.title, summary: c.summary || null, cards: c.cards || [], source: 'ai', card_count: (c.cards || []).length, created_at: new Date().toISOString() }, ...prev]);
+        const cardText = (c.cards || []).map(card => `${card.q} — ${card.a}`).join('\n');
+        syncEmbed([{ source: 'flashcard_deck', source_id: deckId, text: (c.title || 'Flashcard Deck') + '\n' + (c.summary || '') + '\n' + cardText, metadata: { card_count: (c.cards || []).length } }]);
       }
       return;
     }
@@ -4284,6 +4345,11 @@ function App() {
           };
           setStudyPlans(prev => [newPlan, ...prev]);
         }
+      }
+      if (resolvedPlanId) {
+        const blockText = (plan.recurring_blocks || []).map(b => `${b.activity} (${(b.days||[]).join('/')} ${b.start}-${b.end})`).join('\n');
+        const taskText = (plan.milestone_tasks || []).map(t => `${t.task_name} due ${t.due_date}`).join('\n');
+        syncEmbed([{ source: 'study_plan', source_id: resolvedPlanId, text: (plan.summary || 'Study Plan') + '\n' + blockText + '\n' + taskText, metadata: {} }]);
       }
 
       // Instrument plans-created vs started-within-24h. Tied to the first
@@ -4655,6 +4721,7 @@ function App() {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported "' + title + '" to notes 📄');
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
@@ -4664,6 +4731,7 @@ function App() {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'pdf' };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
@@ -4673,6 +4741,9 @@ function App() {
     setNotes(prev => prev.filter(n => n.id !== noteId));
     if (user) {
       syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+      // memory_embeddings has no delete API here on purpose — a stale, never-
+      // retrieved chunk is harmless, and match_memories always filters by the
+      // owner's user_id, so nothing leaks. Cron-based pruning is a future add.
     }
     setToastMsg('Note deleted');
   }
@@ -4680,6 +4751,7 @@ function App() {
   function handleUpdateNote(updated) {
     setNotes(prev => prev.map(n => n.id === updated.id ? { ...n, ...updated } : n));
     if (user) syncOp(() => dbUpsertNote(updated, user.id));
+    syncEmbed([{ source: 'note', source_id: updated.id, text: (updated.name || '') + '\n' + plainTextFromHtml(updated.content), metadata: { note_type: updated.type || 'note' } }]);
     setToastMsg('Note saved');
   }
 
@@ -4687,6 +4759,7 @@ function App() {
     const note = { id: uid(), ...noteData, updatedAt: new Date().toISOString() };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: (note.name || '') + '\n' + plainTextFromHtml(note.content), metadata: { note_type: note.type || 'note' } }]);
     setToastMsg('Note created');
   }
 
@@ -4700,7 +4773,7 @@ function App() {
       savedAt,
       messageCount: chat.messageCount || (chat.messages || []).length,
     };
-    return { id: chat.id, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
+    return { id: chat.id, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt, type: 'saved_chat' };
   }
 
   function autoSaveCurrentChat() {
@@ -4712,6 +4785,7 @@ function App() {
     const savedAt = new Date().toISOString();
     const chatData = { id: chatId, title, messages: messages.slice(), savedAt, messageCount: messages.length };
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chatData), user.id));
+    syncEmbed([{ source: 'note', source_id: chatId, text: title + '\n' + messages.map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     setSavedChats(prev => [chatData, ...prev]);
     return chatData;
   }
@@ -4734,6 +4808,7 @@ function App() {
     const updated = { ...chat, title: nextTitle, savedAt: chat.savedAt || new Date().toISOString() };
     setSavedChats(prev => prev.map(c => c.id === chatId ? updated : c));
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(updated), user.id));
+    syncEmbed([{ source: 'note', source_id: chatId, text: nextTitle + '\n' + (updated.messages || []).map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     setToastMsg('Conversation renamed');
   }
 
@@ -4742,6 +4817,7 @@ function App() {
     const { chat, wasViewing } = savedChatUndo;
     setSavedChats(prev => prev.some(c => c.id === chat.id) ? prev : [chat, ...prev]);
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chat), user.id));
+    syncEmbed([{ source: 'note', source_id: chat.id, text: (chat.title || 'Saved chat') + '\n' + (chat.messages || []).map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     if (wasViewing) {
       setViewingSavedChatId(chat.id);
       setMessages(chat.messages || []);
@@ -5043,14 +5119,14 @@ function App() {
         clientTasks: clientTasksPayload,
         clientCalendarDensity: clientCalendarDensityPayload,
         intentType: inferredIntentType,
-        ...(isPlanningRequest ? { mode: 'planning' } : {}),
-        ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
+        ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
         ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric } : {}),
         // Caller-supplied mode override (e.g. brain_dump from voice transcripts).
         // Wins over the heuristics above.
         ...(opts.mode ? { mode: opts.mode } : {}),
+        ...(opts.planKind ? { planKind: opts.planKind } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5130,34 +5206,27 @@ function App() {
         chatData = { ...chatData, actions: [], clarification: null, clarifications: [] };
       }
 
-      // ── Planning pipeline response: show proposed plan in propose mode ──
-      if (chatData?.orchestration?.mode === 'planning') {
+      // ── Unified plan pipeline response ──
+      // make_plan is now a superset: an explicit-request plan (steps) shows
+      // as a propose-mode plan card; a goal-shaped plan (recurring_blocks /
+      // milestone_tasks) shows as a propose-mode routine card; a brain-dump-
+      // shaped plan (batch_actions) routes straight into the action review
+      // rail, same as the old dedicated brain_dump mode did.
+      if (chatData?.orchestration?.mode === 'plan') {
         const proposal = chatData.actions?.[0];
-        if (proposal && proposal.type === 'make_plan') {
-          const critiqueText = typeof chatData.planning_critique === 'string' ? chatData.planning_critique : '';
-          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
-          sfx.arrive();
-          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
-          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
-          return;
-        }
-      }
+        const critiqueText = typeof chatData.plan_critique === 'string' ? chatData.plan_critique : '';
+        const shape = classifyPlanShape(proposal);
 
-      // ── Brain-dump pipeline response: extracted actions go to the review rail ──
-      if (chatData?.orchestration?.mode === 'brain_dump') {
-        const dumpActions = Array.isArray(chatData.actions) ? chatData.actions : [];
-        const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
-          ? chatData.content.trim()
-          : (dumpActions.length === 0
-            ? "I didn't catch anything actionable in that — try saying it again with a date or a name?"
-            : `Pulled out ${dumpActions.length} item${dumpActions.length === 1 ? '' : 's'} — review below.`);
-        const assistantMsg = { role:'assistant', content:summaryText, timestamp:Date.now() };
-        sfx.arrive();
-        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-        if (user) dbInsertChatMsg('assistant', summaryText, user.id);
-        if (dumpActions.length > 0) {
-          const rows = dumpActions.map(a => {
+        if (shape === 'batch') {
+          const batchActions = proposal.batch_actions;
+          const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
+            ? chatData.content.trim()
+            : `Pulled out ${batchActions.length} item${batchActions.length === 1 ? '' : 's'} — review below.`;
+          const assistantMsg = { role:'assistant', content:summaryText, timestamp:Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', summaryText, user.id);
+          const rows = batchActions.map(a => {
             const conf = typeof a.confidence === 'number' ? a.confidence : null;
             const tentative = a.status === 'tentative' || a.commitment === 'tentative';
             const lowConf = conf != null && conf < 0.7;
@@ -5165,15 +5234,10 @@ function App() {
             return { action: a, reason, confidence: conf };
           });
           setPendingActions(prev => [...prev, ...rows]);
+          return;
         }
-        return;
-      }
 
-      // ── Intent-plan pipeline response: show proposed routine in propose mode ──
-      if (chatData?.orchestration?.mode === 'intent_plan') {
-        const proposal = chatData.actions?.[0];
-        if (proposal && proposal.type === 'make_intent_plan') {
-          const critiqueText = typeof chatData.intent_plan_critique === 'string' ? chatData.intent_plan_critique : '';
+        if (shape === 'routine') {
           const blockCount = (proposal.recurring_blocks?.length || 0) + (proposal.review_cadence?.review_block ? 1 : 0);
           const taskCount = proposal.milestone_tasks?.length || 0;
           const introMsg = { role: 'assistant', content: `here's a structured plan — ${blockCount} recurring block${blockCount !== 1 ? 's' : ''}, ${taskCount} milestone task${taskCount !== 1 ? 's' : ''}. hit Apply to add everything, or Dismiss to skip:`, timestamp: Date.now() };
@@ -5183,6 +5247,25 @@ function App() {
           setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critiqueText }]);
           return;
         }
+
+        if (shape === 'steps') {
+          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
+          return;
+        }
+
+        // Empty draft: legitimately nothing extracted (e.g. chit-chat).
+        const emptyText = typeof chatData.content === 'string' && chatData.content.trim()
+          ? chatData.content.trim()
+          : "I didn't catch anything actionable in that — try again with a bit more detail?";
+        const emptyMsg = { role: 'assistant', content: emptyText, timestamp: Date.now() };
+        sfx.arrive();
+        setMessages(prev => { const n=[...prev,emptyMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', emptyText, user.id);
+        return;
       }
 
       // ── Study-pack response: persist to Library, show interactive card ──
@@ -5577,7 +5660,7 @@ function App() {
       let friendlyMsg;
       // Cause-coded errors from the AI layer come through with structured fields
       // attached to the Error object. Prefer those over string matching.
-      if (raw.includes('PlanningPipelineError') || raw.includes('Planning pipeline failed')) {
+      if (raw.includes('PlanPipelineError') || raw.includes('Plan pipeline failed')) {
         const stageMatch = raw.match(/at (draft|critique|refine)/);
         const stage = stageMatch ? stageMatch[1] : 'planning';
         if (raw.includes('both_models_failed')) {
@@ -5939,10 +6022,10 @@ function App() {
     speechTranscriptRef.current = '';
 
     if (transcript) {
-      // Voice → brain_dump pipeline: extract structured tasks/events with
-      // confidence scoring. Tentative items land in the review rail rather
-      // than mutating state immediately.
-      sendMessage(transcript, { mode: 'brain_dump' });
+      // Voice → unified plan pipeline (brain-dump shaped): extract structured
+      // tasks/events with confidence scoring. Tentative items land in the
+      // review rail rather than mutating state immediately.
+      sendMessage(transcript, { mode: 'plan', planKind: 'brain_dump' });
     } else {
       const hasBrowserSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
       setToastMsg(hasBrowserSR
@@ -6019,10 +6102,38 @@ function App() {
         setShowNotes(p=>!p);
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
+      else if(key==='d'){e.preventDefault();setShowDeadlines(p=>!p)}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showNotes,showChatSidebar,showGlobalSearch,activePanel]);
+  },[showNotes,showChatSidebar,showGlobalSearch,showDeadlines,activePanel]);
+
+  // ── Global search: semantic backend augments the instant local filter ──
+  // Debounced so we don't fire an embed+RPC round-trip on every keystroke.
+  useEffect(() => {
+    if (!showGlobalSearch || !user || globalSearchQuery.trim().length < 3) {
+      setSemanticSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const q = globalSearchQuery.trim();
+    const timer = setTimeout(async () => {
+      try {
+        const session = await sb.auth.getSession();
+        const token = session?.data?.session?.access_token;
+        if (!token || cancelled) return;
+        const res = await fetch(EDGE_FN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ mode: 'search', searchQuery: q, searchSources: ['note', 'flashcard_deck', 'study_plan'], searchLimit: 8 }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setSemanticSearchResults(Array.isArray(data?.results) ? data.results : []);
+      } catch (_) { if (!cancelled) setSemanticSearchResults([]); }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [showGlobalSearch, globalSearchQuery, user]);
 
   // ── Loading data after login ──
   if (user && !dataLoaded) {
@@ -6103,6 +6214,7 @@ function App() {
             }}
             onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); }}
             activePanel={activePanel}
+            onOpenDeadlines={() => setShowDeadlines(true)}
           />
         </div>
       <div className="studio-center-col studio-glass-card">
@@ -6860,6 +6972,7 @@ function App() {
       </div>
 
       {showNotes&&<NotesPanel notes={notes} events={events} tasks={tasks} onClose={()=>setShowNotes(false)} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} onCreateNote={handleCreateNote}/>}
+      {showDeadlines&&<DeadlinesPanel tasks={tasks} events={events} blocks={blocks} ongoing={deadlinesOngoingData()} onClose={()=>setShowDeadlines(false)} onBreakTask={handleBreakTaskFromDeadlines} onOpenChat={()=>setChatOpen(true)}/>}
       {showMyPlans && user && <MyPlansPanel plans={studyPlans} tasks={tasks} onClose={()=>setShowMyPlans(false)} onRevise={(planId)=>{ const plan = studyPlans.find(p=>p.id===planId); setShowMyPlans(false); setPendingRevisionPlanId(planId); postAssistantNote(`What changes should I make to "${plan?.title||'your plan'}"? (e.g. "make the schedule lighter", "add 2 more study sessions per week")`); }} onArchive={(planId)=>{ syncOp(()=>dbUpdateStudyPlan(planId,{status:'archived'},user.id)); setStudyPlans(prev=>prev.map(p=>p.id===planId?{...p,status:'archived'}:p)); }}/>}
       {showGlobalSearch && <GlobalSearchModal
         query={globalSearchQuery}
@@ -6869,6 +6982,7 @@ function App() {
         events={events}
         notes={notes}
         savedChats={savedChats}
+        semanticResults={semanticSearchResults}
         onSelectNote={note => { setShowGlobalSearch(false); setShowNotes(true); }}
         onOpenSavedChat={loadSavedChat}
         onSendMessage={q => { setShowGlobalSearch(false); sendMessage(q); }}

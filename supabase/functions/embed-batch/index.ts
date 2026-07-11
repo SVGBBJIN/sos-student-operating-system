@@ -7,6 +7,7 @@
 
 import { embedBatch } from "../../../shared/ai/index.js";
 import { getEnv } from "../../../shared/env.js";
+import { extractUserId } from "../../../shared/auth.js";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
@@ -23,7 +24,6 @@ interface Item {
 }
 
 interface Body {
-  user_id: string;
   items: Item[];
 }
 
@@ -44,10 +44,25 @@ serve(async (req: Request): Promise<Response> => {
     });
   }
 
+  // The caller's own bearer token is the source of truth for whose rows this
+  // writes — a client-supplied user_id in the body would let anyone embed
+  // (and later retrieve via match_memories) content under another user's id.
+  const userId = extractUserId(req.headers.get("authorization"));
+  if (!userId) {
+    return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const body = (await req.json()) as Body;
-    if (!body.user_id || !Array.isArray(body.items) || body.items.length === 0) {
-      return new Response(JSON.stringify({ error: "user_id and items[] are required" }), {
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return new Response(JSON.stringify({ error: "items[] is required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (body.items.length > 50) {
+      return new Response(JSON.stringify({ error: "Too many items (max 50 per request)" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -55,7 +70,7 @@ serve(async (req: Request): Promise<Response> => {
     const vectors = await embedBatch(texts, "RETRIEVAL_DOCUMENT", 1536);
 
     const rows = body.items.map((item, i) => ({
-      user_id: body.user_id,
+      user_id: userId,
       source: item.source,
       source_id: item.source_id,
       chunk_idx: item.chunk_idx ?? 0,

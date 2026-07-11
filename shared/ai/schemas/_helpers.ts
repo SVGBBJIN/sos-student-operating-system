@@ -79,6 +79,18 @@ export const timeString = z
   .string()
   .refine(isValidTime, "must be HH:MM (24h)");
 
+// Shared enums used by both actions.ts (add_block, add_recurring_event) and
+// studio.ts (make_plan's recurring_blocks bucket) — one definition so the
+// two schemas can't silently drift apart.
+export const blockCategoryEnum = z.enum([
+  "school", "swim", "debate", "free time", "sleep", "other",
+]);
+
+export const dayEnum = z.enum([
+  "Monday", "Tuesday", "Wednesday", "Thursday",
+  "Friday", "Saturday", "Sunday",
+]);
+
 // Duration in seconds for set_timer. Capped at 24h because setTimeout becomes
 // unreliable beyond that, and a "timer" longer than a day is really a calendar
 // event — the model should route those to add_event.

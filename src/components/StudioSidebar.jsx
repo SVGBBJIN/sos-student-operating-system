@@ -44,6 +44,16 @@ function ProjectsIcon() {
   );
 }
 
+function DeadlinesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
+         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/>
+    </svg>
+  );
+}
+
 function LibraryIcon() {
   return (
     <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor"
@@ -109,6 +119,7 @@ export default function StudioSidebar({
   onSelectProject,
   onDashboard,
   activePanel,
+  onOpenDeadlines,
 }) {
   const navigate = useNavigate();
   const today = savedChats.filter(c => isToday(c.savedAt));
@@ -149,6 +160,12 @@ export default function StudioSidebar({
           <PlusIcon />
           <span>New chat</span>
         </button>
+        {onOpenDeadlines && (
+          <button className="sb-home" onClick={onOpenDeadlines} title="Deadlines">
+            <DeadlinesIcon />
+            <span>Deadlines</span>
+          </button>
+        )}
         <button className="sb-home" onClick={() => navigate('/library')} title="Library">
           <LibraryIcon />
           <span>Library</span>

@@ -51,9 +51,7 @@ shared/ai/                        — Isomorphic AI service layer (runs in both 
   schemas/                        — All action schemas (Zod)
     {actions,studio,study_pack,intent_plan,plan,library,proofread,lms}.ts
   pipelines/
-    planning.ts                   — 3-pass planning pipeline (analyze/draft/review/refine)
-    intent_plan.ts                — 3-pass goal → weekly schedule
-    brain_dump.ts                 — 3-pass transcript/text → batch actions
+    plan.ts                       — unified 3-pass plan pipeline (explicit request / goal / brain-dump → one make_plan action)
     proofread.ts                  — Writing feedback pipeline
   context/
     enrich.ts                     — Dynamic context enrichment (behavioral + RAG + study signals)
@@ -97,9 +95,7 @@ Transport-agnostic orchestrator. Mode dispatch:
 | Mode | Pipeline | Output |
 |------|----------|--------|
 | `chat` (default) | Action routing + RAG + behavioral context | SSE or JSON |
-| `planning` | 3-pass planning pipeline (Pro + thinking 4096) | `make_plan` action |
-| `intent_plan` | 3-pass goal → schedule | `make_intent_plan` action |
-| `brain_dump` | 3-pass transcript/text → batch actions | Array of tentative actions |
+| `plan` | 3-pass unified plan pipeline (Pro + thinking 4096) — classifies the input as an explicit request / goal / brain-dump internally and fills the matching bucket(s) of one `make_plan` action | `make_plan` action, or an array of tentative actions when the input was brain-dump-shaped |
 | `studio` | Content generation (forced single tool call) | Flashcards/quiz/outline/summary |
 | `study_pack` | Bundled exam prep artifacts | Summary + concepts + cards + quiz |
 | `proofread` | Writing feedback pipeline | Structured feedback |
@@ -114,31 +110,21 @@ Transport-agnostic orchestrator. Mode dispatch:
 - `done` — final result
 - `error` — error details
 
-The `progress` frame enables live steppers + early preview (~15s) before final result ships. Planning, intent_plan, and brain_dump pipelines emit progress events.
+The `progress` frame enables live steppers + early preview (~15s) before final result ships. The plan pipeline emits progress events.
 
 ### 3-Pass Pipelines
 Pattern: graceful degradation if critique/refine fail or timeout.
 
-**Planning** (`shared/ai/pipelines/planning.ts`):
-1. Draft (22s cap) — full first draft via Pro + `thinkingBudget: 4096`
-2. Critique (10s cap) — gap analysis
-3. Refine (22s cap) — final plan
+**Plan** (`shared/ai/pipelines/plan.ts`) — replaces the former planning / intent_plan / brain_dump pipelines, which were the same draft→critique→refine shape over one `make_plan` tool call and differed only in which buckets the model filled:
+1. Draft (22s cap) — Pro + `thinkingBudget: 4096`. The draft prompt first classifies the input, then fills only the matching bucket(s) of `make_plan`:
+   - **explicit request** ("make me a plan for...") → `steps[]` (each `kind: 'block'` or `'deadline'`)
+   - **goal** ("survive finals week") → `recurring_blocks[]` + `milestone_tasks[]` + `review_cadence`
+   - **brain-dump** (messy transcript/text dump) → `batch_actions[]`, each item carrying `confidence`/`status`/`commitment` — `confidence >= 0.85` eligible for auto-apply, `confidence < 0.7` routes to review rail, `0.7–0.85` shown for confirmation
+2. Critique (10s cap) — gap/realism/calibration analysis, tailored to whichever bucket was filled
+3. Refine (22s cap) — final plan, same bucket(s) as the draft
 - Total budget: 50s (within Vercel 60s limit)
 - Progress phases: `analyzing → drafting → reviewing → finalizing`
-
-**Intent-Plan** (`shared/ai/pipelines/intent_plan.ts`):
-1. Draft — recurring blocks + milestones + review cadence
-2. Critique — schedule realism check
-3. Refine — final plan
-- Output: `MakeIntentPlanInput` (batch-creates blocks/tasks on "Apply")
-
-**Brain-Dump** (`shared/ai/pipelines/brain_dump.ts`):
-1. Draft — extracts actionable items with confidence scores
-2. Critique — identifies missed items
-3. Refine — corrected batch
-- `confidence >= 0.85` → eligible for auto-apply
-- `confidence < 0.7` → routes to review rail
-- `0.7 ≤ confidence < 0.85` → shown for confirmation
+- Client dispatch (`src/App.jsx`): a populated `batch_actions[]` routes straight to the action review rail (bypassing the propose-mode card); `recurring_blocks`/`milestone_tasks` renders `IntentPlanCard` (batch-creates blocks/tasks + persists a `study_plans` row on "Apply"); `steps[]` renders `PlanCard` in propose mode.
 
 **Proofread** (`shared/ai/pipelines/proofread.ts`):
 - Classify content type → route to specialist (Flash for quick, Pro for deep)
@@ -189,9 +175,8 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 | `create_outline` | sections + points | 1–20 |
 | `create_summary` | bullet summary | 1–20 |
 | `create_project_breakdown` | phases + tasks | 1–12 |
-| `make_plan` | steps with dates/times | 1–40 |
+| `make_plan` | unified plan schema: `steps[]` (explicit request), or `recurring_blocks[]`+`milestone_tasks[]`+`review_cadence` (goal), or `batch_actions[]` (brain-dump) — see Plan pipeline above | steps 0–40, recurring_blocks 0–8, milestone_tasks 0–20, batch_actions 0–60 |
 | `make_study_pack` | summary + concepts + cards + quiz | — |
-| `make_intent_plan` | recurring blocks + milestones + review | — |
 
 ### Grades & Study Sets
 - `log_grade` — subject, assignment, grade (0–100), grade_type
@@ -259,6 +244,11 @@ Before every LLM turn, server enriches context in parallel (all bounded 3s, grac
 
 Assembled snippet injected into system prompt with task priority top-3, schedule density, and memory matches.
 
+### Note bucket + search
+Saved work (notes, saved chats, flashcard decks, applied study plans) is embedded into `memory_embeddings` on save (`src/lib/supabase.js` `queueEmbedSync()` → `supabase/functions/embed-batch`, auth'd off the caller's own bearer token) and retrievable two ways:
+- **Model-invoked**: the `search_memory` action tool (existing chat-routing tool, server-executed, results fed back into the same turn — never client-executed)
+- **Manual search**: `mode: "search"` on the chat endpoint (`{ searchQuery, searchSources?, searchLimit? }` → `{ results }`), a pure `retrieve()` passthrough with no LLM call. `⌘K` global search debounces into this to augment its instant local substring filter with semantic/paraphrase matches.
+
 ## Priority Engine (shared/scheduling/priority.ts)
 
 Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **client-side** (for `prioritize_tasks` display).
@@ -305,8 +295,8 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 - `tasks` — title, due_date, subject, status, priority, confidence, commitment, completion_source, lms_assignment_ref
 - `events` — title, event_date, event_type, subject, status, confidence
 - `blocks` — activity, date, start_time/end_time, category
-- `notes` — title, content, subject, parent_id (folders), is_folder
-- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata)
+- `notes` — title, content, subject, parent_id (folders), is_folder, `type` (`note` | `saved_chat` — replaces the old `[chat-save]` name-prefix convention)
+- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata). `source` ∈ `memory | event | task | note | lesson | block | flashcard_deck | study_plan`
 
 **Behavioral signals**:
 - `task_events` — event_type (status_change, postpone, complete, etc.), timestamps, metadata

@@ -3,9 +3,10 @@
 
 export const SCHEMA_VERSIONS = {
   action_tools: "v7-2026-05",
-  studio_tools: "v3-2026-05",
-  planning: "v2-2026-05",
-  intent_plan: "v1-2026-05",
+  // Bumped: make_plan is now the unified superset schema (steps + recurring_blocks
+  // + milestone_tasks + review_cadence + batch_actions), replacing the separate
+  // planning/intent_plan pipelines.
+  studio_tools: "v4-2026-07",
   study_pack: "v1-2026-05",
   coaching: "v1-2026-06",
   reference_search: "v1-2026-05",

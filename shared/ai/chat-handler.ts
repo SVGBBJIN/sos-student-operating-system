@@ -8,9 +8,7 @@
 
 import { callModel, RpmExhaustedError, type CallModelResponse, type ChatAction } from "./chat-core.js";
 import { retrieve, type RetrievedChunk } from "./rag/retrieve.js";
-import { runPlanningPipeline, PlanningPipelineError } from "./pipelines/planning.js";
-import { runIntentPlanPipeline, IntentPlanPipelineError } from "./pipelines/intent_plan.js";
-import { runBrainDumpPipeline, BrainDumpPipelineError } from "./pipelines/brain_dump.js";
+import { runPlanPipeline, PlanPipelineError } from "./pipelines/plan.js";
 import { aggregateRpmStatus, overLimit } from "./rpm-tracker.js";
 import { route, type Intent } from "./router.js";
 import { enrichDynamicContext } from "./context/enrich.js";
@@ -45,6 +43,17 @@ export interface ChatBody {
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
   intentType?: string;
+  // mode:"plan" sub-hint. Set by the voice-transcript quick-capture path to
+  // "brain_dump" so it keeps the old dedicated brain_dump mode's exemption
+  // from the content-generation rate limit — voice dumps are meant to be a
+  // frequent, lightweight capture flow, not a 5/day-limited content-gen
+  // surface like planning/studio. Same trust boundary as before the pipeline
+  // merge: the client already fully controlled which mode string it sent.
+  planKind?: "explicit_request" | "goal" | "brain_dump";
+  // Search saved work (mode: "search") — pure retrieve() passthrough, no LLM call.
+  searchQuery?: string;
+  searchSources?: string[];
+  searchLimit?: number;
   // Hint & Work-Check surfaces.
   contentType?: string;          // procedure | fact | argument (LMS task type hint)
   proofreadRoundsUsed?: number;  // rounds already used in the current 2h window
@@ -180,6 +189,27 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
   const intentQuery = messages.slice(-1)[0]?.content ?? "";
 
   try {
+    // ── Search saved work (My Work / global search) ──
+    // Pure RPC passthrough — no LLM call. Reuses the same retrieve() helper
+    // that powers the model's search_memory tool hop, so a manual search box
+    // and the model's own recall share one index and one ranking.
+    if (body.mode === "search") {
+      if (!userId) {
+        return { kind: "json", status: 401, json: { error: "Authentication required" } };
+      }
+      const q = (body.searchQuery ?? "").trim();
+      if (!q) {
+        return { kind: "json", status: 400, json: { error: "searchQuery is required" } };
+      }
+      const results = await retrieve({
+        userId,
+        query: q,
+        sources: body.searchSources,
+        k: Math.min(body.searchLimit ?? 10, 25),
+      });
+      return { kind: "json", status: 200, json: { results } };
+    }
+
     // ── Voice transcription (Groq Whisper) ──
     if (body.mode === "voice") {
       if (!body.audioBase64) {
@@ -193,56 +223,23 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan" || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
+    // planKind:"brain_dump" is exempt — quick voice-capture is meant to be
+    // frequent/lightweight, not gated behind the same daily cap as planning/
+    // studio generation (matches the pre-merge dedicated brain_dump mode).
+    const isExemptBrainDump = body.mode === "plan" && body.planKind === "brain_dump";
+    if ((body.mode === "studio" || (body.mode === "plan" && !isExemptBrainDump) || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
       }
     }
 
-    // ── Planning pipeline ──
-    if (body.mode === "planning") {
-      const planningCtx = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
-      const buildPlanningJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
-        content: "",
-        actions: [result.proposal],
-        clarifications: [],
-        executed_actions: [],
-        orchestration: { mode: "planning", iterations: result.iterations, ...CLIENT_ORCH },
-        planning_critique: result.critiqueText,
-      });
-      if (wantsSSE) {
-        return {
-          kind: "stream",
-          run: async (onChunk) => {
-            const result = await runPlanningPipeline({
-              systemPrompt: body.systemPrompt ?? "",
-              staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: planningCtx,
-              messages,
-              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
-            });
-            return buildPlanningJson(result);
-          },
-        };
-      }
-      try {
-        const result = await runPlanningPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: planningCtx,
-          messages,
-        });
-        return { kind: "json", status: 200, json: buildPlanningJson(result) };
-      } catch (err) {
-        const e = err as PlanningPipelineError;
-        return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
-      }
-    }
-
-    // ── Intent-plan pipeline ──
-    if (body.mode === "intent_plan") {
-      const intentCtx = await enrichDynamicContext({
+    // ── Unified plan pipeline (explicit request / goal / brain-dump) ──
+    // Replaces the former planning / intent_plan / brain_dump modes — all
+    // three were the same draft→critique→refine shape over one make_plan
+    // tool call; classification now happens via prompting in the draft pass.
+    if (body.mode === "plan") {
+      const planCtx = await enrichDynamicContext({
         userId,
         workspaceContext,
         intentQuery,
@@ -250,86 +247,39 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         clientTasks: body.clientTasks,
         clientCalendarDensity: body.clientCalendarDensity,
       });
-      const buildIntentJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
-        content: "",
-        actions: [result.proposal],
-        clarifications: [],
-        executed_actions: [],
-        orchestration: { mode: "intent_plan", iterations: result.iterations, ...CLIENT_ORCH },
-        intent_plan_critique: result.critiqueText,
-      });
-      if (wantsSSE) {
-        return {
-          kind: "stream",
-          run: async (onChunk) => {
-            const result = await runIntentPlanPipeline({
-              systemPrompt: body.systemPrompt ?? "",
-              staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: intentCtx,
-              messages,
-              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
-            });
-            return buildIntentJson(result);
-          },
-        };
-      }
-      try {
-        const result = await runIntentPlanPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: intentCtx,
-          messages,
-        });
-        return { kind: "json", status: 200, json: buildIntentJson(result) };
-      } catch (err) {
-        const e = err as IntentPlanPipelineError;
-        return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
-      }
-    }
-
-    // ── Brain-dump pipeline (voice / messy text → batch of tentative actions) ──
-    if (body.mode === "brain_dump") {
-      const dumpCtx = await enrichDynamicContext({
-        userId,
-        workspaceContext,
-        intentQuery,
-        baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
-        clientTasks: body.clientTasks,
-        clientCalendarDensity: body.clientCalendarDensity,
-      });
-      const buildDumpJson = (result: { actions: unknown[]; summary: string; iterations: number; critiqueText: string }) => ({
+      const buildPlanJson = (result: { proposal: unknown; summary: string; iterations: number; critiqueText: string }) => ({
         content: result.summary,
-        actions: result.actions,
+        actions: result.proposal ? [result.proposal] : [],
         clarifications: [],
         executed_actions: [],
-        orchestration: { mode: "brain_dump", iterations: result.iterations, ...CLIENT_ORCH },
-        brain_dump_critique: result.critiqueText,
+        orchestration: { mode: "plan", iterations: result.iterations, ...CLIENT_ORCH },
+        plan_critique: result.critiqueText,
       });
       if (wantsSSE) {
         return {
           kind: "stream",
           run: async (onChunk) => {
-            const result = await runBrainDumpPipeline({
+            const result = await runPlanPipeline({
               systemPrompt: body.systemPrompt ?? "",
               staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: dumpCtx,
+              dynamicContext: planCtx,
               messages,
               onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
             });
-            return buildDumpJson(result);
+            return buildPlanJson(result);
           },
         };
       }
       try {
-        const result = await runBrainDumpPipeline({
+        const result = await runPlanPipeline({
           systemPrompt: body.systemPrompt ?? "",
           staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: dumpCtx,
+          dynamicContext: planCtx,
           messages,
         });
-        return { kind: "json", status: 200, json: buildDumpJson(result) };
+        return { kind: "json", status: 200, json: buildPlanJson(result) };
       } catch (err) {
-        const e = err as BrainDumpPipelineError;
+        const e = err as PlanPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
       }
     }

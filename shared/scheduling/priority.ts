@@ -41,6 +41,7 @@ export interface PriorityResult {
   score: number;
   factors: PriorityFactors;
   explanation: string;
+  daysUntilDue: number;
 }
 
 const WEIGHTS = {
@@ -121,6 +122,7 @@ export function computePriority(
     score: Math.round(score * 1000) / 1000,
     factors: { urgency, importance, momentum, deadline_density, friction },
     explanation,
+    daysUntilDue: Math.round(daysUntilDue * 1000) / 1000,
   };
 }
 
