@@ -6188,7 +6188,7 @@ function App() {
         onTheme={setStudioTheme}
         onSettings={() => setActivePanel('settings')}
         onHome={() => navigate('/')}
-        onDashboard={() => setActivePanel('dashboard')}
+        onDashboard={() => { setActivePanel('dashboard'); setSelectedProject(null); }}
         activePanel={activePanel}
         queueCount={pendingQueue ? pendingQueue.length : 0}
       />
@@ -6215,10 +6215,10 @@ function App() {
                 setSelectedProject(null);
               } else {
                 setSelectedProject(name);
-                setChatOpen(true);
+                setChatOpen(false);
               }
             }}
-            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); }}
+            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); setSelectedProject(null); }}
             activePanel={activePanel}
             onOpenDeadlines={() => setShowDeadlines(true)}
           />
@@ -6277,7 +6277,7 @@ function App() {
       )}
 
 
-      {activePanel === 'dashboard' && !chatOpen ? (
+      {activePanel === 'dashboard' && !chatOpen && !selectedProject ? (
         <StudioDashboard
           user={user}
           tasks={tasks}
