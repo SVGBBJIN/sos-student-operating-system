@@ -3959,7 +3959,7 @@ function App() {
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
                 body: {
-                  mode: 'intent_plan',
+                  mode: 'plan',
                   systemPrompt: promptPayload2.prompt,
                   staticSystemPrompt: promptPayload2.stablePrompt,
                   dynamicContext: promptPayload2.dynamicContext,
@@ -3972,8 +3972,9 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              if (proposal && proposal.type === 'make_intent_plan') {
-                const critique = typeof intentData.intent_plan_critique === 'string' ? intentData.intent_plan_critique : '';
+              const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
+              if (proposal && hasRoutine) {
+                const critique = typeof intentData.plan_critique === 'string' ? intentData.plan_critique : '';
                 postAssistantNote(`here's a plan for "${goal}" — review it and hit Apply to add the blocks and tasks, or Dismiss to skip:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critique, _goal: goal }]);
               } else {
@@ -4011,7 +4012,7 @@ function App() {
               const intentData = await streamChat({
                 url: EDGE_FN_URL,
                 body: {
-                  mode: 'intent_plan',
+                  mode: 'plan',
                   systemPrompt: promptPayload2.prompt,
                   staticSystemPrompt: promptPayload2.stablePrompt,
                   dynamicContext: promptPayload2.dynamicContext,
@@ -4022,7 +4023,8 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              if (proposal && proposal.type === 'make_intent_plan') {
+              const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
+              if (proposal && hasRoutine) {
                 postAssistantNote(`here's a revised plan — review it and hit Apply to replace the old version:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _revision_of_plan_id: planId }]);
               } else {
@@ -4121,12 +4123,14 @@ function App() {
           return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
         case 'create_project_breakdown':
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
-        case 'make_plan':
+        case 'make_plan': {
+          const hasRoutine = (c.recurring_blocks?.length || 0) > 0 || (c.milestone_tasks?.length || 0) > 0;
+          if (hasRoutine) {
+            const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
+            const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
+            return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
+          }
           return '# ' + (c.title||'Plan') + '\n\n' + (c.summary ? c.summary + '\n\n' : '') + (c.steps||[]).map((s,i) => '- [ ] ' + s.title + (s.date ? ' (' + s.date + ')' : '') + (s.time ? ' ' + s.time : '') + (s.estimated_minutes ? ' ~' + s.estimated_minutes + 'min' : '')).join('\n');
-        case 'make_intent_plan': {
-          const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
-          const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
-          return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
         }
         default: return JSON.stringify(c, null, 2);
       }
@@ -5043,8 +5047,7 @@ function App() {
         clientTasks: clientTasksPayload,
         clientCalendarDensity: clientCalendarDensityPayload,
         intentType: inferredIntentType,
-        ...(isPlanningRequest ? { mode: 'planning' } : {}),
-        ...(isIntentPlanRequest ? { mode: 'intent_plan' } : {}),
+        ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
         ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric } : {}),
@@ -5130,34 +5133,28 @@ function App() {
         chatData = { ...chatData, actions: [], clarification: null, clarifications: [] };
       }
 
-      // ── Planning pipeline response: show proposed plan in propose mode ──
-      if (chatData?.orchestration?.mode === 'planning') {
+      // ── Unified plan pipeline response ──
+      // make_plan is now a superset: an explicit-request plan (steps) shows
+      // as a propose-mode plan card; a goal-shaped plan (recurring_blocks /
+      // milestone_tasks) shows as a propose-mode routine card; a brain-dump-
+      // shaped plan (batch_actions) routes straight into the action review
+      // rail, same as the old dedicated brain_dump mode did.
+      if (chatData?.orchestration?.mode === 'plan') {
         const proposal = chatData.actions?.[0];
-        if (proposal && proposal.type === 'make_plan') {
-          const critiqueText = typeof chatData.planning_critique === 'string' ? chatData.planning_critique : '';
-          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
-          sfx.arrive();
-          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
-          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
-          return;
-        }
-      }
+        const critiqueText = typeof chatData.plan_critique === 'string' ? chatData.plan_critique : '';
+        const batchActions = proposal && Array.isArray(proposal.batch_actions) ? proposal.batch_actions : [];
+        const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
+        const hasSteps = proposal && (proposal.steps?.length || 0) > 0;
 
-      // ── Brain-dump pipeline response: extracted actions go to the review rail ──
-      if (chatData?.orchestration?.mode === 'brain_dump') {
-        const dumpActions = Array.isArray(chatData.actions) ? chatData.actions : [];
-        const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
-          ? chatData.content.trim()
-          : (dumpActions.length === 0
-            ? "I didn't catch anything actionable in that — try saying it again with a date or a name?"
-            : `Pulled out ${dumpActions.length} item${dumpActions.length === 1 ? '' : 's'} — review below.`);
-        const assistantMsg = { role:'assistant', content:summaryText, timestamp:Date.now() };
-        sfx.arrive();
-        setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-        if (user) dbInsertChatMsg('assistant', summaryText, user.id);
-        if (dumpActions.length > 0) {
-          const rows = dumpActions.map(a => {
+        if (proposal && batchActions.length > 0) {
+          const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
+            ? chatData.content.trim()
+            : `Pulled out ${batchActions.length} item${batchActions.length === 1 ? '' : 's'} — review below.`;
+          const assistantMsg = { role:'assistant', content:summaryText, timestamp:Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', summaryText, user.id);
+          const rows = batchActions.map(a => {
             const conf = typeof a.confidence === 'number' ? a.confidence : null;
             const tentative = a.status === 'tentative' || a.commitment === 'tentative';
             const lowConf = conf != null && conf < 0.7;
@@ -5165,15 +5162,10 @@ function App() {
             return { action: a, reason, confidence: conf };
           });
           setPendingActions(prev => [...prev, ...rows]);
+          return;
         }
-        return;
-      }
 
-      // ── Intent-plan pipeline response: show proposed routine in propose mode ──
-      if (chatData?.orchestration?.mode === 'intent_plan') {
-        const proposal = chatData.actions?.[0];
-        if (proposal && proposal.type === 'make_intent_plan') {
-          const critiqueText = typeof chatData.intent_plan_critique === 'string' ? chatData.intent_plan_critique : '';
+        if (proposal && hasRoutine) {
           const blockCount = (proposal.recurring_blocks?.length || 0) + (proposal.review_cadence?.review_block ? 1 : 0);
           const taskCount = proposal.milestone_tasks?.length || 0;
           const introMsg = { role: 'assistant', content: `here's a structured plan — ${blockCount} recurring block${blockCount !== 1 ? 's' : ''}, ${taskCount} milestone task${taskCount !== 1 ? 's' : ''}. hit Apply to add everything, or Dismiss to skip:`, timestamp: Date.now() };
@@ -5183,6 +5175,25 @@ function App() {
           setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critiqueText }]);
           return;
         }
+
+        if (proposal && hasSteps) {
+          const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', planMsg.content, user.id);
+          setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _critique: critiqueText }]);
+          return;
+        }
+
+        // Empty draft: legitimately nothing extracted (e.g. chit-chat).
+        const emptyText = typeof chatData.content === 'string' && chatData.content.trim()
+          ? chatData.content.trim()
+          : "I didn't catch anything actionable in that — try again with a bit more detail?";
+        const emptyMsg = { role: 'assistant', content: emptyText, timestamp: Date.now() };
+        sfx.arrive();
+        setMessages(prev => { const n=[...prev,emptyMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', emptyText, user.id);
+        return;
       }
 
       // ── Study-pack response: persist to Library, show interactive card ──
@@ -5577,7 +5588,7 @@ function App() {
       let friendlyMsg;
       // Cause-coded errors from the AI layer come through with structured fields
       // attached to the Error object. Prefer those over string matching.
-      if (raw.includes('PlanningPipelineError') || raw.includes('Planning pipeline failed')) {
+      if (raw.includes('PlanPipelineError') || raw.includes('Plan pipeline failed')) {
         const stageMatch = raw.match(/at (draft|critique|refine)/);
         const stage = stageMatch ? stageMatch[1] : 'planning';
         if (raw.includes('both_models_failed')) {
@@ -5939,10 +5950,10 @@ function App() {
     speechTranscriptRef.current = '';
 
     if (transcript) {
-      // Voice → brain_dump pipeline: extract structured tasks/events with
-      // confidence scoring. Tentative items land in the review rail rather
-      // than mutating state immediately.
-      sendMessage(transcript, { mode: 'brain_dump' });
+      // Voice → unified plan pipeline (brain-dump shaped): extract structured
+      // tasks/events with confidence scoring. Tentative items land in the
+      // review rail rather than mutating state immediately.
+      sendMessage(transcript, { mode: 'plan' });
     } else {
       const hasBrowserSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
       setToastMsg(hasBrowserSR

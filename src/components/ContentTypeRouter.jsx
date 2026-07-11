@@ -5,8 +5,19 @@ import { ClueCard, WorkCheckCard } from './CoachingCards';
 
 export default function ContentTypeRouter({ content, onSave, onDismiss, onApplyPlan, onApplyIntentPlan, onApplyIntentPlanSkipConflicts, onStartPlanTask, onExportGoogleDocs, googleConnected, existingRecurring }) {
   switch (content.type) {
-    case 'make_plan':
+    // make_plan is now the unified plan schema: an explicit-request plan
+    // (steps) renders as PlanCard; a goal-shaped plan (recurring_blocks /
+    // milestone_tasks) renders as IntentPlanCard. batch_actions-shaped
+    // (brain-dump) plans never reach here — App.jsx routes those straight
+    // into the action review rail instead of pendingContent.
+    case 'make_plan': {
+      const hasRoutine = (content.recurring_blocks?.length || 0) > 0 || (content.milestone_tasks?.length || 0) > 0;
+      if (hasRoutine) {
+        const conflicts = detectPlanConflicts(content.recurring_blocks || [], existingRecurring || []);
+        return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onApplyWithoutConflicts={onApplyIntentPlanSkipConflicts} onDismiss={onDismiss} conflicts={conflicts} />;
+      }
       return <PlanCard data={content} onApply={onApplyPlan} onSave={onSave} onDismiss={onDismiss} onStartTask={onStartPlanTask} onExportGoogleDocs={onExportGoogleDocs} googleConnected={googleConnected} />;
+    }
     case 'create_flashcards':
       return <FlashcardDisplay data={content} onSave={onSave} onDismiss={onDismiss} />;
     case 'create_quiz':
@@ -18,10 +29,6 @@ export default function ContentTypeRouter({ content, onSave, onDismiss, onApplyP
     // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
     case 'create_project_breakdown':
       return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
-    case 'make_intent_plan': {
-      const conflicts = detectPlanConflicts(content.recurring_blocks || [], existingRecurring || []);
-      return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onApplyWithoutConflicts={onApplyIntentPlanSkipConflicts} onDismiss={onDismiss} conflicts={conflicts} />;
-    }
     case 'make_study_pack':
       return <StudyPackCard data={content} onDismiss={onDismiss} />;
     case 'make_clue':

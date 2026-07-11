@@ -8,9 +8,7 @@
 
 import { callModel, RpmExhaustedError, type CallModelResponse, type ChatAction } from "./chat-core.js";
 import { retrieve, type RetrievedChunk } from "./rag/retrieve.js";
-import { runPlanningPipeline, PlanningPipelineError } from "./pipelines/planning.js";
-import { runIntentPlanPipeline, IntentPlanPipelineError } from "./pipelines/intent_plan.js";
-import { runBrainDumpPipeline, BrainDumpPipelineError } from "./pipelines/brain_dump.js";
+import { runPlanPipeline, PlanPipelineError } from "./pipelines/plan.js";
 import { aggregateRpmStatus, overLimit } from "./rpm-tracker.js";
 import { route, type Intent } from "./router.js";
 import { enrichDynamicContext } from "./context/enrich.js";
@@ -193,56 +191,19 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "planning" || body.mode === "intent_plan" || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
+    if ((body.mode === "studio" || body.mode === "plan" || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
       }
     }
 
-    // ── Planning pipeline ──
-    if (body.mode === "planning") {
-      const planningCtx = (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`;
-      const buildPlanningJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
-        content: "",
-        actions: [result.proposal],
-        clarifications: [],
-        executed_actions: [],
-        orchestration: { mode: "planning", iterations: result.iterations, ...CLIENT_ORCH },
-        planning_critique: result.critiqueText,
-      });
-      if (wantsSSE) {
-        return {
-          kind: "stream",
-          run: async (onChunk) => {
-            const result = await runPlanningPipeline({
-              systemPrompt: body.systemPrompt ?? "",
-              staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: planningCtx,
-              messages,
-              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
-            });
-            return buildPlanningJson(result);
-          },
-        };
-      }
-      try {
-        const result = await runPlanningPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: planningCtx,
-          messages,
-        });
-        return { kind: "json", status: 200, json: buildPlanningJson(result) };
-      } catch (err) {
-        const e = err as PlanningPipelineError;
-        return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
-      }
-    }
-
-    // ── Intent-plan pipeline ──
-    if (body.mode === "intent_plan") {
-      const intentCtx = await enrichDynamicContext({
+    // ── Unified plan pipeline (explicit request / goal / brain-dump) ──
+    // Replaces the former planning / intent_plan / brain_dump modes — all
+    // three were the same draft→critique→refine shape over one make_plan
+    // tool call; classification now happens via prompting in the draft pass.
+    if (body.mode === "plan") {
+      const planCtx = await enrichDynamicContext({
         userId,
         workspaceContext,
         intentQuery,
@@ -250,86 +211,39 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         clientTasks: body.clientTasks,
         clientCalendarDensity: body.clientCalendarDensity,
       });
-      const buildIntentJson = (result: { proposal: unknown; iterations: number; critiqueText: string }) => ({
-        content: "",
-        actions: [result.proposal],
-        clarifications: [],
-        executed_actions: [],
-        orchestration: { mode: "intent_plan", iterations: result.iterations, ...CLIENT_ORCH },
-        intent_plan_critique: result.critiqueText,
-      });
-      if (wantsSSE) {
-        return {
-          kind: "stream",
-          run: async (onChunk) => {
-            const result = await runIntentPlanPipeline({
-              systemPrompt: body.systemPrompt ?? "",
-              staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: intentCtx,
-              messages,
-              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
-            });
-            return buildIntentJson(result);
-          },
-        };
-      }
-      try {
-        const result = await runIntentPlanPipeline({
-          systemPrompt: body.systemPrompt ?? "",
-          staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: intentCtx,
-          messages,
-        });
-        return { kind: "json", status: 200, json: buildIntentJson(result) };
-      } catch (err) {
-        const e = err as IntentPlanPipelineError;
-        return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
-      }
-    }
-
-    // ── Brain-dump pipeline (voice / messy text → batch of tentative actions) ──
-    if (body.mode === "brain_dump") {
-      const dumpCtx = await enrichDynamicContext({
-        userId,
-        workspaceContext,
-        intentQuery,
-        baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
-        clientTasks: body.clientTasks,
-        clientCalendarDensity: body.clientCalendarDensity,
-      });
-      const buildDumpJson = (result: { actions: unknown[]; summary: string; iterations: number; critiqueText: string }) => ({
+      const buildPlanJson = (result: { proposal: unknown; summary: string; iterations: number; critiqueText: string }) => ({
         content: result.summary,
-        actions: result.actions,
+        actions: result.proposal ? [result.proposal] : [],
         clarifications: [],
         executed_actions: [],
-        orchestration: { mode: "brain_dump", iterations: result.iterations, ...CLIENT_ORCH },
-        brain_dump_critique: result.critiqueText,
+        orchestration: { mode: "plan", iterations: result.iterations, ...CLIENT_ORCH },
+        plan_critique: result.critiqueText,
       });
       if (wantsSSE) {
         return {
           kind: "stream",
           run: async (onChunk) => {
-            const result = await runBrainDumpPipeline({
+            const result = await runPlanPipeline({
               systemPrompt: body.systemPrompt ?? "",
               staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: dumpCtx,
+              dynamicContext: planCtx,
               messages,
               onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
             });
-            return buildDumpJson(result);
+            return buildPlanJson(result);
           },
         };
       }
       try {
-        const result = await runBrainDumpPipeline({
+        const result = await runPlanPipeline({
           systemPrompt: body.systemPrompt ?? "",
           staticSystemPrompt: body.staticSystemPrompt ?? null,
-          dynamicContext: dumpCtx,
+          dynamicContext: planCtx,
           messages,
         });
-        return { kind: "json", status: 200, json: buildDumpJson(result) };
+        return { kind: "json", status: 200, json: buildPlanJson(result) };
       } catch (err) {
-        const e = err as BrainDumpPipelineError;
+        const e = err as PlanPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
       }
     }

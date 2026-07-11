@@ -1,7 +1,15 @@
-// Re-exports the make_plan schema from studio.ts and provides the IO shape for
-// the planning pipeline so callers don't have to reach into multiple modules.
+// Re-exports the unified make_plan schema from studio.ts and provides the IO
+// shape for the plan pipeline so callers don't have to reach into multiple
+// modules. make_plan now covers explicit multi-step requests, goal-driven
+// routines, and brain-dump extraction in one schema — see studio.ts.
 
-export { MakePlanSchema, MakePlanStepSchema } from "./studio.js";
+export {
+  MakePlanSchema,
+  MakePlanStepSchema,
+  RecurringBlockSpecSchema,
+  MilestoneTaskSpecSchema,
+  PlanBatchActionSchema,
+} from "./studio.js";
 
 import { z } from "zod";
 

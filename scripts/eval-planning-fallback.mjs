@@ -4,7 +4,7 @@
 // The new pipeline relies on callModel's cross-provider fallback ladder:
 //   - Primary (Groq gpt-oss-120b) succeeds          → 3 iterations
 //   - Primary fails → callModel hops to Gemini 2.5 Pro fallback
-//   - Both providers fail on draft pass → PlanningPipelineError(stage="draft")
+//   - Both providers fail on draft pass → PlanPipelineError(stage="draft")
 //
 // We force AI_PROVIDER_OVERRIDE=gemini so the test runs against a single
 // provider seam, then monkeypatch the LlmProvider instance returned by
@@ -12,7 +12,7 @@
 
 process.env.AI_PROVIDER_OVERRIDE = "gemini";
 
-import { runPlanningPipeline, PlanningPipelineError, getProvider } from "../shared/ai/index.js";
+import { runPlanPipeline, PlanPipelineError, getProvider } from "../shared/ai/index.js";
 
 const SAMPLE_PLAN = {
   type: "make_plan",
@@ -86,7 +86,7 @@ const SCENARIOS = [
     name: "both-tiers-fail",
     handler: async () => { throw new Error("simulated outage"); },
     assertThrows: (err) => {
-      if (!(err instanceof PlanningPipelineError)) throw new Error(`expected PlanningPipelineError, got ${err?.name}: ${err?.message}`);
+      if (!(err instanceof PlanPipelineError)) throw new Error(`expected PlanPipelineError, got ${err?.name}: ${err?.message}`);
       if (err.stage !== "draft") throw new Error(`expected stage=draft, got ${err.stage}`);
     },
   },
@@ -95,7 +95,7 @@ const SCENARIOS = [
 async function runScenario(scenario) {
   const restore = installFakeProvider(scenario.handler);
   try {
-    const result = await runPlanningPipeline({
+    const result = await runPlanPipeline({
       systemPrompt: "you are SOS test",
       staticSystemPrompt: null,
       dynamicContext: null,
