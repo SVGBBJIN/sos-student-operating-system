@@ -21,6 +21,8 @@ export default function AppRouter() {
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => {
       setUser(data?.session?.user ?? null);
+    }).catch(() => {
+      setUser(null);
     });
     const { data: sub } = sb.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
