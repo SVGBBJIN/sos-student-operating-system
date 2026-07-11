@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES, queueEmbedSync } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
 import { extractPdfText } from './lib/pdf';
+import { classifyPlanShape } from './lib/planShape';
+import { plainTextFromHtml } from './lib/text';
 import Icon from './lib/icons';
 import { trackEvent } from './lib/analytics';
 import { dbInsertTaskEvent } from './lib/dataHandlers';
@@ -576,9 +578,6 @@ async function syncEmbed(items) {
     if (!token) return;
     await queueEmbedSync(items, token);
   } catch (_) { /* best-effort */ }
-}
-function plainTextFromHtml(html) {
-  return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
   const row = { user_id: userId, role, content };
@@ -1641,9 +1640,21 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${user.id}` }, payload => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
           const n = dbNoteToApp(payload.new);
+          // Saved chats live in the `notes` table too (type: 'saved_chat') but
+          // must never leak into the regular Notes panel — mirrors the split
+          // already done at initial load (loadAllFromSupabase).
+          if (n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'))) {
+            try {
+              const parsed = JSON.parse(n.content);
+              const chatEntry = { id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 };
+              setSavedChats(prev => { const idx = prev.findIndex(c => c.id === chatEntry.id); return idx >= 0 ? prev.map((c, i) => i === idx ? chatEntry : c) : [chatEntry, ...prev]; });
+            } catch (_) { /* malformed saved-chat payload — drop it, don't leak into notes */ }
+            return;
+          }
           setNotes(prev => { const idx = prev.findIndex(x => x.id === n.id); return idx >= 0 ? prev.map((x, i) => i === idx ? n : x) : [...prev, n]; });
         } else if (payload.eventType === 'DELETE') {
           setNotes(prev => prev.filter(x => x.id !== payload.old.id));
+          setSavedChats(prev => prev.filter(c => c.id !== payload.old.id));
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_blocks', filter: `user_id=eq.${user.id}` }, () => {
@@ -1796,7 +1807,15 @@ function App() {
           setTasks(data.tasks);
           setEvents(data.events);
           setBlocks(data.blocks);
-          setNotes((data.notes || []).filter(n => !(n.name && n.name.startsWith('[chat-save]'))));
+          const isSavedChatNote = n => n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'));
+          setNotes((data.notes || []).filter(n => !isSavedChatNote(n)));
+          const reconciledChats = (data.notes || []).filter(isSavedChatNote).map(n => {
+            try {
+              const parsed = JSON.parse(n.content);
+              return { id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 };
+            } catch (_) { return null; }
+          }).filter(Boolean);
+          setSavedChats(reconciledChats);
           setSyncStatus('saved');
         }
       } catch (_) { /* still offline / failing — leave the soft message in place */ }
@@ -3990,8 +4009,7 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
-              if (proposal && hasRoutine) {
+              if (proposal && classifyPlanShape(proposal) === 'routine') {
                 const critique = typeof intentData.plan_critique === 'string' ? intentData.plan_critique : '';
                 postAssistantNote(`here's a plan for "${goal}" — review it and hit Apply to add the blocks and tasks, or Dismiss to skip:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _critique: critique, _goal: goal }]);
@@ -4041,8 +4059,7 @@ function App() {
                 token: token2 || SUPABASE_ANON_KEY,
               });
               const proposal = intentData?.actions?.[0];
-              const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
-              if (proposal && hasRoutine) {
+              if (proposal && classifyPlanShape(proposal) === 'routine') {
                 postAssistantNote(`here's a revised plan — review it and hit Apply to replace the old version:`);
                 setPendingContent(prev => [...prev, { ...proposal, _propose_mode: true, _intent_plan: true, _revision_of_plan_id: planId }]);
               } else {
@@ -4142,8 +4159,7 @@ function App() {
         case 'create_project_breakdown':
           return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
         case 'make_plan': {
-          const hasRoutine = (c.recurring_blocks?.length || 0) > 0 || (c.milestone_tasks?.length || 0) > 0;
-          if (hasRoutine) {
+          if (classifyPlanShape(c) === 'routine') {
             const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
             const tasks2 = (c.milestone_tasks||[]).map(t => `- [ ] ${t.task_name}${t.due_date?' ('+t.due_date+')':''}`).join('\n');
             return '# Intent Plan\n\n' + (c.summary||'') + '\n\n## Recurring Blocks\n' + (blocks||'(none)') + '\n\n## Milestones\n' + (tasks2||'(none)');
@@ -4771,6 +4787,7 @@ function App() {
     const updated = { ...chat, title: nextTitle, savedAt: chat.savedAt || new Date().toISOString() };
     setSavedChats(prev => prev.map(c => c.id === chatId ? updated : c));
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(updated), user.id));
+    syncEmbed([{ source: 'note', source_id: chatId, text: nextTitle + '\n' + (updated.messages || []).map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     setToastMsg('Conversation renamed');
   }
 
@@ -4779,6 +4796,7 @@ function App() {
     const { chat, wasViewing } = savedChatUndo;
     setSavedChats(prev => prev.some(c => c.id === chat.id) ? prev : [chat, ...prev]);
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chat), user.id));
+    syncEmbed([{ source: 'note', source_id: chat.id, text: (chat.title || 'Saved chat') + '\n' + (chat.messages || []).map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     if (wasViewing) {
       setViewingSavedChatId(chat.id);
       setMessages(chat.messages || []);
@@ -5087,6 +5105,7 @@ function App() {
         // Caller-supplied mode override (e.g. brain_dump from voice transcripts).
         // Wins over the heuristics above.
         ...(opts.mode ? { mode: opts.mode } : {}),
+        ...(opts.planKind ? { planKind: opts.planKind } : {}),
       };
       if (photo) {
         chatBody.imageBase64 = photo.base64;
@@ -5175,11 +5194,10 @@ function App() {
       if (chatData?.orchestration?.mode === 'plan') {
         const proposal = chatData.actions?.[0];
         const critiqueText = typeof chatData.plan_critique === 'string' ? chatData.plan_critique : '';
-        const batchActions = proposal && Array.isArray(proposal.batch_actions) ? proposal.batch_actions : [];
-        const hasRoutine = proposal && ((proposal.recurring_blocks?.length || 0) > 0 || (proposal.milestone_tasks?.length || 0) > 0);
-        const hasSteps = proposal && (proposal.steps?.length || 0) > 0;
+        const shape = classifyPlanShape(proposal);
 
-        if (proposal && batchActions.length > 0) {
+        if (shape === 'batch') {
+          const batchActions = proposal.batch_actions;
           const summaryText = typeof chatData.content === 'string' && chatData.content.trim()
             ? chatData.content.trim()
             : `Pulled out ${batchActions.length} item${batchActions.length === 1 ? '' : 's'} — review below.`;
@@ -5198,7 +5216,7 @@ function App() {
           return;
         }
 
-        if (proposal && hasRoutine) {
+        if (shape === 'routine') {
           const blockCount = (proposal.recurring_blocks?.length || 0) + (proposal.review_cadence?.review_block ? 1 : 0);
           const taskCount = proposal.milestone_tasks?.length || 0;
           const introMsg = { role: 'assistant', content: `here's a structured plan — ${blockCount} recurring block${blockCount !== 1 ? 's' : ''}, ${taskCount} milestone task${taskCount !== 1 ? 's' : ''}. hit Apply to add everything, or Dismiss to skip:`, timestamp: Date.now() };
@@ -5209,7 +5227,7 @@ function App() {
           return;
         }
 
-        if (proposal && hasSteps) {
+        if (shape === 'steps') {
           const planMsg = { role: 'assistant', content: "here's a plan i put together — review it and hit Accept to add the steps to your calendar, or Edit to adjust:", timestamp: Date.now() };
           sfx.arrive();
           setMessages(prev => { const n=[...prev,planMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
@@ -5986,7 +6004,7 @@ function App() {
       // Voice → unified plan pipeline (brain-dump shaped): extract structured
       // tasks/events with confidence scoring. Tentative items land in the
       // review rail rather than mutating state immediately.
-      sendMessage(transcript, { mode: 'plan' });
+      sendMessage(transcript, { mode: 'plan', planKind: 'brain_dump' });
     } else {
       const hasBrowserSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
       setToastMsg(hasBrowserSR

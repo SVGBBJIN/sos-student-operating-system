@@ -1,4 +1,5 @@
 import Icon from '../lib/icons';
+import { classifyPlanShape } from '../lib/planShape';
 import { PlanCard, detectPlanConflicts, IntentPlanCard } from './PlanCards';
 import { FlashcardDisplay, QuizDisplay, GenericContentDisplay, StudyPackCard } from './ContentDisplayCards';
 import { ClueCard, WorkCheckCard } from './CoachingCards';
@@ -11,8 +12,7 @@ export default function ContentTypeRouter({ content, onSave, onDismiss, onApplyP
     // (brain-dump) plans never reach here — App.jsx routes those straight
     // into the action review rail instead of pendingContent.
     case 'make_plan': {
-      const hasRoutine = (content.recurring_blocks?.length || 0) > 0 || (content.milestone_tasks?.length || 0) > 0;
-      if (hasRoutine) {
+      if (classifyPlanShape(content) === 'routine') {
         const conflicts = detectPlanConflicts(content.recurring_blocks || [], existingRecurring || []);
         return <IntentPlanCard data={content} onApply={onApplyIntentPlan} onApplyWithoutConflicts={onApplyIntentPlanSkipConflicts} onDismiss={onDismiss} conflicts={conflicts} />;
       }

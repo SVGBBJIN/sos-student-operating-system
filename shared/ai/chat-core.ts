@@ -30,7 +30,7 @@ import {
   validateAction,
   type ActionName,
 } from "./schemas/actions.js";
-import { buildStudioToolDefs, validateStudio, type StudioToolName } from "./schemas/studio.js";
+import { buildStudioToolDefs, validateStudio, buildPlanToolDefs, validatePlan, type StudioToolName } from "./schemas/studio.js";
 import { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
 import { buildCoachingToolDefs, validateCoaching } from "./schemas/coaching.js";
 import { formatZodIssuesForModel, PLACEHOLDER_SUBJECT_STRINGS } from "./schemas/_helpers.js";
@@ -79,7 +79,7 @@ export interface CallModelRequest {
   dynamicContext?: string;
   messages: Message[];
   attachments?: Attachment[];
-  toolSet?: "action" | "chat" | "studio" | "study_pack" | "coaching" | "none" | "custom";
+  toolSet?: "action" | "chat" | "studio" | "plan" | "study_pack" | "coaching" | "none" | "custom";
   customTools?: ToolDef[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
@@ -136,6 +136,8 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
       return buildChatToolDefs();
     case "studio":
       return buildStudioToolDefs();
+    case "plan":
+      return buildPlanToolDefs();
     case "study_pack":
       return buildStudyPackToolDefs();
     case "coaching":
@@ -587,8 +589,8 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 
   let result = parseResponse(req, response);
 
-  // Schema repair retry — single shot, on action/chat/studio tool sets.
-  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === "chat" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "study_pack" || req.toolSet === "coaching")) {
+  // Schema repair retry — single shot, on action/chat/studio/plan tool sets.
+  if (result.validation_warnings.length > 0 && (req.toolSet === "action" || req.toolSet === "chat" || req.toolSet === undefined || req.toolSet === "studio" || req.toolSet === "plan" || req.toolSet === "study_pack" || req.toolSet === "coaching")) {
     const feedback = result.validation_warnings.flatMap((w) =>
       formatZodIssuesForModel(w.tool, w.issues.map((i) => ({
         code: "custom",
@@ -679,7 +681,9 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
 
 function schemaVersionForRequest(req: CallModelRequest): string {
   switch (req.toolSet) {
-    case "studio": return SCHEMA_VERSIONS.studio_tools;
+    case "studio":
+    case "plan":
+      return SCHEMA_VERSIONS.studio_tools;
     case "study_pack": return SCHEMA_VERSIONS.study_pack;
     case "coaching": return SCHEMA_VERSIONS.coaching;
     case "action":
@@ -747,17 +751,20 @@ function parseResponse(req: CallModelRequest, response: ChatResponse): Omit<Call
     // from the active tool set. Content tool sets skip subject enrichment and
     // clarification cards (they always force a single complete tool call).
     const isStudioTool = req.toolSet === "studio";
+    const isPlanTool = req.toolSet === "plan";
     const isStudyPackTool = req.toolSet === "study_pack";
     const isCoachingTool = req.toolSet === "coaching";
-    const isContentTool = isStudioTool || isStudyPackTool || isCoachingTool;
+    const isContentTool = isStudioTool || isPlanTool || isStudyPackTool || isCoachingTool;
     const enriched = isContentTool ? tc.args : preEnrichSubject(name, tc.args);
     const v = isStudioTool
       ? validateStudio(name, enriched)
-      : isStudyPackTool
-        ? validateStudyPack(name, enriched)
-        : isCoachingTool
-          ? validateCoaching(name, enriched)
-          : validateAction(name as ActionName, enriched);
+      : isPlanTool
+        ? validatePlan(name, enriched)
+        : isStudyPackTool
+          ? validateStudyPack(name, enriched)
+          : isCoachingTool
+            ? validateCoaching(name, enriched)
+            : validateAction(name as ActionName, enriched);
     if (!v.ok) {
       validationWarnings.push({ tool: name, issues: v.issues.map((i) => ({ field: String(i.path[0] ?? ""), message: i.message })) });
       if (!isContentTool) clarifications.push(clarificationFromIssues(name, v.issues, enriched as Record<string, unknown>));

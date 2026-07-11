@@ -43,6 +43,13 @@ export interface ChatBody {
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
   intentType?: string;
+  // mode:"plan" sub-hint. Set by the voice-transcript quick-capture path to
+  // "brain_dump" so it keeps the old dedicated brain_dump mode's exemption
+  // from the content-generation rate limit — voice dumps are meant to be a
+  // frequent, lightweight capture flow, not a 5/day-limited content-gen
+  // surface like planning/studio. Same trust boundary as before the pipeline
+  // merge: the client already fully controlled which mode string it sent.
+  planKind?: "explicit_request" | "goal" | "brain_dump";
   // Search saved work (mode: "search") — pure retrieve() passthrough, no LLM call.
   searchQuery?: string;
   searchSources?: string[];
@@ -216,7 +223,11 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
     }
 
     // Rate-limit content-generation modes before doing any real work.
-    if ((body.mode === "studio" || body.mode === "plan" || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
+    // planKind:"brain_dump" is exempt — quick voice-capture is meant to be
+    // frequent/lightweight, not gated behind the same daily cap as planning/
+    // studio generation (matches the pre-merge dedicated brain_dump mode).
+    const isExemptBrainDump = body.mode === "plan" && body.planKind === "brain_dump";
+    if ((body.mode === "studio" || (body.mode === "plan" && !isExemptBrainDump) || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };

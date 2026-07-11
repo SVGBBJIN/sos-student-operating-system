@@ -4,7 +4,9 @@
 
 import { z } from "zod";
 import {
+  blockCategoryEnum,
   dateString,
+  dayEnum,
   isoDateTimeString,
   optionalSubjectString,
   positiveDurationSeconds,
@@ -25,15 +27,6 @@ const recurringEventTypeEnum = z.enum([
 ]);
 
 const priorityEnum = z.enum(["low", "medium", "high"]);
-
-const blockCategoryEnum = z.enum([
-  "school", "swim", "debate", "free time", "sleep", "other",
-]);
-
-const dayEnum = z.enum([
-  "Monday", "Tuesday", "Wednesday", "Thursday",
-  "Friday", "Saturday", "Sunday",
-]);
 
 // Confidence + commitment shared fields. The model attaches these whenever an
 // extracted item is uncertain — e.g. "I think there might be a chem test

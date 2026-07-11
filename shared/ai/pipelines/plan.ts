@@ -7,9 +7,9 @@
 // happens via prompting inside the draft pass rather than three separate
 // entry points. The shared scaffold lives in agentic.ts.
 
-import type { ChatAction, CallModelResponse } from "../chat-core.js";
+import type { ChatAction } from "../chat-core.js";
 import type { Message, ProgressEvent } from "../providers/types.js";
-import { makePipelineError, runAgenticPipeline } from "./agentic.js";
+import { describeEmptyDraft, makePipelineError, runAgenticPipeline } from "./agentic.js";
 
 export const PlanPipelineError = makePipelineError("PlanPipelineError", "Plan pipeline");
 export type PlanPipelineError = InstanceType<typeof PlanPipelineError>;
@@ -29,23 +29,6 @@ export interface PlanPipelineOutput {
   summary: string;
   critiqueText: string;
   iterations: number;
-}
-
-// Distinguishes a real provider/schema failure (should error, loudly) from a
-// draft that legitimately extracted nothing — e.g. a brain-dump-shaped input
-// that turned out to be chit-chat (should ship empty, not error).
-function describeEmptyDraft(draft: CallModelResponse): string {
-  if (draft.finish_reason === "provider_failed" || draft.finish_reason === "circuit_open") {
-    return draft.content || "AI provider unavailable";
-  }
-  if (draft.validation_warnings.length > 0) {
-    const detail = draft.validation_warnings
-      .flatMap((w) => w.issues.map((i) => `${i.field}: ${i.message}`))
-      .slice(0, 6)
-      .join("; ");
-    return `plan failed schema validation — ${detail}`;
-  }
-  return "model returned no plan action";
 }
 
 function summarizePlan(actions: ChatAction[]): string {
@@ -112,9 +95,9 @@ export async function runPlanPipeline(input: PlanPipelineInput): Promise<PlanPip
       reviewing: "Reviewing for gaps…",
       finalizing: "Refining the final plan…",
     },
-    draftPass: { intent: "plan", toolSet: "studio", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
+    draftPass: { intent: "plan", toolSet: "plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
     critiquePass: { intent: "plan", maxOutputTokens: 600, temperature: 0.3, thinkingBudget: 1024, capMs: 10_000 },
-    refinePass: { intent: "plan", toolSet: "studio", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
+    refinePass: { intent: "plan", toolSet: "plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
     draftLabel: "Draft plan",
     critiquePrompt: "Critique the draft plan above. What is missing, unrealistic, or miscalibrated?",
     refineInstruction: "Now produce the final, improved plan.",
@@ -131,7 +114,7 @@ export async function runPlanPipeline(input: PlanPipelineInput): Promise<PlanPip
     // than silently shipping an empty plan.
     onEmptyDraft: (resp) =>
       resp.finish_reason === "provider_failed" || resp.finish_reason === "circuit_open" || resp.validation_warnings.length > 0
-        ? { error: new Error(describeEmptyDraft(resp)) }
+        ? { error: new Error(describeEmptyDraft(resp, "plan")) }
         : { ship: [] },
   });
 
@@ -144,5 +127,18 @@ export async function runPlanPipeline(input: PlanPipelineInput): Promise<PlanPip
     };
   }
 
-  return { proposal: result.actions[0]!, summary: "", critiqueText: result.critiqueText, iterations: result.iterations };
+  const proposal = result.actions[0]!;
+  const batchActions = Array.isArray(proposal.batch_actions) ? proposal.batch_actions as Array<{ confidence?: number; status?: string; commitment?: string }> : [];
+  // batch_actions-shaped plans skip the propose-mode card and go straight to
+  // the review rail (see App.jsx's mode:'plan' dispatch) — that path reads
+  // `content`/summary as the chat message, so it needs the tentative-items
+  // callout the old brain_dump pipeline computed, not a blank string.
+  const summary = batchActions.length > 0
+    ? `${batchActions.length} item${batchActions.length === 1 ? "" : "s"} extracted` +
+      (batchActions.some((a) => a.status === "tentative" || a.commitment === "tentative")
+        ? " — some marked tentative for you to confirm"
+        : "")
+    : "";
+
+  return { proposal, summary, critiqueText: result.critiqueText, iterations: result.iterations };
 }

@@ -15,6 +15,26 @@ import type { Message, ProgressEvent } from "../providers/types.js";
 
 export type PipelineStage = "draft" | "critique" | "refine";
 
+// Distinguishes a real provider/schema failure (should error, loudly) from a
+// draft that legitimately extracted nothing (should ship empty, not error).
+// Used by onEmptyDraft hooks to decide which outcome applies. This class of
+// "why did the draft come back empty" logic was previously copy-pasted once
+// per pipeline (planning/intent_plan/brain_dump each had their own near-
+// identical version) — one copy here now.
+export function describeEmptyDraft(draft: CallModelResponse, label: string): string {
+  if (draft.finish_reason === "provider_failed" || draft.finish_reason === "circuit_open") {
+    return draft.content || "AI provider unavailable";
+  }
+  if (draft.validation_warnings.length > 0) {
+    const detail = draft.validation_warnings
+      .flatMap((w) => w.issues.map((i) => `${i.field}: ${i.message}`))
+      .slice(0, 6)
+      .join("; ");
+    return `${label} failed schema validation — ${detail}`;
+  }
+  return `model returned no ${label} action`;
+}
+
 // Factory for the per-pipeline error classes. Each surface keeps its own named
 // class (chat-handler reads .stage / .cause_code off the catch) but the body is
 // identical, so it is generated here.

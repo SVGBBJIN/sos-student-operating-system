@@ -2,7 +2,15 @@
 
 import { z } from "zod";
 import type { ToolDef } from "../providers/types.js";
-import { zodToGeminiSchema } from "./_helpers.js";
+import {
+  blockCategoryEnum,
+  dateString,
+  dayEnum,
+  optionalSubjectString,
+  timeString,
+  titleLikeString,
+  zodToGeminiSchema,
+} from "./_helpers.js";
 
 export const CreateFlashcardsSchema = z.object({
   type: z.literal("create_flashcards"),
@@ -64,20 +72,8 @@ export const MakePlanStepSchema = z.object({
   estimated_minutes: z.number().positive().max(720).optional(),
 });
 
-const dayEnum = z.enum([
-  "Monday", "Tuesday", "Wednesday", "Thursday",
-  "Friday", "Saturday", "Sunday",
-]);
-
-const blockCategoryEnum = z.enum([
-  "school", "swim", "debate", "free time", "sleep", "other",
-]);
-
-const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const timeString = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
-
 export const RecurringBlockSpecSchema = z.object({
-  activity: z.string().min(1).max(200),
+  activity: titleLikeString("activity"),
   days: z.array(dayEnum).min(1),
   start: timeString,
   end: timeString,
@@ -87,9 +83,9 @@ export const RecurringBlockSpecSchema = z.object({
 });
 
 export const MilestoneTaskSpecSchema = z.object({
-  task_name: z.string().min(1).max(200),
+  task_name: titleLikeString("task_name"),
   due_date: dateString,
-  subject: z.string().max(100).optional(),
+  subject: optionalSubjectString,
   estimated_minutes: z.number().int().min(5).max(480).optional(),
 });
 
@@ -97,19 +93,22 @@ export const MilestoneTaskSpecSchema = z.object({
 // (see actions.ts) but are validated independently here rather than reusing
 // those schemas directly — they're nested payload objects inside one
 // make_plan tool call, not separate tool calls routed through the "action"
-// toolset's validator.
+// toolset's validator. Reuses the same titleLikeString/optionalSubjectString
+// guards as actions.ts so placeholder/instruction-as-title/generic-subject
+// values are caught here too, not just on direct add_task/add_event/add_block
+// calls.
 export const PlanBatchActionSchema = z.object({
   type: z.enum(["add_task", "add_event", "add_block"]),
-  title: z.string().max(200).optional(),
-  task_name: z.string().max(200).optional(),
-  activity: z.string().max(200).optional(),
+  title: titleLikeString("title").optional(),
+  task_name: titleLikeString("task_name").optional(),
+  activity: titleLikeString("activity").optional(),
   date: dateString.optional(),
   due_date: dateString.optional(),
   time: timeString.optional(),
   start: timeString.optional(),
   end: timeString.optional(),
   end_time: timeString.optional(),
-  subject: z.string().max(100).optional(),
+  subject: optionalSubjectString,
   category: blockCategoryEnum.optional(),
   estimated_minutes: z.number().int().min(5).max(480).optional(),
   confidence: z.number().min(0).max(1).optional(),
@@ -136,7 +135,11 @@ export const MakePlanSchema = z.object({
     review_block: RecurringBlockSpecSchema.optional(),
     notes: z.string().max(500).optional(),
   }).optional(),
-  batch_actions: z.array(PlanBatchActionSchema).max(60).optional().default([]),
+  // Capped at 25, not the ~60 a truly enormous dump could contain: the draft/
+  // refine passes budget maxOutputTokens: 3000 for the whole make_plan call,
+  // which can't reliably fit much more than this many fully-populated items
+  // without risking truncated/invalid JSON.
+  batch_actions: z.array(PlanBatchActionSchema).max(25).optional().default([]),
 }).refine(
   (d) => d.steps.length > 0 || d.recurring_blocks.length > 0 || d.milestone_tasks.length > 0 || d.batch_actions.length > 0,
   { message: "plan must contain at least one step, recurring block, milestone, or extracted item" }
@@ -176,6 +179,26 @@ export function validateStudio(name: string, args: unknown):
   const schema = STUDIO_SCHEMAS[name as StudioToolName];
   if (!schema) return { ok: false, issues: [{ code: z.ZodIssueCode.custom, path: [], message: `Unknown studio tool: ${name}` }] };
   const parsed = schema.safeParse(args);
+  if (parsed.success) return { ok: true, data: parsed.data as Record<string, unknown> };
+  return { ok: false, issues: parsed.error.issues };
+}
+
+// Dedicated single-tool toolset for the plan pipeline. Plan drafts used to run
+// on the 6-tool "studio" toolset (create_flashcards/create_quiz/etc. all
+// alongside make_plan) with toolChoice:"required" — with only one tool in
+// play the risk is nil, but with six the model can pick a studio content tool
+// instead of make_plan, and the pipeline's fallback (`resp.actions[0]`) would
+// silently treat that as the plan proposal. A one-tool toolset makes mis-pick
+// impossible.
+export function buildPlanToolDefs(): ToolDef[] {
+  return [{ name: "make_plan", description: STUDIO_DESCRIPTIONS.make_plan, parameters: zodToGeminiSchema(MakePlanSchema) }];
+}
+
+export function validatePlan(name: string, args: unknown):
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; issues: z.ZodIssue[] } {
+  if (name !== "make_plan") return { ok: false, issues: [{ code: z.ZodIssueCode.custom, path: [], message: `Unknown plan tool: ${name}` }] };
+  const parsed = MakePlanSchema.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as Record<string, unknown> };
   return { ok: false, issues: parsed.error.issues };
 }

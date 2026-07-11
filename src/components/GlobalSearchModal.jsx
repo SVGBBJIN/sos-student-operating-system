@@ -1,4 +1,5 @@
 import React from 'react';
+import { plainTextFromHtml } from '../lib/text';
 
 /* ═══════════════════════════════════════════════
    GLOBAL SEARCH MODAL (Cmd+K)
@@ -31,7 +32,7 @@ export default function GlobalSearchModal({ query, onQueryChange, onClose, tasks
       }
     });
     notes.forEach(n => {
-      const plain = (n.content || '').replace(/<[^>]+>/g, '');
+      const plain = plainTextFromHtml(n.content);
       if (n.name?.toLowerCase().includes(q) || plain.toLowerCase().includes(q)) {
         const idx = plain.toLowerCase().indexOf(q);
         const snippet = idx >= 0 ? '…' + plain.slice(Math.max(0, idx - 20), idx + 60) + '…' : plain.slice(0, 80);
