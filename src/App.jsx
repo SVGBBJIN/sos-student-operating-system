@@ -1770,6 +1770,12 @@ function App() {
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
 
+  // Focus Sessions run state — declared here (ahead of its first read below)
+  // so the notification-suppression effect can see it. See the full Focus
+  // Sessions block further down for the rest of the engine (launcher state,
+  // timers, actions).
+  const [focusRun, setFocusRun] = useState(null);
+
   // ── Notification scheduling: re-run whenever tasks, events, or prefs change ──
   // While a focus session is running the home goes quiet — no scheduled
   // notifications. The suppression is scoped to the session: it never touches
@@ -1968,8 +1974,8 @@ function App() {
   // seams. Both share one engine (shared/scheduling/focus.ts). The run lives in
   // memory only — ephemeral, reverts on reload, persists nothing but the task
   // completions it drives. focusRun === null means no session.
+  // (focusRun itself is declared earlier, ahead of the notification-suppression effect.)
   const [focusLauncherOpen, setFocusLauncherOpen] = useState(false);
-  const [focusRun, setFocusRun] = useState(null);
   // Soft-exit clock (sprint) and break auto-ignite (marathon) timers.
   const sprintClockRef = useRef(null);
   const breakTimeoutRef = useRef(null);
