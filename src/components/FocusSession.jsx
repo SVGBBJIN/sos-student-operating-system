@@ -30,7 +30,7 @@ function fmtClock(ms) {
 }
 
 const wrapStyle = {
-  position: 'fixed', inset: 0, zIndex: 820,
+  position: 'fixed', inset: 0, zIndex: 820, overflow: 'hidden',
   background: 'radial-gradient(circle at 50% 28%, #0c1020 0%, #06070f 70%, #040509 100%)',
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
   padding: 32, textAlign: 'center', gap: 22,
@@ -116,6 +116,7 @@ export default function FocusSession({
   if (status === 'ended') {
     return (
       <div style={wrapStyle}>
+        <FocusBg />
         <div style={labelStyle}>{mode === 'marathon' ? 'marathon done' : 'sprint done'}</div>
         <div style={{ fontSize: 'clamp(20px, 4vw, 28px)', fontWeight: 600, color: 'rgba(255,255,255,0.92)' }}>
           {summary || 'Session closed.'}
@@ -131,6 +132,7 @@ export default function FocusSession({
     const remainMs = breakEndsAt ? breakEndsAt - Date.now() : 0;
     return (
       <div style={wrapStyle}>
+        <FocusBg />
         <div style={labelStyle}>break</div>
         <div style={{ fontSize: 'clamp(40px, 9vw, 72px)', fontWeight: 200, color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
           {fmtClock(remainMs)}
@@ -147,6 +149,7 @@ export default function FocusSession({
   if (breakOffer) {
     return (
       <div style={wrapStyle}>
+        <FocusBg />
         <div style={labelStyle}>seam</div>
         <div style={{ fontSize: 'clamp(20px, 4vw, 28px)', fontWeight: 600, color: 'rgba(255,255,255,0.92)', maxWidth: 'min(480px, 90vw)' }}>
           {breakOffer.line}
@@ -175,6 +178,7 @@ export default function FocusSession({
   if (!activeTask) {
     return (
       <div style={wrapStyle}>
+        <FocusBg />
         <div style={labelStyle}>{mode}</div>
         <div style={{ fontSize: 20, color: 'rgba(255,255,255,0.7)' }}>Queue's clear.</div>
         <button onClick={onEnd} style={{ ...ghostBtn, color: 'rgba(255,255,255,0.78)' }}>Close</button>
@@ -189,6 +193,7 @@ export default function FocusSession({
 
   return (
     <div style={wrapStyle}>
+      <FocusBg />
       <div style={labelStyle}>{topLabel}</div>
 
       <ActiveTask task={activeTask} />
@@ -224,10 +229,30 @@ export default function FocusSession({
   );
 }
 
+// A slow, low-opacity drifting glow — reads as "breathing" rather than
+// decoration. Off entirely under prefers-reduced-motion.
+function FocusBg() {
+  return <div className="fs-bg" aria-hidden="true" />;
+}
+
 function Keyframes() {
   return (
     <style>{`
       @keyframes gateFadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }
+      @keyframes fsDrift {
+        0%   { transform: translate(-4%, -3%) scale(1); }
+        50%  { transform: translate(3%, 4%) scale(1.08); }
+        100% { transform: translate(-4%, -3%) scale(1); }
+      }
+      .fs-bg {
+        position: absolute; inset: -10%; z-index: -1; pointer-events: none;
+        background: radial-gradient(circle at 30% 32%, rgba(94,234,212,0.06), transparent 55%),
+                    radial-gradient(circle at 70% 65%, rgba(94,234,212,0.045), transparent 60%);
+        animation: fsDrift 30s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .fs-bg { animation: none; }
+      }
     `}</style>
   );
 }
