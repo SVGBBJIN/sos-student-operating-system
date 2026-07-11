@@ -399,7 +399,7 @@ export default function Landing() {
             <p>Notes, lessons, flashcards, and AI podcasts — searchable, in one place.</p>
             <span className="more">Learn more →</span>
           </button>
-          <button type="button" className="ld-feat" onClick={go('/studio?focus=tasks')}>
+          <button type="button" className="ld-feat" onClick={go('/studio')}>
             <div className="ico"><Icon name="check" /></div>
             <h3>Task manager</h3>
             <p>Natural language in, structured deadlines out. "Pset due friday" just works.</p>

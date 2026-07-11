@@ -1522,14 +1522,14 @@ function App() {
     }
   }, []);
 
-  // ── Honor ?panel= / ?focus= so Landing "Learn more" cards can deep-link ──
+  // ── Honor ?panel= so Landing "Learn more" cards can deep-link to a panel.
+  // Always lands on the dashboard rather than popping the chat overlay open —
+  // the dashboard already surfaces tasks/calendar/agenda at a glance.
   useEffect(() => {
     const panel = searchParams.get('panel');
-    const focus = searchParams.get('focus');
-    const target = panel || focus;
-    if (!target) return;
-    if (['home', 'settings'].includes(target)) setActivePanel(target);
-    else if (target === 'chat' || target === 'tasks' || target === 'calendar') { setActivePanel('dashboard'); setChatOpen(true); }
+    if (!panel) return;
+    if (['home', 'settings'].includes(panel)) setActivePanel(panel);
+    else setActivePanel('dashboard');
   }, [searchParams]);
 
   // Guests have no DB, so their work lives only in React state — which an OAuth
