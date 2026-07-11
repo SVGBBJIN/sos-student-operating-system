@@ -244,6 +244,11 @@ Before every LLM turn, server enriches context in parallel (all bounded 3s, grac
 
 Assembled snippet injected into system prompt with task priority top-3, schedule density, and memory matches.
 
+### Note bucket + search
+Saved work (notes, saved chats, flashcard decks, applied study plans) is embedded into `memory_embeddings` on save (`src/lib/supabase.js` `queueEmbedSync()` → `supabase/functions/embed-batch`, auth'd off the caller's own bearer token) and retrievable two ways:
+- **Model-invoked**: the `search_memory` action tool (existing chat-routing tool, server-executed, results fed back into the same turn — never client-executed)
+- **Manual search**: `mode: "search"` on the chat endpoint (`{ searchQuery, searchSources?, searchLimit? }` → `{ results }`), a pure `retrieve()` passthrough with no LLM call. `⌘K` global search debounces into this to augment its instant local substring filter with semantic/paraphrase matches.
+
 ## Priority Engine (shared/scheduling/priority.ts)
 
 Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **client-side** (for `prioritize_tasks` display).
@@ -290,8 +295,8 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 - `tasks` — title, due_date, subject, status, priority, confidence, commitment, completion_source, lms_assignment_ref
 - `events` — title, event_date, event_type, subject, status, confidence
 - `blocks` — activity, date, start_time/end_time, category
-- `notes` — title, content, subject, parent_id (folders), is_folder
-- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata)
+- `notes` — title, content, subject, parent_id (folders), is_folder, `type` (`note` | `saved_chat` — replaces the old `[chat-save]` name-prefix convention)
+- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata). `source` ∈ `memory | event | task | note | lesson | block | flashcard_deck | study_plan`
 
 **Behavioral signals**:
 - `task_events` — event_type (status_change, postpone, complete, etc.), timestamps, metadata

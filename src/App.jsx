@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES } from './lib/supabase';
+import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES, queueEmbedSync } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
 import { extractPdfText } from './lib/pdf';
 import Icon from './lib/icons';
@@ -428,6 +428,7 @@ function dbNoteToApp(row) {
     updatedAt: row.updated_at,
     parent_id: row.parent_id || null,
     is_folder: !!row.is_folder,
+    type: row.type || 'note',
   };
 }
 function appNoteToDb(n, userId) {
@@ -439,6 +440,7 @@ function appNoteToDb(n, userId) {
     updated_at: n.updatedAt || new Date().toISOString(),
     parent_id: n.parent_id || null,
     is_folder: !!n.is_folder,
+    type: n.type || 'note',
   };
 }
 
@@ -564,6 +566,19 @@ async function dbDeleteEvent(eventId, userId) {
 async function dbUpsertNote(note, userId) {
   const { error } = await sb.from('notes').upsert(appNoteToDb(note, userId), { onConflict: 'id' });
   if (error) console.error('Note upsert error:', error);
+}
+// Best-effort: index saved work into the RAG store so it becomes retrievable
+// via semantic search. Fire-and-forget — never awaited by callers.
+async function syncEmbed(items) {
+  try {
+    const session = await sb.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) return;
+    await queueEmbedSync(items, token);
+  } catch (_) { /* best-effort */ }
+}
+function plainTextFromHtml(html) {
+  return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 async function dbInsertChatMsg(role, content, userId, photoUrl = null) {
   const row = { user_id: userId, role, content };
@@ -1285,6 +1300,7 @@ function App() {
   useEffect(() => () => { if (savedChatUndoTimerRef.current) clearTimeout(savedChatUndoTimerRef.current); }, []);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [semanticSearchResults, setSemanticSearchResults] = useState([]);
   const CHAT_SAVE_PREFIX = '[chat-save]';
 
   // Photo upload state
@@ -1416,7 +1432,7 @@ function App() {
       const regularNotes = [];
       const chatSaves = [];
       (data.notes || []).forEach(n => {
-        if (n.name && n.name.startsWith('[chat-save]')) {
+        if (n.type === 'saved_chat' || (n.name && n.name.startsWith('[chat-save]'))) {
           try {
             const parsed = JSON.parse(n.content);
             chatSaves.push({ id: n.id, title: parsed.title || 'Untitled Chat', messages: parsed.messages || [], savedAt: parsed.savedAt || n.updatedAt, messageCount: parsed.messageCount || 0 });
@@ -3050,10 +3066,12 @@ function App() {
             if (existing >= 0) {
               const updated = prev.map((n,i) => i===existing ? { ...n, content:n.content+(n.content?'\n':'')+content, updatedAt:new Date().toISOString(), parent_id: folderId || n.parent_id } : n);
               if (user) syncOp(() => dbUpsertNote(updated[existing], user.id));
+              syncEmbed([{ source: 'note', source_id: updated[existing].id, text: tabName + '\n' + plainTextFromHtml(updated[existing].content), metadata: { note_type: 'note' } }]);
               return updated;
             }
             const newNote = { id:uid(), name:tabName, content, updatedAt:new Date().toISOString(), is_folder: false, parent_id: folderId };
             if (user) syncOp(() => dbUpsertNote(newNote, user.id));
+            syncEmbed([{ source: 'note', source_id: newNote.id, text: tabName + '\n' + plainTextFromHtml(content), metadata: { note_type: 'note' } }]);
             return [...prev, newNote];
           });
           if (user) trackEvent(user.id, 'action_confirmed', { type: 'add_note', source });
@@ -4146,6 +4164,8 @@ function App() {
       if (deckId) {
         console.log('[sos] flashcard deck saved:', deckId);
         setFlashcardDecks(prev => [{ id: deckId, title: c.title, summary: c.summary || null, cards: c.cards || [], source: 'ai', card_count: (c.cards || []).length, created_at: new Date().toISOString() }, ...prev]);
+        const cardText = (c.cards || []).map(card => `${card.q} — ${card.a}`).join('\n');
+        syncEmbed([{ source: 'flashcard_deck', source_id: deckId, text: (c.title || 'Flashcard Deck') + '\n' + (c.summary || '') + '\n' + cardText, metadata: { card_count: (c.cards || []).length } }]);
       }
       return;
     }
@@ -4288,6 +4308,11 @@ function App() {
           };
           setStudyPlans(prev => [newPlan, ...prev]);
         }
+      }
+      if (resolvedPlanId) {
+        const blockText = (plan.recurring_blocks || []).map(b => `${b.activity} (${(b.days||[]).join('/')} ${b.start}-${b.end})`).join('\n');
+        const taskText = (plan.milestone_tasks || []).map(t => `${t.task_name} due ${t.due_date}`).join('\n');
+        syncEmbed([{ source: 'study_plan', source_id: resolvedPlanId, text: (plan.summary || 'Study Plan') + '\n' + blockText + '\n' + taskText, metadata: {} }]);
       }
 
       // Instrument plans-created vs started-within-24h. Tied to the first
@@ -4659,6 +4684,7 @@ function App() {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported "' + title + '" to notes 📄');
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
@@ -4668,6 +4694,7 @@ function App() {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'pdf' };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
@@ -4677,6 +4704,9 @@ function App() {
     setNotes(prev => prev.filter(n => n.id !== noteId));
     if (user) {
       syncOp(() => sb.from('notes').delete().eq('id', noteId).eq('user_id', user.id));
+      // memory_embeddings has no delete API here on purpose — a stale, never-
+      // retrieved chunk is harmless, and match_memories always filters by the
+      // owner's user_id, so nothing leaks. Cron-based pruning is a future add.
     }
     setToastMsg('Note deleted');
   }
@@ -4684,6 +4714,7 @@ function App() {
   function handleUpdateNote(updated) {
     setNotes(prev => prev.map(n => n.id === updated.id ? { ...n, ...updated } : n));
     if (user) syncOp(() => dbUpsertNote(updated, user.id));
+    syncEmbed([{ source: 'note', source_id: updated.id, text: (updated.name || '') + '\n' + plainTextFromHtml(updated.content), metadata: { note_type: updated.type || 'note' } }]);
     setToastMsg('Note saved');
   }
 
@@ -4691,6 +4722,7 @@ function App() {
     const note = { id: uid(), ...noteData, updatedAt: new Date().toISOString() };
     setNotes(prev => [...prev, note]);
     if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: (note.name || '') + '\n' + plainTextFromHtml(note.content), metadata: { note_type: note.type || 'note' } }]);
     setToastMsg('Note created');
   }
 
@@ -4704,7 +4736,7 @@ function App() {
       savedAt,
       messageCount: chat.messageCount || (chat.messages || []).length,
     };
-    return { id: chat.id, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt };
+    return { id: chat.id, name: CHAT_SAVE_PREFIX + title, content: JSON.stringify(chatData), updatedAt: savedAt, type: 'saved_chat' };
   }
 
   function autoSaveCurrentChat() {
@@ -4716,6 +4748,7 @@ function App() {
     const savedAt = new Date().toISOString();
     const chatData = { id: chatId, title, messages: messages.slice(), savedAt, messageCount: messages.length };
     if (user) syncOp(() => dbUpsertNote(makeSavedChatNote(chatData), user.id));
+    syncEmbed([{ source: 'note', source_id: chatId, text: title + '\n' + messages.map(m => m.content).join('\n').slice(0, 6000), metadata: { note_type: 'saved_chat' } }]);
     setSavedChats(prev => [chatData, ...prev]);
     return chatData;
   }
@@ -6035,6 +6068,33 @@ function App() {
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showNotes,showChatSidebar,showGlobalSearch,activePanel]);
 
+  // ── Global search: semantic backend augments the instant local filter ──
+  // Debounced so we don't fire an embed+RPC round-trip on every keystroke.
+  useEffect(() => {
+    if (!showGlobalSearch || !user || globalSearchQuery.trim().length < 3) {
+      setSemanticSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const q = globalSearchQuery.trim();
+    const timer = setTimeout(async () => {
+      try {
+        const session = await sb.auth.getSession();
+        const token = session?.data?.session?.access_token;
+        if (!token || cancelled) return;
+        const res = await fetch(EDGE_FN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ mode: 'search', searchQuery: q, searchSources: ['note', 'flashcard_deck', 'study_plan'], searchLimit: 8 }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setSemanticSearchResults(Array.isArray(data?.results) ? data.results : []);
+      } catch (_) { if (!cancelled) setSemanticSearchResults([]); }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [showGlobalSearch, globalSearchQuery, user]);
+
   // ── Loading data after login ──
   if (user && !dataLoaded) {
     return (
@@ -6880,6 +6940,7 @@ function App() {
         events={events}
         notes={notes}
         savedChats={savedChats}
+        semanticResults={semanticSearchResults}
         onSelectNote={note => { setShowGlobalSearch(false); setShowNotes(true); }}
         onOpenSavedChat={loadSavedChat}
         onSendMessage={q => { setShowGlobalSearch(false); sendMessage(q); }}

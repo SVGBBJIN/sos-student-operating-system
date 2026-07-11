@@ -10,3 +10,22 @@ export const EDGE_FN_URL = window.location.hostname.includes('vercel.app')
   : SUPABASE_URL + '/functions/v1/sos-chat';
 
 export const CHAT_MAX_MESSAGES = 60;
+
+/* Fire-and-forget sync of saved work (notes, flashcard decks, study plans)
+   into the RAG index so it becomes retrievable via semantic search. Never
+   blocks or throws into the caller — a failed embed is not worth surfacing
+   as a user-facing error, the save itself already succeeded. */
+export async function queueEmbedSync(items, token) {
+  if (!token || !Array.isArray(items) || items.length === 0) return;
+  const cleaned = items
+    .filter(it => it && it.source_id && typeof it.text === 'string' && it.text.trim())
+    .map(it => ({ source: it.source, source_id: it.source_id, text: it.text.slice(0, 8000), metadata: it.metadata || {}, chunk_idx: 0 }));
+  if (cleaned.length === 0) return;
+  try {
+    await fetch(SUPABASE_URL + '/functions/v1/embed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ items: cleaned }),
+    });
+  } catch (_) { /* best-effort — search just won't find this item yet */ }
+}

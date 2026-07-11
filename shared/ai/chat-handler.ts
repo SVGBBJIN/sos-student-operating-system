@@ -43,6 +43,10 @@ export interface ChatBody {
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
   intentType?: string;
+  // Search saved work (mode: "search") — pure retrieve() passthrough, no LLM call.
+  searchQuery?: string;
+  searchSources?: string[];
+  searchLimit?: number;
   // Hint & Work-Check surfaces.
   contentType?: string;          // procedure | fact | argument (LMS task type hint)
   proofreadRoundsUsed?: number;  // rounds already used in the current 2h window
@@ -178,6 +182,27 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
   const intentQuery = messages.slice(-1)[0]?.content ?? "";
 
   try {
+    // ── Search saved work (My Work / global search) ──
+    // Pure RPC passthrough — no LLM call. Reuses the same retrieve() helper
+    // that powers the model's search_memory tool hop, so a manual search box
+    // and the model's own recall share one index and one ranking.
+    if (body.mode === "search") {
+      if (!userId) {
+        return { kind: "json", status: 401, json: { error: "Authentication required" } };
+      }
+      const q = (body.searchQuery ?? "").trim();
+      if (!q) {
+        return { kind: "json", status: 400, json: { error: "searchQuery is required" } };
+      }
+      const results = await retrieve({
+        userId,
+        query: q,
+        sources: body.searchSources,
+        k: Math.min(body.searchLimit ?? 10, 25),
+      });
+      return { kind: "json", status: 200, json: { results } };
+    }
+
     // ── Voice transcription (Groq Whisper) ──
     if (body.mode === "voice") {
       if (!body.audioBase64) {

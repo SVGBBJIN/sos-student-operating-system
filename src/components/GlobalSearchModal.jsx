@@ -3,7 +3,15 @@ import React from 'react';
 /* ═══════════════════════════════════════════════
    GLOBAL SEARCH MODAL (Cmd+K)
    ═══════════════════════════════════════════════ */
-export default function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, savedChats = [], onSelectNote, onOpenSavedChat, onSendMessage }) {
+// Maps a memory_embeddings row (source + metadata) to a search result "kind".
+function semanticKind(row) {
+  if (row.source === 'flashcard_deck') return 'flashcard';
+  if (row.source === 'study_plan') return 'plan';
+  if (row.source === 'note' && row.metadata?.note_type === 'saved_chat') return 'chat';
+  return 'note';
+}
+
+export default function GlobalSearchModal({ query, onQueryChange, onClose, tasks, events, notes, savedChats = [], semanticResults = [], onSelectNote, onOpenSavedChat, onSendMessage }) {
   const inputRef = React.useRef(null);
   const [activeIndex, setActiveIndex] = React.useState(0);
   React.useEffect(() => { inputRef.current?.focus(); }, []);
@@ -38,16 +46,40 @@ export default function GlobalSearchModal({ query, onQueryChange, onClose, tasks
         out.push({ kind: 'chat', id: chat.id, label: chat.title || 'Saved chat', sub, obj: chat });
       }
     });
-    return out.slice(0, 12);
-  }, [q, tasks, events, notes, savedChats]);
+    // Semantic hits from the RAG index — augments the instant local filter
+    // with fuzzy/meaning matches it can't catch (paraphrases, deep note
+    // content, flashcard decks, and applied study plans). Deduped against
+    // local matches so the same item never appears twice.
+    const localKeys = new Set(out.map(r => r.kind + ':' + r.id));
+    semanticResults.forEach(row => {
+      const kind = semanticKind(row);
+      const key = kind + ':' + row.source_id;
+      if (localKeys.has(key)) return;
+      localKeys.add(key);
+      const snippet = (row.text || '').slice(0, 90);
+      if (kind === 'flashcard') {
+        out.push({ kind, id: row.source_id, label: (row.text || '').split('\n')[0] || 'Flashcard deck', sub: 'Flashcards · ' + snippet, obj: row, semantic: true });
+      } else if (kind === 'plan') {
+        out.push({ kind, id: row.source_id, label: (row.text || '').split('\n')[0] || 'Study plan', sub: 'Study plan · ' + snippet, obj: row, semantic: true });
+      } else if (kind === 'chat') {
+        out.push({ kind, id: row.source_id, label: (row.text || '').split('\n')[0] || 'Saved chat', sub: 'Chat · ' + snippet, obj: row, semantic: true });
+      } else {
+        out.push({ kind: 'note', id: row.source_id, label: (row.text || '').split('\n')[0] || 'Note', sub: snippet, obj: row, semantic: true });
+      }
+    });
+    return out.slice(0, 16);
+  }, [q, tasks, events, notes, savedChats, semanticResults]);
 
   React.useEffect(() => { setActiveIndex(0); }, [query]);
 
-  const kindIcon = { task: '☑', event: '📅', note: '📝', chat: '💬' };
+  const kindIcon = { task: '☑', event: '📅', note: '📝', chat: '💬', flashcard: '🗂', plan: '🗓' };
 
   function handleSelect(r) {
     if (!r) return;
-    if (r.kind === 'note') onSelectNote(r.obj);
+    if (r.kind === 'note') {
+      if (r.semantic) { onSendMessage(`Tell me about "${r.label}"`); return; }
+      onSelectNote(r.obj);
+    }
     else if (r.kind === 'chat') onOpenSavedChat?.(r.id);
     else onSendMessage(`Tell me about "${r.label}"`);
   }
