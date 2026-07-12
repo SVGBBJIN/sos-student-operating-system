@@ -1533,6 +1533,15 @@ function App() {
     else setActivePanel('dashboard');
   }, [searchParams]);
 
+  // ── Honor ?auth=login|signup so Landing's "Sign in" button opens the real
+  // auth modal on arrival instead of just dropping the visitor in anonymously.
+  useEffect(() => {
+    const auth = searchParams.get('auth');
+    if (!auth || user) return;
+    setAuthModalInitialMode(auth === 'signup' ? 'signup' : 'login');
+    setShowAuthModal(true);
+  }, [searchParams, user]);
+
   // Guests have no DB, so their work lives only in React state — which an OAuth
   // redirect or a reload wipes before they ever sign up. Persist it to the same
   // cc_* localStorage keys migrateLocalStorage() already imports on first login,
