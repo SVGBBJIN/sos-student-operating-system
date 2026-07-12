@@ -6430,6 +6430,14 @@ function App() {
           events={events}
           prefs={homePrefs}
           onOpenChat={() => setChatOpen(true)}
+          onStartFocusSession={(preset, label) => {
+            executeAction({
+              type: 'set_timer',
+              preset: preset,
+              label: label,
+              __confirmed: true
+            });
+          }}
         />
       ) : activePanel === 'settings' ? (
         <div className="settings-fullscreen">
