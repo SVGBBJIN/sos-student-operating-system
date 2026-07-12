@@ -8,6 +8,7 @@ const Landing      = React.lazy(() => import('./pages/Landing.jsx'));
 const Library      = React.lazy(() => import('./pages/Library.jsx'));
 const CalendarPage = React.lazy(() => import('./pages/CalendarPage.jsx'));
 const ProjectsPage = React.lazy(() => import('./pages/ProjectsPage.jsx'));
+const JoinGroupPage = React.lazy(() => import('./pages/JoinGroupPage.jsx'));
 const NotFound     = React.lazy(() => import('./pages/NotFound.jsx'));
 
 /**
@@ -83,6 +84,12 @@ export default function AppRouter() {
         <Route
           path="/library"
           element={<Library />}
+        />
+
+        {/* Group invite links — always public; redirects into /studio's auth flow if needed */}
+        <Route
+          path="/join/:token"
+          element={<JoinGroupPage />}
         />
 
         {/* Redirects for old paths */}

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import Icon from '../lib/icons';
-import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL } from '../lib/supabase';
+import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, IMPORT_URL_ENDPOINT } from '../lib/supabase';
 import { extractPdfText } from '../lib/pdf';
 import { fmt } from '../lib/dateUtils';
 import { mapGoogleCalItems, extractDocsText, parseDocId } from '../lib/googleImport.js';
@@ -8,9 +8,12 @@ import { mapGoogleCalItems, extractDocsText, parseDocId } from '../lib/googleImp
 /* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
-export default function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onDisconnect, onConnect,
+export default function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onImportUrl, onDisconnect, onConnect,
   calSyncEnabled, calSyncStatus, calSyncLastAt, calSyncCount, calSyncError, onToggleCalSync, onSyncNow }) {
   const [tab, setTab] = useState('calendar');
+  // URL import tab state — server-side fetch + text extraction (no headless browser)
+  const [urlInput, setUrlInput] = useState('');
+  const [urlLoading, setUrlLoading] = useState(false);
   // Calendar tab state
   const [calEvents, setCalEvents] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -138,6 +141,27 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
     finally { setLoading(false); }
   }
 
+  // ── URL import ── (server-side fetch + readable-text extraction; no login-gated/JS-rendered pages)
+  async function importUrl() {
+    const trimmed = urlInput.trim();
+    if (!trimmed) { setErr('Please enter a URL.'); return; }
+    setUrlLoading(true); setErr(null);
+    try {
+      const session = await sb.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const res = await fetch(IMPORT_URL_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
+        body: JSON.stringify({ url: trimmed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Import failed: ' + res.status);
+      onImportUrl(data.title || trimmed, data.text);
+      setUrlInput('');
+    } catch (e) { setErr(e.message); }
+    finally { setUrlLoading(false); }
+  }
+
   async function importAudio(file) { await transcribeFile(file, setAudioLoading); }
 
   async function importVideo(file) {
@@ -149,7 +173,7 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
     } catch(e) { setErr(e.message); setVideoLoading(false); }
   }
 
-  const isLoading = calLoading || docLoading || pdfLoading || audioLoading || videoLoading;
+  const isLoading = calLoading || docLoading || pdfLoading || audioLoading || videoLoading || urlLoading;
 
   return (
     <>
@@ -179,13 +203,14 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
 
         {/* Tabs */}
         <div className="g-tabs">
-          {['calendar','docs','pdf','audio','video'].map(t=>(
+          {['calendar','docs','pdf','audio','video','url'].map(t=>(
             <button key={t} className={'g-tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setErr(null);}}>
               {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>
               :t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>
               :t==='pdf'?<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>
               :t==='audio'?<><span style={{display:'inline-flex'}}>{Icon.headphones(14)}</span> Audio</>
-              :<><span style={{display:'inline-flex'}}>{Icon.video(14)}</span> Video</>}
+              :t==='video'?<><span style={{display:'inline-flex'}}>{Icon.video(14)}</span> Video</>
+              :<><span style={{display:'inline-flex'}}>{Icon.link(14)}</span> Website</>}
             </button>
           ))}
         </div>
@@ -349,6 +374,26 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
             <input ref={audioInputRef} type="file" accept=".mp3,.wav,.m4a,.ogg,.webm,.aac,.flac" style={{display:'none'}}
               onChange={e=>{if(e.target.files?.[0]){importAudio(e.target.files[0]);e.target.value='';}}}/>
             <p className="g-note" style={{marginTop:8}}>Supported: MP3, WAV, M4A, OGG, WebM, AAC, FLAC. Max 25MB. Audio will be transcribed to text and saved as a note.</p>
+          </div>
+        )}
+
+        {/* ── URL Tab ── (server-side fetch + text extraction, no headless browser) */}
+        {tab==='url' && (
+          <div className="g-section">
+            <p className="g-note">Paste a link to an article, textbook page, or study guide. We'll pull the readable text and build a study pack from it. JS-heavy or login-gated pages won't work.</p>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input type="text" value={urlInput} onChange={e=>{setUrlInput(e.target.value);setErr(null);}}
+                placeholder="https://example.com/article"
+                style={{flex:1,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',color:'var(--text)',fontSize:'0.85rem',outline:'none',transition:'border-color .2s'}}
+                onFocus={e=>e.target.style.borderColor='var(--accent)'}
+                onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+              {urlInput && <button onClick={()=>{setUrlInput('');setErr(null);}}
+                style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:'2px 6px',display:'flex'}}>{Icon.x(14)}</button>}
+            </div>
+            <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:8}}
+              onClick={importUrl} disabled={urlLoading||!urlInput.trim()}>
+              {urlLoading?'Fetching page…':'Import from URL'}
+            </button>
           </div>
         )}
 
