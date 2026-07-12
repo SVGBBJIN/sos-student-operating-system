@@ -1,18 +1,28 @@
 import React from 'react';
 
+/**
+ * The real per-action-type accent vocabulary used by ConfirmationCard
+ * (`getCardInfo()` in ConfirmationCards.jsx) and ContentCard (`accentColor`
+ * prop in ContentDisplayCards.jsx / ContentTypeRouter.jsx) — task/default,
+ * event, block/update, break-down, complete, delete. No other accent values
+ * appear anywhere in the real card system.
+ */
+export type SosCardAccent = 'accent' | 'teal' | 'blue' | 'orange' | 'success' | 'danger';
+
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
-  /** Accent color of the card's left border and header icon. @default 'teal' */
-  accent?: 'teal' | 'amber' | 'violet' | 'danger';
+  /** Accent color of the card's left border, matching its action type. @default 'teal' */
+  accent?: SosCardAccent;
 }
 
 /**
  * Elevated surface used for AI content cards, proposal cards, and confirmation cards.
  * Compose with CardHeader / CardBody / CardActions.
  */
-export function Card({ accent = 'teal', className, children, ...rest }: CardProps) {
-  const cls = ['sos-ds-card', `sos-ds-card--${accent}`, className].filter(Boolean).join(' ');
+export function Card({ accent = 'teal', className, style, children, ...rest }: CardProps) {
+  const cls = ['sos-ds-card', className].filter(Boolean).join(' ');
+  const cardStyle = { ...style, '--sos-ds-card-ac': `var(--sos-${accent})` } as React.CSSProperties;
   return (
-    <div className={cls} {...rest}>
+    <div className={cls} style={cardStyle} {...rest}>
       {children}
     </div>
   );
@@ -27,7 +37,7 @@ export interface CardHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   subtitle?: React.ReactNode;
 }
 
-/** Header row for a Card — icon, title, optional subtitle. */
+/** Header row for a Card — icon, title, optional subtitle. Icon badge tints to the parent Card's accent. */
 export function CardHeader({ icon, title, subtitle, className, ...rest }: CardHeaderProps) {
   return (
     <div className={['sos-ds-card-header', className].filter(Boolean).join(' ')} {...rest}>

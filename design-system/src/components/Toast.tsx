@@ -31,6 +31,8 @@ export interface ConfirmToastProps {
   onReject: () => void;
   /** Small caption line above the message, e.g. a source label. */
   eyebrow?: React.ReactNode;
+  /** Small muted centered line below the actions, e.g. an auto-confirm countdown. */
+  footnote?: React.ReactNode;
 }
 
 /**
@@ -44,6 +46,7 @@ export function ConfirmToast({
   onConfirm,
   onReject,
   eyebrow,
+  footnote,
 }: ConfirmToastProps) {
   return (
     <div className="sos-ds-confirm-toast">
@@ -57,6 +60,7 @@ export function ConfirmToast({
           {rejectLabel}
         </button>
       </div>
+      {footnote && <div className="sos-ds-confirm-toast-footnote">{footnote}</div>}
     </div>
   );
 }

@@ -14,6 +14,7 @@ export function LmsSubmission() {
       rejectLabel="Not yet"
       onConfirm={() => {}}
       onReject={() => {}}
+      footnote="Auto-confirming in 4:52"
     />
   );
 }

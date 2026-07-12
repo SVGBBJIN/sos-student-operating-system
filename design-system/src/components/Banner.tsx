@@ -1,22 +1,31 @@
 import React from 'react';
 
 export interface BannerProps {
-  /** Banner tone. @default 'info' */
-  tone?: 'info' | 'warning' | 'danger';
+  /** Leading icon/emoji, e.g. the app's mascot. */
+  icon?: React.ReactNode;
   /** Main banner message. */
   message: React.ReactNode;
-  /** Optional trailing action, e.g. a countdown label or link. */
-  action?: React.ReactNode;
+  /** Called when the dismiss (×) button is clicked. Omit to hide the button. */
+  onDismiss?: () => void;
 }
 
 /**
- * Full-width inline notice — used for rate-limit warnings and sync-status banners.
+ * Status toast — matches RateLimitBanner exactly (the "Charles is resting"
+ * AI-unavailable notice). This is the only real banner-like element in the
+ * app: single dark style, icon + message + optional dismiss, no tone
+ * variants — an earlier version of this component invented info/warning/
+ * danger tones that don't correspond to anything real, so they were removed.
  */
-export function Banner({ tone = 'info', message, action }: BannerProps) {
+export function Banner({ icon, message, onDismiss }: BannerProps) {
   return (
-    <div className={`sos-ds-banner sos-ds-banner--${tone}`}>
+    <div className="sos-ds-banner" role="alert">
+      {icon && <span className="sos-ds-banner-icon">{icon}</span>}
       <span className="sos-ds-banner-message">{message}</span>
-      {action && <span className="sos-ds-banner-action">{action}</span>}
+      {onDismiss && (
+        <button type="button" className="sos-ds-banner-dismiss" aria-label="Dismiss" onClick={onDismiss}>
+          ×
+        </button>
+      )}
     </div>
   );
 }

@@ -44,50 +44,74 @@ body {
 .sos-ds-btn--sm { padding: 6px 12px; font-size: 0.78rem; }
 .sos-ds-btn--md { padding: 9px 16px; font-size: 0.86rem; }
 .sos-ds-btn--lg { padding: 12px 20px; font-size: 0.94rem; }
+/* primary: matches ContentCard's Save button exactly — real code computes
+   `background: linear-gradient(135deg, ${ac}, color-mix(in srgb, ${ac} 70%, #000))`
+   and `box-shadow: 0 2px 12px color-mix(in srgb, ${ac} 25%, transparent)` from
+   the card's own accent color (`ac`), defaulting to teal outside a Card via
+   the same custom-property fallback Card itself uses. */
 .sos-ds-btn--primary {
-  background: linear-gradient(135deg, var(--sos-teal) 0%, #1db99a 100%);
-  color: #04121a;
-  box-shadow: 0 2px 12px rgba(56, 216, 232, 0.25);
+  background: linear-gradient(
+    135deg,
+    var(--sos-ds-card-ac, var(--sos-teal)),
+    color-mix(in srgb, var(--sos-ds-card-ac, var(--sos-teal)) 70%, #000)
+  );
+  color: #fff;
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--sos-ds-card-ac, var(--sos-teal)) 25%, transparent);
 }
 .sos-ds-btn--primary:hover:not(:disabled) { transform: translateY(-1px); }
 .sos-ds-btn--primary:active:not(:disabled) { transform: scale(0.97); }
+/* secondary: matches .g-btn exactly (GoogleImportModal/InviteLinkModal) —
+   including its literal amber hover tint, which is real and currently live
+   (not overridden by any inline style at its call sites). */
 .sos-ds-btn--secondary {
   background: var(--sos-bg-2);
   border-color: var(--sos-border);
 }
-.sos-ds-btn--secondary:hover:not(:disabled) { border-color: var(--sos-accent); background: rgba(56, 216, 232, 0.05); }
+.sos-ds-btn--secondary:hover:not(:disabled) { border-color: var(--sos-accent); background: rgba(245, 158, 11, 0.05); }
+/* ghost: matches .content-card-dismiss exactly. */
 .sos-ds-btn--ghost {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
   color: var(--sos-text-dim);
 }
 .sos-ds-btn--ghost:hover:not(:disabled) { border-color: var(--sos-text-dim); color: var(--sos-text); }
+/* danger: matches .g-confirm-btn.danger exactly (its own literal red,
+   distinct from the --sos-danger token — see NOTES.md). */
 .sos-ds-btn--danger {
-  background: rgba(255, 107, 129, 0.14);
-  border-color: rgba(255, 107, 129, 0.4);
-  color: var(--sos-danger);
+  background: rgba(255, 71, 87, 0.12);
+  border-color: rgba(255, 71, 87, 0.45);
+  color: #ff8090;
 }
-.sos-ds-btn--danger:hover:not(:disabled) { background: rgba(255, 107, 129, 0.22); }
+.sos-ds-btn--danger:hover:not(:disabled) { background: rgba(255, 71, 87, 0.22); border-color: #ff4757; color: #ff4757; }
 .sos-ds-btn-icon { display: inline-flex; align-items: center; }
 
-/* Badge / Chip */
+/* Badge — matches .notes-badge exactly (size/radius/weight/spacing), one
+   real per-type tone per NotesPanel's notes-badge-pdf/docs/ai and
+   ConfirmationCard's confirm-card-hdr-badge. The real classes pair each
+   tone's foreground token with an unrelated hardcoded rgba() tint left over
+   from an earlier accent palette (see NOTES.md) — reworked here to tint from
+   the same real token instead of perpetuating that mismatch. */
 .sos-ds-badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
-  border-radius: 8px;
-  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
   font-family: var(--sos-font-body);
 }
-.sos-ds-badge--neutral { background: rgba(255, 255, 255, 0.06); color: var(--sos-text-dim); }
-.sos-ds-badge--accent { background: var(--sos-accent-glow); color: var(--sos-accent); }
-.sos-ds-badge--success { background: rgba(53, 210, 154, 0.16); color: var(--sos-success); }
-.sos-ds-badge--warning { background: rgba(255, 179, 71, 0.16); color: var(--sos-warning); }
-.sos-ds-badge--danger { background: rgba(255, 107, 129, 0.16); color: var(--sos-danger); }
+.sos-ds-badge--accent { background: color-mix(in srgb, var(--sos-accent) 12%, transparent); color: var(--sos-accent); }
+.sos-ds-badge--teal { background: color-mix(in srgb, var(--sos-teal) 12%, transparent); color: var(--sos-teal); }
+.sos-ds-badge--blue { background: color-mix(in srgb, var(--sos-blue) 12%, transparent); color: var(--sos-blue); }
+.sos-ds-badge--orange { background: color-mix(in srgb, var(--sos-orange) 12%, transparent); color: var(--sos-orange); }
+.sos-ds-badge--success { background: color-mix(in srgb, var(--sos-success) 12%, transparent); color: var(--sos-success); }
+.sos-ds-badge--danger { background: color-mix(in srgb, var(--sos-danger) 12%, transparent); color: var(--sos-danger); }
 
+/* Chip — matches .sos-chip exactly, including the hover "shimmer" sweep
+   (::after) and press scale-down. No selected/active state exists on the
+   real class, so none is added here. */
 .sos-ds-chip {
   background: rgba(64, 89, 196, 0.18);
   border: 1px solid rgba(86, 120, 242, 0.36);
@@ -95,57 +119,69 @@ body {
   padding: 6px 14px;
   border-radius: 24px;
   font-size: 0.82rem;
-  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
+  position: relative;
+  overflow: hidden;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sos-ds-chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(87, 140, 255, 0.12), transparent);
+  transform: translateX(-100%);
+  transition: none;
 }
 .sos-ds-chip:hover {
   background: linear-gradient(135deg, rgba(92, 118, 245, 0.24), rgba(67, 90, 220, 0.18));
   border-color: rgba(128, 170, 255, 0.8);
+  box-shadow: 0 2px 16px rgba(46, 80, 196, 0.22);
   transform: translateY(-1px);
 }
-.sos-ds-chip--selected {
-  background: linear-gradient(135deg, var(--sos-teal), #1db99a);
-  border-color: transparent;
-  color: #04121a;
-  font-weight: 700;
-}
+.sos-ds-chip:hover::after { transform: translateX(100%); transition: transform 0.5s ease; }
+.sos-ds-chip:active { transform: translateY(0) scale(0.96); }
 
-/* Card */
+/* Card — accent-driven per action type, matching ConfirmationCard/ContentCard
+   (real code passes one `ac` color through border/icon/badge/save-button via
+   inline styles + color-mix(); here the same value is set once as a CSS
+   custom property on the Card root and inherited by its children). */
 .sos-ds-card {
+  --sos-ds-card-ac: var(--sos-teal);
   background: linear-gradient(160deg, rgba(10, 10, 18, 0.95) 0%, rgba(15, 15, 30, 0.92) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-left: 3px solid var(--sos-teal);
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-left: 3px solid var(--sos-ds-card-ac);
   border-radius: 4px 16px 16px 4px;
   max-width: 420px;
   overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(245, 158, 11, 0.06);
 }
-.sos-ds-card--teal { border-left-color: var(--sos-teal); }
-.sos-ds-card--amber { border-left-color: var(--sos-warning); }
-.sos-ds-card--violet { border-left-color: var(--sos-violet); }
-.sos-ds-card--danger { border-left-color: var(--sos-danger); }
+.sos-ds-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(245, 158, 11, 0.12), 0 0 40px rgba(245, 158, 11, 0.04);
+  border-color: rgba(245, 158, 11, 0.2);
+}
 .sos-ds-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 12px 16px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.08);
+  background: rgba(245, 158, 11, 0.03);
 }
 .sos-ds-card-header-left { display: flex; align-items: center; gap: 10px; }
 .sos-ds-card-header-icon {
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: var(--sos-accent-glow);
-  border: 1px solid var(--sos-accent-dim);
+  background: color-mix(in srgb, var(--sos-ds-card-ac) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sos-ds-card-ac) 20%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--sos-accent);
+  color: var(--sos-ds-card-ac);
   flex-shrink: 0;
 }
 .sos-ds-card-title { font-weight: 700; font-size: 0.88rem; color: var(--sos-text); letter-spacing: 0.3px; }
@@ -155,8 +191,8 @@ body {
   display: flex;
   gap: 8px;
   padding: 10px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.015);
+  border-top: 1px solid rgba(245, 158, 11, 0.08);
+  background: rgba(245, 158, 11, 0.02);
 }
 
 /* Toast */
@@ -165,11 +201,17 @@ body {
   padding: 10px 20px;
   border-radius: 14px;
   background: linear-gradient(135deg, var(--sos-success), #1db954);
-  color: #04120c;
+  color: #fff;
   font-weight: 600;
   font-size: 0.88rem;
-  box-shadow: 0 4px 24px rgba(46, 213, 115, 0.4);
+  box-shadow: 0 4px 24px rgba(46, 213, 115, 0.4), 0 0 40px rgba(46, 213, 115, 0.1);
 }
+/* ConfirmToast — matches LmsPendingToast exactly. That component styles
+   itself with var(--bg-secondary,#1e1e2e) / var(--text-secondary,#94a3b8) —
+   two custom properties this app never defines anywhere, so they always
+   render at their literal fallback hex (kept verbatim below); var(--border),
+   var(--success), and var(--text) ARE defined in :root and do resolve to
+   the real current tokens (not their fallbacks) — see NOTES.md. */
 .sos-ds-confirm-toast {
   display: flex;
   flex-direction: column;
@@ -178,11 +220,11 @@ body {
   border-radius: 16px;
   min-width: 280px;
   max-width: 360px;
-  background: var(--sos-bg-2);
+  background: #1e1e2e;
   border: 1px solid var(--sos-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
-.sos-ds-confirm-toast-eyebrow { font-size: 0.76rem; opacity: 0.6; font-weight: 500; }
+.sos-ds-confirm-toast-eyebrow { font-size: 0.8rem; opacity: 0.6; font-weight: 500; }
 .sos-ds-confirm-toast-message { font-weight: 600; font-size: 0.9rem; line-height: 1.35; }
 .sos-ds-confirm-toast-actions { display: flex; gap: 8px; }
 .sos-ds-confirm-toast-confirm {
@@ -192,7 +234,7 @@ body {
   border: none;
   cursor: pointer;
   background: var(--sos-success);
-  color: #04120c;
+  color: #fff;
   font-weight: 700;
   font-size: 0.85rem;
 }
@@ -205,8 +247,9 @@ body {
   font-size: 0.85rem;
   background: transparent;
   border: 1px solid var(--sos-border);
-  color: var(--sos-text-dim);
+  color: #94a3b8;
 }
+.sos-ds-confirm-toast-footnote { font-size: 0.72rem; opacity: 0.4; text-align: center; }
 
 /* Switch */
 .sos-ds-switch {
@@ -220,7 +263,16 @@ body {
   position: relative;
   transition: background 0.2s ease;
 }
-.sos-ds-switch--on { background: linear-gradient(135deg, var(--sos-accent), var(--sos-teal)); }
+/* --accent-highlight (the gradient's 2nd stop) is computed at runtime by
+   AppearanceSettings.jsx as accent mixed 55% toward white — approximated
+   here with color-mix since a static stylesheet can't run that JS. Note
+   --accent and --teal are literally the same hex in the default palette, so
+   a naive accent→teal gradient (an earlier version of this file) renders as
+   a flat, non-gradient fill — not a real visual, just a mistake. */
+.sos-ds-switch--on {
+  background: linear-gradient(135deg, var(--sos-accent), color-mix(in srgb, var(--sos-accent) 45%, white));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
 .sos-ds-switch-knob {
   display: block;
   width: 24px;
@@ -275,38 +327,62 @@ body {
   100% { left: 100%; }
 }
 
-/* TextField */
+/* TextField — matches .confirm-edit-input exactly (the inline-editing input
+   in ConfirmationCard; `.g-input` was considered but is dead CSS — no JSX in
+   the app renders it, so it was dropped as a grounding source). Label
+   matches .confirm-card-label. */
 .sos-ds-field { display: flex; flex-direction: column; gap: 6px; }
-.sos-ds-field-label { font-size: 0.78rem; font-weight: 600; color: var(--sos-text-dim); }
-.sos-ds-field-input {
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--sos-border);
-  background: var(--sos-bg-2);
-  font-size: 0.88rem;
+.sos-ds-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--sos-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
-.sos-ds-field-input:focus-visible {
+.sos-ds-field-input {
+  background: rgba(10, 10, 18, 0.8);
+  border: 1px solid rgba(245, 158, 11, 0.12);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--sos-text);
+  font-size: 0.85rem;
   outline: none;
-  box-shadow: 0 0 0 2px var(--sos-accent-dim);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sos-ds-field-input:focus {
   border-color: var(--sos-accent);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
 }
 .sos-ds-field-hint { font-size: 0.72rem; color: var(--sos-text-dim); }
 .sos-ds-field-hint--error { color: var(--sos-danger); }
 
-/* Banner */
+/* Banner — matches RateLimitBanner exactly (literal values, not tokens: the
+   real component hardcodes its own dark surface independent of --sos-bg-2). */
 .sos-ds-banner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  border-radius: 12px;
-  font-size: 0.82rem;
+  gap: 10px;
+  background: rgba(20, 20, 30, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  padding: 10px 18px;
+  border-radius: 14px;
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.5);
+  font-size: 0.85rem;
+  font-weight: 500;
+  max-width: 90vw;
 }
-.sos-ds-banner--info { background: var(--sos-accent-glow); border: 1px solid var(--sos-accent-dim); }
-.sos-ds-banner--warning { background: rgba(255, 179, 71, 0.14); border: 1px solid rgba(255, 179, 71, 0.36); }
-.sos-ds-banner--danger { background: rgba(255, 107, 129, 0.14); border: 1px solid rgba(255, 107, 129, 0.36); }
-.sos-ds-banner-action { font-weight: 600; white-space: nowrap; }
+.sos-ds-banner-icon { font-size: 1.1rem; }
+.sos-ds-banner-dismiss {
+  margin-left: 8px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+}
 
 /* Chat bubbles */
 .sos-ds-msg-row { display: flex; padding: 6px 24px; }
