@@ -6423,13 +6423,6 @@ function App() {
           }}
           onUploadSyllabus={handleSyllabusUpload}
           syllabusBusy={syllabusBusy}
-        />
-      ) : activePanel === 'home' ? (
-        <HomeScreen
-          tasks={tasks}
-          events={events}
-          prefs={homePrefs}
-          onOpenChat={() => setChatOpen(true)}
           onStartFocusSession={(preset, label) => {
             executeAction({
               type: 'set_timer',
@@ -6438,6 +6431,13 @@ function App() {
               __confirmed: true
             });
           }}
+        />
+      ) : activePanel === 'home' ? (
+        <HomeScreen
+          tasks={tasks}
+          events={events}
+          prefs={homePrefs}
+          onOpenChat={() => setChatOpen(true)}
         />
       ) : activePanel === 'settings' ? (
         <div className="settings-fullscreen">

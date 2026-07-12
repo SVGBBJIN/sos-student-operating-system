@@ -23,13 +23,6 @@ export const HOME_FOCUS_OPTIONS = [
   { id: 'task',    label: 'Today\'s top task' },
   { id: 'event',   label: 'Next upcoming event' },
   { id: 'message', label: 'Custom message' },
-  { id: 'focus_session', label: 'Focus session' },
-];
-
-export const FOCUS_PRESETS = [
-  { id: 'pomodoro', label: 'Pomodoro', duration: '25 min', preset: 'pomodoro' },
-  { id: 'short_break', label: 'Short break', duration: '5 min', preset: 'short_break' },
-  { id: 'long_break', label: 'Long break', duration: '15 min', preset: 'long_break' },
 ];
 
 export function getHomePrefs() {
@@ -86,13 +79,10 @@ function selectFocusContent({ focus, message, tasks, events }) {
     }
     return { primary: 'No events upcoming.', secondary: 'Open week is yours.' };
   }
-  if (focus === 'focus_session') {
-    return { type: 'interactive', primary: 'Start a focus session', isInteractive: true };
-  }
   return { primary: '', secondary: '' };
 }
 
-export default function HomeScreen({ tasks, events, prefs, onOpenChat, onStartFocusSession }) {
+export default function HomeScreen({ tasks, events, prefs, onOpenChat }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000 * 30);
@@ -143,40 +133,6 @@ export default function HomeScreen({ tasks, events, prefs, onOpenChat, onStartFo
           </div>
         )}
       </div>
-
-      {focus.isInteractive && (
-        <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {FOCUS_PRESETS.map(preset => (
-            <button
-              key={preset.id}
-              onClick={() => onStartFocusSession?.(preset.preset, preset.label)}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.9)',
-                backdropFilter: 'blur(12px)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 500,
-                transition: 'all 200ms ease',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.background = 'rgba(255,255,255,0.15)';
-                e.target.style.borderColor = 'rgba(255,255,255,0.4)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.background = 'rgba(255,255,255,0.08)';
-                e.target.style.borderColor = 'rgba(255,255,255,0.2)';
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>{preset.label}</div>
-              <div style={{ fontSize: 11, opacity: 0.8 }}>{preset.duration}</div>
-            </button>
-          ))}
-        </div>
-      )}
 
       <button
         onClick={onOpenChat}
