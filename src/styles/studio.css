@@ -62,11 +62,14 @@
   --accent-bg: rgba(22,163,123,0.10);
   --accent-line: rgba(22,163,123,0.45);
   --success: #16a37b;
+  --success-bg: rgba(22,163,123,0.10);
+  --success-line: rgba(22,163,123,0.45);
   --danger: #dc4f3c;
   --danger-bg: rgba(220,79,60,0.10);
   --danger-line: rgba(220,79,60,0.45);
   --warning: #c98a16;
   --warning-bg: rgba(201,138,22,0.10);
+  --warning-line: rgba(201,138,22,0.45);
   --shadow-sm: 0 1px 3px rgba(26,24,20,0.06);
   --shadow-md: 0 4px 16px rgba(26,24,20,0.10);
   --shadow-lg: 0 12px 30px rgba(26,24,20,0.14);
@@ -1024,6 +1027,7 @@
 }
 .studio .panel-action:hover { color: var(--accent); }
 .studio .panel-body { padding: 0; }
+.studio .panel-body.flush { padding: 0; }
 
 /* ── Up next ─────────────────────────────────────────────────── */
 .studio .upnext { padding: 14px; display: flex; flex-direction: column; gap: 4px; }
@@ -1267,7 +1271,7 @@
   background: var(--bg); border: 1px solid var(--line); color: var(--fg-3);
 }
 .studio .sug-row[data-type="grammar"] .sug-type { color: var(--danger); border-color: var(--danger-line); background: var(--danger-bg); }
-.studio .sug-row[data-type="word"]    .sug-type { color: var(--warning); border-color: var(--warning); background: var(--warning-bg); }
+.studio .sug-row[data-type="word"]    .sug-type { color: var(--warning); border-color: var(--warning-line); background: var(--warning-bg); }
 .studio .sug-row[data-type="style"]   .sug-type { color: var(--accent); border-color: var(--accent-line); background: var(--accent-bg); }
 .studio .sug-change { grid-area: change; font-size: 13px; color: var(--fg-1); }
 .studio .sug-from { color: var(--fg-3); text-decoration: line-through; }

@@ -160,14 +160,33 @@ function useDashboardData(tasks, events) {
       ? `${(focusedMin / 60).toFixed(1)}h`
       : `${focusedMin}m`;
 
-    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress, focused };
+    // Day streak — consecutive calendar days with at least one completed task.
+    // Today doesn't break the streak before it's done: counting starts from
+    // today if it already has a completion, otherwise from yesterday.
+    const doneDates = new Set(
+      (tasks || [])
+        .filter(t => t.status === 'done' && t.completedAt)
+        .map(t => new Date(t.completedAt).toDateString())
+    );
+    let streakDays = 0;
+    if (doneDates.size) {
+      const cursor = new Date();
+      if (!doneDates.has(cursor.toDateString())) cursor.setDate(cursor.getDate() - 1);
+      while (doneDates.has(cursor.toDateString())) {
+        streakDays++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+    }
+
+    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress, focused, streakDays };
   }, [tasks, events]);
 }
 
 /* ── presentational pieces (data-driven) ──────────────────────── */
-function StatStrip({ progress, doneToday, eventsToday, focused }) {
+function StatStrip({ progress, doneToday, eventsToday, focused, streakDays }) {
   const stats = [
-    { id: 'progress', icon: 'target', big: `${progress}%`, label: "today's progress", accent: true },
+    { id: 'streak', icon: 'flame', big: String(streakDays), label: 'day streak', accent: true },
+    { id: 'progress', icon: 'target', big: `${progress}%`, label: "today's progress" },
     { id: 'done', icon: 'check', big: String(doneToday), label: 'done today' },
     { id: 'events', icon: 'calendar', big: String(eventsToday), label: 'events' },
     { id: 'focused', icon: 'clock', big: focused, label: 'focused' },
@@ -317,7 +336,7 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk }
           <QuickActions onPick={onAsk} />
         </header>
 
-        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} />
+        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} streakDays={data.streakDays} />
 
         <div className="bento">
           <div className="bento-agenda">

@@ -1,10 +1,11 @@
 // FocusLauncher — the one-tap entry into a focus session.
 //
-// Removes activation energy and choice overload: pick a mode (Sprint or
-// Marathon), then either a duration (Sprint) or a goal (Marathon — a count off
-// the top of the queue, zero config, or a hand-tapped selection). That's the
-// whole decision. Tasks themselves are never hand-picked in Sprint or in a
-// count-based Marathon — the priority engine drives the order.
+// The task list lives here now, inline — not a separate floating widget.
+// Picking what to work on and starting the timer are the same motion: tap a
+// task's Start pill and the session ignites immediately with that task
+// active. No second click, no ambient soft-timer standing in for the real
+// thing. Marathon still supports a blind Top-N goal (priority engine drives
+// order, no hand-picking) alongside the same list for "Pick tasks".
 //
 // Presentational: App ranks the pool and runs the session. Dry, no praise.
 
@@ -19,7 +20,7 @@ const SPRINT_DURATIONS = [
 const COUNT_GOALS = [3, 5, 8];
 
 const wrapStyle = {
-  position: 'fixed', inset: 0, zIndex: 810,
+  position: 'fixed', inset: 0, zIndex: 810, overflow: 'hidden',
   background: 'radial-gradient(circle at 50% 30%, #0c1020 0%, #06070f 70%, #040509 100%)',
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
   padding: 32, textAlign: 'center', gap: 22, animation: 'gateFadeIn 320ms ease-out',
@@ -38,7 +39,70 @@ const chip = (on) => ({
   color: on ? 'rgba(170,245,230,0.95)' : 'rgba(255,255,255,0.6)',
 });
 
-export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
+function dueLabel(task) {
+  if (!task?.dueDate) return task?.subject || '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(task.dueDate + 'T00:00:00');
+  const days = Math.round((due - today) / 86400000);
+  if (days < 0) return 'overdue';
+  if (days === 0) return 'due today';
+  if (days === 1) return 'due tomorrow';
+  return `due in ${days}d`;
+}
+
+// One CTA per task, one fact per CTA — the strongest real allocator signal,
+// gain-framed, never a fabricated number.
+function ctaText(taskChip) {
+  if (!taskChip) return 'Start';
+  if (typeof taskChip.reductionPct === 'number') return `Start · clears ~${taskChip.reductionPct}% today`;
+  if (taskChip.label) return `Start ${taskChip.label}`;
+  return 'Start';
+}
+
+function TaskRow({ task, chip: taskChip, mode, selected, onStart, onToggle }) {
+  const fit = taskChip?.tone === 'fit';
+  const isSelect = mode === 'select';
+  return (
+    <div
+      className="fl-row"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 12px', borderRadius: 12,
+        border: selected ? '1px solid rgba(94,234,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
+        background: selected ? 'rgba(94,234,212,0.10)' : 'rgba(255,255,255,0.02)',
+        textAlign: 'left', cursor: isSelect ? 'pointer' : 'default',
+      }}
+      onClick={isSelect ? onToggle : undefined}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13.5, fontWeight: 600, color: 'rgba(255,255,255,0.9)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {selected ? '✓ ' : ''}{task.title}
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+          {[dueLabel(task), task.subject].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+      {mode === 'start' && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onStart?.(task); }}
+          style={{
+            flexShrink: 0, padding: '8px 14px', borderRadius: 999, border: 'none', cursor: 'pointer',
+            background: fit ? 'rgba(94,234,212,0.92)' : 'rgba(255,255,255,0.08)',
+            color: fit ? '#05231f' : 'rgba(255,255,255,0.85)',
+            fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+          }}
+        >
+          {ctaText(taskChip)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function FocusLauncher({ tasks = [], chips = [], onLaunch, onClose }) {
   const [mode, setMode] = useState('sprint');
   const [durationMs, setDurationMs] = useState(SPRINT_DURATIONS[1].ms);
   const [goalKind, setGoalKind] = useState('count');
@@ -63,10 +127,19 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
     onLaunch?.({ mode: 'marathon', goal });
   }
 
+  // Tapping a task's own Start pill launches immediately — the timer starts
+  // on this click, no separate confirm step. Sprint always: a one-task jump
+  // in mid-Marathon-setup shouldn't require abandoning the goal picker first.
+  function startOne(task) {
+    onLaunch?.({ mode: 'sprint', durationMs, startTaskId: task.id });
+  }
+
   const canLaunch = !empty && (mode === 'sprint' || goalKind === 'count' || selected.length > 0);
 
   return (
     <div style={wrapStyle} role="dialog" aria-label="Start a focus session">
+      <div className="fl-bg" aria-hidden="true" />
+
       <div style={labelStyle}>Head down</div>
 
       <div style={{ display: 'flex', gap: 10 }}>
@@ -75,7 +148,7 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
       </div>
       <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', maxWidth: 360, lineHeight: 1.4 }}>
         {mode === 'sprint'
-          ? 'One timed window. Top of the queue, task to task, no gap.'
+          ? 'Tap a task to start now, or take the top of the queue blind.'
           : 'Bound by a goal, not a clock. Looped sprints with a break in the seams.'}
       </div>
 
@@ -84,11 +157,18 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
       )}
 
       {!empty && mode === 'sprint' && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {SPRINT_DURATIONS.map(d => (
-            <button key={d.ms} style={chip(durationMs === d.ms)} onClick={() => setDurationMs(d.ms)}>{d.label}</button>
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {SPRINT_DURATIONS.map(d => (
+              <button key={d.ms} style={chip(durationMs === d.ms)} onClick={() => setDurationMs(d.ms)}>{d.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '38vh', overflowY: 'auto', width: 'min(440px, 90vw)' }}>
+            {tasks.map((t, i) => (
+              <TaskRow key={t.id} task={t} chip={chips[i]} mode="start" onStart={startOne} />
+            ))}
+          </div>
+        </>
       )}
 
       {!empty && mode === 'marathon' && (
@@ -107,20 +187,9 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '40vh', overflowY: 'auto', width: 'min(420px, 88vw)' }}>
-              {tasks.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => toggleSel(t.id)}
-                  style={{
-                    textAlign: 'left', padding: '10px 14px', borderRadius: 12, cursor: 'pointer',
-                    border: selected.includes(t.id) ? '1px solid rgba(94,234,212,0.5)' : '1px solid rgba(255,255,255,0.08)',
-                    background: selected.includes(t.id) ? 'rgba(94,234,212,0.10)' : 'rgba(255,255,255,0.02)',
-                    color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: 500,
-                  }}
-                >
-                  {selected.includes(t.id) ? '✓ ' : ''}{t.title}
-                </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '40vh', overflowY: 'auto', width: 'min(440px, 90vw)' }}>
+              {tasks.map((t, i) => (
+                <TaskRow key={t.id} task={t} chip={chips[i]} mode="select" selected={selected.includes(t.id)} onToggle={() => toggleSel(t.id)} />
               ))}
             </div>
           )}
@@ -137,7 +206,7 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
             background: 'rgba(94,234,212,0.92)', color: '#05231f', fontSize: 15, fontWeight: 700,
           }}
         >
-          Start
+          {mode === 'sprint' ? 'Start top of queue' : 'Start'}
         </button>
         <button
           onClick={onClose}
@@ -151,7 +220,23 @@ export default function FocusLauncher({ tasks = [], onLaunch, onClose }) {
         </button>
       </div>
 
-      <style>{`@keyframes gateFadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }`}</style>
+      <style>{`
+        @keyframes gateFadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }
+        @keyframes flDrift {
+          0%   { transform: translate(-4%, -3%) scale(1); }
+          50%  { transform: translate(3%, 4%) scale(1.08); }
+          100% { transform: translate(-4%, -3%) scale(1); }
+        }
+        .fl-bg {
+          position: absolute; inset: -10%; z-index: -1; pointer-events: none;
+          background: radial-gradient(circle at 30% 30%, rgba(94,234,212,0.07), transparent 55%),
+                      radial-gradient(circle at 72% 68%, rgba(94,234,212,0.05), transparent 60%);
+          animation: flDrift 26s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fl-bg { animation: none; }
+        }
+      `}</style>
     </div>
   );
 }
