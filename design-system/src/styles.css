@@ -1,0 +1,353 @@
+@import './tokens.css';
+
+/* SOS is a dark-theme-only design system — every component's text, borders,
+   and "ghost"/ "secondary" surfaces are tuned for the dark app background,
+   not a white canvas. Set it once here so any host page renders legibly by
+   default; a light host page should override --sos-bg/--sos-text instead of
+   fighting individual components. */
+html,
+body {
+  /* !important: some embedding harnesses (incl. this DS's own preview
+     cards) set an inline `body{background:#fff}` after this stylesheet
+     loads, which would otherwise win the cascade by source order and
+     silently put every component back on an unreadable white canvas. */
+  background: var(--sos-bg) !important;
+  color: var(--sos-text);
+}
+
+/* Base */
+.sos-ds-btn,
+.sos-ds-chip,
+.sos-ds-field-input,
+.sos-ds-card,
+.sos-ds-toast,
+.sos-ds-confirm-toast,
+.sos-ds-banner {
+  font-family: var(--sos-font-body);
+  color: var(--sos-text);
+}
+
+/* Button */
+.sos-ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--sos-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sos-ds-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sos-ds-btn--full { width: 100%; }
+.sos-ds-btn--sm { padding: 6px 12px; font-size: 0.78rem; }
+.sos-ds-btn--md { padding: 9px 16px; font-size: 0.86rem; }
+.sos-ds-btn--lg { padding: 12px 20px; font-size: 0.94rem; }
+.sos-ds-btn--primary {
+  background: linear-gradient(135deg, var(--sos-teal) 0%, #1db99a 100%);
+  color: #04121a;
+  box-shadow: 0 2px 12px rgba(56, 216, 232, 0.25);
+}
+.sos-ds-btn--primary:hover:not(:disabled) { transform: translateY(-1px); }
+.sos-ds-btn--primary:active:not(:disabled) { transform: scale(0.97); }
+.sos-ds-btn--secondary {
+  background: var(--sos-bg-2);
+  border-color: var(--sos-border);
+}
+.sos-ds-btn--secondary:hover:not(:disabled) { border-color: var(--sos-accent); background: rgba(56, 216, 232, 0.05); }
+.sos-ds-btn--ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--sos-text-dim);
+}
+.sos-ds-btn--ghost:hover:not(:disabled) { border-color: var(--sos-text-dim); color: var(--sos-text); }
+.sos-ds-btn--danger {
+  background: rgba(255, 107, 129, 0.14);
+  border-color: rgba(255, 107, 129, 0.4);
+  color: var(--sos-danger);
+}
+.sos-ds-btn--danger:hover:not(:disabled) { background: rgba(255, 107, 129, 0.22); }
+.sos-ds-btn-icon { display: inline-flex; align-items: center; }
+
+/* Badge / Chip */
+.sos-ds-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-family: var(--sos-font-body);
+}
+.sos-ds-badge--neutral { background: rgba(255, 255, 255, 0.06); color: var(--sos-text-dim); }
+.sos-ds-badge--accent { background: var(--sos-accent-glow); color: var(--sos-accent); }
+.sos-ds-badge--success { background: rgba(53, 210, 154, 0.16); color: var(--sos-success); }
+.sos-ds-badge--warning { background: rgba(255, 179, 71, 0.16); color: var(--sos-warning); }
+.sos-ds-badge--danger { background: rgba(255, 107, 129, 0.16); color: var(--sos-danger); }
+
+.sos-ds-chip {
+  background: rgba(64, 89, 196, 0.18);
+  border: 1px solid rgba(86, 120, 242, 0.36);
+  color: #7e8fff;
+  padding: 6px 14px;
+  border-radius: 24px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sos-ds-chip:hover {
+  background: linear-gradient(135deg, rgba(92, 118, 245, 0.24), rgba(67, 90, 220, 0.18));
+  border-color: rgba(128, 170, 255, 0.8);
+  transform: translateY(-1px);
+}
+.sos-ds-chip--selected {
+  background: linear-gradient(135deg, var(--sos-teal), #1db99a);
+  border-color: transparent;
+  color: #04121a;
+  font-weight: 700;
+}
+
+/* Card */
+.sos-ds-card {
+  background: linear-gradient(160deg, rgba(10, 10, 18, 0.95) 0%, rgba(15, 15, 30, 0.92) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid var(--sos-teal);
+  border-radius: 4px 16px 16px 4px;
+  max-width: 420px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+.sos-ds-card--teal { border-left-color: var(--sos-teal); }
+.sos-ds-card--amber { border-left-color: var(--sos-warning); }
+.sos-ds-card--violet { border-left-color: var(--sos-violet); }
+.sos-ds-card--danger { border-left-color: var(--sos-danger); }
+.sos-ds-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+.sos-ds-card-header-left { display: flex; align-items: center; gap: 10px; }
+.sos-ds-card-header-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--sos-accent-glow);
+  border: 1px solid var(--sos-accent-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sos-accent);
+  flex-shrink: 0;
+}
+.sos-ds-card-title { font-weight: 700; font-size: 0.88rem; color: var(--sos-text); letter-spacing: 0.3px; }
+.sos-ds-card-subtitle { font-size: 0.68rem; color: var(--sos-text-dim); margin-top: 1px; }
+.sos-ds-card-body { padding: 12px 16px; font-size: 0.85rem; line-height: 1.5; color: var(--sos-text-dim); }
+.sos-ds-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/* Toast */
+.sos-ds-toast {
+  display: inline-block;
+  padding: 10px 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--sos-success), #1db954);
+  color: #04120c;
+  font-weight: 600;
+  font-size: 0.88rem;
+  box-shadow: 0 4px 24px rgba(46, 213, 115, 0.4);
+}
+.sos-ds-confirm-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  min-width: 280px;
+  max-width: 360px;
+  background: var(--sos-bg-2);
+  border: 1px solid var(--sos-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.sos-ds-confirm-toast-eyebrow { font-size: 0.76rem; opacity: 0.6; font-weight: 500; }
+.sos-ds-confirm-toast-message { font-weight: 600; font-size: 0.9rem; line-height: 1.35; }
+.sos-ds-confirm-toast-actions { display: flex; gap: 8px; }
+.sos-ds-confirm-toast-confirm {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: var(--sos-success);
+  color: #04120c;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.sos-ds-confirm-toast-reject {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: transparent;
+  border: 1px solid var(--sos-border);
+  color: var(--sos-text-dim);
+}
+
+/* Switch */
+.sos-ds-switch {
+  width: 52px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  padding: 3px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease;
+}
+.sos-ds-switch--on { background: linear-gradient(135deg, var(--sos-accent), var(--sos-teal)); }
+.sos-ds-switch-knob {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  transform: translateX(0);
+  transition: transform 0.2s ease;
+}
+.sos-ds-switch--on .sos-ds-switch-knob { transform: translateX(22px); }
+
+/* BrandMark */
+.sos-ds-brand-mark { display: inline-flex; align-items: center; padding: 3px; border-radius: 6px; }
+.sos-ds-brand-mark-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--sos-font-display);
+  font-weight: 800;
+  color: var(--sos-text);
+}
+.sos-ds-brand-mark-bulb { color: var(--sos-accent); display: inline-flex; }
+
+/* ProgressBar */
+.sos-ds-progress-track {
+  position: relative;
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(108, 99, 255, 0.14);
+}
+.sos-ds-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--sos-accent), var(--sos-teal));
+  transition: width 0.3s ease;
+}
+.sos-ds-progress-track:not(:has(.sos-ds-progress-fill))::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -42%;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--sos-accent) 38%, var(--sos-teal) 62%, transparent);
+  animation: sos-ds-sweep 1.25s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+@keyframes sos-ds-sweep {
+  0% { left: -42%; }
+  100% { left: 100%; }
+}
+
+/* TextField */
+.sos-ds-field { display: flex; flex-direction: column; gap: 6px; }
+.sos-ds-field-label { font-size: 0.78rem; font-weight: 600; color: var(--sos-text-dim); }
+.sos-ds-field-input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--sos-border);
+  background: var(--sos-bg-2);
+  font-size: 0.88rem;
+}
+.sos-ds-field-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--sos-accent-dim);
+  border-color: var(--sos-accent);
+}
+.sos-ds-field-hint { font-size: 0.72rem; color: var(--sos-text-dim); }
+.sos-ds-field-hint--error { color: var(--sos-danger); }
+
+/* Banner */
+.sos-ds-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+.sos-ds-banner--info { background: var(--sos-accent-glow); border: 1px solid var(--sos-accent-dim); }
+.sos-ds-banner--warning { background: rgba(255, 179, 71, 0.14); border: 1px solid rgba(255, 179, 71, 0.36); }
+.sos-ds-banner--danger { background: rgba(255, 107, 129, 0.14); border: 1px solid rgba(255, 107, 129, 0.36); }
+.sos-ds-banner-action { font-weight: 600; white-space: nowrap; }
+
+/* Chat bubbles */
+.sos-ds-msg-row { display: flex; padding: 6px 24px; }
+.sos-ds-msg-row--user { justify-content: flex-end; }
+.sos-ds-msg-row--ai { justify-content: flex-start; }
+.sos-ds-bubble { max-width: 78%; padding: 12px 14px; font-size: 0.92rem; line-height: 1.55; }
+.sos-ds-bubble--user {
+  background: var(--sos-accent-glow);
+  border: 1px solid var(--sos-accent-dim);
+  border-radius: 18px;
+  border-bottom-right-radius: 6px;
+}
+.sos-ds-bubble--ai {
+  background: var(--sos-bg-2);
+  border: 1px solid var(--sos-border);
+  border-radius: 18px;
+  border-bottom-left-radius: 6px;
+}
+.sos-ds-bubble-time { font-family: var(--sos-font-mono); font-size: 10px; opacity: 0.5; margin-top: 4px; text-align: right; }
+.sos-ds-bubble-extra { margin-top: 10px; }
+.sos-ds-loading-dots { display: flex; gap: 4px; }
+.sos-ds-loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sos-text-dim);
+  animation: sos-ds-dot-pulse 1.2s ease-in-out infinite;
+}
+.sos-ds-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.sos-ds-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes sos-ds-dot-pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+.sos-ds-history-separator { display: flex; align-items: center; gap: 12px; padding: 14px 24px 6px; }
+.sos-ds-history-separator-line { flex: 1; height: 1px; background: var(--sos-border); }
+.sos-ds-history-separator-label {
+  font-family: var(--sos-font-mono);
+  font-size: 10.5px;
+  color: var(--sos-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}

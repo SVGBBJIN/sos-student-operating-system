@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Surfaces */
+  --sos-bg: #060b1d;
+  --sos-bg-2: #0b1430;
+  --sos-card: rgba(45, 104, 255, 0.12);
+
+  /* Text */
+  --sos-text: #d9e4ff;
+  --sos-text-dim: rgba(201, 216, 255, 0.56);
+
+  /* Borders */
+  --sos-border: rgba(112, 142, 214, 0.2);
+  --sos-border-mid: rgba(126, 160, 241, 0.34);
+
+  /* Brand + status */
+  --sos-accent: #38d8e8;
+  --sos-accent-dim: rgba(56, 216, 232, 0.36);
+  --sos-accent-glow: rgba(56, 216, 232, 0.2);
+  --sos-danger: #ff6b81;
+  --sos-success: #35d29a;
+  --sos-warning: #ffb347;
+
+  /* Palette */
+  --sos-green: #35d29a;
+  --sos-blue: #4ea4ff;
+  --sos-orange: #ff9f43;
+  --sos-pink: #ff6bcb;
+  --sos-teal: #38d8e8;
+  --sos-violet: #7c8dff;
+  --sos-soft-blue: rgba(143, 168, 255, 0.16);
+
+  /* Shape */
+  --sos-radius-sm: 10px;
+  --sos-radius: 16px;
+  --sos-radius-lg: 20px;
+  --sos-shadow: 0 2px 16px rgba(1, 9, 30, 0.5);
+
+  /* Spacing */
+  --sos-space-xs: 4px;
+  --sos-space-sm: 8px;
+  --sos-space-md: 12px;
+  --sos-space-lg: 16px;
+  --sos-space-xl: 20px;
+  --sos-space-2xl: 24px;
+  --sos-space-3xl: 32px;
+  --sos-space-4xl: 48px;
+
+  /* Type */
+  --sos-font-display: 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --sos-font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --sos-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
