@@ -25,7 +25,17 @@ function StatusPill({ ok, label }) {
   );
 }
 
-export default function ConnectorsSettings({ onToast }) {
+export default function ConnectorsSettings({
+  onToast,
+  googleConnected,
+  googleUser,
+  calSyncEnabled,
+  calSyncStatus,
+  calSyncLastAt,
+  onConnectGoogle,
+  onDisconnectGoogle,
+  onOpenGoogleImport,
+}) {
   const [extId, setExtIdLocal] = useState(getExtensionId());
   const [state, setState] = useState(null);
   const [err, setErr] = useState(null);
@@ -110,6 +120,35 @@ export default function ConnectorsSettings({ onToast }) {
       <div className="settings-row" style={{paddingTop:0}}>
         <div style={{fontSize:"0.78rem",color:"var(--text-dim)"}}>
           The SOS browser extension watches your LMS pages for submission activity and auto-completes matching tasks. Access is granted per school — never to your full browsing history.
+        </div>
+      </div>
+
+      {/* Google Calendar */}
+      <div style={rowStyle}>
+        <div>
+          <div style={{fontWeight:600,fontSize:"0.88rem"}}>Google Calendar</div>
+          <div style={{fontSize:"0.72rem",color:"var(--text-dim)"}}>
+            {googleConnected
+              ? (googleUser?.email ? `Connected as ${googleUser.email}` : "Connected")
+              : "Import events and two-way sync your Google Calendar."}
+          </div>
+          {googleConnected && (
+            <div style={{fontSize:"0.7rem",color:"var(--text-dim)",marginTop:2}}>
+              Sync: {calSyncEnabled ? (calSyncStatus === 'syncing' ? 'syncing…' : calSyncStatus === 'error' ? 'error' : 'on') : 'off'}
+              {calSyncLastAt ? ` · last synced ${new Date(calSyncLastAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+            </div>
+          )}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <StatusPill ok={!!googleConnected} label={googleConnected ? "Connected" : "Not connected"} />
+          {googleConnected ? (
+            <>
+              <button className="settings-toggle" onClick={() => onOpenGoogleImport?.()}>Import</button>
+              <button className="settings-toggle" onClick={() => onDisconnectGoogle?.()}>Disconnect</button>
+            </>
+          ) : (
+            <button className="settings-toggle settings-toggle-active" onClick={() => onConnectGoogle?.()}>Connect</button>
+          )}
         </div>
       </div>
 

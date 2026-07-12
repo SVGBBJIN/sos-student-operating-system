@@ -14,7 +14,7 @@ import Onboarding from './components/Onboarding';
 import * as sfx from './lib/sfx';
 import StudyTopBar from './components/StudyTopBar';
 import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
-import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority } from './lib/dateUtils';
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority, correctedDateForWeekdayMention } from './lib/dateUtils';
 import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
@@ -2845,6 +2845,16 @@ function App() {
             finalDue = toDateStr(corrected);
             const correctedDayName = corrected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             setTimeout(() => postAssistantNote(`heads up — I moved the due date to ${correctedDayName} since ${normalizedDue} was in the past. say "set the date to [actual date]" if you meant something else.`), 400);
+          } else {
+            // Guardrail: student named an explicit weekday ("due friday") but the
+            // model resolved it to the wrong occurrence — cross-check against the
+            // most recent user message and correct in place.
+            const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+            const mismatch = correctedDateForWeekdayMention(normalizedDue, lastUserMsg, todayVal);
+            if (mismatch) {
+              finalDue = mismatch.date;
+              setTimeout(() => postAssistantNote(`heads up — I corrected the due date to ${mismatch.dayName} to match the day you named.`), 400);
+            }
           }
           const task = { id:uid(), title:taskName, subject:action.subject||'', dueDate:finalDue, estTime:action.estimated_minutes||30, status:(action.status && action.status !== 'tentative' && action.status !== 'confirmed') ? action.status : 'not_started', focusMinutes:0, createdAt:new Date().toISOString(), confidence: typeof action.confidence === 'number' ? action.confidence : null, commitment: action.commitment === 'tentative' ? 'tentative' : 'confirmed' };
           setTasks(prev => {
@@ -2998,7 +3008,15 @@ function App() {
             }));
             return;
           }
-          const normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
+          let normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
+          {
+            const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+            const mismatch = correctedDateForWeekdayMention(normalizedEvDate, lastUserMsg, today());
+            if (mismatch) {
+              normalizedEvDate = mismatch.date;
+              setTimeout(() => postAssistantNote(`heads up — I corrected the date to ${mismatch.dayName} to match the day you named.`), 400);
+            }
+          }
           const ev = { id:uid(), title:evTitle, type:action.event_type||'other', subject:action.subject||'', date:normalizedEvDate, time:action.time||null, end_time:action.endTime||action.end_time||null, description:action.description||'', location:action.location||'', priority:action.priority||'medium', recurring:'none', createdAt:new Date().toISOString(), source:'manual', googleId:null, confidence: typeof action.confidence === 'number' ? action.confidence : null, status: action.status === 'tentative' ? 'tentative' : 'confirmed' };
           setEvents(prev => {
             const updated = [...prev, ev];
@@ -6491,7 +6509,17 @@ function App() {
             </div>
 
             {/* ── Data ── */}
-            <ConnectorsSettings onToast={(m) => setToastMsg(m)} />
+            <ConnectorsSettings
+              onToast={(m) => setToastMsg(m)}
+              googleConnected={isGoogleConnected()}
+              googleUser={googleUser}
+              calSyncEnabled={calSyncEnabled}
+              calSyncStatus={calSyncStatus}
+              calSyncLastAt={calSyncLastAt}
+              onConnectGoogle={connectGoogle}
+              onDisconnectGoogle={disconnectGoogle}
+              onOpenGoogleImport={() => setShowGoogleModal(true)}
+            />
 
             <div className="settings-card settings-fullscreen-card">
               <div className="settings-row" style={{paddingBottom:6}}>

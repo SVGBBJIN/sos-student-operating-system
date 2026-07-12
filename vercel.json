@@ -17,5 +17,8 @@
         { "key": "X-Accel-Buffering",            "value": "no" }
       ]
     }
+  ],
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
