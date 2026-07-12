@@ -128,6 +128,23 @@ export async function runPlanPipeline(input: PlanPipelineInput): Promise<PlanPip
   }
 
   const proposal = result.actions[0]!;
+  const stepCount = Array.isArray(proposal.steps) ? (proposal.steps as unknown[]).length : 0;
+  const blockCount = Array.isArray(proposal.recurring_blocks) ? (proposal.recurring_blocks as unknown[]).length : 0;
+  const milestoneCount = Array.isArray(proposal.milestone_tasks) ? (proposal.milestone_tasks as unknown[]).length : 0;
+  const batchCount = Array.isArray(proposal.batch_actions) ? (proposal.batch_actions as unknown[]).length : 0;
+  // The model called make_plan but left every bucket empty — a hollow plan
+  // (this is the failure mode that used to reach the client as a silent
+  // "0 blocks · 0 tasks" card). Treat it the same as an empty draft so the
+  // student gets an explanation instead of a dead-end card.
+  if (stepCount === 0 && blockCount === 0 && milestoneCount === 0 && batchCount === 0) {
+    return {
+      proposal: null,
+      summary: "I couldn't put together a concrete plan from that — try again, or break the request into something more specific (e.g. a single deadline or one week of study blocks).",
+      critiqueText: "",
+      iterations: result.iterations,
+    };
+  }
+
   const batchActions = Array.isArray(proposal.batch_actions) ? proposal.batch_actions as Array<{ confidence?: number; status?: string; commitment?: string }> : [];
   // batch_actions-shaped plans skip the propose-mode card and go straight to
   // the review rail (see App.jsx's mode:'plan' dispatch) — that path reads

@@ -216,6 +216,23 @@ export function PlanCard({ data, onApply, onSave, onDismiss, onStartTask, onExpo
 
   const hasDocId = !!data.googleDocId;
 
+  if (rawSteps.length === 0) {
+    return (
+      <div style={{background:'rgba(255,107,107,0.06)', border:'1px solid rgba(255,107,107,0.2)', borderRadius:14, padding:'14px 16px', marginBottom:8, maxWidth:480, width:'100%'}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:6}}>
+          <span style={{color:'var(--danger)', display:'flex'}}>{Icon.zap(14)}</span>
+          <span style={{fontWeight:700, fontSize:'0.88rem', color:'var(--text)'}}>Couldn't build a plan</span>
+        </div>
+        <p style={{fontSize:'0.82rem', color:'var(--text-dim)', margin:'0 0 10px', lineHeight:1.5}}>
+          I didn't come back with anything concrete — try again, or be more specific about what you need scheduled.
+        </p>
+        <button onClick={onDismiss} style={{padding:'8px 14px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'var(--text-dim)', borderRadius:8, fontSize:'0.82rem', cursor:'pointer'}}>
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       background:'linear-gradient(135deg, rgba(26,26,46,0.98), rgba(15,15,26,0.95))',
@@ -515,6 +532,22 @@ export function IntentPlanCard({ data, onApply, onApplyWithoutConflicts, onDismi
   const dayMap = { Monday:'M', Tuesday:'Tu', Wednesday:'W', Thursday:'Th', Friday:'F', Saturday:'Sa', Sunday:'Su' };
   const fmtDays = (days) => (days || []).map(d => dayMap[d] || d).join('/');
   const conflictSet = new Set(conflicts.map(c => c.activity));
+  if (totalBlocks === 0 && tasks.length === 0) {
+    return (
+      <div style={{background:'rgba(255,107,107,0.06)', border:'1px solid rgba(255,107,107,0.2)', borderRadius:14, padding:'14px 16px', marginBottom:8}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:6}}>
+          <span style={{color:'var(--danger)', display:'flex'}}>{Icon.zap(14)}</span>
+          <span style={{fontWeight:700, fontSize:'0.88rem', color:'var(--text)'}}>Couldn't build a plan</span>
+        </div>
+        <p style={{fontSize:'0.82rem', color:'var(--text-dim)', margin:'0 0 10px', lineHeight:1.5}}>
+          I didn't come back with anything concrete — try again, or break the ask into smaller pieces (e.g. "block off study time for calc this week" instead of "plan my week").
+        </p>
+        <button onClick={onDismiss} style={{padding:'8px 14px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'var(--text-dim)', borderRadius:8, fontSize:'0.82rem', cursor:'pointer'}}>
+          Dismiss
+        </button>
+      </div>
+    );
+  }
   return (
     <div style={{background:'rgba(108,99,255,0.06)', border:'1px solid rgba(108,99,255,0.18)', borderRadius:14, overflow:'hidden', marginBottom:8}}>
       <div style={{padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
