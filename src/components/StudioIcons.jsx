@@ -25,6 +25,8 @@ export function StudioIcon({ name, size = 16, strokeWidth = 1.75 }) {
     target:  <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></>,
     check:   <><path d="M5 12.5l4.5 4.5L19 7"/></>,
     play:    <><path d="M7 5l12 7-12 7z"/></>,
+    pause:   <><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></>,
+    zap:     <><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></>,
     upload:  <><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></>,
   };
   return (
