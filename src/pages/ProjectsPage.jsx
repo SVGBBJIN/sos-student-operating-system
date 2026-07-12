@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sb } from '../lib/supabase.js';
 import StudyTopBar from '../components/StudyTopBar.jsx';
+import GroupsPanel from '../components/GroupsPanel.jsx';
 
 const DEFAULT_SUBJECTS = ['Math', 'English', 'Science', 'Social Studies'];
 
@@ -43,6 +44,7 @@ export default function ProjectsPage() {
   const [loading,   setLoading]   = useState(true);
   const [selected,  setSelected]  = useState(null);  // selected subject name
   const [activeTab, setActiveTab] = useState('all');
+  const [viewMode,  setViewMode]  = useState('subjects'); // 'subjects' | 'groups'
   const [checked,   setChecked]   = useState(new Set()); // `${type}:${id}`
   const [confirm,   setConfirm]   = useState(false);
   const [deleting,  setDeleting]  = useState(false);
@@ -217,7 +219,20 @@ export default function ProjectsPage() {
             Projects
           </div>
 
-          {loading ? (
+          <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+            {[{ id: 'subjects', label: 'Subjects' }, { id: 'groups', label: 'Groups' }].map(m => (
+              <button key={m.id} onClick={() => setViewMode(m.id)}
+                style={{ flex: 1, padding: '5px 8px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${viewMode === m.id ? 'var(--primary)' : 'var(--border)'}`,
+                  background: viewMode === m.id ? 'var(--muted)' : 'transparent',
+                  color: viewMode === m.id ? 'var(--primary)' : 'var(--muted-foreground)',
+                  fontFamily: 'var(--font-ui)', fontWeight: viewMode === m.id ? 600 : 400 }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {viewMode === 'groups' ? null : loading ? (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>Loading…</div>
           ) : subjects.map(s => {
             const isActive = selected === s.name;
@@ -248,6 +263,9 @@ export default function ProjectsPage() {
         </div>
 
         {/* Main content area */}
+        {viewMode === 'groups' ? (
+          <GroupsPanel user={user} />
+        ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--background)' }}>
           {!selected ? (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--muted-foreground)', fontFamily: 'var(--font-ui)' }}>
@@ -378,6 +396,7 @@ export default function ProjectsPage() {
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );

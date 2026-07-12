@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES, queueEmbedSync } from './lib/supabase';
+import { sb, SUPABASE_ANON_KEY, EDGE_FN_URL, CHAT_MAX_MESSAGES, queueEmbedSync, GROUP_INVITE_REDEEM_ENDPOINT } from './lib/supabase';
 import { streamChat } from './lib/streamChat';
 import { extractPdfText } from './lib/pdf';
 import { classifyPlanShape } from './lib/planShape';
@@ -101,7 +101,7 @@ function setOnboardingEstablished(userId) {
 
 /* ─── Date helpers ─── */
 /* ── Notification scheduling helper ──────────────────────────── */
-function buildNotifications(tasks, events, prefs) {
+function buildNotifications(tasks, events, prefs, activeTimers = []) {
   const notes = [];
   const now = Date.now();
   function atDate(dateStr, hour = 9) {
@@ -148,6 +148,26 @@ function buildNotifications(tasks, events, prefs) {
       const fireAt = dayStart + (startMin - 5) * 60000;
       if (fireAt > now) notes.push({ title: '⏭️ Up next in 5 min', body: ev.title || 'your next block', fireAt, tag: 'next-' + ev.id });
     });
+  }
+  // Wellness: break reminder — 45 minutes into any timer running 45+ minutes
+  // (pomodoro-style study/work timers), nudge a stretch/water break.
+  if (prefs.breakReminders) {
+    const BREAK_AFTER_MS = 45 * 60000;
+    (activeTimers || []).forEach(t => {
+      if (!t || !t.fire_at || !t.duration_seconds || t.duration_seconds * 1000 < BREAK_AFTER_MS) return;
+      const startedAt = new Date(t.fire_at).getTime() - t.duration_seconds * 1000;
+      const fireAt = startedAt + BREAK_AFTER_MS;
+      if (fireAt > now) notes.push({ title: '🧘 Time for a quick break', body: 'You\'ve been at "' + (t.label || 'your timer') + '" for 45 minutes — stretch, hydrate, or look away from the screen.', fireAt, tag: 'break-' + t.id });
+    });
+  }
+  // Wellness: all-nighter warning — a one-shot nudge at 11pm each day reminding
+  // the student to wrap up and protect their sleep, if they're still active.
+  if (prefs.allNighterWarning) {
+    const todayStr = today();
+    const fireAt = atDate(todayStr, 23);
+    if (fireAt > now) {
+      notes.push({ title: '🌙 It\'s getting late', body: 'Consider wrapping up soon — an all-nighter usually costs more than it saves.', fireAt, tag: 'allnighter-' + todayStr });
+    }
   }
   return notes;
 }
@@ -1223,8 +1243,9 @@ function App() {
   const [, setRpmSnapshot] = useState({ remaining: Infinity, limit: Infinity, resetAtMs: 0 });
   const [currentModel, setCurrentModel] = useState(null);
   const [, setModelFallbackUsed] = useState(false);
+  const [activeTimers, setActiveTimers] = useState([]);
   const [notifPrefs, setNotifPrefs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false}'); } catch(_) { return {tasks:true,exams:true,daily:false}; }
+    try { return JSON.parse(localStorage.getItem('sos-notif-prefs') || '{"tasks":true,"exams":true,"daily":false,"breakReminders":false,"allNighterWarning":false}'); } catch(_) { return {tasks:true,exams:true,daily:false,breakReminders:false,allNighterWarning:false}; }
   });
   const [studioTheme, setStudioTheme] = useState(() => localStorage.getItem('sos_studio_theme') || 'dark');
   useEffect(() => {
@@ -1602,6 +1623,34 @@ function App() {
     return () => subscription.unsubscribe();
   }, [user]);
 
+  // ── Redeem a pending study-group invite ──
+  // JoinGroupPage stashes the token in sessionStorage before sending an
+  // unauthenticated visitor through signup (or redirecting an already-logged-in
+  // one straight here). Runs once per token, the moment `user` becomes truthy.
+  useEffect(() => {
+    if (!user) return;
+    const token = sessionStorage.getItem('sos_pending_invite_token');
+    if (!token) return;
+    sessionStorage.removeItem('sos_pending_invite_token');
+    (async () => {
+      try {
+        const session = await sb.auth.getSession();
+        const accessToken = session?.data?.session?.access_token;
+        const res = await fetch(GROUP_INVITE_REDEEM_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (accessToken || SUPABASE_ANON_KEY) },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setToastMsg(data.error || 'Could not join that group.'); return; }
+        setToastMsg('Joined the group 🎉');
+        navigate('/projects');
+      } catch (_) {
+        setToastMsg('Could not join that group.');
+      }
+    })();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Realtime multi-device sync ──
   // When another device inserts/updates/deletes a task, event, or note the change
   // is pushed here via Supabase's postgres_changes channel so the UI stays in sync
@@ -1799,9 +1848,9 @@ function App() {
     if (!dataLoaded) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     if (focusSuppressing) { scheduleNotificationsToSW([]); return; }
-    const notifications = buildNotifications(tasks, events, notifPrefs);
+    const notifications = buildNotifications(tasks, events, notifPrefs, activeTimers);
     scheduleNotificationsToSW(notifications);
-  }, [tasks, events, notifPrefs, dataLoaded, focusSuppressing]);
+  }, [tasks, events, notifPrefs, dataLoaded, focusSuppressing, activeTimers]);
 
   function updateNotifPref(key, val) {
     const next = { ...notifPrefs, [key]: val };
@@ -1970,7 +2019,7 @@ function App() {
   // activeTimers mirrors public.timers rows that haven't fired yet. The
   // setTimeout handle for each lives in timerTimeoutsRef so we can clear it
   // on dismiss/undo. Persisted so timers survive a reload.
-  const [activeTimers, setActiveTimers] = useState([]);
+  // (state itself declared earlier, ahead of the notification-scheduling effect.)
   const timerTimeoutsRef = useRef(new Map());
 
   // ── Focus session (Start primitive) ──
@@ -4773,6 +4822,16 @@ function App() {
     generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
+  function handleImportUrl(title, text) {
+    const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'url_import' };
+    setNotes(prev => [...prev, note]);
+    if (user) syncOp(() => dbUpsertNote(note, user.id));
+    syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
+    setShowGoogleModal(false);
+    setToastMsg('Imported "' + title + '" to notes 🔗');
+    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
+  }
+
   function handleDeleteNote(noteId) {
     setNotes(prev => prev.filter(n => n.id !== noteId));
     if (user) {
@@ -6558,6 +6617,20 @@ function App() {
                 </div>
                 <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
               </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Break reminders</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Nudge to stretch/hydrate 45 minutes into a long timer.</div>
+                </div>
+                <AppleSwitch checked={!!notifPrefs.breakReminders} onChange={()=>updateNotifPref('breakReminders',!notifPrefs.breakReminders)} label="Break reminders" />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>All-nighter warning</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>One nudge at 11pm to protect your sleep.</div>
+                </div>
+                <AppleSwitch checked={!!notifPrefs.allNighterWarning} onChange={()=>updateNotifPref('allNighterWarning',!notifPrefs.allNighterWarning)} label="All-nighter warning" />
+              </div>
               {'Notification' in window && Notification.permission !== 'denied' && (
                 <div className="settings-row">
                   <div>
@@ -7128,6 +7201,7 @@ function App() {
           onImportEvents={handleImportGoogleEvents}
           onImportDoc={handleImportGoogleDoc}
           onImportPdf={handleImportPdf}
+          onImportUrl={handleImportUrl}
           onDisconnect={()=>{ disconnectGoogle(); setShowGoogleModal(false); }}
           onConnect={connectGoogle}
           calSyncEnabled={calSyncEnabled}

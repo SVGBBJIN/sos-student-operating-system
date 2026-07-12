@@ -9,6 +9,14 @@ export const EDGE_FN_URL = window.location.hostname.includes('vercel.app')
   ? '/api/chat'
   : SUPABASE_URL + '/functions/v1/sos-chat';
 
+export const IMPORT_URL_ENDPOINT = window.location.hostname.includes('vercel.app')
+  ? '/api/import-url'
+  : SUPABASE_URL + '/functions/v1/sos-import-url';
+
+export const GROUP_INVITE_REDEEM_ENDPOINT = window.location.hostname.includes('vercel.app')
+  ? '/api/group-invite-redeem'
+  : SUPABASE_URL + '/functions/v1/sos-group-invite-redeem';
+
 export const CHAT_MAX_MESSAGES = 60;
 
 /* Fire-and-forget sync of saved work (notes, flashcard decks, study plans)
