@@ -515,97 +515,6 @@
 }
 .studio .sb-foot-name { flex: 1; font-size: 13px; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ── Focus widget ────────────────────────────────────────── */
-.studio .focus-widget {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  width: 200px;
-  padding: 14px;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: 14px;
-  box-shadow: var(--shadow-md);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 5;
-  animation: fadeUp 360ms var(--ease-out) both;
-  animation-delay: 240ms;
-  transition: border-color 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
-}
-.studio .focus-widget.live { border-color: var(--accent-line); box-shadow: var(--shadow-md), 0 0 60px -10px var(--accent-bg); }
-.studio .focus-widget .fw-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-3);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-.studio .focus-widget .fw-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--fg-3);
-}
-.studio .focus-widget.live .fw-dot {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-.studio .focus-widget.live .fw-label { color: var(--accent); }
-.studio .focus-widget .fw-row { display: flex; align-items: center; gap: 12px; }
-.studio .focus-widget .fw-ring {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 2px solid var(--line-2);
-  border-top-color: var(--accent);
-  transition: border-top-color 220ms var(--ease-out);
-}
-.studio .focus-widget.live .fw-ring { animation: spin 4s linear infinite; }
-.studio .focus-widget .fw-num {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: 22px;
-  color: var(--fg-1);
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.studio .focus-widget.live .fw-num { color: var(--accent); }
-.studio .focus-widget .fw-meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-3);
-  text-transform: uppercase;
-  letter-spacing: 0.10em;
-}
-.studio .focus-widget .fw-actions { display: flex; gap: 6px; margin-top: 4px; }
-.studio .focus-widget .fw-btn {
-  flex: 1;
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--fg-2);
-  cursor: pointer;
-  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
-}
-.studio .focus-widget .fw-btn:hover { background: var(--bg-4); color: var(--fg-1); border-color: var(--line-2); }
-.studio .focus-widget .fw-btn.primary {
-  background: var(--accent-bg);
-  border-color: var(--accent-line);
-  color: var(--accent-strong);
-}
-.studio .focus-widget .fw-btn.primary:hover { background: var(--accent-bg); border-color: var(--accent); }
-.studio .focus-widget .fw-btn.ghost { flex: 0 0 auto; }
-
 /* ── Merged Pomodoro + AI-timer widget ───────────────────────── */
 .study-pomodoro {
   position: absolute;
@@ -1012,13 +921,14 @@
   grid-template-columns: 1.55fr 1fr;
   grid-template-areas:
     "agenda upnext"
-    "agenda due"
+    "focus due"
     "courses courses";
   align-items: start;
 }
 .studio .bento-agenda { grid-area: agenda; }
 .studio .bento-upnext { grid-area: upnext; }
 .studio .bento-due { grid-area: due; }
+.studio .bento-focus { grid-area: focus; }
 .studio .bento-courses { grid-area: courses; }
 
 /* ── Panel ───────────────────────────────────────────────────── */
@@ -1119,6 +1029,24 @@
 .studio .due-row[data-level="danger"]  .due-when { color: var(--danger); }
 .studio .due-row[data-level="warning"] .due-mark { background: var(--warning); }
 .studio .due-row[data-level="warning"] .due-when { color: var(--warning); }
+
+/* ── Focus session panel ─────────────────────────────────────── */
+.studio .focus-row { padding: 10px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.studio .focus-card {
+  display: flex; align-items: center; gap: 9px; text-align: left;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px; color: var(--fg-1); min-width: 0;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+.studio .focus-card:hover { background: var(--bg-4); border-color: var(--accent-line); transform: translateY(-1px); }
+.studio .focus-card-ic {
+  width: 28px; height: 28px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--accent-strong);
+}
+.studio .focus-card-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.studio .focus-card-label { font-size: 12.5px; font-weight: 600; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .focus-card-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Courses ─────────────────────────────────────────────────── */
 .studio .course-grid { padding: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -1335,7 +1263,7 @@
 
 /* ── Responsive: collapse bento on narrow viewports ──────────── */
 @media (max-width: 880px) {
-  .studio .bento { grid-template-columns: 1fr; grid-template-areas: "upnext" "agenda" "due" "courses"; }
+  .studio .bento { grid-template-columns: 1fr; grid-template-areas: "upnext" "agenda" "focus" "due" "courses"; }
   .studio .two-col, .studio .two-col.proof, .studio .grow-grid { grid-template-columns: 1fr; }
   .studio .stat-strip { grid-template-columns: repeat(2, 1fr) !important; }
   .studio .welcome-starts { grid-template-columns: 1fr; }
