@@ -921,8 +921,7 @@
   grid-template-columns: 1.55fr 1fr;
   grid-template-areas:
     "agenda upnext"
-    "agenda due"
-    "focus focus"
+    "focus due"
     "courses courses";
   align-items: start;
 }
@@ -1032,22 +1031,22 @@
 .studio .due-row[data-level="warning"] .due-when { color: var(--warning); }
 
 /* ── Focus session panel ─────────────────────────────────────── */
-.studio .focus-row { padding: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.studio .focus-row { padding: 10px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .studio .focus-card {
-  display: flex; align-items: center; gap: 11px; text-align: left;
+  display: flex; align-items: center; gap: 9px; text-align: left;
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
-  padding: 11px 13px; color: var(--fg-1);
+  padding: 10px; color: var(--fg-1); min-width: 0;
   transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
 }
 .studio .focus-card:hover { background: var(--bg-4); border-color: var(--accent-line); transform: translateY(-1px); }
 .studio .focus-card-ic {
-  width: 32px; height: 32px; border-radius: var(--r-sm); flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--r-sm); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--accent-strong);
 }
 .studio .focus-card-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.studio .focus-card-label { font-size: 13px; font-weight: 600; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.studio .focus-card-time { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.studio .focus-card-label { font-size: 12.5px; font-weight: 600; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio .focus-card-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Courses ─────────────────────────────────────────────────── */
 .studio .course-grid { padding: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -1268,7 +1267,6 @@
   .studio .two-col, .studio .two-col.proof, .studio .grow-grid { grid-template-columns: 1fr; }
   .studio .stat-strip { grid-template-columns: repeat(2, 1fr) !important; }
   .studio .welcome-starts { grid-template-columns: 1fr; }
-  .studio .focus-row { grid-template-columns: 1fr; }
 }
 
 

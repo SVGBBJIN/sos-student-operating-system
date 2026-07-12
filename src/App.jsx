@@ -2037,6 +2037,7 @@ function App() {
   // completions it drives. focusRun === null means no session.
   // (focusRun itself is declared earlier, ahead of the notification-suppression effect.)
   const [focusLauncherOpen, setFocusLauncherOpen] = useState(false);
+  const [focusLauncherMode, setFocusLauncherMode] = useState('sprint');
   // Soft-exit clock (sprint) and break auto-ignite (marathon) timers.
   const sprintClockRef = useRef(null);
   const breakTimeoutRef = useRef(null);
@@ -2525,7 +2526,7 @@ function App() {
     } catch (_) { /* fade hour is a bonus, never a blocker */ }
   }
 
-  function openFocusLauncher() { setFocusLauncherOpen(true); }
+  function openFocusLauncher(mode) { if (mode) setFocusLauncherMode(mode); setFocusLauncherOpen(true); }
 
   function launchFocusSession({ mode, durationMs, goal, startTaskId }) {
     let order = focusPool().map(t => t.id);
@@ -6423,14 +6424,7 @@ function App() {
           }}
           onUploadSyllabus={handleSyllabusUpload}
           syllabusBusy={syllabusBusy}
-          onStartFocusSession={(preset, label) => {
-            executeAction({
-              type: 'set_timer',
-              preset: preset,
-              label: label,
-              __confirmed: true
-            });
-          }}
+          onOpenFocusLauncher={openFocusLauncher}
         />
       ) : activePanel === 'home' ? (
         <HomeScreen
@@ -7286,6 +7280,7 @@ function App() {
           <FocusLauncher
             tasks={fp.tasks}
             chips={fp.chips}
+            initialMode={focusLauncherMode}
             onLaunch={launchFocusSession}
             onClose={() => setFocusLauncherOpen(false)}
           />

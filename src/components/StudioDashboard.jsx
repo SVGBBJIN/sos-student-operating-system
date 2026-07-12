@@ -295,7 +295,7 @@ function CourseGrid({ courses }) {
 }
 
 /* ── the dashboard ────────────────────────────────────────────── */
-export default function StudioDashboard({ user, tasks = [], events = [], onAsk, onUploadSyllabus, syllabusBusy, onStartFocusSession }) {
+export default function StudioDashboard({ user, tasks = [], events = [], onAsk, onUploadSyllabus, syllabusBusy, onOpenFocusLauncher }) {
   const [skipWelcome, setSkipWelcome] = React.useState(() => {
     try {
       return localStorage.getItem(`sos_skip_welcome_${user?.id}`) === '1';
@@ -353,7 +353,7 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk, 
           </div>
           <div className="bento-focus">
             <Panel title="Focus" icon="zap">
-              <FocusSessionWidget onStartSession={onStartFocusSession} />
+              <FocusSessionWidget onLaunch={onOpenFocusLauncher} />
             </Panel>
           </div>
           <div className="bento-due">

@@ -102,8 +102,8 @@ function TaskRow({ task, chip: taskChip, mode, selected, onStart, onToggle }) {
   );
 }
 
-export default function FocusLauncher({ tasks = [], chips = [], onLaunch, onClose }) {
-  const [mode, setMode] = useState('sprint');
+export default function FocusLauncher({ tasks = [], chips = [], initialMode = 'sprint', onLaunch, onClose }) {
+  const [mode, setMode] = useState(initialMode);
   const [durationMs, setDurationMs] = useState(SPRINT_DURATIONS[1].ms);
   const [goalKind, setGoalKind] = useState('count');
   const [count, setCount] = useState(5);
