@@ -334,35 +334,35 @@ export default function Landing() {
           <span className="sos-brand-word" style={{ fontSize: 17, color: 'var(--ld-fg-1)' }}>S<em>O</em>S</span>
         </div>
         <div className="ld-nav-links">
-          <a href="#features" onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }}>Features</a>
-          <a href="#privacy" onClick={(e) => { e.preventDefault(); document.getElementById('privacy')?.scrollIntoView({ behavior: 'smooth' }); }}>Privacy</a>
-          <a href="/studio" onClick={go('/studio')}>Studio</a>
+          <a href="#features" onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }}>features</a>
+          <a href="#privacy" onClick={(e) => { e.preventDefault(); document.getElementById('privacy')?.scrollIntoView({ behavior: 'smooth' }); }}>privacy</a>
+          <a href="/studio" onClick={go('/studio')}>studio</a>
         </div>
-        <button className="ld-nav-cta" onClick={go('/studio')}>Sign in</button>
+        <button className="ld-nav-cta" onClick={go('/studio?auth=login')}>sign in</button>
       </nav>
 
       <section className="ld-hero">
         <div className="ld-hero-text">
           <div className="ld-eyebrow ld-fade-up" style={{ animationDelay: '40ms' }}>
-            Student Operating System
+            student operating system
           </div>
           <h1 className="ld-headline ld-fade-up" style={{ animationDelay: '120ms' }}>
-            Your brain.<em>Organized.</em>
+            your brain.<em>organized.</em>
           </h1>
           <p className="ld-sub ld-fade-up" style={{ animationDelay: '200ms' }}>
-            Tasks, calendar, notes, and study tools — built for the way
-            students actually think. Type. SOS does the rest.
+            tasks, calendar, notes, study tools — one chat box instead of five tabs.
+            type "pset due friday" and it's just... on the calendar.
           </p>
           <div className="ld-cta-row ld-fade-up" style={{ animationDelay: '280ms' }}>
             <button className="ld-btn ld-btn-primary" onClick={go('/studio')}>
-              Enter studio
+              enter studio
               <span className="arrow"><Icon name="arrow" size={16} /></span>
             </button>
             <button
               className="ld-btn ld-btn-ghost"
               onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
             >
-              See how it works
+              see how it works
             </button>
           </div>
           <div className="ld-micro-row ld-fade-up" style={{ animationDelay: '360ms' }}>
@@ -375,51 +375,66 @@ export default function Landing() {
         <HeroStage />
       </section>
 
-      <section className="ld-stats">
-        <div className="ld-stats-inner">
-          <div className="ld-stat"><div className="n">10,000<em>+</em></div><div className="l">students using sos</div></div>
-          <div className="ld-stat"><div className="n">500K<em>+</em></div><div className="l">tasks completed</div></div>
-          <div className="ld-stat"><div className="n">98<em>%</em></div><div className="l">would recommend</div></div>
+      <section className="ld-mechanic">
+        <div className="ld-mechanic-inner">
+          <div className="ld-mechanic-in">
+            <div className="lab">you type</div>
+            <div className="txt">"pset due friday, and block 2hrs for calc review tmrw"</div>
+          </div>
+          <div className="ld-mechanic-arrow"><Icon name="arrow" size={20} /></div>
+          <div className="ld-mechanic-out">
+            <div className="lab">sos does</div>
+            <div className="chips">
+              <span className="chip">✓ task added — due fri</span>
+              <span className="chip">✓ block scheduled — tmrw 2h</span>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="ld-features" id="features">
-        <h2>Everything you need in one place.</h2>
-        <p className="ld-lede">No more tab-juggling between Notion, Calendar, and a flashcard app. SOS unifies the surfaces that matter — the AI does the busywork.</p>
-        <div className="ld-feat-grid">
-          <button type="button" className="ld-feat" onClick={go('/calendar')}>
-            <div className="ico"><Icon name="calendar" /></div>
-            <h3>Smart calendar</h3>
-            <p>Imports from Google. Suggests study blocks. Quietly keeps you on track.</p>
-            <span className="more">Learn more →</span>
-          </button>
-          <button type="button" className="ld-feat" onClick={go('/library')}>
-            <div className="ico"><Icon name="book" /></div>
-            <h3>One library</h3>
-            <p>Notes, lessons, flashcards, and AI podcasts — searchable, in one place.</p>
-            <span className="more">Learn more →</span>
-          </button>
-          <button type="button" className="ld-feat" onClick={go('/studio')}>
-            <div className="ico"><Icon name="check" /></div>
-            <h3>Task manager</h3>
-            <p>Natural language in, structured deadlines out. "Pset due friday" just works.</p>
-            <span className="more">Learn more →</span>
-          </button>
+        <h2>everything, one surface.</h2>
+        <p className="ld-lede">no more tab-juggling between notion, calendar, and a flashcard app — sos unifies the surfaces that matter, and the AI does the busywork.</p>
+        <div className="ld-showcase">
+          <div className="ld-showcase-panel" aria-hidden="true">
+            <div className="ld-sc-row">
+              <div className="ld-sc-col">
+                <div className="ld-sc-head"><Icon name="calendar" size={13} /> calendar</div>
+                <div className="ld-sc-line"><span className="dot cal"/> calc review · 2:00–4:00</div>
+                <div className="ld-sc-line"><span className="dot cal"/> swim practice · 5:30</div>
+              </div>
+              <div className="ld-sc-col">
+                <div className="ld-sc-head"><Icon name="book" size={13} /> library</div>
+                <div className="ld-sc-line"><span className="dot lib"/> derivatives — 12 cards</div>
+                <div className="ld-sc-line"><span className="dot lib"/> midterm study guide</div>
+              </div>
+              <div className="ld-sc-col">
+                <div className="ld-sc-head"><Icon name="check" size={13} /> tasks</div>
+                <div className="ld-sc-line"><span className="dot task"/> pset 4 — due fri</div>
+                <div className="ld-sc-line"><span className="dot task"/> lab writeup — due mon</div>
+              </div>
+            </div>
+          </div>
+          <div className="ld-showcase-callouts">
+            <div className="ld-callout"><span className="dot cal"/> <strong>smart calendar</strong> — imports from Google, suggests study blocks, keeps you on track quietly.</div>
+            <div className="ld-callout"><span className="dot lib"/> <strong>one library</strong> — notes, lessons, flashcards, AI podcasts, all searchable in one place.</div>
+            <div className="ld-callout"><span className="dot task"/> <strong>task manager</strong> — natural language in, structured deadlines out.</div>
+          </div>
         </div>
       </section>
 
       <section className="ld-privacy" id="privacy">
         <div className="ld-privacy-card">
           <div>
-            <h4>Privacy & data usage</h4>
-            <p>Read how SOS handles account, calendar, and study data.</p>
+            <h4>privacy & data usage</h4>
+            <p>read how sos handles account, calendar, and study data.</p>
           </div>
-          <a className="read" href="/privacy.html">View policy →</a>
+          <a className="read" href="/privacy.html">view policy →</a>
         </div>
       </section>
 
       <footer className="ld-footer">
-        <div className="ft">Made for students · Powered by Claude · © 2026 SOS</div>
+        <div className="ft">made for students · powered by Claude · © 2026 SOS</div>
       </footer>
     </div>
   );
@@ -494,6 +509,10 @@ const LANDING_CSS = `
   transition: background 150ms var(--ld-ease-out), border-color 150ms var(--ld-ease-out);
 }
 .ld-nav-cta:hover { background: var(--ld-mint-bg); border-color: var(--ld-mint); }
+@media (max-width: 640px) {
+  .ld-nav { padding: 16px 20px; }
+  .ld-nav-links { display: none; }
+}
 
 /* ── Hero stage ──────────────────────────────────────────── */
 .ld-hero {
@@ -866,39 +885,64 @@ const LANDING_CSS = `
 }
 .ld-scene-dot.on { background: var(--ld-mint); transform: scale(1.2); }
 
-/* ── Stats ───────────────────────────────────────────────── */
-.ld-stats {
+/* ── Mechanic proof strip ────────────────────────────────── */
+.ld-mechanic {
   border-top: 1px solid var(--ld-line); border-bottom: 1px solid var(--ld-line);
   background: rgba(255,255,255,0.012);
   margin-top: 16px;
 }
-.ld-stats-inner {
-  max-width: 1100px; margin: 0 auto;
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 1px; background: var(--ld-line);
+.ld-mechanic-inner {
+  max-width: 1100px; margin: 0 auto; padding: 28px 32px;
+  display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap;
 }
-.ld-stat { background: var(--ld-bg); padding: 28px 32px; display: flex; flex-direction: column; gap: 4px; }
-.ld-stat .n { font-family: var(--ld-font-display); font-weight: 700; font-size: 36px; letter-spacing: -0.02em; color: var(--ld-fg-1); line-height: 1; }
-.ld-stat .n em { color: var(--ld-mint); font-style: normal; }
-.ld-stat .l { font-family: var(--ld-font-mono); font-size: 11px; color: var(--ld-fg-3); text-transform: uppercase; letter-spacing: 0.10em; }
-@media (max-width: 720px) { .ld-stats-inner { grid-template-columns: 1fr; } }
+.ld-mechanic-in, .ld-mechanic-out { display: flex; flex-direction: column; gap: 6px; }
+.ld-mechanic-in .lab, .ld-mechanic-out .lab {
+  font-family: var(--ld-font-mono); font-size: 10px; color: var(--ld-fg-3);
+  text-transform: uppercase; letter-spacing: 0.12em;
+}
+.ld-mechanic-in .txt {
+  font-family: var(--ld-font-mono); font-size: 13px; color: var(--ld-fg-1);
+  background: var(--ld-bg-2); border: 1px solid var(--ld-line-2); border-radius: 10px;
+  padding: 10px 14px; max-width: 40ch;
+}
+.ld-mechanic-arrow { color: var(--ld-mint); flex-shrink: 0; }
+.ld-mechanic-out .chips { display: flex; flex-direction: column; gap: 6px; }
+.ld-mechanic-out .chip {
+  font-family: var(--ld-font-mono); font-size: 12px; color: var(--ld-mint-strong);
+  background: var(--ld-mint-bg); border: 1px solid var(--ld-mint-line); border-radius: 8px;
+  padding: 6px 12px;
+}
+@media (max-width: 720px) { .ld-mechanic-inner { flex-direction: column; } .ld-mechanic-arrow { transform: rotate(90deg); } }
 
-/* ── Features ────────────────────────────────────────────── */
+/* ── Features / unified showcase ─────────────────────────── */
 .ld-features { max-width: 1100px; margin: 0 auto; padding: 96px 32px; }
 .ld-features h2 { font-family: var(--ld-font-display); font-weight: 700; font-size: 32px; letter-spacing: -0.02em; margin: 0 0 8px; color: var(--ld-fg-1); }
 .ld-lede { color: var(--ld-fg-2); font-size: 15px; max-width: 52ch; margin: 0 0 48px; }
-.ld-feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--ld-line); border: 1px solid var(--ld-line); border-radius: 14px; overflow: hidden; }
-@media (max-width: 820px) { .ld-feat-grid { grid-template-columns: 1fr; } }
-.ld-feat { background: var(--ld-bg); padding: 28px; display: flex; flex-direction: column; gap: 12px; transition: background 200ms var(--ld-ease-out), transform 200ms var(--ld-ease-out), box-shadow 200ms var(--ld-ease-out); cursor: pointer; text-align: left; border: 0; font: inherit; color: inherit; appearance: none; }
-.ld-feat:hover { background: rgba(255,255,255,0.02); transform: translateY(-2px); }
-.ld-feat:focus-visible { outline: 2px solid var(--ld-mint); outline-offset: -2px; }
-.ld-feat .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--ld-bg-3); border: 1px solid var(--ld-line); display: inline-flex; align-items: center; justify-content: center; color: var(--ld-mint); transition: border-color 200ms var(--ld-ease-out); }
-.ld-feat:hover .ico { border-color: var(--ld-mint-line); }
-.ld-feat .ico svg { width: 18px; height: 18px; }
-.ld-feat h3 { font-family: var(--ld-font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; margin: 0; color: var(--ld-fg-1); }
-.ld-feat p { font-size: 13.5px; color: var(--ld-fg-2); line-height: 1.6; margin: 0; }
-.ld-feat .more { font-family: var(--ld-font-mono); font-size: 11px; color: var(--ld-fg-3); text-transform: uppercase; letter-spacing: 0.10em; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; transition: color 200ms var(--ld-ease-out); }
-.ld-feat:hover .more { color: var(--ld-mint); }
+.ld-showcase { display: flex; flex-direction: column; gap: 20px; }
+.ld-showcase-panel {
+  border: 1px solid var(--ld-line-2); border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 60%), var(--ld-bg-2);
+  padding: 22px; box-shadow: 0 30px 60px rgba(0,0,0,0.35);
+}
+.ld-sc-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+@media (max-width: 820px) { .ld-sc-row { grid-template-columns: 1fr; } }
+.ld-sc-col { display: flex; flex-direction: column; gap: 8px; }
+.ld-sc-head {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--ld-font-mono); font-size: 11px; color: var(--ld-mint);
+  text-transform: uppercase; letter-spacing: 0.10em;
+  padding-bottom: 8px; border-bottom: 1px solid var(--ld-line);
+}
+.ld-sc-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ld-fg-2); }
+.ld-sc-line .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dot.cal { background: var(--ld-accent-strong); }
+.dot.lib { background: #f9a8d4; }
+.dot.task { background: var(--ld-mint); }
+.ld-showcase-callouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 820px) { .ld-showcase-callouts { grid-template-columns: 1fr; } }
+.ld-callout { font-size: 13.5px; color: var(--ld-fg-2); line-height: 1.6; display: flex; gap: 8px; }
+.ld-callout .dot { margin-top: 6px; }
+.ld-callout strong { color: var(--ld-fg-1); font-weight: 700; }
 
 /* ── Privacy + Footer ────────────────────────────────────── */
 .ld-privacy { max-width: 1100px; margin: 0 auto 64px; padding: 0 32px; }

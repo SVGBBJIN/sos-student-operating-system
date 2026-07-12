@@ -15,6 +15,46 @@ export function toDateStr(d) {
 
 export function today() { return toDateStr(new Date()); }
 
+const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const WEEKDAY_ABBR = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+// Next calendar date (>= today) that falls on the given weekday name/abbreviation
+// found in `text`, or null if no weekday is mentioned. "0 days ahead" (today is
+// that weekday) resolves to the next week's occurrence, matching how students
+// mean "due friday" when today already is Friday.
+export function nextWeekdayFromText(text, todayStr = today()) {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  let targetDow = null;
+  for (const name of WEEKDAY_NAMES) {
+    if (new RegExp('\\b' + name + '\\b').test(lower)) { targetDow = WEEKDAY_NAMES.indexOf(name); break; }
+  }
+  if (targetDow === null) {
+    for (const [abbr, dow] of Object.entries(WEEKDAY_ABBR)) {
+      if (new RegExp('\\b' + abbr + '\\b').test(lower)) { targetDow = dow; break; }
+    }
+  }
+  if (targetDow === null) return null;
+  const base = new Date(todayStr + 'T12:00:00');
+  const todayDow = base.getDay();
+  let diff = targetDow - todayDow;
+  if (diff <= 0) diff += 7;
+  const d = new Date(base);
+  d.setDate(d.getDate() + diff);
+  return toDateStr(d);
+}
+
+// Cross-checks an AI-resolved date against an explicit weekday name mentioned in
+// the student's own message. If the model resolved to the wrong occurrence (the
+// class of off-by-one bug where "due friday" lands on Thursday), returns the
+// corrected ISO date + human day name; otherwise returns null (no correction needed).
+export function correctedDateForWeekdayMention(resolvedDateStr, sourceText, todayStr = today()) {
+  const expected = nextWeekdayFromText(sourceText, todayStr);
+  if (!expected || expected === resolvedDateStr) return null;
+  const dayName = new Date(expected + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  return { date: expected, dayName };
+}
+
 export function daysUntil(dateStr) {
   const now = new Date(); now.setHours(0, 0, 0, 0);
   const target = new Date(dateStr + 'T00:00:00');

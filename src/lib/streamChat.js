@@ -116,5 +116,13 @@ export async function streamChat({ url, body, token, signal, onDelta, onToolCall
   if (!final && aggregated) {
     final = { content: aggregated, actions: [], clarifications: [] };
   }
-  return final ?? { content: '', actions: [], clarifications: [] };
+  if (!final) {
+    // The connection closed (or the platform killed a function that ran past
+    // its time limit) without ever sending a `done` or `error` frame, and we
+    // never accumulated any text either. Treating this as a silent empty
+    // success used to leave the UI stuck mid-progress with no explanation —
+    // surface it as a real error so the caller's timeout/retry messaging fires.
+    throw new Error('stream ended without a response — the request may have timed out within budget');
+  }
+  return final;
 }

@@ -212,7 +212,8 @@ export function StatStrip({ compact }) {
   );
 }
 
-export function WelcomeBox({ user, onAsk, onGrow, onSkip }) {
+export function WelcomeBox({ user, onAsk, onGrow, onSkip, onUploadSyllabus, syllabusBusy }) {
+  const fileRef = React.useRef(null);
   const starts = [
     { icon: 'calendar', t: 'Add your classes',    s: 'build your weekly calendar', q: 'Help me add my classes to my calendar' },
     { icon: 'book',     t: 'Set up a course',      s: 'track work + deadlines',     q: 'Help me set up a course with deadlines' },
@@ -227,6 +228,34 @@ export function WelcomeBox({ user, onAsk, onGrow, onSkip }) {
       <h1 className="welcome-title">Let's set up your week, <span>{user?.name || 'friend'}</span></h1>
       <p className="welcome-lead">Tell me what's on your plate — a class, a deadline, an essay — and I'll build your day around it. Start with one thing.</p>
       <AskBar onSubmit={onAsk} autoFocus />
+      {onUploadSyllabus && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.txt,text/plain,application/pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) onUploadSyllabus(f);
+            }}
+          />
+          <button
+            key="upload-syllabus"
+            className="start-card start-card-highlight"
+            disabled={syllabusBusy}
+            onClick={() => fileRef.current?.click()}
+          >
+            <span className="start-ic"><StudioIcon name="upload" size={17} /></span>
+            <span className="start-body">
+              <span className="start-t">{syllabusBusy ? 'reading your syllabus…' : 'upload a syllabus'}</span>
+              <span className="start-s">parse a whole semester in one go — assignments, exams, class schedule</span>
+            </span>
+            <StudioIcon name="chevronRight" size={13} />
+          </button>
+        </>
+      )}
       <div className="welcome-starts">
         {starts.map(x => (
           <button key={x.t} className="start-card" onClick={() => handleStart(x.q)}>

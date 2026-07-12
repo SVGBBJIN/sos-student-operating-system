@@ -8,6 +8,7 @@ const Landing      = React.lazy(() => import('./pages/Landing.jsx'));
 const Library      = React.lazy(() => import('./pages/Library.jsx'));
 const CalendarPage = React.lazy(() => import('./pages/CalendarPage.jsx'));
 const ProjectsPage = React.lazy(() => import('./pages/ProjectsPage.jsx'));
+const NotFound     = React.lazy(() => import('./pages/NotFound.jsx'));
 
 /**
  * AppRouter — thin router wrapper.
@@ -87,9 +88,11 @@ export default function AppRouter() {
         {/* Redirects for old paths */}
         <Route path="/notes"     element={<Navigate to="/library" replace />} />
         <Route path="/skill-hub" element={<Navigate to="/library" replace />} />
+        <Route path="/dashboard" element={<Navigate to="/studio" replace />} />
+        <Route path="/login"     element={<Navigate to="/" replace />} />
 
-        {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Catch-all — genuinely unknown paths get a themed 404, not a silent redirect */}
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </React.Suspense>
   );
