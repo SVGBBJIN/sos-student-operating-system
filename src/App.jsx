@@ -1160,6 +1160,7 @@ function App() {
   const [grades, setGrades] = useState([]);
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [showDeadlines, setShowDeadlines] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
@@ -6138,10 +6139,10 @@ function App() {
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='d'){e.preventDefault();setShowDeadlines(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(mobileNavOpen){setMobileNavOpen(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
-  },[showNotes,showChatSidebar,showGlobalSearch,showDeadlines,activePanel]);
+  },[showNotes,showChatSidebar,showGlobalSearch,showDeadlines,activePanel,mobileNavOpen]);
 
   // ── Global search: semantic backend augments the instant local filter ──
   // Debounced so we don't fire an embed+RPC round-trip on every keystroke.
@@ -6220,14 +6221,16 @@ function App() {
         onDashboard={() => { setActivePanel('dashboard'); setSelectedProject(null); }}
         activePanel={activePanel}
         queueCount={pendingQueue ? pendingQueue.length : 0}
+        onToggleNav={() => setMobileNavOpen(v => !v)}
       />
-      <div className="studio-sidebar-col">
+      {mobileNavOpen && <div className="studio-nav-backdrop" onClick={() => setMobileNavOpen(false)} />}
+      <div className={'studio-sidebar-col' + (mobileNavOpen ? ' open' : '')}>
           <StudioSidebar
             user={user}
             savedChats={savedChats}
             viewingSavedChatId={viewingSavedChatId}
-            onPick={loadSavedChat}
-            onNew={startNewChat}
+            onPick={(id) => { loadSavedChat(id); setMobileNavOpen(false); }}
+            onNew={() => { startNewChat(); setMobileNavOpen(false); }}
             onDelete={(chat) => setConfirmDeleteChat(chat)}
             onAuthAction={user ? handleLogout : () => setShowAuthModal(true)}
             aiThinking={isLoading}
@@ -6246,10 +6249,11 @@ function App() {
                 setSelectedProject(name);
                 setChatOpen(false);
               }
+              setMobileNavOpen(false);
             }}
-            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); setSelectedProject(null); }}
+            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); setSelectedProject(null); setMobileNavOpen(false); }}
             activePanel={activePanel}
-            onOpenDeadlines={() => setShowDeadlines(true)}
+            onOpenDeadlines={() => { setShowDeadlines(true); setMobileNavOpen(false); }}
           />
         </div>
       <div className="studio-center-col studio-glass-card">
