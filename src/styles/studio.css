@@ -1176,6 +1176,13 @@
 }
 .studio .start-card:hover { background: var(--bg-4); border-color: var(--accent-line); transform: translateY(-1px); }
 .studio .start-card > svg:last-child { color: var(--fg-3); margin-left: auto; }
+.studio .start-card:disabled { opacity: 0.6; cursor: wait; transform: none; }
+.studio .start-card-highlight {
+  width: 100%; margin-top: 4px;
+  background: var(--accent-bg); border-color: var(--accent-line);
+}
+.studio .start-card-highlight:hover:not(:disabled) { background: var(--accent-bg); border-color: var(--accent); }
+.studio .start-card-highlight .start-ic { background: var(--bg); }
 .studio .start-ic {
   width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;

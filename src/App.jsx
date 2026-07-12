@@ -1161,6 +1161,7 @@ function App() {
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [showDeadlines, setShowDeadlines] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [syllabusBusy, setSyllabusBusy] = useState(false);
   const [pendingRevisionPlanId, setPendingRevisionPlanId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dbMessageCount, setDbMessageCount] = useState(0); // P1.4: track DB-loaded message count
@@ -5046,7 +5047,11 @@ function App() {
       setActiveWidgets(w => ({ ...w, schedule: true }));
     }
     const effectiveWorkspaceContext = getWorkspaceContext();
-    const userMsg = { role:'user', content:msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
+    // displayContent lets a caller show a short friendly bubble in the UI
+    // (e.g. "uploaded syllabus: foo.pdf") while the full msgContent — which
+    // may be much larger, like an entire syllabus dump — still goes to the
+    // model via historyForApi below.
+    const userMsg = { role:'user', content: opts.displayContent || msgContent, timestamp:Date.now(), photoPreview:photo?.preview||null, photoUrl:null };
     const updated = [...messages, userMsg];
     while (updated.length > CHAT_MAX_MESSAGES) updated.shift();
     setMessages(updated);
@@ -5060,11 +5065,17 @@ function App() {
       setTimeout(() => Notification.requestPermission(), 2000);
     }
 
+    // Persistence (demo localStorage + DB) stores the short display bubble
+    // when one was given, not the full instruction — keeps saved chat history
+    // (and its re-embedding into future context) from bloating with a whole
+    // syllabus dump every time this conversation is loaded.
+    const persistedContent = opts.displayContent || msgContent;
+
     // Persist demo messages to localStorage so they're migrated to Supabase on sign-up
     if (!user && msgContent) {
       try {
         const demoChat = JSON.parse(localStorage.getItem('cc_chat') || '[]');
-        demoChat.push({ role: 'user', content: msgContent });
+        demoChat.push({ role: 'user', content: persistedContent });
         localStorage.setItem('cc_chat', JSON.stringify(demoChat));
       } catch (_) {}
     }
@@ -5074,13 +5085,13 @@ function App() {
       uploadPhotoToStorage(photo.base64, user.id).then(url => {
         if (url) {
           setMessages(prev => prev.map(m => m.timestamp === userMsg.timestamp ? {...m, photoUrl:url} : m));
-          dbInsertChatMsg('user', msgContent, user.id, url);
+          dbInsertChatMsg('user', persistedContent, user.id, url);
         } else {
-          dbInsertChatMsg('user', msgContent, user.id);
+          dbInsertChatMsg('user', persistedContent, user.id);
         }
       });
     } else if (user) {
-      dbInsertChatMsg('user', msgContent, user.id);
+      dbInsertChatMsg('user', persistedContent, user.id);
     }
 
     // Auto-route planning requests directly (3-pass planning pipeline)
@@ -5097,6 +5108,11 @@ function App() {
         role: m.role,
         content: m.content || '',
       }));
+      if (opts.displayContent && rawHistory.length > 0) {
+        // Swap the shortened display bubble back out for the real content the
+        // model needs to act on (see userMsg construction above).
+        rawHistory[rawHistory.length - 1] = { role: 'user', content: msgContent };
+      }
       const historyForApi = rawHistory.filter(m => m.content && m.content.trim());
       const negationPattern = /\b(don'?t|do\s+not|never|no(?:\s+longer|t)\b)\s+(have|need|got|gotta|want)\b/i;
       const imperativeSignals = /\b(add|create|schedule|delete|remove|cancel|mark|done|complete|update|move|reschedule|block|note|save|remind|break|clear|convert|set|plan|put|log|track|book|enter|register)\b/i;
@@ -5147,7 +5163,7 @@ function App() {
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024,
+        maxTokens: opts.maxTokens || (isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5726,6 +5742,43 @@ function App() {
       }
       setChatError(friendlyMsg);
     } finally { setIsLoading(false); }
+  }
+
+  // ── Syllabus bulk onboarding: one upload -> a whole semester of assignments,
+  // exams, and the recurring class schedule, extracted in one pass and routed
+  // through the same batch_actions review rail as any other bulk extraction.
+  const SYLLABUS_MAX_CHARS = 14000;
+  async function handleSyllabusUpload(file) {
+    if (!file || syllabusBusy) return;
+    setSyllabusBusy(true);
+    try {
+      let text = '';
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) {
+        text = await extractPdfText(file);
+      } else {
+        text = await file.text();
+      }
+      text = (text || '').trim();
+      if (!text) {
+        setToastMsg("Couldn't read any text from that file — try a text-based PDF or a .txt export.");
+        return;
+      }
+      if (text.length > SYLLABUS_MAX_CHARS) text = text.slice(0, SYLLABUS_MAX_CHARS) + '\n[…truncated]';
+
+      setChatOpen(true);
+      const instruction = `I'm uploading my syllabus. Parse the ENTIRE semester out of it: every assignment/pset with a due date, every exam/midterm/final date, and the recurring weekly class schedule (day/time). Extract each as its own item — don't summarize, don't skip items because there are many.\n\nSYLLABUS TEXT:\n${text}`;
+      await sendMessage(instruction, {
+        mode: 'plan',
+        planKind: 'brain_dump',
+        maxTokens: 6000,
+        displayContent: `📄 uploaded syllabus: ${file.name || 'syllabus'}`,
+      });
+    } catch (err) {
+      console.error('Syllabus parse failed:', err);
+      setToastMsg("Couldn't parse that syllabus — try again, or add classes/assignments one at a time.");
+    } finally {
+      setSyllabusBusy(false);
+    }
   }
 
   function handleClarificationSubmit(payload) {
@@ -6309,6 +6362,8 @@ function App() {
               setTimeout(() => sendMessage(prompt), 0);
             }
           }}
+          onUploadSyllabus={handleSyllabusUpload}
+          syllabusBusy={syllabusBusy}
         />
       ) : activePanel === 'home' ? (
         <HomeScreen
