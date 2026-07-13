@@ -20,9 +20,7 @@ export { assembleContext } from "./context/assembler.js";
 export { enrichDynamicContext } from "./context/enrich.js";
 export { SCHEMA_VERSIONS } from "./schemas/versions.js";
 export { buildActionToolDefs, validateAction } from "./schemas/actions.js";
-export { buildStudioToolDefs, validateStudio } from "./schemas/studio.js";
-export { buildStudyPackToolDefs, validateStudyPack } from "./schemas/study_pack.js";
-export type { MakeStudyPackInput } from "./schemas/study_pack.js";
+export { buildPlanToolDefs, validatePlan } from "./schemas/studio.js";
 export { buildCoachingToolDefs, validateCoaching } from "./schemas/coaching.js";
 export type { MakeClueInput, MakeWorkCheckInput } from "./schemas/coaching.js";
 export {
@@ -38,10 +36,12 @@ export {
   normalizeCheckCards,
   computeCoverage,
   proofreadState,
+  resolveAutoProofreadTrigger,
   type ContentType,
   type CheckCard,
   type Coverage,
   type ProofreadState,
+  type ProofreadTrigger,
 } from "../coaching/workcheck.js";
 export type { BehavioralSignals } from "./signals/behavioral.js";
 export { getBehavioralSignals, formatSignalsForContext } from "./signals/behavioral.js";

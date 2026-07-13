@@ -4,7 +4,7 @@
 //                  Stays on Gemini; Groq does not offer hosted embeddings.
 // Tier 1 (flash) → Groq GPT-OSS-20B (chat, action routing, classification,
 //                  summarization). Cross-provider fallback: Gemini 2.5 Flash.
-// Tier 2 (pro)   → Groq GPT-OSS-120B (studio, plan, deep reasoning).
+// Tier 2 (pro)   → Groq GPT-OSS-120B (plan, work_check, deep reasoning).
 //                  Cross-provider fallback: Gemini 2.5 Pro.
 //
 // Intents map to a Tier; per-tier provider selection lives in PROVIDER_BY_TIER.
@@ -22,9 +22,7 @@ export type Tier = "embed" | "flash" | "pro";
 export type Intent =
   | "chat"
   | "action_routing"
-  | "studio"
   | "plan"
-  | "study_pack"
   | "clue"
   | "work_check"
   | "embed";
@@ -32,13 +30,11 @@ export type Intent =
 const TIER_BY_INTENT: Record<Intent, Tier> = {
   chat: "flash",
   action_routing: "flash",
-  studio: "pro",
   // Unified plan pipeline (explicit request / goal / brain-dump). Runs on Pro
   // uniformly — brain-dump-shaped inputs used to run cheaper on Flash via
   // action_routing; revisit with a lightweight pre-classifier if cost/latency
   // regresses now that they share this intent.
   plan: "pro",
-  study_pack: "pro",
   // The forward clue is a light, single-shot hint — Flash is plenty. The
   // backward check is the deep-reasoning surface (localizing the broken step /
   // weak claim against a rubric) — it needs Pro.
