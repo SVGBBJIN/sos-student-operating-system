@@ -66,12 +66,12 @@ components bundle against. A design that uses those components must likewise sit
 under a react-router `<Router>`.
 
 ## Known findings / warnings
-- **SOURCE BUG (not fixed here):** `PlanTemplateSelector` crashes on render —
-  its `exam_prep` template uses `iconFn: Icon.target`, and `Icon.target` does
-  **not exist** in `src/lib/icons.jsx` (→ `tmpl.iconFn is not a function`). This
-  crashes in the real app too. It ships in the bundle (importable) but shows the
-  **floor card** (no authored preview) until the source adds an `Icon.target` (or
-  the template points at an existing icon). Worth reporting to the app team.
+- **SOURCE BUG — FIXED:** `PlanTemplateSelector` used to crash on render because
+  its `exam_prep` template references `iconFn: Icon.target` and `Icon.target` did
+  not exist in `src/lib/icons.jsx` (→ `tmpl.iconFn is not a function`). Fixed by
+  adding a Lucide-style `target:` icon (three concentric circles) to
+  `src/lib/icons.jsx`. PlanTemplateSelector now renders fully (authored preview,
+  no longer a floor card).
 - `[FONT_MISSING] "Arial Black", "Impact"` — these are **system fallback fonts**
   in font stacks, not brand fonts. Intentionally not bundled. Safe to ignore.
 
