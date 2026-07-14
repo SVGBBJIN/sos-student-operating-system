@@ -179,23 +179,50 @@ function useDashboardData(tasks, events) {
       }
     }
 
-    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress, focused, streakDays };
+    // Week strip — last 7 days (oldest → today), filled when a task was
+    // completed that day. An ownable at-a-glance consistency view.
+    const weekDots = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      weekDots.push({
+        key: d.toDateString(),
+        dow: d.toLocaleDateString('en-US', { weekday: 'narrow' }),
+        filled: doneDates.has(d.toDateString()),
+        today: i === 0,
+      });
+    }
+
+    return { agenda, upcoming, open, courses, doneToday, eventsToday: agenda.length, progress, focused, streakDays, weekDots };
   }, [tasks, events]);
 }
 
 /* ── presentational pieces (data-driven) ──────────────────────── */
-function StatStrip({ progress, doneToday, eventsToday, focused, streakDays }) {
+function StatStrip({ progress, doneToday, eventsToday, focused, streakDays, weekDots }) {
   const stats = [
-    { id: 'streak', icon: 'flame', big: String(streakDays), label: 'day streak', accent: true },
     { id: 'progress', icon: 'target', big: `${progress}%`, label: "today's progress" },
     { id: 'done', icon: 'check', big: String(doneToday), label: 'done today' },
     { id: 'events', icon: 'calendar', big: String(eventsToday), label: 'events' },
     { id: 'focused', icon: 'clock', big: focused, label: 'focused' },
   ];
+  const dots = weekDots || [];
   return (
-    <div className="stat-strip" style={{ gridTemplateColumns: `repeat(${stats.length}, 1fr)` }}>
+    <div className="stat-strip" style={{ gridTemplateColumns: `1.4fr repeat(${stats.length}, 1fr)` }}>
+      {/* Streak as an ownable week-strip rather than a generic number tile. */}
+      <div className="stat stat-accent stat-week">
+        <span className="stat-label">this week</span>
+        <div className="week-dots">
+          {dots.map(d => (
+            <span key={d.key} className={'wk-dot' + (d.filled ? ' filled' : '') + (d.today ? ' today' : '')}>
+              <span className="wk-dot-mark" />
+              <span className="wk-dot-dow">{d.dow}</span>
+            </span>
+          ))}
+        </div>
+        <span className="stat-sub">{streakDays} day streak</span>
+      </div>
       {stats.map(s => (
-        <div key={s.id} className={'stat' + (s.accent ? ' stat-accent' : '')}>
+        <div key={s.id} className="stat">
           <span className="stat-ic"><StudioIcon name={s.icon} size={14} /></span>
           <span className="stat-big">{s.big}</span>
           <span className="stat-label">{s.label}</span>
@@ -337,7 +364,7 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk, 
           <QuickActions onPick={onAsk} />
         </header>
 
-        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} streakDays={data.streakDays} />
+        <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} streakDays={data.streakDays} weekDots={data.weekDots} />
 
         <div className="bento">
           <div className="bento-agenda">
