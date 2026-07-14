@@ -8,9 +8,37 @@ import { mapGoogleCalItems, extractDocsText, parseDocId } from '../lib/googleImp
 /* ═══════════════════════════════════════════════
    GOOGLE IMPORT MODAL
    ═══════════════════════════════════════════════ */
-export default function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onImportUrl, onDisconnect, onConnect,
+// Parse pasted/CSV-ish flashcard text into [{q, a}]. One card per line;
+// splits on the first delimiter found (tab, "|", " - ", then comma) so
+// spreadsheet pastes, pipe-separated lists, and simple CSVs all work.
+function parseFlashcardText(raw) {
+  const delimiters = [/\t/, /\s*\|\s*/, /\s+-\s+/, /,/];
+  return raw
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      for (const d of delimiters) {
+        const parts = line.split(d);
+        if (parts.length >= 2) {
+          const q = parts[0].trim();
+          const a = parts.slice(1).join(' ').trim();
+          if (q && a) return { q, a };
+        }
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+export default function GoogleImportModal({ googleToken, googleUser, onClose, onImportEvents, onImportDoc, onImportPdf, onImportUrl, onImportFlashcards, notes = [], onDisconnect, onConnect,
   calSyncEnabled, calSyncStatus, calSyncLastAt, calSyncCount, calSyncError, onToggleCalSync, onSyncNow }) {
   const [tab, setTab] = useState('calendar');
+  // Flashcards tab state
+  const [fcText, setFcText] = useState('');
+  const [fcTargetNoteId, setFcTargetNoteId] = useState('__new__');
+  const [fcNewTitle, setFcNewTitle] = useState('');
+  const [fcLoading, setFcLoading] = useState(false);
   // URL import tab state — server-side fetch + text extraction (no headless browser)
   const [urlInput, setUrlInput] = useState('');
   const [urlLoading, setUrlLoading] = useState(false);
@@ -162,6 +190,22 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
     finally { setUrlLoading(false); }
   }
 
+  // ── Flashcards ── (paste or CSV-ish text → parsed → attached as a note layer)
+  function importFlashcards() {
+    setErr(null);
+    const cards = parseFlashcardText(fcText);
+    if (cards.length === 0) { setErr('No valid cards found. Use one per line: question, answer (tab, "|", " - ", or comma also work).'); return; }
+    if (fcTargetNoteId !== '__new__' && !fcNewTitle && !notes.find(n => n.id === fcTargetNoteId)) { setErr('Pick a note to add these to.'); return; }
+    setFcLoading(true);
+    try {
+      const target = fcTargetNoteId === '__new__'
+        ? { mode: 'new', title: fcNewTitle }
+        : { mode: 'existing', noteId: fcTargetNoteId };
+      onImportFlashcards(target, cards);
+      setFcText(''); setFcNewTitle('');
+    } finally { setFcLoading(false); }
+  }
+
   async function importAudio(file) { await transcribeFile(file, setAudioLoading); }
 
   async function importVideo(file) {
@@ -173,7 +217,7 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
     } catch(e) { setErr(e.message); setVideoLoading(false); }
   }
 
-  const isLoading = calLoading || docLoading || pdfLoading || audioLoading || videoLoading || urlLoading;
+  const isLoading = calLoading || docLoading || pdfLoading || audioLoading || videoLoading || urlLoading || fcLoading;
 
   return (
     <>
@@ -203,14 +247,15 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
 
         {/* Tabs */}
         <div className="g-tabs">
-          {['calendar','docs','pdf','audio','video','url'].map(t=>(
+          {['calendar','docs','pdf','audio','video','url','flashcards'].map(t=>(
             <button key={t} className={'g-tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setErr(null);}}>
               {t==='calendar'?<><span style={{display:'inline-flex'}}>{Icon.calendar(14)}</span> Calendar</>
               :t==='docs'?<><span style={{display:'inline-flex'}}>{Icon.fileText(14)}</span> Docs</>
               :t==='pdf'?<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> PDF</>
               :t==='audio'?<><span style={{display:'inline-flex'}}>{Icon.headphones(14)}</span> Audio</>
               :t==='video'?<><span style={{display:'inline-flex'}}>{Icon.video(14)}</span> Video</>
-              :<><span style={{display:'inline-flex'}}>{Icon.link(14)}</span> Website</>}
+              :t==='url'?<><span style={{display:'inline-flex'}}>{Icon.link(14)}</span> Website</>
+              :<><span style={{display:'inline-flex'}}>{Icon.listTree(14)}</span> Flashcards</>}
             </button>
           ))}
         </div>
@@ -380,7 +425,7 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
         {/* ── URL Tab ── (server-side fetch + text extraction, no headless browser) */}
         {tab==='url' && (
           <div className="g-section">
-            <p className="g-note">Paste a link to an article, textbook page, or study guide. We'll pull the readable text and build a study pack from it. JS-heavy or login-gated pages won't work.</p>
+            <p className="g-note">Paste a link to an article, textbook page, or study guide. We'll pull the readable text and save it as a note. JS-heavy or login-gated pages won't work.</p>
             <div style={{display:'flex',gap:8,alignItems:'center'}}>
               <input type="text" value={urlInput} onChange={e=>{setUrlInput(e.target.value);setErr(null);}}
                 placeholder="https://example.com/article"
@@ -406,6 +451,41 @@ export default function GoogleImportModal({ googleToken, googleUser, onClose, on
             <input ref={videoInputRef} type="file" accept=".mp4,.webm,.mov,.avi,.mkv" style={{display:'none'}}
               onChange={e=>{if(e.target.files?.[0]){importVideo(e.target.files[0]);e.target.value='';}}}/>
             <p className="g-note" style={{marginTop:8}}>Supported: MP4, WebM, MOV, AVI, MKV. Max 25MB. Audio from the video will be transcribed to text and saved as a note.</p>
+          </div>
+        )}
+
+        {/* ── Flashcards Tab ── (paste/CSV import → attached as a layer on a note) */}
+        {tab==='flashcards' && (
+          <div className="g-section">
+            <p className="g-note">Paste one card per line — <code>question, answer</code> (tab, "|", or " - " also work). Cards attach as a flashcards layer on the note you pick below.</p>
+            <textarea
+              value={fcText}
+              onChange={e=>{setFcText(e.target.value);setErr(null);}}
+              placeholder={'What is the capital of France? | Paris\nH2O is called what? | Water'}
+              rows={6}
+              style={{width:'100%',boxSizing:'border-box',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',color:'var(--text)',fontSize:'0.85rem',outline:'none',resize:'vertical',fontFamily:'inherit'}}
+            />
+            <div style={{display:'flex',gap:8,alignItems:'center',marginTop:8}}>
+              <select
+                value={fcTargetNoteId}
+                onChange={e=>setFcTargetNoteId(e.target.value)}
+                style={{flex:1,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'8px 10px',color:'var(--text)',fontSize:'0.85rem',outline:'none'}}
+              >
+                <option value="__new__">+ New note…</option>
+                {notes.filter(n=>!n.is_folder).map(n=>(
+                  <option key={n.id} value={n.id}>{n.name || 'Untitled'}</option>
+                ))}
+              </select>
+            </div>
+            {fcTargetNoteId === '__new__' && (
+              <input type="text" value={fcNewTitle} onChange={e=>{setFcNewTitle(e.target.value);setErr(null);}}
+                placeholder="New note title…"
+                style={{width:'100%',boxSizing:'border-box',marginTop:8,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',color:'var(--text)',fontSize:'0.85rem',outline:'none'}}/>
+            )}
+            <button className="confirm-btn confirm-btn-yes" style={{width:'100%',marginTop:8}}
+              onClick={importFlashcards} disabled={fcLoading||!fcText.trim()}>
+              {fcLoading?'Importing…':'Import flashcards'}
+            </button>
           </div>
         )}
       </div>

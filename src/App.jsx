@@ -669,16 +669,21 @@ async function dbUpsertDateBlock(date, timeSlot, data, userId) {
   const { error } = await sb.from('date_blocks').upsert(row, { onConflict: 'user_id,block_date,time_slot' });
   if (error) console.error('Date block upsert error:', error);
 }
-async function dbSaveFlashcardDeck(deck, userId) {
-  const { data, error } = await sb.from('flashcard_decks').insert({
+// Multi-layer notes: a note is a container of layers (text / flashcards /
+// audio / video / image) rather than one text body. Replaces the old
+// standalone flashcard-deck feature — imported flashcards now attach to a
+// note as a layer instead of living as a separate top-level object.
+async function dbAddNoteLayer(noteId, layer, userId) {
+  const { data, error } = await sb.from('note_layers').insert({
     user_id: userId,
-    title: (deck.title || 'Flashcard Deck').slice(0, 200),
-    summary: deck.summary || null,
-    cards: deck.cards || [],
-    source: deck.source || 'ai',
-    card_count: (deck.cards || []).length,
+    note_id: noteId,
+    layer_type: layer.layer_type,
+    position: layer.position || 0,
+    content: layer.text || layer.caption || null,
+    cards: layer.cards || null,
+    media_url: layer.media_url || null,
   }).select('id').single();
-  if (error) { console.error('flashcard_decks insert error:', error); return null; }
+  if (error) { console.error('note_layers insert error:', error); return null; }
   return data?.id || null;
 }
 async function dbSaveStudyPlan(plan, userId) {
@@ -695,26 +700,6 @@ async function dbUpdateStudyPlan(planId, patch, userId) {
   const { error } = await sb.from('study_plans').update(patch).eq('id', planId).eq('user_id', userId);
   if (error) console.error('study_plans update error:', error);
 }
-async function dbSaveStudyPack(pack, userId, opts = {}) {
-  const artifacts = [
-    { kind: 'summary', data: { bullets: pack.summary || [], key_concepts: pack.key_concepts || [] } },
-    { kind: 'flashcards', data: pack.flashcards || [] },
-    { kind: 'quiz', data: pack.quiz || [] },
-  ];
-  const { data, error } = await sb.from('study_packs').insert({
-    user_id: userId,
-    title: (pack.title || 'Study Pack').slice(0, 200),
-    subject: pack.subject || null,
-    topic: pack.topic || null,
-    status: 'ready',
-    source_kind: opts.sourceKind || 'manual',
-    artifacts,
-    linked_event_id: opts.linkedEventId || null,
-  }).select('id').single();
-  if (error) { console.error('study_packs insert error:', error); return null; }
-  return data?.id || null;
-}
-
 /* ── Migrate localStorage → Supabase (first login) ── */
 async function migrateLocalStorage(userId) {
   const migrated = localStorage.getItem('sos_migrated_' + userId);
@@ -1036,8 +1021,6 @@ ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 }
 
 /* ─── Multi-model message classifier ─── */
-const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
-const BRIEFING_REGEX = /\b(daily\s+briefing|today'?s?\s+briefing|my\s+briefing|give\s+me\s+(?:a|my|the|today'?s?)\s+briefing|(?:what'?s|whats)\s+(?:on\s+)?(?:my\s+)?(?:agenda|plate)\s+today|brief\s+me|morning\s+briefing|what\s+do\s+i\s+have\s+(?:going\s+on\s+)?today)\b/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(?!(?:my\s+)?(?:week|month|semester)\b)(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 // Hint & Work-Check surfaces. The clue is the forward "I'm stuck, get me
 // started" ask; the work-check is the backward "look at what I produced" ask.
@@ -1206,8 +1189,10 @@ function App() {
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
   const [studyPlans, setStudyPlans] = useState([]);
-  const [flashcardDecks, setFlashcardDecks] = useState([]);
-  const [grades, setGrades] = useState([]);
+  const [noteLayers, setNoteLayers] = useState([]); // multi-layer notes: text/flashcards/audio/video/image
+  const [calendarEnabled, setCalendarEnabled] = useState(() => {
+    try { return localStorage.getItem('sos_calendar_enabled') === 'true'; } catch (_) { return false; }
+  }); // Calendar is demoted to an optional, toggle-able view; off by default.
   const [showMyPlans, setShowMyPlans] = useState(false);
   const [showDeadlines, setShowDeadlines] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1298,6 +1283,7 @@ function App() {
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
   const proofreadHistoryRef = useRef(loadProofreadHistory()); // { [assignmentKey]: number[] }
+  const preSubmissionNudgedRef = useRef(new Set()); // task ids already nudged this session (pre-submission proofread trigger)
   // Undo toast: shown for 8s after a destructive/mutating AI action
   const [undoToast, setUndoToast] = useState(null); // { label, snap: {tasks, events, notes, blocks} }
   const undoTimerRef = useRef(null);
@@ -1521,16 +1507,11 @@ function App() {
       setToastMsg('⚠️ Couldn\'t load your data right now — please refresh. Avoid adding anything until it loads.');
     }
 
-    // Load flashcard decks for AI tool access (read_study_sets, delete_study_set, read_project)
+    // Load note layers (multi-layer notes: text/flashcards/audio/video/image)
     try {
-      const { data: decks } = await sb.from('flashcard_decks').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(100);
-      setFlashcardDecks(decks || []);
-    } catch (e) { console.error('Failed to load flashcard decks:', e); }
-
-    try {
-        const { data: gradesData } = await sb.from('grades').select('*').eq('user_id', authUser.id).order('created_at', { ascending: false }).limit(500);
-        setGrades(gradesData || []);
-      } catch (e) { console.error('Failed to load grades:', e); }
+      const { data: layers } = await sb.from('note_layers').select('*').eq('user_id', authUser.id).order('position', { ascending: true }).limit(1000);
+      setNoteLayers(layers || []);
+    } catch (e) { console.error('Failed to load note layers:', e); }
 
     // Resolve the user's start-latency experiment arm: read the pinned
     // assignment, or seed one deterministically on first load. Best-effort —
@@ -2000,8 +1981,7 @@ function App() {
     diffTable('tasks', snap.tasks, cur.tasks, t => appTaskToDb(t, user.id));
     diffTable('events', snap.events, cur.events, e => appEventToDb(e, user.id));
     diffTable('notes', snap.notes, cur.notes, n => appNoteToDb(n, user.id));
-    if (snap.grades) diffTable('grades', snap.grades, cur.grades, g => ({ ...g, user_id: user.id }));
-    if (snap.flashcardDecks) diffTable('flashcard_decks', snap.flashcardDecks, cur.flashcardDecks, d => ({ ...d, user_id: user.id }));
+    if (snap.noteLayers) diffTable('note_layers', snap.noteLayers, cur.noteLayers, l => ({ ...l, user_id: user.id }));
 
     // Blocks: only reconcile when they actually differ (most undos don't touch them).
     if (JSON.stringify(snap.blocks) !== JSON.stringify(cur.blocks)) {
@@ -2036,13 +2016,12 @@ function App() {
     const { snap } = undoToast;
     // Capture current state BEFORE the setters so the DB reconcile can diff
     // against what's actually live right now.
-    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
+    const cur = { tasks, events, notes, blocks, noteLayers };
     setTasks(snap.tasks);
     setEvents(snap.events);
     setNotes(snap.notes);
     setBlocks(snap.blocks);
-    if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
-    if (snap.grades) setGrades(snap.grades);
+    if (snap.noteLayers) setNoteLayers(snap.noteLayers);
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
@@ -2837,7 +2816,7 @@ function App() {
     setRollupItems([]); // every item was decided this pass
     if (!acceptedActions || !acceptedActions.length) return;
     // Whole batch is one undoable snapshot.
-    const batchSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+    const batchSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), noteLayers: noteLayers.slice() };
     acceptedActions.forEach(a => executeAction({ ...a, __confirmed: true, commitment: 'confirmed' }));
     pushUndoToast(`Undo: applied ${acceptedActions.length} batched item${acceptedActions.length !== 1 ? 's' : ''}`, batchSnap);
   }
@@ -2847,10 +2826,9 @@ function App() {
   }
   function undoRollupAuto(autoItem) {
     const snap = autoItem.snap;
-    const cur = { tasks, events, notes, blocks, grades, flashcardDecks };
+    const cur = { tasks, events, notes, blocks, noteLayers };
     setTasks(snap.tasks); setEvents(snap.events); setNotes(snap.notes); setBlocks(snap.blocks);
-    if (snap.flashcardDecks) setFlashcardDecks(snap.flashcardDecks);
-    if (snap.grades) setGrades(snap.grades);
+    if (snap.noteLayers) setNoteLayers(snap.noteLayers);
     setRollupAuto(prev => prev.filter(x => x !== autoItem));
     if (user) syncOp(() => persistSnapshotToDb(snap, cur), 'the undo');
   }
@@ -2875,9 +2853,9 @@ function App() {
       'add_task','add_event','add_block','add_recurring_event',
       'update_task','update_event','delete_task','delete_event','delete_block',
       'complete_task','convert_event_to_block','convert_block_to_event',
-      'break_task','clear_all','delete_study_set',
+      'break_task','clear_all',
       'update_block','postpone_task','bulk_complete',
-      'rename_note','move_note','create_folder','log_grade','update_study_set',
+      'rename_note','move_note','create_folder','add_note_layer','delete_note_layer',
     ]);
     if (mutatingTypes.has(action.type) && !action.__confirmed) {
       const conf = typeof action.confidence === 'number' ? action.confidence : null;
@@ -2893,13 +2871,13 @@ function App() {
       }
       if (autoConf) {
         // Auto-applied today — mirror into the rollup as "already done · undo".
-        const autoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+        const autoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), noteLayers: noteLayers.slice() };
         setRollupAuto(prev => [...prev, { action, summary: actionSummary(action), snap: autoSnap }]);
       }
     }
 
     // Snapshot state before any mutation so the user can undo within 8 seconds
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), noteLayers: noteLayers.slice() };
     try {
       switch (action.type) {
         case 'add_task': {
@@ -3008,6 +2986,17 @@ function App() {
           // Time payout — recovered time as information, not celebration.
           postAssistantNote(payoutLine(target));
           pushUndoToast(`Undo: completed "${target.title}"`, undoSnap);
+          // Proofread suite, trigger 1 of 3: a milestone task from a saved study
+          // plan was just finished — nudge a work-check on the deliverable
+          // before the student moves on to the next thing.
+          const isMilestone = studyPlans.some(sp =>
+            (sp.plan_json?.milestone_tasks || []).some(mt => (mt.task_name || '').toLowerCase() === target.title.toLowerCase())
+          );
+          if (isMilestone) {
+            setTimeout(() => postAssistantNote(
+              `That's a milestone from your study plan — want a quick check on it before you move on? Paste your work here, or say "check my work".`
+            ), 900);
+          }
           break;
         }
         case 'update_task': {
@@ -3156,11 +3145,6 @@ function App() {
           recordExecution('add_event', `"${ev.title}" on ${ev.date}`);
           window.dispatchEvent(new CustomEvent('sos:calendar:new-event', { detail: { id: ev.id } }));
           pushUndoToast(`Undo: added "${ev.title}"`, undoSnap);
-          // Passive study generation: an exam/test/quiz auto-spawns a study pack
-          // linked to the event so material is ready before the deadline.
-          if (['test','exam','quiz'].includes(ev.type)) {
-            generateStudyPackInBackground({ subject: ev.subject, topic: ev.title, linkedEventId: ev.id, sourceKind: 'event' });
-          }
           if (isGoogleConnected() && calSyncEnabled) {
             pushEventToGoogle(ev, googleToken).then(gid => {
               if (gid) {
@@ -3753,22 +3737,6 @@ function App() {
           recordExecution('prioritize_tasks', `top ${ranked.length} tasks`);
           break;
         }
-        case 'delete_study_set': {
-          const titleSearch = (action.title || '').toLowerCase().trim();
-          const match = flashcardDecks.find(d =>
-            d.title.toLowerCase().includes(titleSearch) ||
-            titleSearch.includes(d.title.toLowerCase())
-          );
-          if (!match) {
-            postAssistantNote(`I couldn't find a flashcard deck called "${action.title}" to delete.`);
-            break;
-          }
-          setFlashcardDecks(prev => prev.filter(d => d.id !== match.id));
-          if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', match.id).eq('user_id', user.id));
-          recordExecution('delete_study_set', `"${match.title}"`);
-          pushUndoToast(`Undo: deleted study set "${match.title}"`, undoSnap);
-          break;
-        }
         case 'read_notes': {
           const subjectFilter = (action.subject || '').trim();
           const searchFilter = (action.search || '').trim();
@@ -3797,20 +3765,6 @@ function App() {
           postAssistantNote(noteLines.join('\n'));
           break;
         }
-        case 'read_study_sets': {
-          if (flashcardDecks.length === 0) {
-            postAssistantNote('No flashcard decks found. Create one by asking me to "make flashcards on [topic]".');
-            break;
-          }
-          const deckLines = [`**Flashcard Decks** (${flashcardDecks.length}):\n`];
-          flashcardDecks.forEach(d => {
-            const cc = d.card_count || (d.cards || []).length;
-            const src = d.source === 'ai' ? ' · AI-generated' : ' · manual';
-            deckLines.push(`- **${d.title}**${src} · ${cc} card${cc !== 1 ? 's' : ''}`);
-          });
-          postAssistantNote(deckLines.join('\n'));
-          break;
-        }
         case 'read_project': {
           const projSubject = (action.subject || '').trim();
           if (!projSubject) {
@@ -3821,8 +3775,7 @@ function App() {
           const projTasks = tasks.filter(t => (t.subject || '').toLowerCase() === psl && t.status !== 'done');
           const projEvents = events.filter(e => (e.subject || '').toLowerCase() === psl);
           const projNotes = notes.filter(n => (n.subject || n.tab_name || '').toLowerCase() === psl);
-          const projDecks = flashcardDecks.filter(d => d.title.toLowerCase().includes(psl));
-          const total = projTasks.length + projEvents.length + projNotes.length + projDecks.length;
+          const total = projTasks.length + projEvents.length + projNotes.length;
           if (total === 0) {
             postAssistantNote(`No content found for "${projSubject}". Check the subject name — it must match exactly.`);
             break;
@@ -3843,13 +3796,6 @@ function App() {
           if (projNotes.length > 0) {
             projLines.push(`\n**Notes (${projNotes.length}):**`);
             projNotes.forEach(n => projLines.push(`- ${n.name || 'Untitled'}`));
-          }
-          if (projDecks.length > 0) {
-            projLines.push(`\n**Study Sets (${projDecks.length}):**`);
-            projDecks.forEach(d => {
-              const cc = d.card_count || (d.cards || []).length;
-              projLines.push(`- ${d.title} · ${cc} cards`);
-            });
           }
           postAssistantNote(projLines.join('\n'));
           break;
@@ -4090,50 +4036,43 @@ function App() {
           pushUndoToast(`Undo: created folder "${cfName}"`, undoSnap);
           break;
         }
-        case 'log_grade': {
-          const lgSubject = (action.subject || '').trim();
-          const lgAssignment = (action.assignment || '').trim();
-          const lgGrade = typeof action.grade === 'number' ? action.grade : parseFloat(action.grade);
-          if (!lgSubject || !lgAssignment || isNaN(lgGrade)) {
-            postAssistantNote(`I need subject, assignment name, and grade to log this.`);
+        case 'add_note_layer': {
+          const nlSearch = (action.note_title || '').trim().toLowerCase();
+          const nlNote = notes.find(n =>
+            !n.is_folder && ((n.name || '').toLowerCase().includes(nlSearch) || nlSearch.includes((n.name || '').toLowerCase()))
+          );
+          if (!nlNote) {
+            postAssistantNote(`I couldn't find a note called "${action.note_title}" to add that to.`);
             break;
           }
-          const gradeRecord = { id: uid(), subject: lgSubject, assignment: lgAssignment, grade: lgGrade, grade_type: action.grade_type || 'other', created_at: new Date().toISOString() };
-          setGrades(prev => [gradeRecord, ...prev]);
-          if (user) syncOp(() => sb.from('grades').insert({ id: gradeRecord.id, user_id: user.id, subject: lgSubject, assignment: lgAssignment, grade: lgGrade, grade_type: gradeRecord.grade_type }));
-          const subjectGrades = [...grades, gradeRecord].filter(g => (g.subject || '').toLowerCase() === lgSubject.toLowerCase());
-          const avg = subjectGrades.reduce((s, g) => s + Number(g.grade), 0) / subjectGrades.length;
-          postAssistantNote(`Logged **${lgGrade}%** on **${lgAssignment}** (${lgSubject}).\n\nYour ${lgSubject} average is now **${avg.toFixed(1)}%** across ${subjectGrades.length} grade${subjectGrades.length !== 1 ? 's' : ''}.`);
-          recordExecution('log_grade', `${lgGrade}% on "${lgAssignment}" (${lgSubject})`);
+          const nlPosition = noteLayers.filter(l => l.note_id === nlNote.id).length;
+          const nlLayer = {
+            id: uid(),
+            note_id: nlNote.id,
+            layer_type: action.layer_type,
+            position: nlPosition,
+            content: action.text || action.caption || null,
+            cards: action.cards || null,
+            media_url: action.media_url || null,
+            created_at: new Date().toISOString(),
+          };
+          setNoteLayers(prev => [...prev, nlLayer]);
+          if (user) syncOp(() => dbAddNoteLayer(nlNote.id, { ...nlLayer, position: nlPosition }, user.id).then(id => { if (id) nlLayer.id = id; }));
+          recordExecution('add_note_layer', `${action.layer_type} layer on "${nlNote.name}"`);
+          postAssistantNote(`Added a ${action.layer_type} layer to **${nlNote.name}**.`);
+          pushUndoToast(`Undo: added layer to "${nlNote.name}"`, undoSnap);
           break;
         }
-        case 'update_study_set': {
-          const usSearch = (action.title || '').trim().toLowerCase();
-          const usMatch = flashcardDecks.find(d =>
-            d.title.toLowerCase().includes(usSearch) || usSearch.includes(d.title.toLowerCase())
-          );
-          if (!usMatch) {
-            postAssistantNote(`I couldn't find a flashcard deck called "${action.title}" to update.`);
+        case 'delete_note_layer': {
+          const dlLayer = noteLayers.find(l => l.id === action.layer_id);
+          if (!dlLayer) {
+            postAssistantNote(`I couldn't find that layer to delete.`);
             break;
           }
-          let updatedCards = [...(usMatch.cards || [])];
-          if (action.cards_to_remove && action.cards_to_remove.length > 0) {
-            const removeSet = action.cards_to_remove.map(q => q.trim().toLowerCase());
-            updatedCards = updatedCards.filter(c => !removeSet.some(rq => (c.q || '').toLowerCase().includes(rq)));
-          }
-          if (action.cards_to_add && action.cards_to_add.length > 0) {
-            updatedCards = [...updatedCards, ...action.cards_to_add];
-          }
-          const usNewTitle = (action.new_title || '').trim() || usMatch.title;
-          const usUpdated = { ...usMatch, title: usNewTitle, cards: updatedCards, card_count: updatedCards.length };
-          setFlashcardDecks(prev => prev.map(d => d.id === usMatch.id ? usUpdated : d));
-          if (user) syncOp(() => sb.from('flashcard_decks').update({ title: usNewTitle, cards: updatedCards, card_count: updatedCards.length }).eq('id', usMatch.id).eq('user_id', user.id));
-          const usChanges = [];
-          if (usNewTitle !== usMatch.title) usChanges.push(`renamed to "${usNewTitle}"`);
-          if (action.cards_to_add?.length) usChanges.push(`added ${action.cards_to_add.length} card${action.cards_to_add.length !== 1 ? 's' : ''}`);
-          if (action.cards_to_remove?.length) usChanges.push(`removed ${action.cards_to_remove.length} card${action.cards_to_remove.length !== 1 ? 's' : ''}`);
-          postAssistantNote(`Updated **${usMatch.title}**: ${usChanges.join(', ') || 'no changes'}. Now has ${updatedCards.length} card${updatedCards.length !== 1 ? 's' : ''}.`);
-          pushUndoToast(`Undo: updated deck "${usMatch.title}"`, undoSnap);
+          setNoteLayers(prev => prev.filter(l => l.id !== dlLayer.id));
+          if (user) syncOp(() => sb.from('note_layers').delete().eq('id', dlLayer.id).eq('user_id', user.id));
+          recordExecution('delete_note_layer', dlLayer.layer_type);
+          pushUndoToast(`Undo: deleted ${dlLayer.layer_type} layer`, undoSnap);
           break;
         }
         case 'plan_intent': {
@@ -4306,16 +4245,6 @@ function App() {
   function formatContentForNote(c) {
     try {
       switch (c.type) {
-        case 'create_flashcards':
-          return (c.cards||[]).map((card,i) => 'Q' + (i+1) + ': ' + card.q + '\nA: ' + card.a).join('\n\n');
-        case 'create_outline':
-          return (c.sections||[]).map(s => '## ' + s.heading + '\n' + (s.points||[]).map(p => '- ' + p).join('\n')).join('\n\n');
-        case 'create_summary':
-          return (c.bullets||[]).map(b => '- ' + b).join('\n');
-        case 'create_quiz':
-          return (c.questions||[]).map((q,i) => 'Q' + (i+1) + ': ' + q.q + '\nChoices: ' + (q.choices||[]).join(' | ') + '\nAnswer: ' + q.answer).join('\n\n');
-        case 'create_project_breakdown':
-          return (c.phases||[]).map(p => '## ' + p.phase + (p.deadline ? ' (due ' + p.deadline + ')' : '') + '\n' + (p.tasks||[]).map(t => '- [ ] ' + t).join('\n')).join('\n\n');
         case 'make_plan': {
           if (classifyPlanShape(c) === 'routine') {
             const blocks = (c.recurring_blocks||[]).map(b => `- ${b.activity} (${(b.days||[]).join('/')} ${b.start}–${b.end})`).join('\n');
@@ -4331,18 +4260,6 @@ function App() {
   async function handleSaveContent(idx) {
     const c = pendingContent[idx];
     if (!c) return;
-    if (c.type === 'create_flashcards' && user) {
-      const deckId = await dbSaveFlashcardDeck({ title: c.title, summary: c.summary, cards: c.cards, source: 'ai' }, user.id);
-      setPendingContent(prev => prev.filter((_,i) => i !== idx));
-      setToastMsg('Saved "' + (c.title || 'Flashcard Deck') + '" to Library');
-      if (deckId) {
-        console.log('[sos] flashcard deck saved:', deckId);
-        setFlashcardDecks(prev => [{ id: deckId, title: c.title, summary: c.summary || null, cards: c.cards || [], source: 'ai', card_count: (c.cards || []).length, created_at: new Date().toISOString() }, ...prev]);
-        const cardText = (c.cards || []).map(card => `${card.q} — ${card.a}`).join('\n');
-        syncEmbed([{ source: 'flashcard_deck', source_id: deckId, text: (c.title || 'Flashcard Deck') + '\n' + (c.summary || '') + '\n' + cardText, metadata: { card_count: (c.cards || []).length } }]);
-      }
-      return;
-    }
     const formatted = formatContentForNote(c);
     executeAction({ type:'add_note', tab_name: c.title || 'Study Material', content: formatted });
     setPendingContent(prev => prev.filter((_,i) => i !== idx));
@@ -4390,7 +4307,7 @@ function App() {
   }
 
   async function handleApplyIntentPlan(idx, plan, skipConflicts = false) {
-    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), flashcardDecks: flashcardDecks.slice(), grades: grades.slice() };
+    const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), noteLayers: noteLayers.slice() };
     let taskCount = 0, blockCount = 0;
     const createdTaskIds = [];
 
@@ -4827,32 +4744,29 @@ function App() {
     return () => clearInterval(id);
   }, [calSyncEnabled, googleToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Background study-pack generation. Fires on file imports and on
-  // test/exam/quiz calendar events — no user request needed (passive study).
-  async function generateStudyPackInBackground({ subject, topic, sourceText, linkedEventId, sourceKind }) {
-    if (!user) return;
-    try {
-      setToastMsg(`Building a study pack for ${topic || subject || 'your material'}…`);
-      const session = await sb.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const userMsg = sourceText
-        ? `Create a study pack${subject ? ' for ' + subject : ''}${topic ? ' on "' + topic + '"' : ''} from this material:\n\n${String(sourceText).slice(0, 12000)}`
-        : `Create a study pack${subject ? ' for ' + subject : ''}${topic ? ' on the topic "' + topic + '"' : ''}.`;
-      const res = await fetch(EDGE_FN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
-        body: JSON.stringify({ mode: 'study_pack', messages: [{ role: 'user', content: userMsg }], maxTokens: 8000 }),
+  // Proofread suite, trigger 2 of 3: a task is due within the next 24 hours and
+  // has a note (draftable content) attached — nudge a work-check before the
+  // deadline instead of only offering the check on-request. Checked every 10
+  // minutes; each task is nudged at most once per session.
+  useEffect(() => {
+    const PRE_SUBMISSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const scan = () => {
+      const now = Date.now();
+      tasks.forEach(t => {
+        if (t.status === 'done' || !t.dueDate) return;
+        if (preSubmissionNudgedRef.current.has(t.id)) return;
+        const dueAt = new Date(t.dueDate + 'T23:59:59').getTime();
+        if (dueAt <= now || dueAt - now > PRE_SUBMISSION_WINDOW_MS) return;
+        const linkedNote = notes.find(n => !n.is_folder && (n.name || '').toLowerCase().includes((t.title || '').toLowerCase()) && (n.content || '').trim().length > 20);
+        if (!linkedNote) return;
+        preSubmissionNudgedRef.current.add(t.id);
+        postAssistantNote(`"${t.title}" is due soon — want a quick check on "${linkedNote.name}" before you submit? Paste it here, or say "check my work".`);
       });
-      if (!res.ok) { console.error('study pack background gen failed:', res.status); return; }
-      const data = await res.json();
-      const proposal = data?.actions?.[0];
-      if (!proposal || proposal.type !== 'make_study_pack') return;
-      const packId = await dbSaveStudyPack(proposal, user.id, { linkedEventId: linkedEventId || null, sourceKind: sourceKind || 'manual' });
-      if (packId) setToastMsg(`Study pack ready: ${proposal.title} — open it in your Library 📚`);
-    } catch (e) {
-      console.error('study pack background gen error:', e);
-    }
-  }
+    };
+    scan();
+    const id = setInterval(scan, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [tasks, notes]);
 
   function handleImportGoogleDoc(title, text) {
     const note = { id: uid(), name: title, content: text, updatedAt: new Date().toISOString(), source: 'google_docs' };
@@ -4861,7 +4775,6 @@ function App() {
     syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported "' + title + '" to notes 📄');
-    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
   function handleImportPdf(title, text) {
@@ -4871,7 +4784,6 @@ function App() {
     syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported PDF "' + title + '" to notes 📑');
-    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
   }
 
   function handleImportUrl(title, text) {
@@ -4881,7 +4793,29 @@ function App() {
     syncEmbed([{ source: 'note', source_id: note.id, text: title + '\n' + plainTextFromHtml(text), metadata: { note_type: 'note' } }]);
     setShowGoogleModal(false);
     setToastMsg('Imported "' + title + '" to notes 🔗');
-    generateStudyPackInBackground({ topic: title, sourceText: text, sourceKind: 'import' });
+  }
+
+  // Flashcard import: attaches an imported deck as a flashcards layer on a
+  // note (see note_layers) instead of a standalone deck — flashcards are a
+  // note layer type, not their own top-level feature.
+  function handleImportFlashcards(target, cards) {
+    if (!cards || cards.length === 0) { setToastMsg('No valid cards found — check the format.'); return; }
+    let note = target.mode === 'existing' ? notes.find(n => n.id === target.noteId) : null;
+    if (target.mode === 'existing' && !note) { setToastMsg('Could not find that note.'); return; }
+    if (!note) {
+      const title = (target.title || 'Imported Flashcards').trim() || 'Imported Flashcards';
+      note = { id: uid(), name: title, content: '', updatedAt: new Date().toISOString(), source: 'flashcard_import' };
+      setNotes(prev => [...prev, note]);
+      if (user) syncOp(() => dbUpsertNote(note, user.id));
+    }
+    const position = noteLayers.filter(l => l.note_id === note.id).length;
+    const layer = { id: uid(), note_id: note.id, layer_type: 'flashcards', position, content: null, cards, media_url: null, created_at: new Date().toISOString() };
+    setNoteLayers(prev => [...prev, layer]);
+    if (user) syncOp(() => dbAddNoteLayer(note.id, layer, user.id).then(id => { if (id) layer.id = id; }));
+    const cardText = cards.map(c => `${c.q} — ${c.a}`).join('\n');
+    syncEmbed([{ source: 'note', source_id: note.id, text: note.name + '\n' + cardText, metadata: { note_type: 'note' } }]);
+    setShowGoogleModal(false);
+    setToastMsg(`Added ${cards.length} flashcard${cards.length !== 1 ? 's' : ''} to "${note.name}" 🗂️`);
   }
 
   function handleDeleteNote(noteId) {
@@ -5292,9 +5226,8 @@ function App() {
         ...(isBriefingRequest ? { mode: 'briefing' } : {}),
         ...(isContentGenRequest ? { mode: 'studio' } : {}),
         ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
-        ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
-        ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric } : {}),
+        ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric, proofreadTrigger: opts.proofreadTrigger || 'on_request' } : {}),
         // Caller-supplied mode override (e.g. brain_dump from voice transcripts).
         // Wins over the heuristics above.
         ...(opts.mode ? { mode: opts.mode } : {}),
@@ -5535,9 +5468,14 @@ function App() {
           proofreadHistoryRef.current[workCheckKey] = arr;
           saveProofreadHistory(proofreadHistoryRef.current);
           const terminal = proposal.proofread?.terminal;
+          const trigger = proposal.proofread?.trigger;
           const introMsg = { role: 'assistant', content: terminal
             ? "last check for this one — here's where it stands, then it's back to you:"
-            : "here's where your work stands — strengths first, then the spots worth another look:", timestamp: Date.now() };
+            : trigger === 'milestone'
+              ? "nice work finishing that milestone — quick check before you move on:"
+              : trigger === 'pre_submission'
+                ? "this is due soon, so let's check it now — strengths first, then the spots worth another look:"
+                : "here's where your work stands — strengths first, then the spots worth another look:", timestamp: Date.now() };
           sfx.arrive();
           setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
@@ -6389,7 +6327,7 @@ function App() {
         const res = await fetch(EDGE_FN_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ mode: 'search', searchQuery: q, searchSources: ['note', 'flashcard_deck', 'study_plan'], searchLimit: 8 }),
+          body: JSON.stringify({ mode: 'search', searchQuery: q, searchSources: ['note', 'study_plan'], searchLimit: 8 }),
         });
         if (!res.ok || cancelled) return;
         const data = await res.json();
@@ -6577,6 +6515,13 @@ function App() {
                   <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Let Charles break complex requests into parallel steps automatically.</div>
                 </div>
                 <button className={'settings-toggle'+(agenticMode?' settings-toggle-active':'')} onClick={()=>setAgenticMode(!agenticMode)}>{agenticMode ? 'On' : 'Off'}</button>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Calendar view</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Show the visual calendar page. Scheduling itself always keeps running in the background — this only toggles the view.</div>
+                </div>
+                <button className={'settings-toggle'+(calendarEnabled?' settings-toggle-active':'')} onClick={()=>{ const next = !calendarEnabled; setCalendarEnabled(next); localStorage.setItem('sos_calendar_enabled', next ? 'true' : 'false'); }}>{calendarEnabled ? 'On' : 'Off'}</button>
               </div>
               <div className="settings-row">
                 <div>
@@ -6832,14 +6777,14 @@ function App() {
           tasks={tasks}
           events={events}
           notes={notes}
-          flashcardDecks={flashcardDecks}
+          noteLayers={noteLayers}
           onClose={() => setSelectedProject(null)}
           onDeleteItems={(items) => {
             items.forEach(({ type, id }) => {
               if (type === 'task') { setTasks(prev => prev.filter(t => t.id !== id)); if (user) syncOp(() => dbDeleteTask(id, user.id)); }
               else if (type === 'event') { setEvents(prev => prev.filter(e => e.id !== id)); if (user) syncOp(() => dbDeleteEvent(id, user.id)); }
               else if (type === 'note') { setNotes(prev => prev.filter(n => n.id !== id)); if (user) syncOp(() => sb.from('notes').delete().eq('id', id).eq('user_id', user.id)); }
-              else if (type === 'deck') { setFlashcardDecks(prev => prev.filter(d => d.id !== id)); if (user) syncOp(() => sb.from('flashcard_decks').delete().eq('id', id).eq('user_id', user.id)); }
+              else if (type === 'layer') { setNoteLayers(prev => prev.filter(l => l.id !== id)); if (user) syncOp(() => sb.from('note_layers').delete().eq('id', id).eq('user_id', user.id)); }
             });
           }}
         />
@@ -7341,6 +7286,8 @@ function App() {
           onImportDoc={handleImportGoogleDoc}
           onImportPdf={handleImportPdf}
           onImportUrl={handleImportUrl}
+          onImportFlashcards={handleImportFlashcards}
+          notes={notes}
           onDisconnect={()=>{ disconnectGoogle(); setShowGoogleModal(false); }}
           onConnect={connectGoogle}
           calSyncEnabled={calSyncEnabled}

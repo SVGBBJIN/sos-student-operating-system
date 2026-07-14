@@ -58,6 +58,9 @@ export interface ChatBody {
   contentType?: string;          // procedure | fact | argument (LMS task type hint)
   proofreadRoundsUsed?: number;  // rounds already used in the current 2h window
   hasRubric?: boolean;           // whether the student pasted a rubric/prompt
+  // How this work-check was invoked: an explicit ask, a milestone-completion
+  // nudge, or a due-date-proximity nudge. Defaults to "on_request".
+  proofreadTrigger?: "on_request" | "milestone" | "pre_submission";
 }
 
 function coerceContentType(v?: string): ContentType | null {
@@ -227,7 +230,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
     // frequent/lightweight, not gated behind the same daily cap as planning/
     // studio generation (matches the pre-merge dedicated brain_dump mode).
     const isExemptBrainDump = body.mode === "plan" && body.planKind === "brain_dump";
-    if ((body.mode === "studio" || (body.mode === "plan" && !isExemptBrainDump) || body.mode === "study_pack" || body.mode === "clue" || body.mode === "work_check") && userId) {
+    if (((body.mode === "plan" && !isExemptBrainDump) || body.mode === "clue" || body.mode === "work_check") && userId) {
       const rl = await checkContentRateLimit(userId);
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
@@ -316,12 +319,13 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       const contentType = coerceContentType(body.contentType);
       const proofread = resolveProofread(body.proofreadRoundsUsed);
       const hasRubric = Boolean(body.hasRubric);
+      const trigger = body.proofreadTrigger ?? "on_request";
       const result = await callModel({
         intent: "work_check",
         systemPrompt: (body.systemPrompt ? body.systemPrompt + "\n\n" : "") + WORK_CHECK_SYSTEM,
         staticSystemPrompt: body.staticSystemPrompt ?? undefined,
         dynamicContext:
-          (body.dynamicContext ?? "") + buildWorkCheckContext({ contentType, proofread, hasRubric }),
+          (body.dynamicContext ?? "") + buildWorkCheckContext({ contentType, proofread, hasRubric, trigger }),
         messages,
         toolSet: "coaching",
         toolChoice: "required",
@@ -330,7 +334,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         thinkingBudget: 2048,
       });
       const raw = result.actions.find((a) => a.type === "make_work_check") ?? result.actions[0] ?? null;
-      const action = raw ? normalizeWorkCheckAction(raw, proofread) : null;
+      const action = raw ? normalizeWorkCheckAction(raw, proofread, trigger) : null;
       return {
         kind: "json",
         status: 200,
@@ -338,7 +342,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
           ...result,
           actions: action ? [action] : [],
           executed_actions: [],
-          orchestration: { mode: "work_check", terminal: proofread.terminal, ...CLIENT_ORCH },
+          orchestration: { mode: "work_check", terminal: proofread.terminal, trigger, ...CLIENT_ORCH },
         },
       };
     }
@@ -412,44 +416,6 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       clientTasks: body.clientTasks,
       clientCalendarDensity: body.clientCalendarDensity,
     });
-
-    // ── Studio (forced tool call, content generation) ──
-    if (body.mode === "studio") {
-      const result = await callModel({
-        intent: "studio",
-        systemPrompt: body.systemPrompt ?? "",
-        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-        dynamicContext,
-        messages,
-        toolSet: "studio",
-        toolChoice: "required",
-        maxOutputTokens: Math.min(Number(body.maxTokens) || 4096, 4096),
-      });
-      return {
-        kind: "json",
-        status: 200,
-        json: { ...result, executed_actions: [], orchestration: { mode: "studio", ...CLIENT_ORCH } },
-      };
-    }
-
-    // ── Study pack (forced tool call, bundled content generation) ──
-    if (body.mode === "study_pack") {
-      const result = await callModel({
-        intent: "study_pack",
-        systemPrompt: body.systemPrompt ?? "",
-        staticSystemPrompt: body.staticSystemPrompt ?? undefined,
-        dynamicContext,
-        messages,
-        toolSet: "study_pack",
-        toolChoice: "required",
-        maxOutputTokens: Math.min(Number(body.maxTokens) || 8192, 8192),
-      });
-      return {
-        kind: "json",
-        status: 200,
-        json: { ...result, executed_actions: [], orchestration: { mode: "study_pack", ...CLIENT_ORCH } },
-      };
-    }
 
     // ── Default chat path ──
     const attachments = body.imageBase64

@@ -19,16 +19,16 @@ const TYPE_BG = {
   task:  'hsl(220,65%,55%)',
   event: 'hsl(12,65%,52%)',
   note:  'hsl(165,55%,45%)',
-  deck:  'hsl(260,65%,55%)',
+  layer: 'hsl(260,65%,55%)',
 };
-const TYPE_LABEL = { task: 'Task', event: 'Event', note: 'Note', deck: 'Study Set' };
+const TYPE_LABEL = { task: 'Task', event: 'Event', note: 'Note', layer: 'Layer' };
 
 function toneFor(name) {
   for (const r of SUBJECT_TONE) if (r.match.test(name || '')) return r.tone;
   return 'review';
 }
 
-export default function ProjectPanel({ subject, tasks = [], events = [], notes = [], flashcardDecks = [], onClose, onDeleteItems }) {
+export default function ProjectPanel({ subject, tasks = [], events = [], notes = [], noteLayers = [], onClose, onDeleteItems }) {
   const [activeTab, setActiveTab] = useState('all');
   const [checked,   setChecked]   = useState(new Set());
   const [confirm,   setConfirm]   = useState(false);
@@ -40,22 +40,23 @@ export default function ProjectPanel({ subject, tasks = [], events = [], notes =
     const projTasks  = tasks.filter(t => !t.is_folder && (t.subject || '').toLowerCase() === sl && t.status !== 'done');
     const projEvents = events.filter(e => (e.subject || '').toLowerCase() === sl);
     const projNotes  = notes.filter(n => !n.is_folder && ((n.subject || n.tab_name || '').toLowerCase() === sl));
-    const projDecks  = flashcardDecks.filter(d => d.title.toLowerCase().includes(sl));
-    return { tasks: projTasks, events: projEvents, notes: projNotes, decks: projDecks };
-  }, [tasks, events, notes, flashcardDecks, sl]);
+    const projNoteIds = new Set(projNotes.map(n => n.id));
+    const projLayers = noteLayers.filter(l => projNoteIds.has(l.note_id));
+    return { tasks: projTasks, events: projEvents, notes: projNotes, layers: projLayers };
+  }, [tasks, events, notes, noteLayers, sl]);
 
   const allItems = useMemo(() => [
     ...proj.tasks.map(t  => ({ id: t.id, _type: 'task',  _label: t.title || 'Untitled', _meta: t.dueDate || '' })),
     ...proj.events.map(e => ({ id: e.id, _type: 'event', _label: e.title || 'Untitled', _meta: e.date || '' })),
     ...proj.notes.map(n  => ({ id: n.id, _type: 'note',  _label: n.name  || 'Untitled', _meta: n.updatedAt ? new Date(n.updatedAt).toLocaleDateString() : '' })),
-    ...proj.decks.map(d  => ({ id: d.id, _type: 'deck',  _label: d.title || 'Untitled', _meta: `${d.card_count || (d.cards || []).length} cards` })),
+    ...proj.layers.map(l  => ({ id: l.id, _type: 'layer',  _label: l.layer_type || 'layer', _meta: (l.cards || []).length ? `${l.cards.length} cards` : '' })),
   ], [proj]);
 
   const items = useMemo(() => {
     if (activeTab === 'tasks')  return allItems.filter(i => i._type === 'task');
     if (activeTab === 'events') return allItems.filter(i => i._type === 'event');
     if (activeTab === 'notes')  return allItems.filter(i => i._type === 'note');
-    if (activeTab === 'decks')  return allItems.filter(i => i._type === 'deck');
+    if (activeTab === 'layers')  return allItems.filter(i => i._type === 'layer');
     return allItems;
   }, [allItems, activeTab]);
 
@@ -90,7 +91,7 @@ export default function ProjectPanel({ subject, tasks = [], events = [], notes =
     { id: 'events', label: 'Events',     count: proj.events.length },
     { id: 'tasks',  label: 'Tasks',      count: proj.tasks.length },
     { id: 'notes',  label: 'Notes',      count: proj.notes.length },
-    { id: 'decks',  label: 'Study Sets', count: proj.decks.length },
+    { id: 'layers', label: 'Layers',     count: proj.layers.length },
   ];
 
   return (

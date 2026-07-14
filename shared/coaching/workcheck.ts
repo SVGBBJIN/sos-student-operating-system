@@ -192,6 +192,44 @@ export interface ProofreadState {
   resetsAt: number;
 }
 
+// ── Automatic proofread triggers ─────────────────────────────────────────────
+// The work-check used to fire only on-request (the student asks, or the
+// client's keyword detector fires). These two triggers make it proactive:
+//   - milestone: a milestone task tied to a study_plan was just marked done —
+//     good moment to check the deliverable before moving on.
+//   - pre_submission: a task's due date is within the submission window and
+//     the task has draftable content (a note/attempt) attached — last chance
+//     to check before it's due.
+// Both are nudges, never forced: they surface a suggestion the student can
+// accept or dismiss, and still spend a round against the same 2h/2-round cap
+// so an auto-triggered check and an on-request check can't be stacked to
+// evade the limit.
+
+export type ProofreadTrigger = "on_request" | "milestone" | "pre_submission";
+
+// How close to the deadline "pre-submission" starts being offered.
+export const PRE_SUBMISSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface AutoProofreadInput {
+  isMilestoneTask?: boolean;
+  dueAt?: number | null; // epoch ms
+  hasDraftContent?: boolean; // a note/attempt is attached to work from
+  now?: number;
+}
+
+// Decide whether an automatic nudge should fire, and under what trigger. Pure
+// and read-only — callers still run this through proofreadState() to confirm
+// a round is actually available before executing the check.
+export function resolveAutoProofreadTrigger(input: AutoProofreadInput): ProofreadTrigger | null {
+  if (!input.hasDraftContent) return null;
+  if (input.isMilestoneTask) return "milestone";
+  const now = input.now ?? Date.now();
+  if (typeof input.dueAt === "number" && input.dueAt > now && input.dueAt - now <= PRE_SUBMISSION_WINDOW_MS) {
+    return "pre_submission";
+  }
+  return null;
+}
+
 // Given the timestamps of prior proofread rounds for one assignment, decide what
 // the next attempt is. The window slides: rounds older than 2 hours fall away,
 // and each new window re-checks the full work fresh.

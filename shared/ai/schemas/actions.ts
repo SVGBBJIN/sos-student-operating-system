@@ -270,23 +270,12 @@ export const ConvertBlockToEventSchema = z.object({
 });
 export type ConvertBlockToEventInput = z.infer<typeof ConvertBlockToEventSchema>;
 
-export const DeleteStudySetSchema = z.object({
-  type: z.literal("delete_study_set").optional(),
-  title: titleLikeString("title"),
-});
-export type DeleteStudySetInput = z.infer<typeof DeleteStudySetSchema>;
-
 export const ReadNotesSchema = z.object({
   type: z.literal("read_notes").optional(),
   subject: optionalSubjectString,
   search: z.string().max(100).optional(),
 });
 export type ReadNotesInput = z.infer<typeof ReadNotesSchema>;
-
-export const ReadStudySetsSchema = z.object({
-  type: z.literal("read_study_sets").optional(),
-});
-export type ReadStudySetsInput = z.infer<typeof ReadStudySetsSchema>;
 
 export const ReadProjectSchema = z.object({
   type: z.literal("read_project").optional(),
@@ -369,15 +358,6 @@ export const CreateFolderSchema = z.object({
 });
 export type CreateFolderInput = z.infer<typeof CreateFolderSchema>;
 
-export const LogGradeSchema = z.object({
-  type: z.literal("log_grade").optional(),
-  subject: subjectString,
-  assignment: titleLikeString("assignment"),
-  grade: z.number().min(0).max(100),
-  grade_type: z.enum(["exam", "quiz", "homework", "project", "other"]).optional(),
-});
-export type LogGradeInput = z.infer<typeof LogGradeSchema>;
-
 export const PledgeStartSchema = z.object({
   type: z.literal("pledge_start").optional(),
   title: titleLikeString("title"),
@@ -388,17 +368,49 @@ export const PledgeStartSchema = z.object({
 });
 export type PledgeStartInput = z.infer<typeof PledgeStartSchema>;
 
-export const UpdateStudySetSchema = z.object({
-  type: z.literal("update_study_set").optional(),
-  title: titleLikeString("title"),
-  new_title: z.string().min(2).max(120).optional(),
-  cards_to_add: z
-    .array(z.object({ q: z.string().min(1).max(500), a: z.string().min(1).max(500) }))
-    .max(50)
-    .optional(),
-  cards_to_remove: z.array(z.string().min(1).max(500)).max(50).optional(),
+// ── Multi-layer notes ────────────────────────────────────────────────────────
+// A note is a container of layers rather than a single text body. Each layer
+// is one imported artifact — freeform text, an imported flashcard set, an
+// audio recording/upload, a video, or an image — attached to an existing note
+// so mixed media study material lives in one place instead of being spread
+// across a separate flashcard-deck feature.
+const noteLayerTypeEnum = z.enum(["text", "flashcards", "audio", "video", "image"]);
+
+export const AddNoteLayerSchema = z
+  .object({
+    type: z.literal("add_note_layer").optional(),
+    note_title: titleLikeString("note_title"),
+    layer_type: noteLayerTypeEnum,
+    // text layer
+    text: z.string().max(50000).optional(),
+    // flashcards layer — imported deck content, scoped to this note only
+    cards: z
+      .array(z.object({ q: z.string().min(1).max(500), a: z.string().min(1).max(2000) }))
+      .max(40)
+      .optional(),
+    // audio/video/image layer — client already uploaded the file to storage
+    // and passes back the resulting URL; the model never handles binary data.
+    media_url: z.string().max(2000).optional(),
+    caption: z.string().max(300).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.layer_type === "text" && !v.text) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["text"], message: "Provide text for a text layer" });
+    }
+    if (v.layer_type === "flashcards" && (!v.cards || v.cards.length === 0)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["cards"], message: "Provide at least one card for a flashcards layer" });
+    }
+    if ((v.layer_type === "audio" || v.layer_type === "video" || v.layer_type === "image") && !v.media_url) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["media_url"], message: `Provide media_url for a ${v.layer_type} layer` });
+    }
+  });
+export type AddNoteLayerInput = z.infer<typeof AddNoteLayerSchema>;
+
+export const DeleteNoteLayerSchema = z.object({
+  type: z.literal("delete_note_layer").optional(),
+  layer_id: z.string().min(1, "layer_id is required"),
 });
-export type UpdateStudySetInput = z.infer<typeof UpdateStudySetSchema>;
+export type DeleteNoteLayerInput = z.infer<typeof DeleteNoteLayerSchema>;
 
 // ── Consolidated follow-up task verb ────────────────────────────────────────
 // One tool that covers the four follow-up operations on an existing task:
@@ -492,9 +504,7 @@ export const ACTION_SCHEMAS = {
   break_task: BreakTaskSchema,
   convert_event_to_block: ConvertEventToBlockSchema,
   convert_block_to_event: ConvertBlockToEventSchema,
-  delete_study_set: DeleteStudySetSchema,
   read_notes: ReadNotesSchema,
-  read_study_sets: ReadStudySetsSchema,
   read_project: ReadProjectSchema,
   read_tasks: ReadTasksSchema,
   search_memory: SearchMemorySchema,
@@ -504,8 +514,8 @@ export const ACTION_SCHEMAS = {
   rename_note: RenameNoteSchema,
   move_note: MoveNoteSchema,
   create_folder: CreateFolderSchema,
-  log_grade: LogGradeSchema,
-  update_study_set: UpdateStudySetSchema,
+  add_note_layer: AddNoteLayerSchema,
+  delete_note_layer: DeleteNoteLayerSchema,
   pledge_start: PledgeStartSchema,
   manage_task: ManageTaskSchema,
 } as const;
@@ -540,10 +550,8 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   break_task: "Break a deadline into a day-by-day plan of 2–10 smaller subtasks (e.g. day 0: outline, day 1: draft, day 2: revise). parent_title is the original task's name (used as subject context). Each subtask must have a real title. Prefer setting day_offset (days from today, staggered across the runway to the deadline) over a fixed `due` date so the breakdown fits how many days are actually left — only set `due` directly when the student specifies exact dates. estimated_minutes is optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
   convert_event_to_block: "Convert a calendar event into a time block on the schedule. Identify the event by title or event_id. Optionally override date, start, end, and category; if omitted, the client infers from the event. NEVER guess start/end — call ask_clarification if the student didn't state them.",
   convert_block_to_event: "Convert a time block into a calendar event. date, start, and end identify the block to remove. title, event_type, and subject are optional — the client falls back to the block's name if title is omitted.",
-  delete_study_set: "Permanently delete a flashcard deck / study set by title. Uses fuzzy title matching. Only call when the student explicitly asks to delete or remove a flashcard deck or study set.",
   read_notes: "Read and list the student's notes, optionally filtered by subject or search query. Posts a summary to chat with note titles and IDs so the student can reference them. Call when the student asks what notes they have, wants to find a note, or asks to see their notes.",
-  read_study_sets: "Read and list all flashcard decks the student has saved. Posts a summary to chat with deck titles and card counts. Call when the student asks what study sets or flashcard decks they have.",
-  read_project: "Read all content (tasks, events, notes, study sets) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
+  read_project: "Read all content (tasks, events, notes) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
   read_tasks: "List the student's tasks with optional filters: subject, status (not_started/in_progress/done), or tasks due within N days. Posts a formatted list to chat. Call when the student asks what tasks they have, wants to see pending work, or asks about tasks for a specific subject.",
   search_memory: "Search the student's saved memories, notes, and past context by meaning (semantic search). Call this ONLY when answering needs background the student mentioned earlier or stored previously — e.g. 'what did I say about my history essay?', 'remind me what my goals were'. `query` is the keywords/phrase to search for. Do NOT call for simple scheduling or task actions. The results come back to you to use in your answer.",
   update_block: "Modify an existing time block — rename it, change its time, or change its category. Identify the block by date + start time OR date + activity name. Provide at least one of new_activity, new_start, new_end, or new_category. NEVER guess times — call ask_clarification if the student didn't state them.",
@@ -552,8 +560,8 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   rename_note: "Change the title/name of an existing note without touching its content. title is the current name (fuzzy match); new_title is the replacement.",
   move_note: "Move a note into a different folder by updating its parent. title identifies the note (fuzzy match). folder is the destination folder name — omit to move to root. If the folder doesn't exist, tell the student to create it first.",
   create_folder: "Create a new folder in the student's notes. name is the folder title. Optionally nest it under a parent_folder. Does not create duplicate folders.",
-  log_grade: "Record a grade for an assignment or exam. subject, assignment name, and grade (0–100) are required. grade_type can be 'exam', 'quiz', 'homework', 'project', or 'other'. Posts the logged grade and the updated subject average to chat.",
-  update_study_set: "Edit an existing flashcard deck — rename it, add new cards, or remove cards by question text. At least one of new_title, cards_to_add, or cards_to_remove must be provided. Identify the deck by title (fuzzy match).",
+  add_note_layer: "Add a layer to an existing note: a text block, an imported flashcard set (cards), or an audio/video/image attachment (media_url — the client already uploaded the file). note_title identifies the note (fuzzy match). Exactly one layer_type per call; provide the matching field (text / cards / media_url).",
+  delete_note_layer: "Remove one layer from a note by its layer_id. Only call when the student explicitly asks to delete or remove a specific layer/attachment.",
   pledge_start: "Record WHEN the student intends to START a task (not when it's due). Call this whenever the student commits to a start time — 'I'll start my essay at 7', 'I'll get to chem after dinner', 'gonna do calc tonight'. Identify the task by title (fuzzy match); start_at is the resolved ISO 8601 datetime with timezone. This powers the start-latency experiment that measures intention vs. actual start.",
   manage_task: "Modify an EXISTING task. Set operation to 'update', 'complete', 'delete', or 'postpone'. Identify the task by title (fuzzy match) — or task_id (UUID) for 'update'. operation='update' needs at least one of new_title, due, estimated_minutes, or commitment. operation='postpone' needs new_due_date (YYYY-MM-DD). 'complete' and 'delete' need only the title. Use add_task (not this) to create a new task. If the task can't be identified, call ask_clarification.",
 };
@@ -585,9 +593,9 @@ export function buildActionToolDefs(): ToolDef[] {
 // this menu.
 const CHAT_TOOLS: ActionName[] = [
   // Capture verbs — lead turns, route better standalone, never consolidated.
-  "add_task", "add_event", "add_block", "add_recurring_event", "add_note",
-  // Read verbs — schedule / tasks / notes / study-set lookups.
-  "read_calendar", "read_tasks", "read_notes", "read_study_sets", "read_project",
+  "add_task", "add_event", "add_block", "add_recurring_event", "add_note", "add_note_layer",
+  // Read verbs — schedule / tasks / notes lookups.
+  "read_calendar", "read_tasks", "read_notes", "read_project",
   // Consolidated follow-up task CRUD (update / delete / complete / postpone).
   "manage_task",
   // Other single-entity verbs that genuinely lead default-chat turns.
