@@ -87,7 +87,7 @@ export async function persistTelemetry(event: RequestTelemetry): Promise<void> {
         user_id: event.user_id ?? null,
         prompt_version: event.prompt_version ?? null,
         workspace_context: event.workspace_context ?? null,
-        is_content_gen: event.intent === "studio" || event.intent === "plan",
+        is_content_gen: event.intent === "plan",
         latency_ms: event.total_ms,
         ok: event.status === "success",
         error: event.error ?? null,

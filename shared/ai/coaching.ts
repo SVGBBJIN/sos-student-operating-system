@@ -14,6 +14,7 @@ import {
   type ContentType,
   type RawCheckCard,
   type ProofreadState,
+  type ProofreadTrigger,
 } from "../coaching/workcheck.js";
 
 // ── Clue (forward) ───────────────────────────────────────────────────────────
@@ -78,10 +79,23 @@ const DRAFTING_GUIDANCE =
   "\n\nDRAFTING STAGE: the student is still writing. Treat unwritten content as " +
   "an ignore signal — never flag something that simply is not there yet.";
 
+const TRIGGER_GUIDANCE: Record<ProofreadTrigger, string> = {
+  on_request: "",
+  milestone:
+    " This check was triggered automatically because the student just completed a " +
+    "milestone task from their study plan — frame the opening as a quick check-in on " +
+    "that deliverable, not a cold ask.",
+  pre_submission:
+    " This check was triggered automatically because the linked task is due soon — " +
+    "prioritize anything that would block submission (missing required elements, " +
+    "unaddressed rubric criteria) over stylistic nitpicks.",
+};
+
 export function buildWorkCheckContext(opts: {
   contentType: ContentType | null;
   proofread: ProofreadState;
   hasRubric: boolean;
+  trigger?: ProofreadTrigger;
 }): string {
   const parts: string[] = [];
   if (opts.contentType) parts.push(`DOMINANT_CONTENT_TYPE: ${opts.contentType}.`);
@@ -90,14 +104,15 @@ export function buildWorkCheckContext(opts: {
     parts.push("No rubric pasted — gently nudge the student to paste theirs (set needs_rubric_nudge).");
   }
   const stage = opts.proofread.terminal ? TERMINAL_GUIDANCE : DRAFTING_GUIDANCE;
-  return `\n\n${parts.join(" ")}${stage}`;
+  const trigger = opts.trigger ? TRIGGER_GUIDANCE[opts.trigger] : "";
+  return `\n\n${parts.join(" ")}${stage}${trigger}`;
 }
 
 // Apply the deterministic invariants to the validated make_work_check action:
 // shape the cards (strengths first, ≤3 gaps, ≤5 total, confidence/qualitative
 // hedging), compute the clamped coverage number, and attach the proofread state
 // so the UI can render the terminal hand-back. Idempotent and pure-ish (no I/O).
-export function normalizeWorkCheckAction(action: ChatAction, proofread: ProofreadState): ChatAction {
+export function normalizeWorkCheckAction(action: ChatAction, proofread: ProofreadState, trigger?: ProofreadTrigger): ChatAction {
   const rawCards = Array.isArray(action.cards) ? (action.cards as RawCheckCard[]) : [];
   const cards = normalizeCheckCards(rawCards);
   const coverage = computeCoverage(
@@ -108,7 +123,7 @@ export function normalizeWorkCheckAction(action: ChatAction, proofread: Proofrea
     ...action,
     cards,
     coverage,
-    proofread: { round: proofread.round, max: 2, terminal: proofread.terminal },
+    proofread: { round: proofread.round, max: 2, terminal: proofread.terminal, trigger: trigger ?? "on_request" },
     // At the drafting stage an unwritten element is an ignore signal, so the
     // gentle "no conclusion yet?" prompt only survives at the terminal stage.
     unwritten_note: proofread.terminal ? action.unwritten_note : undefined,

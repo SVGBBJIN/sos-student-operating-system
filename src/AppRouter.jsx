@@ -68,10 +68,19 @@ export default function AppRouter() {
           element={<App />}
         />
 
-        {/* Protected — calendar */}
+        {/* Protected — calendar. Demoted to an optional, toggle-able feature
+            (see App.jsx Settings); off by default. The internal adaptive
+            calendar that feeds the priority engine and plan pipeline keeps
+            running regardless of this toggle — only this visual view is gated. */}
         <Route
           path="/calendar"
-          element={user ? <CalendarPage /> : <Navigate to="/" replace />}
+          element={
+            user
+              ? (localStorage.getItem('sos_calendar_enabled') === 'true'
+                  ? <CalendarPage />
+                  : <Navigate to="/studio" replace />)
+              : <Navigate to="/" replace />
+          }
         />
 
         {/* Protected — projects browser */}
