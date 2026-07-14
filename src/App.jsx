@@ -124,11 +124,33 @@ function buildNotifications(tasks, events, prefs, activeTimers = []) {
     });
   }
   if (prefs.daily) {
-    const dailyHour = parseInt(localStorage.getItem('sos-notif-daily-hour') || '8', 10);
-    const todayStr = today();
-    const fireAt = atDate(todayStr, dailyHour);
-    if (fireAt > now) {
-      notes.push({ title: '📋 Good morning — here\'s your plan', body: `You have ${tasks.filter(t=>t.status!=='done').length} active tasks today.`, fireAt, tag: 'daily-plan' });
+    // Proactive daily digest — the retention nudge. For each of the next 7 days
+    // (the SW scheduling horizon), fire a morning "here's what's due" push that
+    // names the day's tasks + events, so a student who never opens the app still
+    // gets pulled back by what actually matters that day.
+    const dailyHour = Number.isFinite(prefs.dailyHour) ? prefs.dailyHour : parseInt(localStorage.getItem('sos-notif-daily-hour') || '8', 10);
+    for (let i = 0; i < 7; i++) {
+      const day = new Date();
+      day.setDate(day.getDate() + i);
+      const dayStr = toDateStr(day);
+      const fireAt = atDate(dayStr, dailyHour);
+      if (fireAt <= now) continue; // don't schedule a morning that's already passed
+      const dueTasks = tasks.filter(t => t.status !== 'done' && t.dueDate === dayStr);
+      const dayEvents = events.filter(ev => ev && ev.date === dayStr && ev.status !== 'cancelled');
+      // Skip empty days after today so the digest never nags with "nothing due".
+      if (i > 0 && dueTasks.length === 0 && dayEvents.length === 0) continue;
+      const segments = [];
+      if (dueTasks.length) {
+        const names = dueTasks.slice(0, 3).map(t => t.title).join(', ');
+        segments.push(`Due: ${names}${dueTasks.length > 3 ? ` +${dueTasks.length - 3} more` : ''}`);
+      }
+      if (dayEvents.length) {
+        const names = dayEvents.slice(0, 2).map(e => e.title).join(', ');
+        segments.push(`${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}: ${names}`);
+      }
+      const body = segments.length ? segments.join(' · ') : 'Nothing due — a good day to get ahead.';
+      const title = i === 0 ? '📋 Good morning — here\'s today' : '📋 Tomorrow\'s plan';
+      notes.push({ title, body, fireAt, tag: 'daily-digest-' + dayStr });
     }
   }
   // Proactive next-block nudge: 5 minutes before a timed event/block starts,
@@ -6707,11 +6729,28 @@ function App() {
               </div>
               <div className="settings-row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily plan reminder</div>
-                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Morning nudge at 8am with your active task count.</div>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>Daily digest</div>
+                  <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>A morning push with exactly what's due that day — tasks and events — so you're pulled back without having to remember to check.</div>
                 </div>
-                <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>updateNotifPref('daily',!notifPrefs.daily)} label="Daily reminder" />
+                <AppleSwitch checked={!!notifPrefs.daily} onChange={()=>{ const on = !notifPrefs.daily; updateNotifPref('daily', on); if (on && 'Notification' in window && Notification.permission === 'default') { try { Notification.requestPermission(); } catch(_) {} } }} label="Daily digest" />
               </div>
+              {notifPrefs.daily && (
+                <div className="settings-row" style={{paddingLeft:0}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:'0.84rem'}}>Digest time</div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>When to send the morning digest.</div>
+                  </div>
+                  <select
+                    value={Number.isFinite(notifPrefs.dailyHour) ? notifPrefs.dailyHour : 8}
+                    onChange={(e)=>updateNotifPref('dailyHour', parseInt(e.target.value, 10))}
+                    style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,color:'var(--text)',fontSize:'0.84rem',padding:'6px 10px',outline:'none'}}
+                  >
+                    {[6,7,8,9,10,12].map(h => (
+                      <option key={h} value={h}>{fmtTime(h, 0)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="settings-row">
                 <div>
                   <div style={{fontWeight:600,fontSize:'0.88rem'}}>Break reminders</div>
