@@ -4745,6 +4745,29 @@ function App() {
     setToastMsg('Imported "' + title + '" to notes 🔗');
   }
 
+  // Flashcard import: attaches an imported deck as a flashcards layer on a
+  // note (see note_layers) instead of a standalone deck — flashcards are a
+  // note layer type, not their own top-level feature.
+  function handleImportFlashcards(target, cards) {
+    if (!cards || cards.length === 0) { setToastMsg('No valid cards found — check the format.'); return; }
+    let note = target.mode === 'existing' ? notes.find(n => n.id === target.noteId) : null;
+    if (target.mode === 'existing' && !note) { setToastMsg('Could not find that note.'); return; }
+    if (!note) {
+      const title = (target.title || 'Imported Flashcards').trim() || 'Imported Flashcards';
+      note = { id: uid(), name: title, content: '', updatedAt: new Date().toISOString(), source: 'flashcard_import' };
+      setNotes(prev => [...prev, note]);
+      if (user) syncOp(() => dbUpsertNote(note, user.id));
+    }
+    const position = noteLayers.filter(l => l.note_id === note.id).length;
+    const layer = { id: uid(), note_id: note.id, layer_type: 'flashcards', position, content: null, cards, media_url: null, created_at: new Date().toISOString() };
+    setNoteLayers(prev => [...prev, layer]);
+    if (user) syncOp(() => dbAddNoteLayer(note.id, layer, user.id).then(id => { if (id) layer.id = id; }));
+    const cardText = cards.map(c => `${c.q} — ${c.a}`).join('\n');
+    syncEmbed([{ source: 'note', source_id: note.id, text: note.name + '\n' + cardText, metadata: { note_type: 'note' } }]);
+    setShowGoogleModal(false);
+    setToastMsg(`Added ${cards.length} flashcard${cards.length !== 1 ? 's' : ''} to "${note.name}" 🗂️`);
+  }
+
   function handleDeleteNote(noteId) {
     setNotes(prev => prev.filter(n => n.id !== noteId));
     if (user) {
@@ -7113,6 +7136,8 @@ function App() {
           onImportDoc={handleImportGoogleDoc}
           onImportPdf={handleImportPdf}
           onImportUrl={handleImportUrl}
+          onImportFlashcards={handleImportFlashcards}
+          notes={notes}
           onDisconnect={()=>{ disconnectGoogle(); setShowGoogleModal(false); }}
           onConnect={connectGoogle}
           calSyncEnabled={calSyncEnabled}
