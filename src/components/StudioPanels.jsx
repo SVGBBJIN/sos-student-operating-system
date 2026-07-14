@@ -119,7 +119,7 @@ export function UpNext({ event }) {
   );
 }
 
-export function AgendaList({ events = SOS_EVENTS }) {
+export function AgendaList({ events = [] }) {
   return (
     <div className="agenda">
       {events.map(ev => (
@@ -138,7 +138,7 @@ export function AgendaList({ events = SOS_EVENTS }) {
   );
 }
 
-export function DueList({ items = SOS_DEADLINES }) {
+export function DueList({ items = [] }) {
   return (
     <div className="due">
       {items.map(d => (
@@ -155,7 +155,7 @@ export function DueList({ items = SOS_DEADLINES }) {
   );
 }
 
-export function CourseGrid({ courses = SOS_COURSES }) {
+export function CourseGrid({ courses = [] }) {
   return (
     <div className="course-grid">
       {courses.map(c => (
@@ -172,7 +172,7 @@ export function CourseGrid({ courses = SOS_COURSES }) {
   );
 }
 
-export function ReviewDecks({ decks = SOS_DECKS }) {
+export function ReviewDecks({ decks = [] }) {
   return (
     <div className="deck-list">
       {decks.map(d => (
