@@ -5223,6 +5223,12 @@ function App() {
       // (a "check my work" is a backward ask even if it mentions being stuck).
       const isWorkCheckRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && WORK_CHECK_REGEX.test(text || '');
       const isClueRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && !isWorkCheckRequest && CLUE_REGEX.test(text || '');
+      // Studio content generation (flashcards, quiz, outline, summary, breakdown).
+      // Routed to the forced-tool-call studio pipeline so the model returns a
+      // structured card instead of a prose blob rendered as a chat bubble.
+      const isContentGenRequest = !isBriefingRequest && !isStudyPackRequest && !isPlanningRequest
+        && !isIntentPlanRequest && !isWorkCheckRequest && !isClueRequest
+        && !photo && CONTENT_GEN_REGEX.test(text || '');
       const coachingContentType = (isWorkCheckRequest || isClueRequest) ? classifyContentType({ text: msgContent }) : null;
       const workCheckKey = `wc:${effectiveWorkspaceContext || 'global'}`;
       const proofreadUsed = isWorkCheckRequest ? proofreadRoundsUsedFor(proofreadHistoryRef.current, workCheckKey) : 0;
@@ -5253,7 +5259,7 @@ function App() {
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: opts.maxTokens || (isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
+        maxTokens: opts.maxTokens || (isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isContentGenRequest ? 4096 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5262,6 +5268,7 @@ function App() {
         clientCalendarDensity: clientCalendarDensityPayload,
         intentType: inferredIntentType,
         ...(isBriefingRequest ? { mode: 'briefing' } : {}),
+        ...(isContentGenRequest ? { mode: 'studio' } : {}),
         ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
@@ -5452,6 +5459,33 @@ function App() {
           setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
           setPendingContent(prev => [...prev, { ...proposal, _study_pack_id: packId }]);
+          return;
+        }
+      }
+
+      // ── Studio content response: route the structured tool call to a rich
+      // card (swipeable flashcards, quiz, outline, …) instead of letting a
+      // prose blob render as a plain chat bubble. Cards carry their own
+      // Save-to-Library action. ──
+      if (chatData?.orchestration?.mode === 'studio') {
+        const studioContentTypes = ['create_flashcards','create_quiz','create_outline','create_summary','create_project_breakdown'];
+        const studioActions = (Array.isArray(chatData.actions) ? chatData.actions : []).filter(a => a && studioContentTypes.includes(a.type));
+        if (studioActions.length > 0) {
+          const labelByType = {
+            create_flashcards: 'flashcards',
+            create_quiz: 'quiz',
+            create_outline: 'outline',
+            create_summary: 'summary',
+            create_project_breakdown: 'project breakdown',
+          };
+          const label = labelByType[studioActions[0].type] || 'study material';
+          const introMsg = { role: 'assistant', content: `here's your ${label} — swipe through it below, then hit Save to keep it in your Library:`, timestamp: Date.now() };
+          sfx.arrive();
+          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
+          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
+          setPendingContent(prev => [...prev, ...studioActions]);
+          setContentGenUsed(prev => (typeof chatData.content_gen_used === 'number' ? chatData.content_gen_used : (prev || 0) + 1));
+          setIsLoading(false);
           return;
         }
       }
@@ -6777,6 +6811,11 @@ function App() {
       <div className="sos-chat-overlay" style={{
         position:'absolute', inset:0, zIndex:20,
         display: chatOpen ? 'flex' : 'none',
+        // Belt-and-suspenders with display:none — the overlay stays mounted
+        // whenever messages exist (to preserve state), so guard against it
+        // swallowing clicks meant for the dashboard/settings underneath it
+        // when chat isn't the active surface.
+        pointerEvents: chatOpen ? 'auto' : 'none',
         flexDirection:'column',
         background:'var(--bg)',
       }}>
