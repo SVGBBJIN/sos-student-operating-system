@@ -6,7 +6,7 @@ import { srsCardKey, srsRate } from '../lib/srs';
 /* ═══════════════════════════════════════════════
    CONTENT DISPLAY COMPONENTS
    ═══════════════════════════════════════════════ */
-export function ContentCard({ icon, title, subject, onSave, onDismiss, children, accentColor }) {
+export function ContentCard({ icon, title, subject, onSave, onDismiss, children, accentColor, saveLabel }) {
   const ac = accentColor || 'var(--teal)';
   return (
     <div className="content-card" style={{borderLeftColor:ac}}>
@@ -19,7 +19,7 @@ export function ContentCard({ icon, title, subject, onSave, onDismiss, children,
       </div>
       <div className="content-card-body">{children}</div>
       <div className="content-card-actions">
-        <button className="content-card-save" style={{background:`linear-gradient(135deg, ${ac}, color-mix(in srgb, ${ac} 70%, #000))`,boxShadow:`0 2px 12px color-mix(in srgb, ${ac} 25%, transparent)`}} onClick={onSave}>{Icon.fileText(14)} Save to Notes</button>
+        <button className="content-card-save" style={{background:`linear-gradient(135deg, ${ac}, color-mix(in srgb, ${ac} 70%, #000))`,boxShadow:`0 2px 12px color-mix(in srgb, ${ac} 25%, transparent)`}} onClick={onSave}>{Icon.fileText(14)} {saveLabel || 'Save to Notes'}</button>
         <button className="content-card-dismiss" onClick={onDismiss}>Dismiss</button>
       </div>
     </div>
@@ -32,7 +32,7 @@ export function FlashcardDisplay({ data, onSave, onDismiss }) {
   const [flipped, setFlipped] = useState(false);
   const [lastInterval, setLastInterval] = useState(null);
 
-  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards yet — tell me what you're studying</div></ContentCard>;
+  if (cards.length === 0) return <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" saveLabel="Save to Library"><div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>No cards yet — tell me what you're studying</div></ContentCard>;
 
   function goNext() { if (idx < cards.length - 1) { setFlipped(false); setLastInterval(null); setTimeout(() => setIdx(i => i + 1), 100); } }
   function goPrev() { if (idx > 0) { setFlipped(false); setLastInterval(null); setTimeout(() => setIdx(i => i - 1), 100); } }
@@ -44,7 +44,7 @@ export function FlashcardDisplay({ data, onSave, onDismiss }) {
   }
 
   return (
-    <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)">
+    <ContentCard icon={Icon.layers(16)} title={data.title||'Flashcards'} subject={data.subject} onSave={onSave} onDismiss={onDismiss} accentColor="var(--accent)" saveLabel="Save to Library">
       <div className="fc-container" onClick={() => setFlipped(f => !f)}>
         <div className={'fc-inner' + (flipped ? ' flipped' : '')}>
           <div className="fc-front">

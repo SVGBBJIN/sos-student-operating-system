@@ -434,7 +434,7 @@ export default function Landing() {
       </section>
 
       <footer className="ld-footer">
-        <div className="ft">made for students · powered by Claude · © 2026 SOS</div>
+        <div className="ft">made for students · powered by Charles · © 2026 SOS</div>
       </footer>
     </div>
   );
@@ -538,8 +538,11 @@ const LANDING_CSS = `
   margin: 18px 0 0;
 }
 .ld-headline em {
-  color: var(--ld-mint); font-style: italic; font-weight: 700;
-  display: block;
+  /* Distinct display face (Fraunces, an optical serif) for the emphasized H1
+     line — builds hierarchy and personality against the Syne/DM Sans system. */
+  font-family: 'Fraunces', Georgia, serif;
+  color: var(--ld-mint); font-style: italic; font-weight: 900;
+  display: block; letter-spacing: -0.02em;
 }
 .ld-sub {
   font-size: 17px; color: var(--ld-fg-2); line-height: 1.6;

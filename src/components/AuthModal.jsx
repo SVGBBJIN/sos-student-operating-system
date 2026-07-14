@@ -64,9 +64,23 @@ export default function AuthModal({ onAuth, onClose, initialMode = 'login' }) {
     }
   }
 
+  function validateForm() {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) return 'Please enter your email address.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return 'Please enter a valid email address.';
+    if (!password) return 'Please enter a password.';
+    if (password.length < 6) return 'Password must be at least 6 characters.';
+    return null;
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setLoading(true);
     try {
       if (mode === 'signup') {
