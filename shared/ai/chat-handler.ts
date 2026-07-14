@@ -358,7 +358,9 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         "Schema: { \"summary\": string (1 sentence), \"events_today\": string[], " +
         "\"unfinished_tasks\": string[], \"prep_gaps\": string[], \"missing\": string[] }. " +
         "Use the assembled context to fill events_today and unfinished_tasks; leave prep_gaps " +
-        "and missing as empty arrays for now.";
+        "and missing as empty arrays for now. " +
+        "If the context states today's date and weekday, use them verbatim in the summary and " +
+        "never name a different weekday. Do not invent events that are not in the context.";
       try {
         const result = await callModel({
           intent: "chat",

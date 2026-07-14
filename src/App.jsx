@@ -14,7 +14,7 @@ import Onboarding from './components/Onboarding';
 import * as sfx from './lib/sfx';
 import StudyTopBar from './components/StudyTopBar';
 import { estimateInputTokens, truncateWithEllipsis, capLines, capLinesInfo, dedupeRepeatedLines } from './lib/textUtils';
-import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority, correctedDateForWeekdayMention } from './lib/dateUtils';
+import { fmt, fmtFull, toDateStr, today, daysUntil, fmtTime, getPriority, correctedDateForWeekdayMention, resolveRelativeDate } from './lib/dateUtils';
 import { normalize, matchScore, resolveEvent, resolveTask } from './lib/matching';
 import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
@@ -1015,6 +1015,7 @@ ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 
 /* ─── Multi-model message classifier ─── */
 const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
+const BRIEFING_REGEX = /\b(daily\s+briefing|today'?s?\s+briefing|my\s+briefing|give\s+me\s+(?:a|my|the|today'?s?)\s+briefing|(?:what'?s|whats)\s+(?:on\s+)?(?:my\s+)?(?:agenda|plate)\s+today|brief\s+me|morning\s+briefing|what\s+do\s+i\s+have\s+(?:going\s+on\s+)?today)\b/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(?!(?:my\s+)?(?:week|month|semester)\b)(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 // Hint & Work-Check surfaces. The clue is the forward "I'm stuck, get me
 // started" ask; the work-check is the backward "look at what I produced" ask.
@@ -1083,7 +1084,10 @@ function inferActionFromMessage(text) {
   // Negations: "I don't have a test today" should NOT create anything.
   if (/\b(don'?t|do\s+not|never|no(?:\s+longer|t)\b)\s+(have|need|got|gotta|want)\b/i.test(text)) return null;
 
-  const eventWords = /\b(test|exam|quiz|midterm|final|game|match|practice|rehearsal|tryout|meet|tournament|scrimmage|recital|concert|lesson|appointment|meeting|class|interview|workshop|seminar|orientation|deadline)\b/i;
+  const eventWords = /\b(test|exam|quiz|midterm|final|game|match|practice|rehearsal|tryout|meet|tournament|scrimmage|recital|concert|lesson|appointment|meeting|class|interview|workshop|seminar|orientation|deadline|study\s+group|study\s+session|group|club|party|hangout|dinner|lunch|breakfast|birthday|sync|standup|stand-up|office\s+hours|call|zoom|social|gathering|reunion|banquet|dance|prom|fundraiser)\b/i;
+  // An explicit "event" keyword ("add event: …", "schedule an event") is an
+  // unambiguous calendar intent — it must never be misrouted to a task/project.
+  const explicitEvent = /\b(?:add|create|schedule|new|put|set\s*up)\s+(?:an?\s+)?event\b|\bevent\s*:/i.test(text);
   const taskWords = /\b(hw|homework|essay|project|paper|assignment|lab|report|presentation|deck|slides|writeup|outline|draft|chapter|chapters|reading|worksheet|pset|problem\s+set|finish|complete|do|write|study)\b/i;
 
   // ── Check for remove/delete intent FIRST (before add logic) ──
@@ -1114,7 +1118,11 @@ function inferActionFromMessage(text) {
   let title = text.trim()
     .replace(/\b(hey|so|um|btw|just|fyi|also)\b[\s,]*/gi, ' ')
     .replace(/\b(add|create|schedule|put|mark|set\s*up|log|i\s+have|i'?ve\s+got|ive\s+got|i\s+just\s+got|i\s+just\s+found\s+out|there'?s\s+a|got|gotta|need\s*to|have\s*to|hafta|i'?m\s+supposed\s+to|supposed\s+to|remind\s+me\s+to|remind\s+me\s+about|on|at|by|due|this|next|my|a|an|the|for|to)\b/gi, ' ')
+    .replace(/\bevent\s*:?/gi, ' ')
     .replace(/\b(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tmrw|tmw|2morrow|tomorrow|today|2day|next\s+week)\b/gi, ' ')
+    .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to|until|till)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi, ' ')
+    .replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi, ' ')
+    .replace(/[:]/g, ' ')
     .replace(/\s+/g, ' ').trim();
   if (title) title = title.charAt(0).toUpperCase() + title.slice(1);
   if (!title || title.length < 2) title = 'Untitled';
@@ -1131,7 +1139,7 @@ function inferActionFromMessage(text) {
     if (new RegExp('\\b' + abbr + '\\b', 'i').test(text)) { subject = full; break; }
   }
 
-  if (eventWords.test(text)) {
+  if (explicitEvent || eventWords.test(text)) {
     return {
       type:'add_event', title:title.substring(0,60), date:inferredDate||today(),
       event_type:/test|exam|quiz/i.test(text)?'test':/practice|rehearsal|tryout|game|match|meet|tournament|scrimmage/i.test(text)?'practice':'event',
@@ -1376,9 +1384,12 @@ function App() {
         .filter(t => t.status !== 'done')
         .slice(0, 50)
         .map(t => ({ id: t.id, title: t.title, subject: t.subject, dueDate: t.dueDate, estTime: t.estTime, status: t.status, createdAt: t.createdAt, postponeCount: t.postponeCount || 0 }));
-      const todaysEvents = events.filter(ev => ev.date === todayStr).map(ev => `${ev.title}${ev.time ? ' @ ' + ev.time : ''}`);
+      const dateLabel = new Date(todayStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+      const todaysEvents = events.filter(ev => ev && ev.date === todayStr && ev.status !== 'cancelled').map(ev => `${ev.title}${ev.time ? ' @ ' + ev.time : ''}`);
       const unfinishedTitles = tasks.filter(t => t.status !== 'done' && t.dueDate <= todayStr).map(t => t.title);
-      const dynamicContext = `TODAY: ${todayStr}\nTODAY'S EVENTS: ${todaysEvents.join('; ') || '(none)'}\nUNFINISHED TASKS DUE TODAY OR EARLIER: ${unfinishedTitles.join('; ') || '(none)'}`;
+      // Pass the authoritative weekday+date so the model never invents a
+      // contradictory one (the "Monday, Sun, Jul 12" class of bug).
+      const dynamicContext = `TODAY IS ${dateLabel} (${todayStr}). Refer to today by this exact date and weekday — never state a different weekday.\nTODAY'S EVENTS: ${todaysEvents.join('; ') || '(none)'}\nUNFINISHED TASKS DUE TODAY OR EARLIER: ${unfinishedTitles.join('; ') || '(none)'}`;
       const res = await fetch(EDGE_FN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY) },
@@ -1394,7 +1405,16 @@ function App() {
       if (res.ok) {
         const data = await res.json();
         if (data?.briefing) {
-          setBriefingData({ ...data.briefing, _fetchedAt: Date.now() });
+          // Client is the source of truth for the schedule + task lists so the
+          // card never says "nothing scheduled" when an event exists, and so a
+          // hallucinated weekday can't leak into the header.
+          setBriefingData({
+            ...data.briefing,
+            events_today: todaysEvents,
+            unfinished_tasks: unfinishedTitles,
+            date_label: dateLabel,
+            _fetchedAt: Date.now(),
+          });
           try { localStorage.setItem('sos-last-briefing', todayStr); } catch (_) {}
         }
       }
@@ -3047,13 +3067,22 @@ function App() {
           const evTitle = (action.title || '').trim();
           const rawEvDate = (action.date || '').trim();
           const titleValid = evTitle && evTitle.length >= 2;
-          const dateValid = rawEvDate && /^\d{4}-\d{2}-\d{2}$/.test(rawEvDate);
-          const normalized = { ...action, type: 'add_event', title: titleValid ? evTitle : '', date: dateValid ? rawEvDate : '' };
+          // Rescue relative dates the model left unresolved ("tomorrow", "friday")
+          // so the event isn't dropped into a needless "what date?" clarification
+          // loop or pinned to today. Prefer the action's own date phrase, then
+          // fall back to the student's most recent message.
+          let resolvedEvDate = rawEvDate;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(rawEvDate)) {
+            const lastUserMsgForDate = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+            resolvedEvDate = resolveRelativeDate(rawEvDate, today()) || resolveRelativeDate(lastUserMsgForDate, today()) || '';
+          }
+          const dateValid = resolvedEvDate && /^\d{4}-\d{2}-\d{2}$/.test(resolvedEvDate);
+          const normalized = { ...action, type: 'add_event', title: titleValid ? evTitle : '', date: dateValid ? resolvedEvDate : '' };
           const { valid, missing_required } = validateActionSchema(normalized);
           if (!valid) {
             const known = {};
             if (titleValid) known.title = evTitle;
-            if (dateValid) known.date = rawEvDate;
+            if (dateValid) known.date = resolvedEvDate;
             if (action.subject) known.subject = action.subject;
             if (action.event_type) known.event_type = action.event_type;
             if (action.time) known.time = action.time;
@@ -3069,7 +3098,7 @@ function App() {
             }));
             return;
           }
-          let normalizedEvDate = (() => { try { return toDateStr(new Date(rawEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
+          let normalizedEvDate = (() => { try { return toDateStr(new Date(resolvedEvDate + 'T12:00:00')); } catch(_) { return today(); } })();
           {
             const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
             const mismatch = correctedDateForWeekdayMention(normalizedEvDate, lastUserMsg, today());
@@ -5186,8 +5215,9 @@ function App() {
         || (statementSignals.test(msgContent) && (itemSignals.test(msgContent) || dateSignals.test(msgContent)))
       );
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
-      const isStudyPackRequest = STUDY_PACK_REGEX.test(text || '');
-      const isPlanningRequest = !isStudyPackRequest && PLANNING_REGEX.test(text || '');
+      const isBriefingRequest = !opts.mode && BRIEFING_REGEX.test(text || '') && !photo;
+      const isStudyPackRequest = !isBriefingRequest && STUDY_PACK_REGEX.test(text || '');
+      const isPlanningRequest = !isBriefingRequest && !isStudyPackRequest && PLANNING_REGEX.test(text || '');
       const isIntentPlanRequest = !isStudyPackRequest && !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
       // Hint & Work-Check: the check wins over the clue when both could match
       // (a "check my work" is a backward ask even if it mentions being stuck).
@@ -5231,6 +5261,7 @@ function App() {
         clientTasks: clientTasksPayload,
         clientCalendarDensity: clientCalendarDensityPayload,
         intentType: inferredIntentType,
+        ...(isBriefingRequest ? { mode: 'briefing' } : {}),
         ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
         ...(isStudyPackRequest ? { mode: 'study_pack' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
@@ -5316,6 +5347,34 @@ function App() {
         console.warn('Schema version mismatch — server:', chatData.schema_version, 'client:', EXPECTED_ACTION_SCHEMA);
         setToastMsg('⚠️ The app just updated — refresh the page so I can run actions correctly (your data is safe).');
         chatData = { ...chatData, actions: [], clarification: null, clarifications: [] };
+      }
+
+      // ── Briefing response ──
+      // Briefing mode returns a structured { briefing } payload rather than
+      // chat content/actions. Render it into the briefing card and echo a short
+      // summary into the chat so the request never dead-ends at the
+      // "I didn't get a response" fallback.
+      if (chatData?.briefing && typeof chatData.briefing === 'object') {
+        const b = chatData.briefing;
+        const todayStr = today();
+        const dateLabel = new Date(todayStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        // Client owns the schedule + task truth so the card can't contradict the
+        // real workspace (see loadBriefing for the same override).
+        const evToday = events.filter(ev => ev && ev.date === todayStr && ev.status !== 'cancelled').map(ev => `${ev.title}${ev.time ? ' @ ' + ev.time : ''}`);
+        const unfinished = tasks.filter(t => t.status !== 'done' && t.dueDate <= todayStr).map(t => t.title);
+        setBriefingData({ ...b, events_today: evToday, unfinished_tasks: unfinished, date_label: dateLabel, _fetchedAt: Date.now() });
+        try { localStorage.setItem('sos-last-briefing', todayStr); } catch (_) {}
+        const parts = [];
+        if (typeof b.summary === 'string' && b.summary.trim()) parts.push(b.summary.trim());
+        if (evToday.length) parts.push(`Today: ${evToday.join(', ')}.`); else parts.push('Nothing on your calendar today.');
+        if (unfinished.length) parts.push(`Open: ${unfinished.join(', ')}.`);
+        const briefingText = parts.join(' ') || "Here's your briefing for today.";
+        const assistantMsg = { role: 'assistant', content: briefingText, timestamp: Date.now() };
+        sfx.arrive();
+        setMessages(prev => { const n = [...prev, assistantMsg]; while (n.length > CHAT_MAX_MESSAGES) n.shift(); return n; });
+        if (user) dbInsertChatMsg('assistant', briefingText, user.id);
+        setIsLoading(false);
+        return;
       }
 
       // ── Unified plan pipeline response ──
@@ -6690,7 +6749,7 @@ function App() {
             <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,padding:'12px 0',fontSize:'0.78rem'}}>
               <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Privacy Policy</a>
               <span style={{color:'var(--border)'}}>|</span>
-              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
+              <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{color:'var(--text-dim)',textDecoration:'none',transition:'color .15s'}}>Terms of Service</a>
             </div>
           </div>
         </div>
@@ -6813,7 +6872,7 @@ function App() {
             <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
               <div style={{borderLeft:'3px solid var(--accent)',background:'rgba(108,99,255,0.05)',borderRadius:12,padding:'12px 14px'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-                  <strong style={{fontSize:'0.92rem'}}>Today's briefing</strong>
+                  <strong style={{fontSize:'0.92rem'}}>Today's briefing{briefingData.date_label ? ` · ${briefingData.date_label}` : ''}</strong>
                   <div style={{display:'flex',gap:6}}>
                     <button onClick={loadBriefing} disabled={briefingLoading} title="Refresh"
                       style={{background:'transparent',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-dim)',fontSize:'0.72rem',padding:'3px 8px',cursor:'pointer'}}>

@@ -44,6 +44,33 @@ export function nextWeekdayFromText(text, todayStr = today()) {
   return toDateStr(d);
 }
 
+// Resolves a relative date phrase ("today", "tomorrow", "next week", a weekday
+// name, or an already-ISO string) to an ISO date string, or null if nothing
+// date-like is found. Used to rescue add_event/add_task when the model leaves a
+// relative word ("tomorrow") in the date field instead of a resolved date.
+export function resolveRelativeDate(text, todayStr = today()) {
+  if (!text) return null;
+  const raw = String(text).trim();
+  // Already an ISO date? Pass it straight through.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const lower = raw.toLowerCase();
+  const base = new Date(todayStr + 'T12:00:00');
+  if (/\b(today|2day|tonight)\b/.test(lower)) return todayStr;
+  if (/\b(tomorrow|tmrw|tmw|2morrow|tmr)\b/.test(lower)) {
+    const d = new Date(base); d.setDate(d.getDate() + 1); return toDateStr(d);
+  }
+  if (/\bday\s+after\s+tomorrow\b/.test(lower)) {
+    const d = new Date(base); d.setDate(d.getDate() + 2); return toDateStr(d);
+  }
+  if (/\bnext\s+week\b/.test(lower)) {
+    const d = new Date(base); d.setDate(d.getDate() + 7); return toDateStr(d);
+  }
+  // Weekday name ("friday", "next friday") → next occurrence.
+  const weekday = nextWeekdayFromText(lower, todayStr);
+  if (weekday) return weekday;
+  return null;
+}
+
 // Cross-checks an AI-resolved date against an explicit weekday name mentioned in
 // the student's own message. If the model resolved to the wrong occurrence (the
 // class of off-by-one bug where "due friday" lands on Thursday), returns the

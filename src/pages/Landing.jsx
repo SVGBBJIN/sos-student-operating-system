@@ -434,7 +434,7 @@ export default function Landing() {
       </section>
 
       <footer className="ld-footer">
-        <div className="ft">made for students · powered by Claude · © 2026 SOS</div>
+        <div className="ft">made for students · powered by Charles · © 2026 SOS</div>
       </footer>
     </div>
   );
