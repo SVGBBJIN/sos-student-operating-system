@@ -83,21 +83,58 @@ export function AskBar({ onSubmit, autoFocus }) {
   );
 }
 
+const QUICK_ACTIONS = [
+  { icon: 'calendar', label: 'Add event',   q: 'Add an event thursday 3pm — calc study group' },
+  { icon: 'target',   label: 'Make a plan', q: 'Make me a 5-day plan to study for the calc midterm' },
+  { icon: 'cards',    label: 'Quiz me',     q: 'Quiz me on derivatives' },
+  { icon: 'edit',     label: 'Proofread',   q: 'Proofread my Faulkner essay intro' },
+];
+
 export function QuickActions({ onPick }) {
-  const items = [
-    { icon: 'calendar', label: 'Add event',   q: 'Add an event thursday 3pm — calc study group' },
-    { icon: 'target',   label: 'Make a plan', q: 'Make me a 5-day plan to study for the calc midterm' },
-    { icon: 'cards',    label: 'Quiz me',     q: 'Quiz me on derivatives' },
-    { icon: 'edit',     label: 'Proofread',   q: 'Proofread my Faulkner essay intro' },
-  ];
   return (
     <div className="qa-row">
-      {items.map(it => (
+      {QUICK_ACTIONS.map(it => (
         <button key={it.label} className="qa-chip" onClick={() => onPick && onPick(it.q)}>
           <StudioIcon name={it.icon} size={14} />
           <span>{it.label}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/* One entry point: a single ask box with the quick actions folded in as
+   suggestion chips beneath it, instead of a separate text box + pill row. */
+export function AskComposer({ onSubmit, suggestions = QUICK_ACTIONS, autoFocus }) {
+  const [v, setV] = React.useState('');
+  const ref = React.useRef(null);
+  React.useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, [autoFocus]);
+  function go() { const q = v.trim(); if (!q) return; setV(''); onSubmit && onSubmit(q); }
+  return (
+    <div className="ask-composer">
+      <div className="ask-bar">
+        <span className="ask-spark"><StudioIcon name="sparkles" size={16} /></span>
+        <input
+          ref={ref}
+          value={v}
+          onChange={e => setV(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); go(); } }}
+          placeholder="ask sos to plan, add an event, quiz you, or proofread…"
+        />
+        <button className="ask-send" onClick={go} disabled={!v.trim()} aria-label="Ask">
+          <StudioIcon name="arrowUp" size={15} />
+        </button>
+      </div>
+      {suggestions.length > 0 && (
+        <div className="ask-suggestions" role="group" aria-label="Quick actions">
+          {suggestions.map(it => (
+            <button key={it.label} className="qa-chip" onClick={() => onSubmit && onSubmit(it.q)}>
+              <StudioIcon name={it.icon} size={14} />
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

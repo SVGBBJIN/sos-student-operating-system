@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { StudioIcon } from './StudioIcons';
-import { Panel, AskBar, QuickActions, WelcomeBox } from './StudioPanels';
+import { Panel, AskComposer, WelcomeBox } from './StudioPanels';
 import FocusSessionWidget from './FocusSessionWidget';
 
 /* ── helpers ──────────────────────────────────────────────────── */
@@ -206,8 +206,15 @@ function StatStrip({ progress, doneToday, eventsToday, focused, streakDays, week
     { id: 'focused', icon: 'clock', big: focused, label: 'focused' },
   ];
   const dots = weekDots || [];
+  // Nothing logged today (doneToday === 0 ⟹ progress 0% and focused 0m too):
+  // a row of zeros reads as broken/placeholder, so show one encouraging
+  // prompt instead — but keep the week-strip, which stays meaningful.
+  const noActivityToday = doneToday === 0;
   return (
-    <div className="stat-strip" style={{ gridTemplateColumns: `1.4fr repeat(${stats.length}, 1fr)` }}>
+    <div
+      className="stat-strip"
+      style={{ gridTemplateColumns: noActivityToday ? '1.4fr 4fr' : `1.4fr repeat(${stats.length}, 1fr)` }}
+    >
       {/* Streak as an ownable week-strip rather than a generic number tile. */}
       <div className="stat stat-accent stat-week">
         <span className="stat-label">this week</span>
@@ -221,13 +228,25 @@ function StatStrip({ progress, doneToday, eventsToday, focused, streakDays, week
         </div>
         <span className="stat-sub">{streakDays} day streak</span>
       </div>
-      {stats.map(s => (
-        <div key={s.id} className="stat">
-          <span className="stat-ic"><StudioIcon name={s.icon} size={14} /></span>
-          <span className="stat-big">{s.big}</span>
-          <span className="stat-label">{s.label}</span>
+      {noActivityToday ? (
+        <div className="stat stat-empty">
+          <span className="stat-ic"><StudioIcon name="target" size={14} /></span>
+          <span className="stat-empty-title">Fresh start today</span>
+          <span className="stat-empty-sub">
+            {eventsToday > 0
+              ? `${eventsToday} event${eventsToday === 1 ? '' : 's'} on your plate — complete a task to start today's streak.`
+              : "Complete a task to start today's streak — ask sos what to tackle first."}
+          </span>
         </div>
-      ))}
+      ) : (
+        stats.map(s => (
+          <div key={s.id} className="stat">
+            <span className="stat-ic"><StudioIcon name={s.icon} size={14} /></span>
+            <span className="stat-big">{s.big}</span>
+            <span className="stat-label">{s.label}</span>
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -360,8 +379,7 @@ export default function StudioDashboard({ user, tasks = [], events = [], onAsk, 
         <header className="home-head">
           <div className="eyebrow">{dateEyebrow()}</div>
           <h1 className="home-greeting">{greeting()}, <span>{name}</span></h1>
-          <AskBar onSubmit={onAsk} />
-          <QuickActions onPick={onAsk} />
+          <AskComposer onSubmit={onAsk} />
         </header>
 
         <StatStrip progress={data.progress} doneToday={data.doneToday} eventsToday={data.eventsToday} focused={data.focused} streakDays={data.streakDays} weekDots={data.weekDots} />

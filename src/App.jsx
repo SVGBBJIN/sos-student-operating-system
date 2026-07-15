@@ -1849,7 +1849,9 @@ function App() {
     const chatEl = chatAreaRef.current;
     if (!chatEl) return;
     chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
-  }, [messages, isLoading, pendingActions, pendingContent, pendingClarification]);
+    // chatOpen is a dep so reopening the (now remounted) overlay lands at the
+    // latest message instead of scrolled to the top.
+  }, [messages, isLoading, pendingActions, pendingContent, pendingClarification, chatOpen]);
 
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
@@ -6790,16 +6792,18 @@ function App() {
         />
       ) : null}
 
-      {/* ── Chat overlay — always mounted to preserve state, shown when chatOpen ── */}
-      {(chatOpen || messages.length > 0 || isLoading) && (
+      {/* ── Chat overlay — mounted only while chat is the active surface ──
+           Message history, draft input, etc. all live in App-level state
+           (messages/input/pending*), so unmounting the overlay when chat is
+           closed loses no data. Gating the render on chatOpen means the
+           absolute, z-index:20 layer never sits over the dashboard/settings
+           at all — it can't intercept or redirect clicks meant for the
+           surface underneath. (isLoading is always accompanied by chatOpen,
+           since every send path opens chat first.) ── */}
+      {chatOpen && (
       <div className="sos-chat-overlay" style={{
         position:'absolute', inset:0, zIndex:20,
-        display: chatOpen ? 'flex' : 'none',
-        // Belt-and-suspenders with display:none — the overlay stays mounted
-        // whenever messages exist (to preserve state), so guard against it
-        // swallowing clicks meant for the dashboard/settings underneath it
-        // when chat isn't the active surface.
-        pointerEvents: chatOpen ? 'auto' : 'none',
+        display:'flex',
         flexDirection:'column',
         background:'var(--bg)',
       }}>
