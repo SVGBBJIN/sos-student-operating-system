@@ -6882,16 +6882,8 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try something like">
-                  <div className="sos-chat-empty-suggestions-label">try something like</div>
-                  <button
-                    key={suggestionIdx}
-                    type="button"
-                    className="sos-chat-empty-pill sos-chat-empty-pill-rotating"
-                    onClick={() => sendMessage(SOS_SUGGESTIONS[suggestionIdx])}
-                  >
-                    {SOS_SUGGESTIONS[suggestionIdx]}
-                  </button>
+                <div key={suggestionIdx} className="sos-chat-empty-rotating-msg">
+                  {SOS_SUGGESTIONS[suggestionIdx]}
                 </div>
               )}
             </div>
