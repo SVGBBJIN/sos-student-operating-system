@@ -20,7 +20,6 @@ import PomodoroTimer from './components/PomodoroTimer';
 import ScheduleWidget from './components/ScheduleWidget';
 import SosNotification from './components/SosNotification';
 import StudioSidebar from './components/StudioSidebar';
-import StudioDashboard from './components/StudioDashboard';
 import ProjectPanel from './components/ProjectPanel.jsx';
 import RateLimitBanner from './components/RateLimitBanner';
 import GooglePermissionSummary from './components/GooglePermissionSummary';
@@ -355,6 +354,19 @@ function smallestNextStep(task) {
 
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 15;
+
+// Rotating ambient messages shown in the empty chat state (guests).
+const SOS_SUGGESTIONS = [
+  "Let's break it up together",
+  'What can we get done today?',
+  "What's on your plate?",
+  "Let's knock something out",
+  'One thing at a time — what\'s first?',
+  "Ready when you are",
+  "Let's make today easier",
+  "What's weighing on you?",
+  "Let's get you sorted",
+];
 
 // Schema-version guard. The server stamps every response with the action-tool
 // schema version it was built against. We compare the MAJOR token ("v7" in
@@ -1268,7 +1280,9 @@ function App() {
     localStorage.setItem('sos_studio_theme', studioTheme);
   }, [studioTheme]);
   const [activePanel, setActivePanel] = useState('dashboard');
-  const [chatOpen, setChatOpen] = useState(false);
+  // Chat is the home surface (no separate bento dashboard) — defaults open,
+  // and only goes false while a Project panel is showing in its place.
+  const [chatOpen, setChatOpen] = useState(true);
   const [responseStyle, setResponseStyle] = useState(() => localStorage.getItem('sos_response_style') || 'balanced');
   const [sfxEnabled, setSfxEnabled] = useState(() => sfx.isEnabled());
   const getWorkspaceContext = useCallback(() => {
@@ -1322,6 +1336,12 @@ function App() {
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [showLmsModal, setShowLmsModal] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  // Rotating example prompt shown in the empty chat state (guests).
+  const [suggestionIdx, setSuggestionIdx] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setSuggestionIdx(i => (i + 1) % SOS_SUGGESTIONS.length), 3800);
+    return () => clearInterval(iv);
+  }, []);
   const [showGooglePermSummary, setShowGooglePermSummary] = useState(false);
   const googleClientRef = useRef(null);
   // Calendar auto-sync state (persisted to localStorage)
@@ -1348,6 +1368,7 @@ function App() {
   const [pendingPhoto, setPendingPhoto] = useState(null); // { base64, preview, mimeType }
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const photoInputRef = useRef(null);
+  const syllabusInputRef = useRef(null);
 
   // Voice-to-text state
   const [isRecording, setIsRecording] = useState(false);
@@ -1575,8 +1596,8 @@ function App() {
   useEffect(() => {
     const panel = searchParams.get('panel');
     if (!panel) return;
-    if (['home', 'settings'].includes(panel)) setActivePanel(panel);
-    else setActivePanel('dashboard');
+    if (['home', 'settings'].includes(panel)) { setActivePanel(panel); setChatOpen(panel !== 'settings'); }
+    else { setActivePanel('dashboard'); setChatOpen(true); }
   }, [searchParams]);
 
   // ── Honor ?auth=login|signup so Landing's "Sign in" button opens the real
@@ -1849,7 +1870,9 @@ function App() {
     const chatEl = chatAreaRef.current;
     if (!chatEl) return;
     chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
-  }, [messages, isLoading, pendingActions, pendingContent, pendingClarification]);
+    // chatOpen is a dep so reopening the (now remounted) overlay lands at the
+    // latest message instead of scrolled to the top.
+  }, [messages, isLoading, pendingActions, pendingContent, pendingClarification, chatOpen]);
 
   // ── Focus input on load ──
   useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
@@ -6297,7 +6320,9 @@ function App() {
       if(key==='/'){e.preventDefault();inputRef.current?.focus()}
       else if(key==='s'){
         e.preventDefault();
-        setActivePanel(prev => prev === 'settings' ? 'dashboard' : 'settings');
+        const enteringSettings = activePanel !== 'settings';
+        setActivePanel(enteringSettings ? 'settings' : 'dashboard');
+        setChatOpen(!enteringSettings);
       }
       else if(key==='n'){
         e.preventDefault();
@@ -6305,7 +6330,7 @@ function App() {
       }
       else if(key==='h'){e.preventDefault();setShowChatSidebar(p=>!p)}
       else if(key==='d'){e.preventDefault();setShowDeadlines(p=>!p)}
-      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(mobileNavOpen){setMobileNavOpen(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(chatOpen){setChatOpen(false);return;}if(activePanel==='settings')setActivePanel('dashboard')}
+      else if(key==='escape'){if(showGlobalSearch){setShowGlobalSearch(false);return;}if(mobileNavOpen){setMobileNavOpen(false);return;}if(showChatSidebar)setShowChatSidebar(false);if(showNotes)setShowNotes(false);if(showDeadlines)setShowDeadlines(false);if(activePanel==='settings'){setActivePanel('dashboard');setChatOpen(true);}}
     }
     window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);
   },[showNotes,showChatSidebar,showGlobalSearch,showDeadlines,activePanel,mobileNavOpen]);
@@ -6382,9 +6407,9 @@ function App() {
         syncStatus={syncStatus}
         theme={studioTheme}
         onTheme={setStudioTheme}
-        onSettings={() => setActivePanel('settings')}
+        onSettings={() => { setActivePanel('settings'); setChatOpen(false); }}
         onHome={() => navigate('/')}
-        onDashboard={() => { setActivePanel('dashboard'); setSelectedProject(null); }}
+        onDashboard={() => { setActivePanel('dashboard'); setSelectedProject(null); setChatOpen(true); }}
         activePanel={activePanel}
         queueCount={pendingQueue ? pendingQueue.length : 0}
         onToggleNav={() => setMobileNavOpen(v => !v)}
@@ -6409,15 +6434,14 @@ function App() {
             notes={notes}
             selectedProject={selectedProject}
             onSelectProject={(name) => {
-              if (selectedProject === name) {
-                setSelectedProject(null);
-              } else {
-                setSelectedProject(name);
-                setChatOpen(false);
-              }
+              // ProjectsBar already resolves the select/deselect toggle
+              // itself (passes the subject name, or null to deselect) —
+              // trust it rather than re-deriving the toggle here.
+              setSelectedProject(name);
+              setChatOpen(!name);
               setMobileNavOpen(false);
             }}
-            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(false); setSelectedProject(null); setMobileNavOpen(false); }}
+            onDashboard={() => { setActivePanel('dashboard'); setChatOpen(true); setSelectedProject(null); setMobileNavOpen(false); }}
             activePanel={activePanel}
             onOpenDeadlines={() => { setShowDeadlines(true); setMobileNavOpen(false); }}
           />
@@ -6464,22 +6488,7 @@ function App() {
       )}
 
 
-      {activePanel === 'dashboard' && !chatOpen && !selectedProject ? (
-        <StudioDashboard
-          user={user}
-          tasks={tasks}
-          events={events}
-          onAsk={(prompt) => {
-            setChatOpen(true);
-            if (prompt && prompt.trim()) {
-              setTimeout(() => sendMessage(prompt), 0);
-            }
-          }}
-          onUploadSyllabus={handleSyllabusUpload}
-          syllabusBusy={syllabusBusy}
-          onOpenFocusLauncher={openFocusLauncher}
-        />
-      ) : activePanel === 'home' ? (
+      {activePanel === 'home' ? (
         <HomeScreen
           tasks={tasks}
           events={events}
@@ -6494,7 +6503,7 @@ function App() {
                 <div className="settings-title">Settings</div>
                 <div className="settings-sub">Customize Charles, notifications, and appearance.</div>
               </div>
-              <button className="settings-toggle settings-toggle-active" onClick={()=>setActivePanel('dashboard')}>{Icon.x(14)} Close</button>
+              <button className="settings-toggle settings-toggle-active" onClick={()=>{setActivePanel('dashboard');setChatOpen(true);}}>{Icon.x(14)} Close</button>
             </div>
 
             {/* ── AI Assistant ── */}
@@ -6778,7 +6787,7 @@ function App() {
           events={events}
           notes={notes}
           noteLayers={noteLayers}
-          onClose={() => setSelectedProject(null)}
+          onClose={() => { setSelectedProject(null); setChatOpen(true); }}
           onDeleteItems={(items) => {
             items.forEach(({ type, id }) => {
               if (type === 'task') { setTasks(prev => prev.filter(t => t.id !== id)); if (user) syncOp(() => dbDeleteTask(id, user.id)); }
@@ -6790,34 +6799,39 @@ function App() {
         />
       ) : null}
 
-      {/* ── Chat overlay — always mounted to preserve state, shown when chatOpen ── */}
-      {(chatOpen || messages.length > 0 || isLoading) && (
+      {/* ── Chat — the home surface (no separate bento dashboard). Mounted
+           only while chatOpen, which is true by default and only flips
+           false while a Project panel takes its place. Message history,
+           draft input, etc. all live in App-level state (messages/input/
+           pending*), so unmounting on project-select loses no data, and the
+           absolute z-index:20 layer never sits over Settings/Project and
+           intercept clicks meant for them. ── */}
+      {chatOpen && (
       <div className="sos-chat-overlay" style={{
         position:'absolute', inset:0, zIndex:20,
-        display: chatOpen ? 'flex' : 'none',
-        // Belt-and-suspenders with display:none — the overlay stays mounted
-        // whenever messages exist (to preserve state), so guard against it
-        // swallowing clicks meant for the dashboard/settings underneath it
-        // when chat isn't the active surface.
-        pointerEvents: chatOpen ? 'auto' : 'none',
+        display:'flex',
         flexDirection:'column',
         background:'var(--bg)',
       }}>
       <div className="sos-chat-shell" style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
       <div className="sos-chat-column" style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
-      {/* ── Chat close bar ── */}
+      {/* ── Chat head — chat is the home surface now, so this is a "new
+           chat" shortcut (mirrors the sidebar's + New chat) rather than a
+           close/back-to-dashboard control. ── */}
       <div className="studio-chat-head">
         <span className="studio-chat-head-label">
           {messages.length > 0 ? 'SOS Chat' : 'Ask SOS'}
         </span>
         <span style={{flex:1}}/>
-        <button
-          className="icon-btn"
-          onClick={() => setChatOpen(false)}
-          title="Back to dashboard"
-          aria-label="Close chat"
-          style={{color:'var(--fg-3)'}}
-        >{Icon.x(15)}</button>
+        {messages.length > 0 && (
+          <button
+            className="icon-btn"
+            onClick={startNewChat}
+            title="New chat"
+            aria-label="New chat"
+            style={{color:'var(--fg-3)'}}
+          >{Icon.plus(15)}</button>
+        )}
       </div>
       {/* ── Chat Area ── */}
       <ErrorBoundary>
@@ -6868,25 +6882,8 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
-                  <div className="sos-chat-empty-suggestions-label">try one of these</div>
-                  <div className="sos-chat-empty-grid">
-                    {[
-                      'Add a task: physics problem set due Friday',
-                      "What's on my schedule this week?",
-                      'Make a new note for history lecture',
-                      'Block 3-5pm tomorrow for studying',
-                    ].map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        className="sos-chat-empty-pill"
-                        onClick={() => sendMessage(prompt)}
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
+                <div key={suggestionIdx} className="sos-chat-empty-rotating-msg">
+                  {SOS_SUGGESTIONS[suggestionIdx]}
                 </div>
               )}
             </div>
@@ -7167,6 +7164,11 @@ function App() {
             <div style={{position:'relative'}}>
             <form className="sos-chat-form" onSubmit={handleSubmit} style={{display:'flex',gap:8,alignItems:'center'}}>
               <input ref={photoInputRef} type="file" accept="image/*,.pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={handleAttachmentSelect}/>
+              <input ref={syllabusInputRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" style={{display:'none'}} onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (f) handleSyllabusUpload(f);
+              }}/>
               <button type="button" className="sos-input-icon-btn" onClick={()=>setShowAttachMenu(p=>!p)} disabled={isLoading} title="Attach or import"
                 style={{width:40,height:40,borderRadius:'50%',background:'transparent',border:'1px solid '+(pendingPhoto||showAttachMenu?'var(--accent)':'var(--border)'),color:pendingPhoto||showAttachMenu?'var(--accent)':'var(--text-dim)',cursor:isLoading?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .2s',opacity:isLoading?0.5:1}}>
                 {Icon.plus(18)}
@@ -7176,6 +7178,7 @@ function App() {
                   <div style={{position:'fixed',inset:0,zIndex:199}} onClick={()=>setShowAttachMenu(false)}/>
                   <div className="sos-attach-menu">
                     <button type="button" onClick={()=>{photoInputRef.current?.click();setShowAttachMenu(false);}}>📎 File</button>
+                    <button type="button" disabled={syllabusBusy} onClick={()=>{syllabusInputRef.current?.click();setShowAttachMenu(false);}}>📄 {syllabusBusy ? 'reading syllabus…' : 'Syllabus'}</button>
                     <button type="button" onClick={()=>{setShowGoogleModal(true);setShowAttachMenu(false);}}>🔗 Google</button>
                   </div>
                 </>
@@ -7209,10 +7212,6 @@ function App() {
             </div>
           </>
         )}
-        <div style={{marginTop:8,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:10,background:'rgba(255,255,255,0.03)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-          <span style={{fontSize:'0.74rem',color:'var(--text-dim)'}}>Your data controls and policy details are always available.</span>
-          <a href="privacy.html" style={{fontSize:'0.74rem',color:'var(--accent)',fontWeight:600,textDecoration:'none'}}>Privacy Policy</a>
-        </div>
       </div>
       </div>
       </div>
