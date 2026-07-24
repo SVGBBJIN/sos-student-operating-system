@@ -355,6 +355,19 @@ function smallestNextStep(task) {
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 15;
 
+// Rotating example prompts shown in the empty chat state (guests).
+const SOS_SUGGESTIONS = [
+  'Break down that project into steps',
+  'Add a task: physics problem set due Friday',
+  "What's on my schedule this week?",
+  'Make a new note for history lecture',
+  'Block 3-5pm tomorrow for studying',
+  'Quiz me on derivatives',
+  'Make a study guide for the midterm',
+  'Proofread my essay intro',
+  'Remind me about office hours tomorrow',
+];
+
 // Schema-version guard. The server stamps every response with the action-tool
 // schema version it was built against. We compare the MAJOR token ("v7" in
 // "v7-2026-05"): a major mismatch means a breaking shape change this client
@@ -1323,6 +1336,12 @@ function App() {
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [showLmsModal, setShowLmsModal] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  // Rotating example prompt shown in the empty chat state (guests).
+  const [suggestionIdx, setSuggestionIdx] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setSuggestionIdx(i => (i + 1) % SOS_SUGGESTIONS.length), 3800);
+    return () => clearInterval(iv);
+  }, []);
   const [showGooglePermSummary, setShowGooglePermSummary] = useState(false);
   const googleClientRef = useRef(null);
   // Calendar auto-sync state (persisted to localStorage)
@@ -6863,25 +6882,16 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try one of these">
-                  <div className="sos-chat-empty-suggestions-label">try one of these</div>
-                  <div className="sos-chat-empty-grid">
-                    {[
-                      'Add a task: physics problem set due Friday',
-                      "What's on my schedule this week?",
-                      'Make a new note for history lecture',
-                      'Block 3-5pm tomorrow for studying',
-                    ].map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        className="sos-chat-empty-pill"
-                        onClick={() => sendMessage(prompt)}
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
+                <div className="sos-chat-empty-suggestions" role="group" aria-label="Try something like">
+                  <div className="sos-chat-empty-suggestions-label">try something like</div>
+                  <button
+                    key={suggestionIdx}
+                    type="button"
+                    className="sos-chat-empty-pill sos-chat-empty-pill-rotating"
+                    onClick={() => sendMessage(SOS_SUGGESTIONS[suggestionIdx])}
+                  >
+                    {SOS_SUGGESTIONS[suggestionIdx]}
+                  </button>
                 </div>
               )}
             </div>
