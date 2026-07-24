@@ -355,17 +355,17 @@ function smallestNextStep(task) {
 // CHAT_MAX_MESSAGES imported from ./lib/supabase
 const GUEST_DEMO_LIMIT = 15;
 
-// Rotating example prompts shown in the empty chat state (guests).
+// Rotating ambient messages shown in the empty chat state (guests).
 const SOS_SUGGESTIONS = [
-  'Break down that project into steps',
-  'Add a task: physics problem set due Friday',
-  "What's on my schedule this week?",
-  'Make a new note for history lecture',
-  'Block 3-5pm tomorrow for studying',
-  'Quiz me on derivatives',
-  'Make a study guide for the midterm',
-  'Proofread my essay intro',
-  'Remind me about office hours tomorrow',
+  "Let's break it up together",
+  'What can we get done today?',
+  "What's on your plate?",
+  "Let's knock something out",
+  'One thing at a time — what\'s first?',
+  "Ready when you are",
+  "Let's make today easier",
+  "What's weighing on you?",
+  "Let's get you sorted",
 ];
 
 // Schema-version guard. The server stamps every response with the action-tool
