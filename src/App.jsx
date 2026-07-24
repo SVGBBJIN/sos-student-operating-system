@@ -7210,10 +7210,6 @@ function App() {
             </div>
           </>
         )}
-        <div style={{marginTop:8,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:10,background:'rgba(255,255,255,0.03)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-          <span style={{fontSize:'0.74rem',color:'var(--text-dim)'}}>Your data controls and policy details are always available.</span>
-          <a href="privacy.html" style={{fontSize:'0.74rem',color:'var(--accent)',fontWeight:600,textDecoration:'none'}}>Privacy Policy</a>
-        </div>
       </div>
       </div>
       </div>
