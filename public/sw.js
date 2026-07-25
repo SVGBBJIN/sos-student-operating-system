@@ -13,24 +13,26 @@ self.addEventListener('activate', e => {
 });
 
 /* ── Notification scheduling ────────────────────────────────── */
-// Map of pending notification timeouts (timerId → true)
-const pendingTimers = {};
+// Pending notification timeouts, keyed by an incrementing id → timeout handle.
+const pendingTimers = new Map();
 let timerCounter = 0;
 
 self.addEventListener('message', e => {
   const { type, notifications } = e.data || {};
   if (type !== 'SCHEDULE_NOTIFICATIONS' || !Array.isArray(notifications)) return;
 
-  // Clear all previous timers
-  Object.keys(pendingTimers).forEach(id => clearTimeout(Number(id)));
-  Object.keys(pendingTimers).forEach(id => delete pendingTimers[id]);
+  // Clear all previous timers. Must clear by the stored timeout HANDLE — the
+  // map key is only a counter, so clearing by key cancelled nothing and every
+  // reschedule leaked its predecessor into duplicate notifications.
+  pendingTimers.forEach(handle => clearTimeout(handle));
+  pendingTimers.clear();
 
   const now = Date.now();
   notifications.forEach(n => {
     const delay = n.fireAt - now;
     if (delay < 0 || delay > 7 * 24 * 60 * 60 * 1000) return; // skip past or >7d out
     const id = ++timerCounter;
-    const timerId = setTimeout(() => {
+    const handle = setTimeout(() => {
       self.registration.showNotification(n.title, {
         body: n.body,
         icon: '/brain-logo.svg',
@@ -39,9 +41,9 @@ self.addEventListener('message', e => {
         renotify: false,
         data: { url: '/' },
       }).catch(() => {});
-      delete pendingTimers[id];
+      pendingTimers.delete(id);
     }, delay);
-    pendingTimers[id] = timerId;
+    pendingTimers.set(id, handle);
   });
 });
 

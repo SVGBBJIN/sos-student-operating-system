@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { sb } from '../lib/supabase.js';
-import { TweaksPanel, TweakSection, TweakRow, TweakSlider, TweakColor, TweakToggle, useTweaks } from './TweaksPanel';
+import { TweaksPanel, TweakSection, TweakColor } from './TweaksPanel';
 
 const SWATCHES = [
   { name: 'Sage',     hex: '#5fa882' },

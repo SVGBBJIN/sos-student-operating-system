@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import BrandMark from '../components/BrandMark.jsx';
 
 /* ─── Themed 404 — reuses the landing page's dark + mint palette ─── */
 export default function NotFound() {

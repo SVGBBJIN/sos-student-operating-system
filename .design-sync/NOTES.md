@@ -30,15 +30,14 @@ components from `src/components/`.
   is a floor card — see bug below).
 
 ## Scoping conventions (important — designs must follow these)
-- **Studio-family components** (StudioDashboard, StudioHomeView, StudioSidebar,
-  StudyTopBar, Panel, AskBar, QuickActions, UpNext, AgendaList, DueList,
-  CourseGrid, ReviewDecks, StatStrip, WelcomeBox, AddCard, DynamicIsland,
-  FocusSessionWidget) render bare classes (`.panel`, `.stat-strip`, `.di`, …)
-  that are **scoped under `.studio`** in `studio.css`. Their previews wrap them
-  in `<div className="studio">`. When the wrapped element is a single component
-  (not the full grid), add `display:block` to the wrapper — the raw `.studio`
-  grid (`grid-template-rows:48px 1fr`) otherwise drops a lone child into the 48px
-  row and clips it (this bit StudioDashboard).
+- **Studio-family components** (StudioSidebar, StudyTopBar, Panel, AskBar,
+  QuickActions, UpNext, AgendaList, DueList, CourseGrid, ReviewDecks, StatStrip,
+  WelcomeBox, AddCard, DynamicIsland) render bare classes (`.panel`,
+  `.stat-strip`, `.di`, …) that are **scoped under `.studio`** in `studio.css`.
+  Their previews wrap them in `<div className="studio">`. When the wrapped
+  element is a single component (not the full grid), add `display:block` to the
+  wrapper — the raw `.studio` grid (`grid-template-rows:48px 1fr`) otherwise
+  drops a lone child into the 48px row and clips it.
 - **Global cards** (confirmation, content, plan, auth, proposal, schedule) use
   top-level classes in `index.css`/`lofi-layout.css` and need no wrapper; they
   pick up mint from the `:root` override.
@@ -46,15 +45,11 @@ components from `src/components/`.
 ## Data-shape gotchas (for authoring previews)
 - `ConfirmationCard` — `action={type, …type-specific fields}`; colour/icon keyed
   off `action.type`.
-- `StudyPackCard.data.summary` must be an **array** (it `.map`s it), not a string.
 - `ScheduleWidget` — events need `time`/`end_time` in **24h `HH:MM`** and
   `date === today`; it's an absolutely-positioned timeline that auto-scrolls to
   "now", so wrap it in a `position:relative` fixed-height parent (its CSS is
   `position:absolute; max-height: calc(100% - 220px)`). Blocks are
   `{recurring:[{days:[dow…], start, end, name, category}]}`.
-- `StudioDashboard` — pass real `tasks`+`events` (else it shows the empty-state
-  WelcomeBox). Events use `{date, time, end_time}`, tasks `{task_name, due_date,
-  status}`.
 - Several Studio panels (AgendaList, DueList, CourseGrid, ReviewDecks, StatStrip)
   ship **built-in demo data** as defaults — previews can render them prop-less.
 

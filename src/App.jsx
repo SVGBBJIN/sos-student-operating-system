@@ -75,7 +75,7 @@ import LmsSetupModal from './components/LmsSetupModal';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import NotesPanel from './components/NotesPanel';
 import { Toast, LmsPendingToast, AppleSwitch } from './components/Toast';
-import { formatAssistantMessage, getLoadingMessage, CONTENT_GEN_REGEX } from './lib/formatting';
+import { formatAssistantMessage, getLoadingMessage } from './lib/formatting';
 import { ThinkingIndicator, PipelineProgressIndicator, AutoApproveIndicator } from './components/PipelineProgressIndicator';
 
 const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
@@ -1033,7 +1033,6 @@ ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 }
 
 /* ─── Multi-model message classifier ─── */
-const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
 const BRIEFING_REGEX = /\b(daily\s+briefing|today'?s?\s+briefing|my\s+briefing|give\s+me\s+(?:a|my|the|today'?s?)\s+briefing|(?:what'?s|whats)\s+(?:on\s+)?(?:my\s+)?(?:agenda|plate)\s+today|brief\s+me|morning\s+briefing|what\s+do\s+i\s+have\s+(?:going\s+on\s+)?today)\b/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(?!(?:my\s+)?(?:week|month|semester)\b)(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 // Hint & Work-Check surfaces. The clue is the forward "I'm stuck, get me
@@ -1294,8 +1293,6 @@ function App() {
   const [lmsPendingConfirm, setLmsPendingConfirm] = useState(null); // {taskId, taskTitle, lmsName}
   useEffect(() => { if (toastMsg) sfx.chime(); }, [toastMsg]);
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
-  const [, setContentGenUsed] = useState(0);
-  const DAILY_CONTENT_LIMIT = 5;
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
   const proofreadHistoryRef = useRef(loadProofreadHistory()); // { [assignmentKey]: number[] }
@@ -1551,17 +1548,6 @@ function App() {
       restored.forEach(t => scheduleTimerFire(t));
     } catch(e) { console.error('Failed to load timers:', e); }
 
-    // Fetch today's content generation count
-    try {
-      const now = new Date();
-      const nyDate = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      const { count } = await sb.from('content_generations')
-        .select('*', { count:'exact', head:true })
-        .eq('user_id', authUser.id)
-        .gte('created_at', nyDate + 'T00:00:00-05:00');
-      setContentGenUsed(count || 0);
-    } catch(e) { console.error('Failed to fetch content gen count:', e); }
-
     setDataLoaded(true);
 
     // ── Onboarding configuration gate ──
@@ -1800,7 +1786,12 @@ function App() {
   useEffect(() => {
     if (!dataLoaded) return;
     let attempts = 0;
+    // The poll retries for up to 10s. Without cancellation the chain outlives
+    // an unmount and can still fire setState/toasts from a dead component.
+    let retryTimer = null;
+    let cancelled = false;
     function tryInit() {
+      if (cancelled) return;
       if (window.google?.accounts?.oauth2) {
         googleClientRef.current = window.google.accounts.oauth2.initTokenClient({
           client_id: '504839570150-i4s8urseqgrjucbhqfjc9phiavrcn08d.apps.googleusercontent.com',
@@ -1841,10 +1832,11 @@ function App() {
         }
       } else if (attempts < 20) {
         attempts++;
-        setTimeout(tryInit, 500);
+        retryTimer = setTimeout(tryInit, 500);
       }
     }
     tryInit();
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
   }, [dataLoaded]);
 
   function isGoogleConnected() { return !!googleToken && googleExpiry > Date.now(); }
@@ -1877,7 +1869,11 @@ function App() {
   }, [messages, isLoading, pendingActions, pendingContent, pendingClarification, chatOpen]);
 
   // ── Focus input on load ──
-  useEffect(() => { if (dataLoaded) setTimeout(() => inputRef.current?.focus(), 300); }, [dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, [dataLoaded]);
 
   // Focus Sessions run state — declared here (ahead of its first read below)
   // so the notification-suppression effect can see it. See the full Focus
@@ -3571,8 +3567,6 @@ function App() {
           }
           break;
         }
-        case 'view_schedule':
-          break;
         case 'read_calendar': {
           const startD = action.start_date || today();
           // Default to a two-week window so "this week" read-backs always reach
@@ -5164,14 +5158,6 @@ function App() {
       dbInsertChatMsg('user', persistedContent, user.id);
     }
 
-    // Auto-route planning requests directly (3-pass planning pipeline)
-    if (PLANNING_REGEX.test(text || '')) {
-      // Fall through to the normal chat path — sendMessage will use mode: "planning"
-      // (handled in the chatBody block below)
-    } else if (CONTENT_GEN_REGEX.test(text || '')) {
-      // Content-gen requests fall through to the studio pipeline below.
-    }
-
     try {
       // For image requests: send only last 2 messages to keep payload small for vision model.
       const rawHistory = updated.slice(photo ? -2 : -12).map(m => ({
@@ -5197,19 +5183,12 @@ function App() {
       );
       const inferredIntentType = likelyActionIntent ? 'action' : 'chat';
       const isBriefingRequest = !opts.mode && BRIEFING_REGEX.test(text || '') && !photo;
-      const isStudyPackRequest = !isBriefingRequest && STUDY_PACK_REGEX.test(text || '');
-      const isPlanningRequest = !isBriefingRequest && !isStudyPackRequest && PLANNING_REGEX.test(text || '');
-      const isIntentPlanRequest = !isStudyPackRequest && !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
+      const isPlanningRequest = !isBriefingRequest && PLANNING_REGEX.test(text || '');
+      const isIntentPlanRequest = !isPlanningRequest && INTENT_PLAN_REGEX.test(text || '');
       // Hint & Work-Check: the check wins over the clue when both could match
       // (a "check my work" is a backward ask even if it mentions being stuck).
-      const isWorkCheckRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && WORK_CHECK_REGEX.test(text || '');
-      const isClueRequest = !isStudyPackRequest && !isPlanningRequest && !isIntentPlanRequest && !isWorkCheckRequest && CLUE_REGEX.test(text || '');
-      // Studio content generation (flashcards, quiz, outline, summary, breakdown).
-      // Routed to the forced-tool-call studio pipeline so the model returns a
-      // structured card instead of a prose blob rendered as a chat bubble.
-      const isContentGenRequest = !isBriefingRequest && !isStudyPackRequest && !isPlanningRequest
-        && !isIntentPlanRequest && !isWorkCheckRequest && !isClueRequest
-        && !photo && CONTENT_GEN_REGEX.test(text || '');
+      const isWorkCheckRequest = !isPlanningRequest && !isIntentPlanRequest && WORK_CHECK_REGEX.test(text || '');
+      const isClueRequest = !isPlanningRequest && !isIntentPlanRequest && !isWorkCheckRequest && CLUE_REGEX.test(text || '');
       const coachingContentType = (isWorkCheckRequest || isClueRequest) ? classifyContentType({ text: msgContent }) : null;
       const workCheckKey = `wc:${effectiveWorkspaceContext || 'global'}`;
       const proofreadUsed = isWorkCheckRequest ? proofreadRoundsUsedFor(proofreadHistoryRef.current, workCheckKey) : 0;
@@ -5240,7 +5219,7 @@ function App() {
         staticSystemPrompt: promptPayload.stablePrompt,
         dynamicContext: promptPayload.dynamicContext,
         messages: historyForApi,
-        maxTokens: opts.maxTokens || (isStudyPackRequest ? 8000 : (isPlanningRequest || isIntentPlanRequest) ? 3000 : isContentGenRequest ? 4096 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
+        maxTokens: opts.maxTokens || ((isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
         workspaceContext: effectiveWorkspaceContext,
         prompt_version: promptPayload.promptVersion,
         context_chars: promptPayload.contextChars,
@@ -5249,7 +5228,6 @@ function App() {
         clientCalendarDensity: clientCalendarDensityPayload,
         intentType: inferredIntentType,
         ...(isBriefingRequest ? { mode: 'briefing' } : {}),
-        ...(isContentGenRequest ? { mode: 'studio' } : {}),
         ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),
         ...(isClueRequest ? { mode: 'clue', contentType: coachingContentType } : {}),
         ...(isWorkCheckRequest ? { mode: 'work_check', contentType: coachingContentType, proofreadRoundsUsed: proofreadUsed, hasRubric: workCheckHasRubric, proofreadTrigger: opts.proofreadTrigger || 'on_request' } : {}),
@@ -5303,7 +5281,6 @@ function App() {
           const assistantMsg = { role:'assistant', content:limitMsg, timestamp:Date.now() };
           setMessages(prev => { const n=[...prev,assistantMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
           if (user) dbInsertChatMsg('assistant', limitMsg, user.id);
-          setContentGenUsed(err.payload.used || DAILY_CONTENT_LIMIT);
           setIsLoading(false);
           return;
         }
@@ -5424,49 +5401,6 @@ function App() {
         setMessages(prev => { const n=[...prev,emptyMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
         if (user) dbInsertChatMsg('assistant', emptyText, user.id);
         return;
-      }
-
-      // ── Study-pack response: persist to Library, show interactive card ──
-      if (chatData?.orchestration?.mode === 'study_pack') {
-        const proposal = chatData.actions?.[0];
-        if (proposal && proposal.type === 'make_study_pack') {
-          let packId = null;
-          if (user) packId = await dbSaveStudyPack(proposal, user.id, { sourceKind: 'manual' });
-          const cardCount = (proposal.flashcards || []).length;
-          const quizCount = (proposal.quiz || []).length;
-          const introMsg = { role: 'assistant', content: `here's your study pack for ${proposal.topic || proposal.title} — ${cardCount} flashcard${cardCount !== 1 ? 's' : ''}, a ${quizCount}-question quiz, and an exam summary. it's saved to your Library.`, timestamp: Date.now() };
-          sfx.arrive();
-          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
-          setPendingContent(prev => [...prev, { ...proposal, _study_pack_id: packId }]);
-          return;
-        }
-      }
-
-      // ── Studio content response: route the structured tool call to a rich
-      // card (swipeable flashcards, quiz, outline, …) instead of letting a
-      // prose blob render as a plain chat bubble. Cards carry their own
-      // Save-to-Library action. ──
-      if (chatData?.orchestration?.mode === 'studio') {
-        const studioContentTypes = ['create_flashcards','create_quiz','create_outline','create_summary'];
-        const studioActions = (Array.isArray(chatData.actions) ? chatData.actions : []).filter(a => a && studioContentTypes.includes(a.type));
-        if (studioActions.length > 0) {
-          const labelByType = {
-            create_flashcards: 'flashcards',
-            create_quiz: 'quiz',
-            create_outline: 'outline',
-            create_summary: 'summary',
-          };
-          const label = labelByType[studioActions[0].type] || 'study material';
-          const introMsg = { role: 'assistant', content: `here's your ${label} — swipe through it below, then hit Save to keep it in your Library:`, timestamp: Date.now() };
-          sfx.arrive();
-          setMessages(prev => { const n=[...prev,introMsg]; while(n.length>CHAT_MAX_MESSAGES)n.shift(); return n; });
-          if (user) dbInsertChatMsg('assistant', introMsg.content, user.id);
-          setPendingContent(prev => [...prev, ...studioActions]);
-          setContentGenUsed(prev => (typeof chatData.content_gen_used === 'number' ? chatData.content_gen_used : (prev || 0) + 1));
-          setIsLoading(false);
-          return;
-        }
       }
 
       // ── Clue response: show the forward hint card ──
