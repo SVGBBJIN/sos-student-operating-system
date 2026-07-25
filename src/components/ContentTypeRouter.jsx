@@ -27,8 +27,6 @@ export default function ContentTypeRouter({ content, onSave, onDismiss, onApplyP
     case 'create_summary':
       return <GenericContentDisplay data={content} icon={Icon.clipboard(16)} label="Summary" onSave={onSave} onDismiss={onDismiss} accentColor="var(--teal)" />;
     // create_study_plan removed — study plans now use the agentic planning pipeline (make_plan)
-    case 'create_project_breakdown':
-      return <GenericContentDisplay data={content} icon={Icon.hammer(16)} label="Project Breakdown" onSave={onSave} onDismiss={onDismiss} accentColor="var(--orange)" />;
     case 'make_study_pack':
       return <StudyPackCard data={content} onDismiss={onDismiss} />;
     case 'make_clue':

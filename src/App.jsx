@@ -1033,6 +1033,8 @@ ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
 }
 
 /* ─── Multi-model message classifier ─── */
+const STUDY_PACK_REGEX = /\bstudy\s?packs?\b|\bstudy\s?sets?\b/i;
+const BRIEFING_REGEX = /\b(daily\s+briefing|today'?s?\s+briefing|my\s+briefing|give\s+me\s+(?:a|my|the|today'?s?)\s+briefing|(?:what'?s|whats)\s+(?:on\s+)?(?:my\s+)?(?:agenda|plate)\s+today|brief\s+me|morning\s+briefing|what\s+do\s+i\s+have\s+(?:going\s+on\s+)?today)\b/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(?!(?:my\s+)?(?:week|month|semester)\b)(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
 // Hint & Work-Check surfaces. The clue is the forward "I'm stuck, get me
 // started" ask; the work-check is the backward "look at what I produced" ask.
@@ -5446,7 +5448,7 @@ function App() {
       // prose blob render as a plain chat bubble. Cards carry their own
       // Save-to-Library action. ──
       if (chatData?.orchestration?.mode === 'studio') {
-        const studioContentTypes = ['create_flashcards','create_quiz','create_outline','create_summary','create_project_breakdown'];
+        const studioContentTypes = ['create_flashcards','create_quiz','create_outline','create_summary'];
         const studioActions = (Array.isArray(chatData.actions) ? chatData.actions : []).filter(a => a && studioContentTypes.includes(a.type));
         if (studioActions.length > 0) {
           const labelByType = {
@@ -5454,7 +5456,6 @@ function App() {
             create_quiz: 'quiz',
             create_outline: 'outline',
             create_summary: 'summary',
-            create_project_breakdown: 'project breakdown',
           };
           const label = labelByType[studioActions[0].type] || 'study material';
           const introMsg = { role: 'assistant', content: `here's your ${label} — swipe through it below, then hit Save to keep it in your Library:`, timestamp: Date.now() };

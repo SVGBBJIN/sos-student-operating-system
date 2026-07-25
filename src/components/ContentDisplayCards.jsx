@@ -151,8 +151,6 @@ export function GenericContentDisplay({ data, icon, label, onSave, onDismiss, ac
           return (data.bullets||[]).map(b => ({ type:'bullet', text:b }));
         case 'create_outline':
           return (data.sections||[]).flatMap(s => [{ type:'heading', text: s.heading }, ...(s.points||[]).map(p => ({ type:'point', text: p }))]);
-        case 'create_project_breakdown':
-          return (data.phases||[]).flatMap(p => [{ type:'heading', text: p.phase + (p.deadline ? ' — due ' + fmt(p.deadline) : '') }, ...(p.tasks||[]).map(t => ({ type:'point', text: t }))]);
         default: return [{ type:'bullet', text:'(content generated)' }];
       }
     } catch(e) { return [{ type:'bullet', text:'(error displaying content)' }]; }

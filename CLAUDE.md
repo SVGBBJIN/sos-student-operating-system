@@ -174,7 +174,6 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 | `create_quiz` | questions + choices + explanation | 1–30 |
 | `create_outline` | sections + points | 1–20 |
 | `create_summary` | bullet summary | 1–20 |
-| `create_project_breakdown` | phases + tasks | 1–12 |
 | `make_plan` | unified plan schema: `steps[]` (explicit request), or `recurring_blocks[]`+`milestone_tasks[]`+`review_cadence` (goal), or `batch_actions[]` (brain-dump) — see Plan pipeline above | steps 0–40, recurring_blocks 0–8, milestone_tasks 0–20, batch_actions 0–60 |
 | `make_study_pack` | summary + concepts + cards + quiz | — |
 

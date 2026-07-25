@@ -25,24 +25,3 @@ export const Outline = () => (
     />
   </Dark>
 );
-
-export const Breakdown = () => (
-  <Dark>
-    <GenericContentDisplay
-      label="Project"
-      accentColor="var(--orange)"
-      data={{
-        type: 'create_project_breakdown',
-        title: 'Science Fair Project',
-        subject: 'Chemistry',
-        phases: [
-          { phase: 'Research', deadline: '2026-07-18', tasks: ['Pick a testable question', 'Gather 5 sources'] },
-          { phase: 'Experiment', deadline: '2026-07-25', tasks: ['Run trials', 'Record data'] },
-          { phase: 'Write-up', deadline: '2026-08-01', tasks: ['Draft poster', 'Practice presentation'] },
-        ],
-      }}
-      onSave={noop}
-      onDismiss={noop}
-    />
-  </Dark>
-);
