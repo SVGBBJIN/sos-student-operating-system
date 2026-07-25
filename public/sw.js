@@ -35,8 +35,8 @@ self.addEventListener('message', e => {
     const handle = setTimeout(() => {
       self.registration.showNotification(n.title, {
         body: n.body,
-        icon: '/brain-logo.svg',
-        badge: '/brain-logo.svg',
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
         tag: n.tag || 'sos-reminder',
         renotify: false,
         data: { url: '/' },

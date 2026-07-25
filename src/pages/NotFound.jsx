@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import BrandMark from '../components/BrandMark.jsx';
 
 /* ─── Themed 404 — reuses the landing page's dark + mint palette ─── */
 export default function NotFound() {
@@ -15,12 +16,7 @@ export default function NotFound() {
       <div className="nf-topline" />
       <div className="nf-card">
         <div className="nf-brand">
-          <span className="sos-brand-mark" style={{ borderRadius: 7, padding: 4, borderColor: 'rgba(255,255,255,0.16)' }}>
-            <img src="/brain-logo.svg" alt="" width="20" height="20" />
-          </span>
-          <span style={{ fontSize: 17, color: 'var(--nf-fg-1)', fontFamily: 'var(--nf-font-display)', fontWeight: 800, letterSpacing: '-0.02em' }}>
-            S<em style={{ color: 'var(--nf-mint)', fontStyle: 'normal' }}>O</em>S
-          </span>
+          <BrandMark fontSize={17} />
         </div>
         <div className="nf-code">404</div>
         <h1 className="nf-headline">this page went missing.</h1>
