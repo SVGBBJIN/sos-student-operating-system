@@ -403,7 +403,6 @@ All action tools defined as Zod schemas. The same schema generates:
 | `create_quiz` | title, summary, questions[]{q, choices[], answer, explanation} | 1–30 questions |
 | `create_outline` | title, sections[]{heading, points[]} | 1–20 sections |
 | `create_summary` | title, bullets[] | 1–20 bullets |
-| `create_project_breakdown` | title, phases[]{phase, deadline?, tasks[]} | 1–12 phases |
 | `make_plan` | title, summary?, steps[]{title, date?, time?, estimated_minutes?} | 1–40 steps |
 
 #### Study Pack

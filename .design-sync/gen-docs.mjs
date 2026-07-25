@@ -10,7 +10,6 @@ mkdirSync(OUT, { recursive: true });
 // [Name, Category, one-line description, wrap hint]
 const C = [
   ['BrandMark', 'Brand', 'The SOS wordmark — Fraunces-900 italic "SOS" with the coral middle O and a bordered retro brand mark. `fontSize` scales it.'],
-  ['AuthScreen', 'Landing', 'Full-screen sign-in / sign-up surface: email + password, "continue with Google", and the SOS wordmark. Entry point before a student is authenticated.'],
   ['Onboarding', 'Landing', 'First-run onboarding flow that drafts a student\'s week in a few conversational taps — no forms.'],
 
   ['ConfirmationCard', 'Confirmations', 'The core AI confirmation card. Renders a proposed action (add_task, add_event, add_block, delete_*, convert_*, …) with editable fields and Approve / Edit / Dismiss. Colour + icon are keyed off `action.type`.'],
@@ -24,15 +23,10 @@ const C = [
   ['PlanTemplateSelector', 'Plans', 'Picker of built-in plan templates (weekly study, exam prep, essay, project timeline, research paper) or "custom plan".'],
 
   ['ContentCard', 'Content', 'Generic wrapper for generated study content: an icon + title + subject header, a coloured accent bar, arbitrary body, and Save-to-Notes / Dismiss actions.'],
-  ['FlashcardDisplay', 'Content', 'An interactive flashcard deck viewer — flip between question (`q`) and answer (`a`), step through the deck, save or dismiss.'],
-  ['QuizDisplay', 'Content', 'An interactive multiple-choice quiz — one question at a time with choices, correct/wrong reveal, running score, and a final score screen.'],
   ['GenericContentDisplay', 'Content', 'Renders AI-generated outline / summary / breakdown content (bullets, sections, or phases) inside a ContentCard.'],
-  ['StudyPackCard', 'Content', 'A bundled exam-prep pack: summary + key concepts + flashcards + quiz for a topic, generated as one artifact.'],
   ['ClueCard', 'Content', 'A Socratic coaching card — gives a clue / next step toward an answer without giving it away, with a deeper fallback if the student is stuck.'],
   ['WorkCheckCard', 'Content', 'A work-check / proofreading card — flags hedged or unsupported claims in the student\'s own writing lane-by-lane.'],
 
-  ['StudioDashboard', 'Studio', 'The Studio dashboard shell — the mint-accented home surface: stat strip, welcome box, agenda, deadlines, courses, and review decks. Wrap in an element with class `studio`.'],
-  ['StudioHomeView', 'Studio', 'The Studio centre column ("Let\'s set up your week") — the conversational home view with quick-action rails. Wrap in `studio`.'],
   ['StudioSidebar', 'Studio', 'The Studio left sidebar — brand, new-chat, saved-chat history, projects, focus session, and account. Wrap in `studio`.'],
   ['StudyTopBar', 'Studio', 'The Studio top bar — clock, sync status, nav toggles, theme switch, and account. Wrap in `studio`.'],
   ['Panel', 'Studio', 'A titled Studio panel container — header with icon + count + action, and a body slot. The building block of the dashboard grid. Wrap in `studio`.'],
@@ -51,7 +45,6 @@ const C = [
   ['ScheduleWidget', 'Widgets', 'A floating "today\'s schedule" widget — time-ordered events and blocks, tone-coded, dockable.'],
   ['PomodoroTimer', 'Widgets', 'A Pomodoro / focus timer with preset tabs (pomodoro, short break, long break) and AI-set timer rings.'],
   ['DynamicIsland', 'Widgets', 'A compact status pill ("dynamic island") showing the clock and current session/status.'],
-  ['FocusSessionWidget', 'Widgets', 'A focus-session launcher — Sprint (timed, one task) vs Marathon (goal, loops tasks) modes.'],
 ];
 
 for (const [name, category, desc] of C) {

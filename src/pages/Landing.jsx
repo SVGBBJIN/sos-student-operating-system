@@ -328,10 +328,7 @@ export default function Landing() {
 
       <nav className="ld-nav ld-fade-up">
         <div className="ld-nav-brand">
-          <span className="sos-brand-mark" style={{ borderRadius: 7, padding: 4, borderColor: 'rgba(255,255,255,0.16)' }}>
-            <img src="/brain-logo.svg" alt="" width="20" height="20" />
-          </span>
-          <span className="sos-brand-word" style={{ fontSize: 17, color: 'var(--ld-fg-1)' }}>S<em>O</em>S</span>
+          <BrandMark fontSize={17} />
         </div>
         <div className="ld-nav-links">
           <a href="#features" onClick={(e) => { e.preventDefault(); document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' }); }}>features</a>
@@ -489,12 +486,6 @@ const LANDING_CSS = `
   padding: 22px 32px;
 }
 .ld-nav-brand { display: flex; align-items: center; gap: 10px; }
-.ld-nav-brand img { width: 24px; height: 24px; }
-.ld-nav-brand .word {
-  font-family: var(--ld-font-display); font-weight: 800; font-size: 18px;
-  letter-spacing: -0.02em; color: var(--ld-fg-1);
-}
-.ld-nav-brand .word em { color: var(--ld-mint); font-style: normal; }
 .ld-nav-links { display: flex; gap: 28px; }
 .ld-nav-links a {
   font-size: 13px; color: var(--ld-fg-2); text-decoration: none;

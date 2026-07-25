@@ -127,7 +127,6 @@
 .studio .topbar-right { display: flex; align-items: center; gap: 8px; }
 
 .studio .sos-brand-mark { border-color: var(--line); background: var(--paper-2); }
-.studio .sos-brand-word { font-size: 16px; color: var(--fg-1); }
 
 /* ── Buttons ─────────────────────────────────────────────── */
 .studio .icon-btn {

@@ -108,7 +108,7 @@ Run the regression eval with `npm run eval:planning`.
 
 **Content generation** (only available when `isContentGen: true`)
 - `create_flashcards` · `create_quiz` · `create_outline` · `create_summary`
-- `create_study_plan` · `create_project_breakdown` · `make_plan`
+- `create_study_plan` · `make_plan`
 - A saved `create_flashcards` result is persisted to `flashcard_decks` (`source: 'ai'`) via `dbSaveFlashcardDeck()` and surfaces in the Library "Flashcards" view. Applied study/intent plans persist to `study_plans`.
 
 **Meta**

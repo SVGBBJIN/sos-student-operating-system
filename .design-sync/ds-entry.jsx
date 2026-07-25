@@ -12,7 +12,6 @@ export { MemoryRouter as DSRouterProvider } from 'react-router-dom';
 
 // ── Brand & landing ──────────────────────────────────────────────
 export { default as BrandMark } from '../src/components/BrandMark.jsx';
-export { default as AuthScreen } from '../src/components/AuthScreen.jsx';
 export { default as Onboarding } from '../src/components/Onboarding.jsx';
 
 // ── AI confirmation / action cards ───────────────────────────────
@@ -21,19 +20,14 @@ export { default as ProposalCard } from '../src/components/ProposalCard.jsx';
 export { ClarificationCard, MultiFieldClarificationCard } from '../src/components/ClarificationCard.jsx';
 export { PlanCard, IntentPlanCard, PlanTemplateSelector } from '../src/components/PlanCards.jsx';
 
-// ── Generated content cards (Studio output) ──────────────────────
+// ── Generated content cards ──────────────────────────────────────
 export {
   ContentCard,
-  FlashcardDisplay,
-  QuizDisplay,
   GenericContentDisplay,
-  StudyPackCard,
 } from '../src/components/ContentDisplayCards.jsx';
 export { ClueCard, WorkCheckCard } from '../src/components/CoachingCards.jsx';
 
 // ── Dashboard / Studio surfaces ──────────────────────────────────
-export { default as StudioDashboard } from '../src/components/StudioDashboard.jsx';
-export { default as StudioHomeView } from '../src/components/StudioHomeView.jsx';
 export { default as StudioSidebar } from '../src/components/StudioSidebar.jsx';
 export { default as StudyTopBar } from '../src/components/StudyTopBar.jsx';
 export {
@@ -55,4 +49,3 @@ export { default as HomeScreen } from '../src/components/HomeScreen.jsx';
 export { default as ScheduleWidget } from '../src/components/ScheduleWidget.jsx';
 export { default as PomodoroTimer } from '../src/components/PomodoroTimer.jsx';
 export { default as DynamicIsland } from '../src/components/DynamicIsland.jsx';
-export { default as FocusSessionWidget } from '../src/components/FocusSessionWidget.jsx';

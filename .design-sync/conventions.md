@@ -11,18 +11,18 @@ parallel class vocabulary.
 SOS has two style scopes. Getting the wrapper right is what makes components look
 styled instead of unstyled:
 
-- **Studio components** — `StudioDashboard`, `StudioHomeView`, `StudioSidebar`,
-  `StudyTopBar`, `Panel`, `AskBar`, `QuickActions`, `UpNext`, `AgendaList`,
-  `DueList`, `CourseGrid`, `ReviewDecks`, `StatStrip`, `WelcomeBox`, `AddCard`,
-  `DynamicIsland`, `FocusSessionWidget` — their CSS is scoped under `.studio`.
+- **Studio components** — `StudioSidebar`, `StudyTopBar`, `Panel`, `AskBar`,
+  `QuickActions`, `UpNext`, `AgendaList`, `DueList`, `CourseGrid`,
+  `ReviewDecks`, `StatStrip`, `WelcomeBox`, `AddCard`,
+  `DynamicIsland` — their CSS is scoped under `.studio`.
   **Wrap them in an element with `className="studio"`.** That element also carries
   the design tokens, so nest your own markup inside it too. For light mode, put
   `data-theme="light"` on an ancestor.
 - **Everything else** — the AI confirmation/plan/content cards
   (`ConfirmationCard`, `BulkConfirmationCard`, `ProposalCard`, `PlanCard`,
-  `IntentPlanCard`, `ClarificationCard`, `FlashcardDisplay`, `QuizDisplay`,
-  `StudyPackCard`, `ClueCard`, `WorkCheckCard`, …) and the landing screens
-  (`AuthScreen`, `Onboarding`, `BrandMark`) — use global classes and need **no
+  `IntentPlanCard`, `ClarificationCard`, `GenericContentDisplay`, `ClueCard`,
+  `WorkCheckCard`, …) and the landing screens
+  (`Onboarding`, `BrandMark`) — use global classes and need **no
   wrapper**. Put them on a dark surface (`background: #0f1115`).
 
 `StudioSidebar` and `StudyTopBar` call react-router; if you use them, mount your
