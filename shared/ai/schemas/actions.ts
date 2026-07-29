@@ -537,7 +537,7 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   add_recurring_event: "Add a recurring event repeating on weekdays (e.g. swim Mon/Wed/Fri).",
   clear_all: "DESTRUCTIVE: wipe ALL tasks, events, blocks, notes. confirm MUST be true.",
   ask_clarification: "Ask ONE short, plain-language question when the request is genuinely ambiguous and you can't pick a sensible default. Optionally give up to 4 short answer options. Prefer just attempting the action — missing required fields are asked for automatically. Never use for study-content generation.",
-  read_calendar: "Read-only schedule lookup. Set end_date to the stated timeframe; omit for default one-week window. Never combine with mutating tools.",
+  read_calendar: "Read-only schedule lookup for dates OUTSIDE the context window. DYNAMIC CONTEXT already carries today's schedule, this week, and upcoming events — answer from it directly instead of calling this. Only call when the student asks about a date range the context does not cover. Set end_date to the stated timeframe; omit for the default one-week window. Never combine with mutating tools. Never call twice in one turn.",
   set_timer: "Start a countdown. label = student's exact words. Exactly one of: duration_seconds (1..86400), fire_at (ISO 8601+tz), or preset (pomodoro/short_break/long_break). Convert '20 minutes'→1200, '1 hour'→3600. If no duration given, call ask_clarification.",
   cancel_timer: "Cancel (stop) a running timer by label. Use the label exactly as shown in ACTIVE TIMERS. If no timers are running, tell the student there's nothing to cancel. If the label is ambiguous, call ask_clarification.",
   add_note: "Create a note. subject = folder. Ask one missing field at a time: subject first, then source (options: 'I will write it'/'Paste/import'/'AI write'), then title. Use source='ai_generated' if the student asked you to draft it.",
@@ -550,10 +550,10 @@ const ACTION_DESCRIPTIONS: Record<ActionName, string> = {
   break_task: "Break a deadline into a day-by-day plan of 2–10 smaller subtasks (e.g. day 0: outline, day 1: draft, day 2: revise). parent_title is the original task's name (used as subject context). Each subtask must have a real title. Prefer setting day_offset (days from today, staggered across the runway to the deadline) over a fixed `due` date so the breakdown fits how many days are actually left — only set `due` directly when the student specifies exact dates. estimated_minutes is optional. Call ask_clarification first if the student hasn't specified what parts to break into.",
   convert_event_to_block: "Convert a calendar event into a time block on the schedule. Identify the event by title or event_id. Optionally override date, start, end, and category; if omitted, the client infers from the event. NEVER guess start/end — call ask_clarification if the student didn't state them.",
   convert_block_to_event: "Convert a time block into a calendar event. date, start, and end identify the block to remove. title, event_type, and subject are optional — the client falls back to the block's name if title is omitted.",
-  read_notes: "Read and list the student's notes, optionally filtered by subject or search query. Posts a summary to chat with note titles and IDs so the student can reference them. Call when the student asks what notes they have, wants to find a note, or asks to see their notes.",
-  read_project: "Read all content (tasks, events, notes) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject.",
-  read_tasks: "List the student's tasks with optional filters: subject, status (not_started/in_progress/done), or tasks due within N days. Posts a formatted list to chat. Call when the student asks what tasks they have, wants to see pending work, or asks about tasks for a specific subject.",
-  search_memory: "Search the student's saved memories, notes, and past context by meaning (semantic search). Call this ONLY when answering needs background the student mentioned earlier or stored previously — e.g. 'what did I say about my history essay?', 'remind me what my goals were'. `query` is the keywords/phrase to search for. Do NOT call for simple scheduling or task actions. The results come back to you to use in your answer.",
+  read_notes: "List the student's notes, optionally filtered by subject or search query, and post that list to chat. DYNAMIC CONTEXT already carries the NOTES INDEX and note previews — if the answer is there, just say it instead of calling this. Only call when the student explicitly wants the full list posted, or needs a note the index does not cover. Never call twice in one turn.",
+  read_project: "Read all content (tasks, events, notes) grouped under a specific subject/project. subject must match one the student uses (e.g. 'Math', 'Chemistry'). Call when the student asks what's in a project or subject and the context window doesn't already show it. Never call twice in one turn.",
+  read_tasks: "List the student's tasks with optional filters: subject, status (not_started/in_progress/done), or tasks due within N days, and post that list to chat. DYNAMIC CONTEXT already carries ACTIVE TASKS and OVERDUE — answer counts, names and due dates straight from it instead of calling this. Only call when the student explicitly asks for the full list to be posted, or needs a filter the context can't answer (e.g. completed tasks). Never call twice in one turn.",
+  search_memory: "Search the student's saved memories, notes, and past context by meaning (semantic search). Call this ONLY when answering needs background that is NOT already in DYNAMIC CONTEXT or earlier in this conversation — e.g. 'what did I say about my history essay?', 'remind me what my goals were'. Re-reading something already in front of you costs the student an extra round-trip, so check the context first. `query` is the keywords/phrase to search for. Do NOT call for simple scheduling or task actions. You may call this at most ONCE per turn; the results come back to you to use in your answer.",
   update_block: "Modify an existing time block — rename it, change its time, or change its category. Identify the block by date + start time OR date + activity name. Provide at least one of new_activity, new_start, new_end, or new_category. NEVER guess times — call ask_clarification if the student didn't state them.",
   postpone_task: "Push a task's due date to a later date. Identify by title (fuzzy match). new_due_date must be a valid YYYY-MM-DD date. Increments the task's postpone count for behavioral tracking.",
   bulk_complete: "Mark multiple tasks done in one shot. Filter by subject (e.g. 'Math') and/or a list of titles. At least one of subject or titles is required. Common at end of study sessions ('mark all my English tasks as done').",
@@ -607,8 +607,14 @@ const CHAT_TOOLS: ActionName[] = [
   "search_memory", "ask_clarification",
 ];
 
-export function buildChatToolDefs(): ToolDef[] {
-  return CHAT_TOOLS.map(toolDef);
+// `exclude` drops verbs the caller has already spent for this turn. The memory
+// hop uses it to strip `search_memory` from the follow-up pass so a single
+// bounded retrieval can never turn into a request loop.
+export function buildChatToolDefs(exclude?: readonly string[]): ToolDef[] {
+  const tools = exclude && exclude.length > 0
+    ? CHAT_TOOLS.filter((t) => !exclude.includes(t))
+    : CHAT_TOOLS;
+  return tools.map(toolDef);
 }
 
 export function validateAction(name: string, args: unknown): { ok: true; data: Record<string, unknown> } | { ok: false; issues: z.ZodIssue[] } {

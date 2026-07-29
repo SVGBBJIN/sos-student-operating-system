@@ -111,13 +111,54 @@ function stripMemoryActions(result: CallModelResponse): CallModelResponse {
   return { ...result, actions: result.actions.filter((a) => a.type !== "search_memory") };
 }
 
-// Drop search_memory tool-call frames from the live stream so the internal tool
-// never surfaces as a client-side action preview; everything else passes through.
-function filterMemoryFrames(onChunk: (c: StreamChunk) => void): (c: StreamChunk) => void {
-  return (c) => {
-    if (c.type === "tool_call" && c.toolCall?.name === "search_memory") return;
-    onChunk(c);
-  };
+// ── Redundant read collapsing ───────────────────────────────────────────────
+// A turn that asks for the same lookup twice (read_tasks with identical
+// filters, two identical read_calendar windows, …) costs the student a
+// duplicated wall of text in chat and a second pass over the same client data
+// for zero new information. Collapse exact repeats, keeping first occurrence
+// order. Only read verbs are collapsed — repeating a *mutating* verb can be
+// legitimate (two tasks that happen to share a title are still two tasks).
+const READ_ACTIONS = new Set([
+  "read_calendar",
+  "read_tasks",
+  "read_notes",
+  "read_project",
+  "read_study_sets",
+  "view_schedule",
+  "prioritize_tasks",
+  "search_memory",
+]);
+
+// Stable stringify so {a:1,b:2} and {b:2,a:1} hash alike.
+function actionSignature(a: ChatAction): string {
+  const keys = Object.keys(a).filter((k) => k !== "type").sort();
+  const parts = keys.map((k) => {
+    const v = (a as Record<string, unknown>)[k];
+    return `${k}=${v === null || v === undefined ? "" : JSON.stringify(v)}`;
+  });
+  return `${a.type}(${parts.join(",")})`;
+}
+
+export function dedupeReadActions(actions: ChatAction[]): ChatAction[] {
+  const seen = new Set<string>();
+  const out: ChatAction[] = [];
+  for (const a of actions) {
+    if (!READ_ACTIONS.has(a.type)) {
+      out.push(a);
+      continue;
+    }
+    const sig = actionSignature(a);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(a);
+  }
+  return out;
+}
+
+function dedupeResponseReads(result: CallModelResponse): CallModelResponse {
+  const deduped = dedupeReadActions(result.actions);
+  if (deduped.length === result.actions.length) return result;
+  return { ...result, actions: deduped };
 }
 
 function overLimitForIntent(intent: Intent): boolean {
@@ -423,7 +464,11 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       : undefined;
     const maxOutputTokens = body.maxTokens ?? 1024;
 
-    const runChat = (ctx: string, onChunk?: (c: StreamChunk) => void) =>
+    const runChat = (
+      ctx: string,
+      onChunk?: (c: StreamChunk) => void,
+      excludeTools?: readonly string[],
+    ) =>
       callModel({
         intent: "action_routing",
         systemPrompt: body.systemPrompt ?? "",
@@ -432,6 +477,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         messages,
         attachments,
         toolSet: "chat",
+        excludeTools,
         maxOutputTokens,
         groundTitles: true,
         onChunk,
@@ -439,18 +485,51 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
 
     // One bounded retrieval hop: if the first pass asks to search memory, run the
     // retrieval and re-run the model once with the results in context.
+    //
+    // The first pass's prose is BUFFERED, not streamed. If the model turns out to
+    // want a memory hop, that whole pass is superseded by the second one — and
+    // anything already flushed would sit stranded in the client's transcript
+    // ahead of the real answer, which then overwrites it on the `done` frame
+    // (the reply visibly "types itself, then clips over"). Buffering costs
+    // nothing when no hop happens: the frames are replayed in order the moment
+    // we know the first pass is final. Usage frames pass through immediately —
+    // a discarded pass still spent those tokens and the client should see it.
     const runWithMemory = async (onChunk?: (c: StreamChunk) => void): Promise<CallModelResponse> => {
-      const first = await runChat(dynamicContext, onChunk ? filterMemoryFrames(onChunk) : undefined);
+      const buffered: StreamChunk[] = [];
+      const bufferFrames = onChunk
+        ? (c: StreamChunk) => {
+            // search_memory is server-internal — it must never surface as a
+            // client-side action preview, in either pass.
+            if (c.type === "tool_call" && c.toolCall?.name === "search_memory") return;
+            if (c.type === "usage") { onChunk(c); return; }
+            buffered.push(c);
+          }
+        : undefined;
+
+      const first = await runChat(dynamicContext, bufferFrames);
       const mem = userId ? extractMemoryQuery(first.actions) : null;
-      if (!mem) return stripMemoryActions(first);
+
+      if (!mem) {
+        // No hop — the first pass IS the answer. Replay it in arrival order.
+        if (onChunk) for (const c of buffered) onChunk(c);
+        return dedupeResponseReads(stripMemoryActions(first));
+      }
+
+      // Hop: the buffered pass is superseded, so it is dropped rather than sent.
       let chunks: RetrievedChunk[] = [];
       try {
         chunks = await retrieve({ userId: userId!, query: mem.query, sources: mem.sources, k: 8 });
       } catch {
         chunks = [];
       }
-      const second = await runChat(`${dynamicContext}\n\n${formatMemories(chunks)}`, onChunk);
-      return stripMemoryActions(second);
+      // search_memory is withheld from the follow-up pass so a single bounded
+      // retrieval can't recurse into a second (stripped, answerless) hop.
+      const second = await runChat(
+        `${dynamicContext}\n\n${formatMemories(chunks)}`,
+        onChunk,
+        ["search_memory"],
+      );
+      return dedupeResponseReads(stripMemoryActions(second));
     };
 
     if (wantsSSE) {

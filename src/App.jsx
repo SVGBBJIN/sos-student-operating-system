@@ -797,9 +797,36 @@ const CONTEXT_SECTION_BUDGETS = {
   schedule: 600,
 };
 
+// Read-only lookups whose output is a formatted block posted into chat. These
+// are safe to skip when repeated: they mutate nothing, and the student is
+// already looking at the identical block a moment above. Any workspace mutation
+// clears the cache, so a repeat after a real change still re-runs.
+const DEDUPED_READ_TYPES = new Set([
+  'read_calendar', 'read_tasks', 'read_notes', 'read_project',
+  'read_study_sets', 'view_schedule',
+]);
+const READ_DEDUP_WINDOW_MS = 90_000;
+
+// Stable signature: key order can't change the hash, and internal __-prefixed
+// flags (e.g. __confirmed) are excluded so they never split a duplicate.
+function readSignature(action) {
+  const keys = Object.keys(action)
+    .filter(k => k !== 'type' && !k.startsWith('_') && action[k] !== undefined && action[k] !== null)
+    .sort();
+  return action.type + '(' + keys.map(k => k + '=' + JSON.stringify(action[k])).join(',') + ')';
+}
+
 const POLICY_MODULES = {
   core: 'You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class, texting "did you study?" right before an exam. You\'re not a professor — you\'re the friend who actually gets it. Match the student\'s tone and energy: brief when they\'re brief, casual when they\'re casual, calm when they\'re stressed. Skip hollow openers ("Certainly!", "Great question!", "Of course!") — just respond. Use contractions naturally. Sound like a person, not a help desk.',
   no_hallucination: 'Never invent schedule/tasks/deadlines or note content.',
+  // The single most common failure mode on the chat surface was a tool call with
+  // an empty `content` field: the action fired but the student saw silence (or a
+  // canned "got it"). Always speaking alongside the call fixes it at the source.
+  always_reply: "ALWAYS write a short natural-language reply, even when you call a tool — the tool call is the action, your text is what the student actually reads. Never return a tool call with empty text. One or two sentences: say what you're doing and anything they need to know ('adding your chem test Friday — that's 3 days out, want a study block before it?'). Never narrate mechanics ('calling add_task'), never dump raw tool names or JSON, and never reply with only an emoji or a bare 'done'.",
+  // Redundant re-reads: the model would call read_tasks/read_calendar/read_notes
+  // to fetch data already sitting in DYNAMIC CONTEXT, costing a round-trip and
+  // dumping a duplicate wall of text into the chat.
+  context_first: "DYNAMIC CONTEXT below already contains today's schedule, this week, active + overdue tasks, upcoming events, active timers, and the notes index with previews. That IS your working memory — read it and answer from it directly. Do NOT call read_tasks, read_calendar, read_notes, read_project or search_memory to fetch something already shown there; that wastes a round-trip and reprints what the student can already see. Only reach for a read tool when the answer genuinely lies outside the context — a date range it doesn't cover, a status filter like completed tasks, the full body of a note, or something the student mentioned in an earlier session. Never issue the same lookup twice in one turn, and never re-run a lookup whose result is already in this conversation.",
   workspace: 'Prioritize workspace_context when useful (notes vs schedule vs chat).',
   clarification: "Missing-field handling: just attempt the matching action with your BEST GUESS — prefer a sensible default over a question. The app automatically asks the student for any required field you leave out, so you almost never need ask_clarification. A tired or lazy student won't fill out a form, so default rather than interrogate. Reserve ask_clarification for genuinely AMBIGUOUS requests (not merely incomplete ones) where no reasonable default exists — keep its question one short plain sentence. NEVER invent or guess start/end times for time blocks; leave them out and let the app ask. NEVER call ask_clarification for flashcards, quizzes, summaries, outlines, or other study content — generate those right away from the topic in the message or the student's notes. If the student says 'just do it', 'don't ask', 'your call', 'you decide', 'whatever', or similar, proceed with reasonable defaults and do not ask. Never invent specific titles/names — use the student's wording. For greetings or small talk, reply naturally with no tool call.",
   overwhelm: "When the student is overwhelmed, paralyzed, procrastinating, or asks things like 'what do I do right now', 'where do I start', 'I don't even know what to do', or 'I don't wanna' — NEVER reply with a bare acknowledgement like 'got it'. FIRST call prioritize_tasks (or read_tasks) to pull their real workload, then pick ONE task to start — not necessarily the highest-priority one, but the most STARTABLE task that still matters (short, concrete, low-effort), since the goal is breaking the freeze, not optimizing the schedule. LEAD with a trivially-startable 2-minute first step ('open the doc and write the title', 'do just the first problem') before you even name the task. Procrastination is about starting, not planning. Start a 25-minute focus timer labeled with that task (set_timer preset='pomodoro', label = the task title) rather than asking how long. Be warm and encouraging — one concrete next step, never a lecture, never a bare unlabeled timer. Do NOT use points, streaks, XP, or other gamification.",
@@ -974,6 +1001,8 @@ function buildSystemPrompt(tasks, blocks, events, notes, tier = 2, options = {})
   const stablePolicyTier1 = `STABLE POLICY (${SYSTEM_PROMPT_VERSION})
 You are SOS — a sharp, laid-back study sidekick who gets student life: the 11pm panic, the procrastination spiral, pulling up SparkNotes 10 minutes before class. You're not a professor — you're the friend who actually gets it. Match the student's tone: brief when they're brief, casual when they're casual, calm when they're stressed. No hollow openers — just respond like a person. Keep replies short (2-3 sentences max).
 Never invent tasks/events/deadlines that are not present in dynamic context.
+Always write a short reply in your own words, even when you call a tool — never return a tool call with empty text.
+The dynamic context below is your working memory: answer schedule/task/note questions straight from it instead of calling a read tool for something already shown there.
 If schedule/tasks are clear, say so directly.
 If student asks about note content, reference only available notes and ask a focused follow-up when details are missing.`;
 
@@ -994,7 +1023,9 @@ NOTES: ${noteNames}`;
 
   const baseModules = [
     POLICY_MODULES.core,
+    POLICY_MODULES.always_reply,
     POLICY_MODULES.no_hallucination,
+    POLICY_MODULES.context_first,
     POLICY_MODULES.workspace,
     POLICY_MODULES.clarification,
     POLICY_MODULES.overwhelm,
@@ -1295,6 +1326,10 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('saved'); // 'saving', 'saved', 'error'
   const rpmStateRef = useRef({ remaining: Infinity, resetAtMs: 0 });
   const recentlyExecutedActionsRef = useRef([]); // [{ type, summary, executedAt }]
+  // Signatures of read-only lookups already answered recently, so an identical
+  // re-read within the window doesn't reprint the same wall of text into chat.
+  // { [signature]: executedAt }
+  const recentReadsRef = useRef({});
   const proofreadHistoryRef = useRef(loadProofreadHistory()); // { [assignmentKey]: number[] }
   const preSubmissionNudgedRef = useRef(new Set()); // task ids already nudged this session (pre-submission proofread trigger)
   // Undo toast: shown for 8s after a destructive/mutating AI action
@@ -2856,6 +2891,23 @@ function App() {
 
   // ── Action executor (writes to Supabase) ──
   function executeAction(action) {
+    // ── Redundant re-read guard ──
+    // The model sometimes re-issues a lookup it (or the previous turn) already
+    // ran — same filters, same answer. Re-running it reprints a duplicate block
+    // and re-walks the whole task/event list for nothing. Its prose reply still
+    // goes out; only the duplicated dump is suppressed.
+    if (action && DEDUPED_READ_TYPES.has(action.type)) {
+      const now = Date.now();
+      const sig = readSignature(action);
+      const prev = recentReadsRef.current[sig];
+      // Prune while we're here so the map can't grow without bound.
+      for (const [k, ts] of Object.entries(recentReadsRef.current)) {
+        if (now - ts > READ_DEDUP_WINDOW_MS) delete recentReadsRef.current[k];
+      }
+      if (prev && now - prev < READ_DEDUP_WINDOW_MS) return;
+      recentReadsRef.current[sig] = now;
+    }
+
     function recordExecution(type, summary) {
       const entry = { type, summary, executedAt: Date.now() };
       recentlyExecutedActionsRef.current = [
@@ -2896,6 +2948,11 @@ function App() {
         setRollupAuto(prev => [...prev, { action, summary: actionSummary(action), snap: autoSnap }]);
       }
     }
+
+    // Anything that mutates the workspace invalidates the read-dedup cache — a
+    // repeated lookup after a change is a genuinely different answer and must
+    // run again.
+    if (mutatingTypes.has(action.type)) recentReadsRef.current = {};
 
     // Snapshot state before any mutation so the user can undo within 8 seconds
     const undoSnap = { tasks: tasks.slice(), events: events.slice(), notes: notes.slice(), blocks: JSON.parse(JSON.stringify(blocks)), noteLayers: noteLayers.slice() };
@@ -5539,11 +5596,36 @@ function App() {
         edit_note: 'got it — I can update that note.',
         delete_note: 'got it — I can delete that note.',
       };
+      // Auto-approve phrasing: the action is already running, so the ack is past
+      // tense rather than the propose-mode "I can …".
+      const autoAckByType = {
+        update_event: 'updated that event for you.',
+        add_block: 'added that block to your schedule.',
+        add_event: 'added that to your calendar.',
+        add_task: 'added that task.',
+        add_recurring_event: 'added that recurring event.',
+        add_note: 'created that note.',
+        delete_event: 'removed that event.',
+        delete_task: 'deleted that task.',
+        complete_task: 'marked that complete.',
+        postpone_task: 'pushed that back for you.',
+        edit_note: 'updated that note.',
+        delete_note: 'deleted that note.',
+        set_timer: 'timer started.',
+        cancel_timer: 'timer cancelled.',
+      };
       const hasClarificationPrompt = clarificationsArr.some(c => c?.question && String(c.question).trim().length > 0);
+      // A tool call with empty text used to render as silence under
+      // auto-approve — the action fired and the student saw nothing come back.
+      // There is always something to say now; the model is also instructed to
+      // supply its own text (POLICY_MODULES.always_reply), so this is a floor,
+      // not the usual path.
       const displayContent = rawContent
         ? rawContent
         : actions.length > 0
-          ? (aiAutoApprove ? '' : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
+          ? (aiAutoApprove
+              ? (autoAckByType[actions[0]?.type] || 'done — handled that for you.')
+              : (actionAckByType[actions[0]?.type] || 'got it — I can do that.'))
           : hasClarificationPrompt
             ? "i need one quick detail before i can do that."
           : "hmm, I didn't get a response from the AI. the service may be briefly unavailable — please try again in a moment.";
@@ -6207,6 +6289,9 @@ function App() {
     // Leaving them pinned would confuse the AI in a fresh chat (it would think
     // actions "just happened" when the user has started over).
     recentlyExecutedActionsRef.current = [];
+    // Same reasoning for cached lookups — a fresh chat should re-answer reads
+    // rather than suppress them as duplicates of the old conversation.
+    recentReadsRef.current = {};
     if (user) dbClearChat(user.id);
   }
 

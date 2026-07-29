@@ -80,6 +80,9 @@ export interface CallModelRequest {
   attachments?: Attachment[];
   toolSet?: "action" | "chat" | "plan" | "coaching" | "none" | "custom";
   customTools?: ToolDef[];
+  // Tool names to withhold from this call. Applies to the "chat" tool set —
+  // used by the memory hop to drop `search_memory` from its follow-up pass.
+  excludeTools?: readonly string[];
   toolChoice?: "auto" | "required" | "none";
   responseSchema?: object;
   responseMimeType?: string;
@@ -132,7 +135,7 @@ function toolDefsForRequest(req: CallModelRequest): ToolDef[] | undefined {
     case "action":
       return buildActionToolDefs();
     case "chat":
-      return buildChatToolDefs();
+      return buildChatToolDefs(req.excludeTools);
     case "plan":
       return buildPlanToolDefs();
     case "coaching":
