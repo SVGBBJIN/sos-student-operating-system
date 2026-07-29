@@ -257,8 +257,8 @@ Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **clie
 | Factor | Weight | Logic |
 |--------|--------|-------|
 | Urgency | 35% | Days-to-due exponential decay (3-day half-life); overdue = 1.0 |
-| Importance | 25% | priority field + 0.15 boost for high-stakes subjects (math, AP, SAT, finals, etc.) |
-| Momentum | 15% | Per-subject postpone rate; high postpone → higher score |
+| Importance | 25% | priority field + 0.15 boost for high-stakes subjects (math, AP, SAT, finals, etc.) — matched per WORD, so "AP Chemistry" qualifies |
+| Momentum | 15% | Per-subject postpone rate; high postpone → higher score. Subject-keyed signal maps are keyed by `normSubject()` (lowercased/trimmed) — normalize before lookup |
 | Deadline Density | 15% | Fraction of 5 tasks sharing same due date |
 | Friction | 10% | `postpone_count × 0.15` |
 
@@ -332,6 +332,8 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 | `/api/lms-sync-trigger` | POST | Manual sync |
 | `/api/lms-confirm` | POST | Confirm matched task |
 
+**Prompt fields**: send EITHER the split pair (`staticSystemPrompt` + `dynamicContext`) or the legacy combined `systemPrompt` — never both. The combined string already contains the pair, so sending all three made both providers emit each part twice (a measured 2.00x on system tokens). `promptFields()` in `src/App.jsx` is the single place that picks.
+
 **Chat body** (`ChatBody`):
 ```typescript
 {
@@ -381,7 +383,7 @@ VITE_GNEWS_TOKEN          — optional (news widget)
 
 ## Rate Limiting
 
-- **Content generation** (studio, planning, intent_plan, study_pack): 5 per day per user
+- **Content generation** (studio, planning, intent_plan, study_pack): 5 per day per user, claimed atomically via the `claim_content_generation` RPC and refunded via `release_content_generation` when the generation fails or yields nothing
 - **Chat / action_routing**: RPM tier limits via `shared/rate-limit.ts`
 - Daily counter tracked server-side and localStorage
 - `RateLimitBanner` displays status + reset countdown

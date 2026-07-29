@@ -38,7 +38,6 @@ import { SCHEMA_VERSIONS } from "./schemas/versions.js";
 import {
   circuitFallbackResponse,
   circuitOpen,
-  isRetryable,
   recordFailure,
   recordSuccess,
 } from "./resilience.js";
@@ -310,7 +309,11 @@ async function invokeProvider(
   modelOverride: string,
   providerName: ProviderName,
   deadline: number,
-  consumer?: (c: StreamChunk) => void
+  consumer?: (c: StreamChunk) => void,
+  // Lets a caller cancel this attempt early. The hedged dispatcher uses it to
+  // abort the loser the instant the winner settles, so we stop paying for
+  // tokens nobody will read.
+  cancelSignal?: AbortSignal
 ): Promise<{ response: ChatResponse; chunks: number }> {
   const provider = getProvider(providerName);
   const tools = toolDefsForRequest(req);
@@ -322,11 +325,16 @@ async function invokeProvider(
   if (remaining < MIN_ATTEMPT_MS) {
     throw new Error(`call budget exhausted — ${remaining}ms left`);
   }
+  if (cancelSignal?.aborted) {
+    throw new Error("attempt cancelled before dispatch");
+  }
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(new Error(`provider timeout after ${remaining}ms`)),
     remaining
   );
+  const onCancel = () => controller.abort(new Error("attempt superseded"));
+  cancelSignal?.addEventListener("abort", onCancel, { once: true });
 
   const chatReq: ChatRequest = {
     model: modelOverride,
@@ -384,6 +392,7 @@ async function invokeProvider(
     return { response, chunks: chunkCount };
   } finally {
     clearTimeout(timer);
+    cancelSignal?.removeEventListener("abort", onCancel);
   }
 }
 
@@ -394,7 +403,16 @@ async function invokeProvider(
 // Streaming calls stay sequential — one ordered byte stream per client.
 // If primary fails before the timer fires, fallback starts immediately.
 
-const HEDGE_DELAY_MS = 2_000;
+// Hedging exists to rescue a STALLED provider, not to race a model that is
+// legitimately thinking. A flat 2s fired on essentially every Pro pass — a
+// `plan` draft with thinkingBudget 4096 routinely runs 10–20s — so every plan
+// request issued 6 upstream calls instead of 3, on the priciest models. Delays
+// are tier-shaped: past these points, slowness is a real signal.
+const HEDGE_DELAY_BY_TIER: Record<Tier, number> = {
+  flash: 3_000,
+  pro: 10_000,
+  embed: 2_000,
+};
 
 async function raceProviders(
   req: CallModelRequest,
@@ -407,6 +425,12 @@ async function raceProviders(
   const primaryKey = `${primary.provider}:${tier}`;
   const fallbackKey = `${fallback.provider}:${tier}`;
   let totalAttempts = 1;
+
+  // One controller per attempt. Whoever settles first aborts the other — a
+  // hedge that isn't cancelled is just double billing, since the loser
+  // otherwise streams to completion and is then discarded.
+  const primaryCancel = new AbortController();
+  const fallbackCancel = new AbortController();
 
   return new Promise<Win>((resolve, reject) => {
     let settled = false;
@@ -426,29 +450,35 @@ async function raceProviders(
       fallbackStarted = true;
       totalAttempts += 1;
       recordRequest(tier);
-      invokeProvider(req, fallback.model, fallback.provider, deadline)
+      invokeProvider(req, fallback.model, fallback.provider, deadline, undefined, fallbackCancel.signal)
         .then(({ response }) => {
           if (settled) return;
           settled = true;
+          primaryCancel.abort();
           recordSuccess(fallbackKey);
           resolve({ response, fallbackUsed: true, winner: fallback.provider, attempts: totalAttempts });
         })
         .catch((err) => {
+          // A loser aborted by the winner is not a provider fault — recording
+          // it would walk the circuit breaker toward opening on healthy traffic.
+          if (settled) return;
           recordFailure(fallbackKey);
           fallbackFailed = true;
           if (primaryFailed) reject(primaryErr ?? err);
         });
     };
 
-    invokeProvider(req, primary.model, primary.provider, deadline)
+    invokeProvider(req, primary.model, primary.provider, deadline, undefined, primaryCancel.signal)
       .then(({ response }) => {
         if (settled) return;
         settled = true;
         if (fallbackTimer) clearTimeout(fallbackTimer);
+        fallbackCancel.abort();
         recordSuccess(primaryKey);
         resolve({ response, fallbackUsed: false, winner: primary.provider, attempts: totalAttempts });
       })
       .catch((err) => {
+        if (settled) return;
         recordFailure(primaryKey);
         primaryErr = err;
         primaryFailed = true;
@@ -457,7 +487,7 @@ async function raceProviders(
         if (fallbackFailed) reject(err);
       });
 
-    fallbackTimer = setTimeout(tryFallback, HEDGE_DELAY_MS);
+    fallbackTimer = setTimeout(tryFallback, HEDGE_DELAY_BY_TIER[tier]);
   });
 }
 
@@ -567,7 +597,12 @@ export async function callModel(req: CallModelRequest): Promise<CallModelRespons
       } catch (err) {
         lastError = err;
         recordFailure(circuitKey);
-        void isRetryable(err);
+        // The cross-provider hop is deliberately unconditional: even a
+        // non-retryable failure here (a 4xx from this provider's own payload
+        // translation) can succeed on the other provider, which builds its
+        // request differently. A previous `void isRetryable(err)` computed a
+        // classification and discarded it, which read as a gate but was not
+        // one — the ladder always fell through either way.
       }
     }
   }

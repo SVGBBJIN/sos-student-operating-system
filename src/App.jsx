@@ -1063,6 +1063,36 @@ ${[...baseModules, ...intentModules].map((line) => '- ' + line).join('\n')}`;
   };
 }
 
+// The browser's IANA timezone, or undefined if the runtime won't report one.
+function localTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Prompt fields for the request body.
+//
+// `prompt` is the LEGACY single-string form and it already contains
+// stablePrompt + dynamicContext concatenated. Sending all three meant both
+// providers re-assembled them into their own system messages (groq.ts
+// buildSystemMessages, gemini.ts systemInstruction), so the stable policy and
+// the context block each went over the wire TWICE — a measured 2.00x on the
+// system prompt, ~2.5k wasted input tokens per turn, tripled on mode:"plan".
+//
+// Send the split pair when we have it; fall back to the combined string only
+// for the tier-1 shape, which doesn't produce a split. Never send both.
+function promptFields(payload) {
+  if (payload.stablePrompt) {
+    return {
+      staticSystemPrompt: payload.stablePrompt,
+      dynamicContext: payload.dynamicContext,
+    };
+  }
+  return { systemPrompt: payload.prompt };
+}
+
 /* ─── Multi-model message classifier ─── */
 const BRIEFING_REGEX = /\b(daily\s+briefing|today'?s?\s+briefing|my\s+briefing|give\s+me\s+(?:a|my|the|today'?s?)\s+briefing|(?:what'?s|whats)\s+(?:on\s+)?(?:my\s+)?(?:agenda|plate)\s+today|brief\s+me|morning\s+briefing|what\s+do\s+i\s+have\s+(?:going\s+on\s+)?today)\b/i;
 const PLANNING_REGEX = /\b(study\s*plan|study\s*guide|plan\s+(?!(?:my\s+)?(?:week|month|semester)\b)(my|for|out|this)|exam\s+prep|prep\s+for|plan\s+to\s+study|make\s+(?:me\s+)?a\s+plan|create\s+(?:a\s+)?(?:study\s+)?plan)\b/i;
@@ -4170,9 +4200,7 @@ function App() {
                 url: EDGE_FN_URL,
                 body: {
                   mode: 'plan',
-                  systemPrompt: promptPayload2.prompt,
-                  staticSystemPrompt: promptPayload2.stablePrompt,
-                  dynamicContext: promptPayload2.dynamicContext,
+                  ...promptFields(promptPayload2),
                   messages: [{ role: 'user', content: `Goal: ${goal}${action.horizon ? ` (horizon: ${action.horizon})` : ''}${action.subject ? `, subject: ${action.subject}` : ''}${action.deadline ? `, deadline: ${action.deadline}` : ''}` }],
                   maxTokens: 3000,
                   workspaceContext: 'schedule',
@@ -4222,9 +4250,7 @@ function App() {
                 url: EDGE_FN_URL,
                 body: {
                   mode: 'plan',
-                  systemPrompt: promptPayload2.prompt,
-                  staticSystemPrompt: promptPayload2.stablePrompt,
-                  dynamicContext: promptPayload2.dynamicContext,
+                  ...promptFields(promptPayload2),
                   messages: [{ role: 'user', content: `EXISTING PLAN:\n${existingPlanSummary}\n\nREVISION INSTRUCTIONS: ${instructions}\n\nProduce a revised version of this plan incorporating the instructions above.` }],
                   maxTokens: 3000,
                   workspaceContext: 'schedule',
@@ -5271,10 +5297,10 @@ function App() {
       const clientCalendarDensityPayload = buildCalendarDensity(clientTasksPayload, blocks.dates || {});
 
       const chatBody = {
-        systemPrompt: promptPayload.prompt,
-        // Split static/dynamic for Groq prompt caching (static policy is identical across all users)
-        staticSystemPrompt: promptPayload.stablePrompt,
-        dynamicContext: promptPayload.dynamicContext,
+        // Split static/dynamic for Groq prompt caching (static policy is
+        // identical across all users). promptFields sends exactly one of the
+        // two shapes — never the combined string alongside its own parts.
+        ...promptFields(promptPayload),
         messages: historyForApi,
         maxTokens: opts.maxTokens || ((isPlanningRequest || isIntentPlanRequest) ? 3000 : isWorkCheckRequest ? 2500 : isClueRequest ? 900 : 1024),
         workspaceContext: effectiveWorkspaceContext,
@@ -5283,6 +5309,10 @@ function App() {
         input_tokens_est: promptPayload.estimatedInputTokens,
         clientTasks: clientTasksPayload,
         clientCalendarDensity: clientCalendarDensityPayload,
+        // Behavioral time-of-day signals are bucketed server-side; without the
+        // student's zone they'd be read in UTC and report a peak-productivity
+        // hour shifted by the whole offset.
+        timeZone: localTimeZone(),
         intentType: inferredIntentType,
         ...(isBriefingRequest ? { mode: 'briefing' } : {}),
         ...((isPlanningRequest || isIntentPlanRequest) ? { mode: 'plan' } : {}),

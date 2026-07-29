@@ -52,7 +52,14 @@ export function estimateCost(model: string, usage: TokenUsage): number {
   const p = PRICING[model as PricingKey];
   if (!p) return 0;
   const inTokens = usage.prompt_tokens ?? 0;
-  const outTokens = usage.output_tokens ?? 0;
+  // Reasoning tokens bill at the output rate on both Groq (gpt-oss
+  // reasoning_effort) and Gemini (thinkingBudget). Some providers already fold
+  // them into completion_tokens, others report them only in the details block —
+  // count them separately ONLY when they aren't already included, otherwise a
+  // Pro pass with thinkingBudget 4096 double-counts. Groq's
+  // completion_tokens_details.reasoning_tokens is a subset of completion_tokens,
+  // so the max() below is the safe reading of both shapes.
+  const outTokens = Math.max(usage.output_tokens ?? 0, usage.thinking_tokens ?? 0);
   return (inTokens / 1000) * p.in + (outTokens / 1000) * p.out;
 }
 
@@ -62,6 +69,7 @@ export function emitEvent(event: RequestTelemetry & { cost_usd?: number }): void
     cost_usd: estimateCost(event.model, {
       prompt_tokens: event.prompt_tokens,
       output_tokens: event.output_tokens,
+      thinking_tokens: event.thinking_tokens,
     }),
   };
   // Newline-delimited JSON so log shippers can parse without context.

@@ -20,6 +20,9 @@ export interface EnrichOptions {
   baseContext: string;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
+  // IANA zone from the browser. Behavioral time-of-day bucketing is meaningless
+  // in server-local (UTC) terms, so it is read in the student's own zone.
+  timeZone?: string;
 }
 
 export async function enrichDynamicContext(opts: EnrichOptions): Promise<string> {
@@ -31,7 +34,7 @@ export async function enrichDynamicContext(opts: EnrichOptions): Promise<string>
 
   try {
     const [signals, studySignals] = await Promise.all([
-      getBehavioralSignals(opts.userId).catch(() => undefined),
+      getBehavioralSignals(opts.userId, { timeZone: opts.timeZone }).catch(() => undefined),
       getStudySignals(opts.userId).catch(() => undefined),
     ]);
 

@@ -24,7 +24,7 @@ import {
 import type { ContentType } from "../coaching/workcheck.js";
 import type { StreamChunk, ProgressEvent } from "./providers/types.js";
 import { getEnv } from "../env.js";
-import { checkContentRateLimit } from "../rate-limit.js";
+import { checkContentRateLimit, refundContentRateLimit } from "../rate-limit.js";
 import type { TaskForScoring, CalendarDensity } from "../scheduling/priority.js";
 
 export interface ChatBody {
@@ -42,6 +42,10 @@ export interface ChatBody {
   prompt_version?: string;
   clientTasks?: TaskForScoring[];
   clientCalendarDensity?: CalendarDensity;
+  // IANA timezone from the browser (e.g. "America/New_York"). Behavioral
+  // time-of-day signals are bucketed in the student's own zone — server-local
+  // is UTC on both runtimes, which shifted every completion by the offset.
+  timeZone?: string;
   intentType?: string;
   // mode:"plan" sub-hint. Set by the voice-transcript quick-capture path to
   // "brain_dump" so it keeps the old dedicated brain_dump mode's exemption
@@ -232,6 +236,18 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
   const messages = body.messages ?? [];
   const intentQuery = messages.slice(-1)[0]?.content ?? "";
 
+  // Set once a content-generation slot has actually been consumed, so any
+  // failure path can hand it back. Declared out here so the outer catch can
+  // reach it. Claiming up-front is what makes the cap hold under concurrency;
+  // keeping the charge after an error is not — the student would lose one of
+  // five to a fault they didn't cause.
+  let claimedRateLimit = false;
+  const refundClaim = async (): Promise<void> => {
+    if (!claimedRateLimit || !userId) return;
+    claimedRateLimit = false;
+    await refundContentRateLimit(userId);
+  };
+
   try {
     // ── Search saved work (My Work / global search) ──
     // Pure RPC passthrough — no LLM call. Reuses the same retrieve() helper
@@ -245,12 +261,21 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       if (!q) {
         return { kind: "json", status: 400, json: { error: "searchQuery is required" } };
       }
-      const results = await retrieve({
-        userId,
-        query: q,
-        sources: body.searchSources,
-        k: Math.min(body.searchLimit ?? 10, 25),
-      });
+      // Degrade rather than 500. retrieve() throws on embed failure or its own
+      // timeout, and ⌘K calls this to *augment* an instant local substring
+      // filter — an error there would blank a search box that already had
+      // usable local results.
+      let results: RetrievedChunk[] = [];
+      try {
+        results = await retrieve({
+          userId,
+          query: q,
+          sources: body.searchSources,
+          k: Math.min(body.searchLimit ?? 10, 25),
+        });
+      } catch (err) {
+        console.warn("search retrieve failed:", err instanceof Error ? err.message : err);
+      }
       return { kind: "json", status: 200, json: { results } };
     }
 
@@ -276,6 +301,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       if (!rl.allowed) {
         return { kind: "json", status: 429, json: { error: "Rate limited", rateLimited: true, used: rl.used } };
       }
+      claimedRateLimit = true;
     }
 
     // ── Unified plan pipeline (explicit request / goal / brain-dump) ──
@@ -290,6 +316,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
         clientTasks: body.clientTasks,
         clientCalendarDensity: body.clientCalendarDensity,
+        timeZone: body.timeZone,
       });
       const buildPlanJson = (result: { proposal: unknown; summary: string; iterations: number; critiqueText: string }) => ({
         content: result.summary,
@@ -299,18 +326,31 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         orchestration: { mode: "plan", iterations: result.iterations, ...CLIENT_ORCH },
         plan_critique: result.critiqueText,
       });
+      // The pipeline can return successfully with no proposal at all — an empty
+      // draft, or a make_plan whose every bucket came back empty. The student
+      // got no plan, so the generation slot goes back rather than being spent
+      // on a dead end.
+      const refundIfNoPlan = async <T extends { proposal: unknown }>(result: T): Promise<T> => {
+        if (!result.proposal) await refundClaim();
+        return result;
+      };
       if (wantsSSE) {
         return {
           kind: "stream",
           run: async (onChunk) => {
-            const result = await runPlanPipeline({
-              systemPrompt: body.systemPrompt ?? "",
-              staticSystemPrompt: body.staticSystemPrompt ?? null,
-              dynamicContext: planCtx,
-              messages,
-              onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
-            });
-            return buildPlanJson(result);
+            try {
+              const result = await runPlanPipeline({
+                systemPrompt: body.systemPrompt ?? "",
+                staticSystemPrompt: body.staticSystemPrompt ?? null,
+                dynamicContext: planCtx,
+                messages,
+                onProgress: (ev: ProgressEvent) => onChunk({ type: "progress", event: ev }),
+              });
+              return buildPlanJson(await refundIfNoPlan(result));
+            } catch (err) {
+              await refundClaim();
+              throw err;
+            }
           },
         };
       }
@@ -321,8 +361,9 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
           dynamicContext: planCtx,
           messages,
         });
-        return { kind: "json", status: 200, json: buildPlanJson(result) };
+        return { kind: "json", status: 200, json: buildPlanJson(await refundIfNoPlan(result)) };
       } catch (err) {
+        await refundClaim();
         const e = err as PlanPipelineError;
         return { kind: "json", status: 500, json: { error: e.message, stage: e.stage, cause_code: e.cause_code } };
       }
@@ -397,6 +438,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
         baseContext: (body.dynamicContext ?? "") + `\n\nWORKSPACE_CONTEXT: ${workspaceContext}`,
         clientTasks: body.clientTasks,
         clientCalendarDensity: body.clientCalendarDensity,
+        timeZone: body.timeZone,
       });
       const briefingPrompt = (body.systemPrompt ?? "") +
         "\n\nProduce a concise daily briefing as STRICT JSON only — no prose outside the JSON. " +
@@ -456,6 +498,7 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       baseContext: baseChatContext,
       clientTasks: body.clientTasks,
       clientCalendarDensity: body.clientCalendarDensity,
+      timeZone: body.timeZone,
     });
 
     // ── Default chat path ──
@@ -555,6 +598,9 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       json: { ...result, executed_actions: [], orchestration: { mode: "client_execution", ...CLIENT_ORCH } },
     };
   } catch (err) {
+    // Covers the clue / work_check paths (and anything else that threw after a
+    // claim) — the generation never happened, so the slot goes back.
+    await refundClaim();
     if (err instanceof RpmExhaustedError) {
       return rpmExhaustedJson(err.tier, err.resetAtMs);
     }

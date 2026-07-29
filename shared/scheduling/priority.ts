@@ -59,10 +59,30 @@ const PRIORITY_VALUES: Record<string, number> = {
 };
 
 // Subjects where missing a task has outsized academic consequences.
+//
+// Matched per WORD, not as a whole-string equality. Real subjects are written
+// "AP Chemistry", "Math 2", "SAT Prep" — an exact-set lookup matched none of
+// them, so the documented 0.15 high-stakes boost effectively never applied.
 const HIGH_STAKES_SUBJECTS = new Set([
   "math", "chemistry", "chem", "physics", "biology", "bio",
-  "calculus", "ap", "sat", "act", "finals",
+  "calculus", "calc", "ap", "sat", "act", "finals", "final",
 ]);
+
+function isHighStakesSubject(subject: string | undefined): boolean {
+  if (!subject) return false;
+  for (const word of subject.toLowerCase().split(/[^a-z]+/)) {
+    if (word && HIGH_STAKES_SUBJECTS.has(word)) return true;
+  }
+  return false;
+}
+
+// Canonical subject key for behavioral-signal lookups. Must stay in step with
+// normSubject() in shared/ai/signals/behavioral.ts, which builds those maps.
+// Kept inline rather than imported so this module stays dependency-free.
+function subjectKeyFor(subject: string | undefined): string {
+  const s = (subject ?? "").trim().toLowerCase();
+  return s.length > 0 ? s : "other";
+}
 
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -88,13 +108,11 @@ export function computePriority(
 
   // Importance: priority field → value, boosted if high-stakes subject.
   const basePriority = PRIORITY_VALUES[task.priority?.toLowerCase() ?? ""] ?? 0.5;
-  const subjectBoost = HIGH_STAKES_SUBJECTS.has(
-    (task.subject ?? "").toLowerCase()
-  ) ? 0.15 : 0;
+  const subjectBoost = isHighStakesSubject(task.subject) ? 0.15 : 0;
   const importance = clamp(basePriority + subjectBoost);
 
   // Momentum: drawn from postpone-rate signals — high rate means needs more urgency.
-  const subjectKey = (task.subject ?? "other").toLowerCase();
+  const subjectKey = subjectKeyFor(task.subject);
   const postponeRate = signals?.postpone_rate_by_subject[subjectKey] ?? 0;
   const momentum = clamp(postponeRate);
 

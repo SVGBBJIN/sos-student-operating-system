@@ -4,6 +4,8 @@
 
 export interface BehavioralSignals {
   completion_rate_30d: number;
+  // Subject-keyed maps are keyed by the NORMALIZED subject (lowercased,
+  // trimmed) — see normSubject below. Consumers must normalize before lookup.
   median_hours_to_complete: Record<string, number>;  // by subject
   postpone_rate_by_subject: Record<string, number>;
   time_of_day_histogram: number[];  // 24 buckets, completion counts per hour
@@ -19,6 +21,19 @@ const EMPTY: BehavioralSignals = {
   recent_abandons: [],
   total_events_30d: 0,
 };
+
+// Canonical key for every subject-keyed signal map.
+//
+// These maps used to be keyed by the RAW metadata string ("Math", "AP Bio")
+// while shared/scheduling/priority.ts looked them up lowercased — so the lookup
+// missed for every subject that wasn't already lowercase, and `momentum` (15%
+// of the priority score) silently evaluated to 0 for essentially all real
+// traffic. Normalizing at the source fixes the lookup and merges
+// "Math"/"math"/" Math " into one bucket.
+export function normSubject(raw: unknown): string {
+  const s = String(raw ?? "").trim().toLowerCase();
+  return s.length > 0 ? s : "other";
+}
 
 // In-process cache: key = "userId:hourBucket", value = signals + expiry.
 const cache = new Map<string, { signals: BehavioralSignals; expiresAt: number }>();
@@ -40,11 +55,37 @@ function median(values: number[]): number {
     : (sorted[mid] ?? 0);
 }
 
+// Hour-of-day for an instant, read in the student's own timezone.
+//
+// The histogram used to use Date#getHours(), which is the SERVER's local hour —
+// UTC on both Vercel and Supabase Edge. For a student in America/New_York that
+// shifted every completion 4–5 buckets, so "Peak productivity hour" (injected
+// into the prompt as fact) reported e.g. 3AM for someone who works at 10PM.
+// Falls back to server-local only when the client didn't send a zone.
+function hourInZone(iso: string, timeZone?: string): number {
+  const d = new Date(iso);
+  if (!timeZone) return d.getHours();
+  try {
+    const hour = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hour12: false,
+    }).format(d);
+    const n = Number(hour);
+    return Number.isFinite(n) ? n % 24 : d.getHours();
+  } catch {
+    // Invalid/unknown zone string — never let it break signal collection.
+    return d.getHours();
+  }
+}
+
 export async function getBehavioralSignals(
   userId: string,
-  opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string }
+  opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string; timeZone?: string }
 ): Promise<BehavioralSignals> {
-  const key = `${userId}:${hourBucket()}`;
+  // Timezone participates in the cache key: the same user's histogram is
+  // bucketed differently under a different zone.
+  const key = `${userId}:${opts?.timeZone ?? "server"}:${hourBucket()}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.signals;
 
@@ -110,7 +151,7 @@ export async function getBehavioralSignals(
       if (r.task_id) {
         createByTask.set(r.task_id, {
           time: new Date(r.occurred_at).getTime(),
-          subject: String((r.metadata as Record<string, unknown>).subject ?? "other"),
+          subject: normSubject((r.metadata as Record<string, unknown>).subject),
         });
       }
     }
@@ -135,11 +176,11 @@ export async function getBehavioralSignals(
     const postponeCountBySubject: Record<string, number> = {};
     const createCountBySubject: Record<string, number> = {};
     for (const r of creates) {
-      const subj = String((r.metadata as Record<string, unknown>).subject ?? "other");
+      const subj = normSubject((r.metadata as Record<string, unknown>).subject);
       createCountBySubject[subj] = (createCountBySubject[subj] ?? 0) + 1;
     }
     for (const r of postpones) {
-      const subj = String((r.metadata as Record<string, unknown>).subject ?? "other");
+      const subj = normSubject((r.metadata as Record<string, unknown>).subject);
       postponeCountBySubject[subj] = (postponeCountBySubject[subj] ?? 0) + 1;
     }
     const postpone_rate_by_subject: Record<string, number> = {};
@@ -151,7 +192,7 @@ export async function getBehavioralSignals(
     // Completion time-of-day histogram
     const time_of_day_histogram: number[] = Array(24).fill(0) as number[];
     for (const r of completes) {
-      const hour = new Date(r.occurred_at).getHours();
+      const hour = hourInZone(r.occurred_at, opts?.timeZone);
       time_of_day_histogram[hour] = (time_of_day_histogram[hour] ?? 0) + 1;
     }
 
@@ -162,7 +203,7 @@ export async function getBehavioralSignals(
       .slice(0, 5)
       .map((r) => ({
         title: String((r.metadata as Record<string, unknown>).title ?? ""),
-        subject: String((r.metadata as Record<string, unknown>).subject ?? "other"),
+        subject: normSubject((r.metadata as Record<string, unknown>).subject),
         age_days: Math.round(
           (Date.now() - new Date(r.occurred_at).getTime()) / 86_400_000
         ),
@@ -213,11 +254,13 @@ export function formatSignalsForContext(signals: BehavioralSignals): string {
     lines.push(`Typical task duration: ${notableSubjects.join(", ")}`);
   }
 
-  // Peak completion hour
-  const peakHour = signals.time_of_day_histogram.indexOf(
-    Math.max(...signals.time_of_day_histogram)
-  );
-  if (signals.total_events_30d > 5 && peakHour >= 0) {
+  // Peak completion hour. The `peakMax > 0` guard matters: indexOf on an
+  // all-zero histogram returns 0, which previously reported a confident
+  // "Peak productivity hour: 12AM" for any user with >5 events but no
+  // completions — a fabricated behavioral fact injected into the prompt.
+  const peakMax = Math.max(...signals.time_of_day_histogram);
+  const peakHour = signals.time_of_day_histogram.indexOf(peakMax);
+  if (signals.total_events_30d > 5 && peakMax > 0 && peakHour >= 0) {
     const ampm = peakHour < 12 ? "AM" : "PM";
     const h12 = peakHour % 12 === 0 ? 12 : peakHour % 12;
     lines.push(`Peak productivity hour: ${h12}${ampm}`);

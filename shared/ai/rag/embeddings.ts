@@ -38,16 +38,32 @@ async function embedWithRetry(req: EmbedRequest): Promise<number[][]> {
   }
 }
 
-export async function embedBatch(texts: string[], taskType: EmbedRequest["taskType"] = "RETRIEVAL_DOCUMENT", dim = 1536): Promise<number[][]> {
+export async function embedBatch(
+  texts: string[],
+  taskType: EmbedRequest["taskType"] = "RETRIEVAL_DOCUMENT",
+  dim = 1536,
+  signal?: AbortSignal,
+): Promise<number[][]> {
   if (texts.length === 0) return [];
   const batches = chunks(texts, BATCH);
   const results: number[][][] = new Array(batches.length);
   let next = 0;
+  // Once any batch fails the whole call rejects, so the remaining workers are
+  // producing results nobody will read. Without this flag they kept issuing
+  // upstream requests (with retries) long after the caller had given up, and
+  // could outlive the request that started them.
+  let aborted = false;
   async function worker(): Promise<void> {
     while (true) {
+      if (aborted || signal?.aborted) return;
       const i = next++;
       if (i >= batches.length) return;
-      results[i] = await embedWithRetry({ inputs: batches[i]!, taskType, dim });
+      try {
+        results[i] = await embedWithRetry({ inputs: batches[i]!, taskType, dim, signal });
+      } catch (err) {
+        aborted = true;
+        throw err;
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()));
@@ -138,6 +154,20 @@ export function embedCoalesced(texts: string[], opts: CoalesceOptions = {}): Pro
   const taskType = opts.taskType ?? "RETRIEVAL_DOCUMENT";
   const dim = opts.dim ?? 1536;
   const model = opts.model ?? embedModel("primary");
+
+  // A single caller bigger than one upstream request can't be coalesced — the
+  // packing loop only starts a new group *between* callers, so an oversized one
+  // used to sail through as one over-cap request. Run it on its own, chunked.
+  // Order is preserved, so results still map 1:1 onto `texts`.
+  const totalChars = texts.reduce((s, t) => s + t.length, 0);
+  if (texts.length > MAX_BATCH_INPUTS || totalChars > MAX_BATCH_CHARS) {
+    return Promise.all(
+      chunks(texts, MAX_BATCH_INPUTS).map((part) =>
+        embedWithRetry({ inputs: part, taskType, dim, model })
+      )
+    ).then((parts) => parts.flat());
+  }
+
   const key = `${model}::${taskType}::${dim}`;
   return new Promise<number[][]>((resolve, reject) => {
     let q = coalesceQueues.get(key);
