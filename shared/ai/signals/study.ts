@@ -3,6 +3,8 @@
 // suggest review of topics the student keeps scoring low on.
 // Uses fetch only — safe for both Node (Vercel) and Deno (supabase/functions).
 
+import { createSwrCache } from "./swr.js";
+
 export type TopicTrend = "improving" | "declining" | "flat";
 
 export interface WeakTopic {
@@ -20,25 +22,31 @@ export interface StudySignals {
 
 const EMPTY: StudySignals = { weak_topics: [] };
 
-// In-process cache: key = "userId:hourBucket", value = signals + expiry.
-const cache = new Map<string, { signals: StudySignals; expiresAt: number }>();
+// In-process stale-while-revalidate cache, keyed by user. Same critical-path
+// reasoning as behavioral.ts: once warm, an expiry refreshes in the background
+// instead of making one turn wait on the REST round-trip. A student with no
+// weak topics yet is cached briefly so a transient failure can't pin an empty
+// result for the hour.
+const cache = createSwrCache<StudySignals>({
+  ttlMs: (s) => (s.weak_topics.length > 0 ? 3_600_000 : 60_000),
+  maxStaleMs: 6 * 3_600_000,
+});
 
 // Wall-clock cap on the study_attempts fetch — runs before chat turns, so a
 // slow REST call must never stall the request.
 const STUDY_BUDGET_MS = 3000;
 
-function hourBucket(): number {
-  return Math.floor(Date.now() / 3_600_000);
-}
-
-export async function getStudySignals(
+export function getStudySignals(
   userId: string,
   opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string }
 ): Promise<StudySignals> {
-  const key = `${userId}:${hourBucket()}`;
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.signals;
+  return cache.get(`${userId}:${opts?.windowDays ?? 30}`, () => fetchStudySignals(userId, opts));
+}
 
+async function fetchStudySignals(
+  userId: string,
+  opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string }
+): Promise<StudySignals> {
   const supabaseUrl = opts?.supabaseUrl ?? (
     typeof process !== "undefined" ? process.env.SUPABASE_URL : undefined
   ) ?? "";
@@ -120,9 +128,7 @@ export async function getStudySignals(
     }
     weak.sort((a, b) => a.avg_mastery - b.avg_mastery);
 
-    const signals: StudySignals = { weak_topics: weak.slice(0, 5) };
-    cache.set(key, { signals, expiresAt: Date.now() + 3_600_000 });
-    return signals;
+    return { weak_topics: weak.slice(0, 5) };
   } catch {
     return EMPTY;
   } finally {

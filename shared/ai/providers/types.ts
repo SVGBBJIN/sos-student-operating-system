@@ -65,11 +65,17 @@ export interface ChatResponse {
 }
 
 export interface ProgressEvent {
-  phase: "analyzing" | "drafting" | "reviewing" | "finalizing";
+  phase: "analyzing" | "drafting" | "reviewing" | "finalizing" | "searching";
   label: string;
   step: number;
   totalSteps: number;
   draft?: Record<string, unknown>;
+  // Signals that everything streamed so far belongs to a superseded pass and
+  // the client must clear its live buffer. Set on the chat path's memory hop:
+  // the first pass streams, decides it needs stored background, and the second
+  // pass re-answers from scratch — without this the two answers concatenate in
+  // the live bubble.
+  reset?: boolean;
 }
 
 export type StreamChunk =

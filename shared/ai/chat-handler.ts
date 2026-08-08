@@ -443,6 +443,20 @@ async function _handleChatRequest(input: HandleChatInput): Promise<ChatOutcome> 
       const first = await runChat(dynamicContext, onChunk ? filterMemoryFrames(onChunk) : undefined);
       const mem = userId ? extractMemoryQuery(first.actions) : null;
       if (!mem) return stripMemoryActions(first);
+      // The second pass re-answers from scratch, so anything the first pass
+      // already streamed into the live bubble is superseded. Tell the client to
+      // drop it before the retrieval hop, which also gives the student a reason
+      // for the pause instead of a stalled-looking stream.
+      onChunk?.({
+        type: "progress",
+        event: {
+          phase: "searching",
+          label: "Searching your saved work…",
+          step: 1,
+          totalSteps: 2,
+          reset: true,
+        },
+      });
       let chunks: RetrievedChunk[] = [];
       try {
         chunks = await retrieve({ userId: userId!, query: mem.query, sources: mem.sources, k: 8 });

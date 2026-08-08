@@ -10,7 +10,7 @@
 // now lives here once.
 
 import { callModel, type ChatAction, type CallModelResponse } from "../chat-core.js";
-import type { Intent } from "../router.js";
+import type { Intent, Tier } from "../router.js";
 import type { Message, ProgressEvent } from "../providers/types.js";
 
 export type PipelineStage = "draft" | "critique" | "refine";
@@ -64,6 +64,10 @@ export interface PassSpec {
   temperature: number;
   thinkingBudget?: number;
   capMs: number;
+  // Force a tier for this pass alone, independent of the intent's routing. Used
+  // to keep a cheap, non-tool-calling pass (the plain-text critique) off the
+  // slow Pro model while the tool-calling passes stay on it.
+  tierOverride?: Tier;
 }
 
 // onEmptyDraft lets a pipeline decide what an actionless draft means: ship it
@@ -127,6 +131,7 @@ export async function runAgenticPipeline(cfg: AgenticConfig): Promise<AgenticRes
   try {
     draftResp = await callModel({
       intent: cfg.draftPass.intent,
+      tierOverride: cfg.draftPass.tierOverride,
       systemPrompt: cfg.systemPrompt,
       staticSystemPrompt: cfg.staticSystemPrompt ?? undefined,
       dynamicContext: ctx(cfg.hints.draft),
@@ -173,6 +178,7 @@ export async function runAgenticPipeline(cfg: AgenticConfig): Promise<AgenticRes
     try {
       const critique = await callModel({
         intent: cfg.critiquePass.intent,
+        tierOverride: cfg.critiquePass.tierOverride,
         systemPrompt: cfg.systemPrompt,
         staticSystemPrompt: cfg.staticSystemPrompt ?? undefined,
         dynamicContext: ctx(cfg.hints.critique),
@@ -204,6 +210,7 @@ export async function runAgenticPipeline(cfg: AgenticConfig): Promise<AgenticRes
     try {
       const refine = await callModel({
         intent: cfg.refinePass.intent,
+        tierOverride: cfg.refinePass.tierOverride,
         systemPrompt: cfg.systemPrompt,
         staticSystemPrompt: cfg.staticSystemPrompt ?? undefined,
         dynamicContext: ctx(cfg.hints.refine),

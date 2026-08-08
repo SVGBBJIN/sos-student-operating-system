@@ -2,6 +2,8 @@
 // Used by the priority engine and injected as a pinned context snippet.
 // Uses fetch only — safe for both Node (Vercel) and Deno (supabase/functions).
 
+import { createSwrCache } from "./swr.js";
+
 export interface BehavioralSignals {
   completion_rate_30d: number;
   median_hours_to_complete: Record<string, number>;  // by subject
@@ -20,16 +22,20 @@ const EMPTY: BehavioralSignals = {
   total_events_30d: 0,
 };
 
-// In-process cache: key = "userId:hourBucket", value = signals + expiry.
-const cache = new Map<string, { signals: BehavioralSignals; expiresAt: number }>();
+// In-process stale-while-revalidate cache, keyed by user. This read sits on the
+// critical path (its output is prompt content, so the model call can't start
+// until it resolves), so an expiry must not cost a turn the full round-trip:
+// once warm, a stale entry is served immediately and refreshed in the
+// background. An EMPTY result — no events yet, or a degraded fetch — is cached
+// only briefly so a transient failure can't pin a blank profile for the hour.
+const cache = createSwrCache<BehavioralSignals>({
+  ttlMs: (s) => (s.total_events_30d > 0 ? 3_600_000 : 60_000),
+  maxStaleMs: 6 * 3_600_000,
+});
 
 // Wall-clock cap on the task_events fetch — this runs before every
 // schedule-aware chat turn, so a slow REST call must never stall the request.
 const BEHAVIORAL_BUDGET_MS = 3000;
-
-function hourBucket(): number {
-  return Math.floor(Date.now() / 3_600_000);
-}
 
 function median(values: number[]): number {
   if (values.length === 0) return 0;
@@ -40,14 +46,17 @@ function median(values: number[]): number {
     : (sorted[mid] ?? 0);
 }
 
-export async function getBehavioralSignals(
+export function getBehavioralSignals(
   userId: string,
   opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string }
 ): Promise<BehavioralSignals> {
-  const key = `${userId}:${hourBucket()}`;
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.signals;
+  return cache.get(`${userId}:${opts?.windowDays ?? 30}`, () => fetchBehavioralSignals(userId, opts));
+}
 
+async function fetchBehavioralSignals(
+  userId: string,
+  opts?: { windowDays?: number; supabaseUrl?: string; serviceKey?: string }
+): Promise<BehavioralSignals> {
   const supabaseUrl = opts?.supabaseUrl ?? (
     typeof process !== "undefined"
       ? process.env.SUPABASE_URL
@@ -177,7 +186,6 @@ export async function getBehavioralSignals(
       total_events_30d: rows.length,
     };
 
-    cache.set(key, { signals, expiresAt: Date.now() + 3_600_000 });
     return signals;
   } catch {
     return EMPTY;

@@ -9,6 +9,62 @@ export const ThinkingIndicator=({message="thinkisizing…"})=>(
   </div>
 );
 
+// Live token stream for the default chat path. The server has always streamed
+// `delta` frames; this renders them as they land instead of leaving the student
+// on a spinner until the whole turn resolves. Tool calls stream in the same
+// pass, so an action-only turn (no prose) still shows visible progress.
+const TOOL_VERB = {
+  add_task: 'adding task', add_event: 'adding event', add_block: 'blocking time',
+  add_recurring_event: 'adding recurring event', add_note: 'writing note',
+  update_task: 'updating task', update_event: 'updating event',
+  delete_task: 'deleting task', delete_event: 'deleting event',
+  complete_task: 'completing task', postpone_task: 'postponing task',
+  break_task: 'breaking down task', prioritize_tasks: 'ranking your tasks',
+  bulk_complete: 'completing tasks', read_tasks: 'reading your tasks',
+  read_calendar: 'checking your calendar', view_schedule: 'checking your schedule',
+  set_timer: 'setting timer', cancel_timer: 'cancelling timer',
+  log_grade: 'logging grade', make_plan: 'building your plan',
+  create_flashcards: 'making flashcards', create_quiz: 'writing a quiz',
+  create_outline: 'outlining', create_summary: 'summarizing',
+};
+
+function toolLabel(tc) {
+  const name = tc?.name || '';
+  const verb = TOOL_VERB[name] || (name ? name.replace(/_/g, ' ') : 'working');
+  const args = tc?.args || {};
+  const subject = args.title || args.task_name || args.activity || args.label || '';
+  return subject ? `${verb}: ${subject}` : verb;
+}
+
+export function StreamingMessage({ text, toolCalls = [], statusLabel }) {
+  const hasText = typeof text === 'string' && text.length > 0;
+  if (!hasText && toolCalls.length === 0 && !statusLabel) return null;
+  return (
+    <div className="sos-msg sos-msg-ai" style={{padding:'6px 16px'}}>
+      {/* `.streaming` drives the existing blinking-caret rule in index.css, so a
+         natural pause between tokens never reads as a finished-but-truncated
+         answer. Raw text (not formatAssistantMessage) while streaming: partial
+         markdown renders as broken syntax mid-stream, and the finished message
+         is re-rendered formatted a beat later anyway. */}
+      <div className={'sos-bubble sos-bubble-ai' + (hasText ? ' streaming' : '')}>
+        {statusLabel && (
+          <div style={{fontSize:'0.72rem',color:'var(--accent)',marginBottom:hasText||toolCalls.length?6:0,fontStyle:'italic',animation:'textPulse 1.6s ease-in-out infinite'}}>{statusLabel}</div>
+        )}
+        {hasText && <span style={{whiteSpace:'pre-wrap'}}>{text}</span>}
+        {toolCalls.length > 0 && (
+          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:hasText?8:0}}>
+            {toolCalls.map((tc, i) => (
+              <span key={i} style={{fontSize:'0.72rem',padding:'3px 9px',borderRadius:10,background:'rgba(108,99,255,0.12)',border:'1px solid rgba(108,99,255,0.25)',color:'var(--text-dim)',animation:'fadeIn .2s ease'}}>
+                {toolLabel(tc)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const PIPELINE_STEP_LABELS = ['Analyzing', 'Drafting', 'Reviewing', 'Finalizing'];
 export function PipelineProgressIndicator({ progress }) {
   if (!progress) return null;

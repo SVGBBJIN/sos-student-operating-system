@@ -106,11 +106,13 @@ Transport-agnostic orchestrator. Mode dispatch:
 - `delta` — text chunk
 - `tool_call` — structured action invocation
 - `usage` — token counts
-- `progress` — pipeline phase (`{phase, label, step, totalSteps, draft?}`)
+- `progress` — pipeline phase (`{phase, label, step, totalSteps, draft?, reset?}`)
 - `done` — final result
 - `error` — error details
 
 The `progress` frame enables live steppers + early preview (~15s) before final result ships. The plan pipeline emits progress events.
+
+The default chat path renders `delta` and `tool_call` frames live (`StreamingMessage` in `src/components/PipelineProgressIndicator.jsx`): tokens appear as they arrive and each tool call shows as a chip, so the spinner only covers the gap before first byte. The chat path's `search_memory` hop emits `{phase: "searching", reset: true}` before its second model pass — `reset` tells the client to drop everything the superseded first pass streamed, so the two answers never concatenate in the live bubble.
 
 ### 3-Pass Pipelines
 Pattern: graceful degradation if critique/refine fail or timeout.
@@ -120,7 +122,7 @@ Pattern: graceful degradation if critique/refine fail or timeout.
    - **explicit request** ("make me a plan for...") → `steps[]` (each `kind: 'block'` or `'deadline'`)
    - **goal** ("survive finals week") → `recurring_blocks[]` + `milestone_tasks[]` + `review_cadence`
    - **brain-dump** (messy transcript/text dump) → `batch_actions[]`, each item carrying `confidence`/`status`/`commitment` — `confidence >= 0.85` eligible for auto-apply, `confidence < 0.7` routes to review rail, `0.7–0.85` shown for confirmation
-2. Critique (10s cap) — gap/realism/calibration analysis, tailored to whichever bucket was filled
+2. Critique (8s cap) — gap/realism/calibration analysis, tailored to whichever bucket was filled. Runs on **Flash** (`tierOverride`) — it is plain text with no tool call, so the Pro-only constraint below does not apply and the serial chain gets several seconds back
 3. Refine (22s cap) — final plan, same bucket(s) as the draft
 - Total budget: 50s (within Vercel 60s limit)
 - Progress phases: `analyzing → drafting → reviewing → finalizing`

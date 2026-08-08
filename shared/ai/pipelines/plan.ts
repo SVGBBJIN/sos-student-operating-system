@@ -96,7 +96,12 @@ export async function runPlanPipeline(input: PlanPipelineInput): Promise<PlanPip
       finalizing: "Refining the final plan…",
     },
     draftPass: { intent: "plan", toolSet: "plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
-    critiquePass: { intent: "plan", maxOutputTokens: 600, temperature: 0.3, thinkingBudget: 1024, capMs: 10_000 },
+    // Critique is a short plain-text gap analysis with no tool call, so the
+    // Pro-only caveat below (Flash produces schema-invalid make_plan output)
+    // doesn't apply to it. Running it on Flash cuts several seconds out of the
+    // serial draft→critique→refine chain and leaves that much more of the 50s
+    // budget for the refine pass, which is the one that actually needs Pro.
+    critiquePass: { intent: "plan", tierOverride: "flash", maxOutputTokens: 600, temperature: 0.3, thinkingBudget: 1024, capMs: 8_000 },
     refinePass: { intent: "plan", toolSet: "plan", toolChoice: "required", maxOutputTokens: 3000, temperature: 0.4, thinkingBudget: 4096, capMs: 22_000 },
     draftLabel: "Draft plan",
     critiquePrompt: "Critique the draft plan above. What is missing, unrealistic, or miscalibrated?",

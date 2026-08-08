@@ -76,7 +76,7 @@ import GlobalSearchModal from './components/GlobalSearchModal';
 import NotesPanel from './components/NotesPanel';
 import { Toast, LmsPendingToast, AppleSwitch } from './components/Toast';
 import { formatAssistantMessage, getLoadingMessage } from './lib/formatting';
-import { ThinkingIndicator, PipelineProgressIndicator, AutoApproveIndicator } from './components/PipelineProgressIndicator';
+import { ThinkingIndicator, PipelineProgressIndicator, AutoApproveIndicator, StreamingMessage } from './components/PipelineProgressIndicator';
 
 const ONBOARDING_ESTABLISHED_PREFIX = 'sos_onboarding_established_';
 
@@ -1227,6 +1227,13 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("thinkisizing…");
   const [pipelineProgress, setPipelineProgress] = useState(null);
+  // Live SSE stream for the default chat path: tokens and tool calls rendered
+  // as they arrive rather than held back until the turn resolves. Both are
+  // cleared the moment the final message lands (and on the memory-hop reset,
+  // where a second pass supersedes whatever the first one streamed).
+  const [streamingText, setStreamingText] = useState('');
+  const [streamingToolCalls, setStreamingToolCalls] = useState([]);
+  const [streamingStatus, setStreamingStatus] = useState(null);
   const [previewPlanEntry, setPreviewPlanEntry] = useState(null);
   const [chatError, setChatError] = useState(null);
   const [autoApproveStatus, setAutoApproveStatus] = useState(null);
@@ -1867,6 +1874,19 @@ function App() {
     // chatOpen is a dep so reopening the (now remounted) overlay lands at the
     // latest message instead of scrolled to the top.
   }, [messages, isLoading, pendingActions, pendingContent, pendingClarification, chatOpen]);
+
+  // Follow the live token stream. Separate from the effect above because it
+  // fires on nearly every token: instant (not smooth) so the scroll can keep
+  // up, and only when the student is already near the bottom — someone who
+  // scrolled up to re-read something shouldn't get yanked back down.
+  useEffect(() => {
+    if (!streamingText && streamingToolCalls.length === 0) return;
+    const chatEl = chatAreaRef.current;
+    if (!chatEl) return;
+    const distanceFromBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
+    if (distanceFromBottom > 120) return;
+    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'auto' });
+  }, [streamingText, streamingToolCalls]);
 
   // ── Focus input on load ──
   useEffect(() => {
@@ -5251,7 +5271,15 @@ function App() {
           body: chatBody,
           token: token || SUPABASE_ANON_KEY,
           signal: abortSignal,
+          onDelta: (_chunk, aggregated) => setStreamingText(aggregated),
+          onToolCall: (tc) => setStreamingToolCalls(prev => (prev.length >= 8 ? prev : [...prev, tc])),
           onProgress: (ev) => {
+            if (!ev) return;
+            // A superseded pass (server-side memory hop) — drop what it streamed
+            // so the second answer doesn't concatenate onto the first.
+            if (ev.reset) { setStreamingText(''); setStreamingToolCalls([]); }
+            if (ev.phase === 'searching') { setStreamingStatus(ev.label); return; }
+            setStreamingStatus(null);
             setPipelineProgress(ev);
             if (ev.draft) {
               setPreviewPlanEntry(ev.draft);
@@ -5290,6 +5318,12 @@ function App() {
       }
       setPipelineProgress(null);
       setPreviewPlanEntry(null);
+      // Hand off from the live stream to the committed message. Same tick as
+      // the setMessages call further down, so React batches them into one paint
+      // and the bubble never blinks back to the thinking indicator.
+      setStreamingText('');
+      setStreamingToolCalls([]);
+      setStreamingStatus(null);
 
       if (chatData?.rpm) { rpmStateRef.current = chatData.rpm; setRpmSnapshot(chatData.rpm); }
       if (chatData?.model_used) {
@@ -5812,7 +5846,12 @@ function App() {
         friendlyMsg = looksLikeProviderError ? "hmm, something hiccuped — want to try again?" : (raw || "hmm, that hiccuped — want to try again?");
       }
       setChatError(friendlyMsg);
-    } finally { setIsLoading(false); }
+    } finally {
+      setIsLoading(false);
+      setStreamingText('');
+      setStreamingToolCalls([]);
+      setStreamingStatus(null);
+    }
   }
 
   // ── Syllabus bulk onboarding: one upload -> a whole semester of assignments,
@@ -6995,8 +7034,13 @@ function App() {
             <ContentTypeRouter content={pc} onSave={()=>handleSaveContent(idx)} onDismiss={()=>handleDismissContent(idx)} onApplyPlan={(steps)=>handleApplyPlan(idx,steps)} onApplyIntentPlan={(plan)=>handleApplyIntentPlan(idx,plan)} onApplyIntentPlanSkipConflicts={(plan)=>handleApplyIntentPlanSkipConflicts(idx,plan)} onStartPlanTask={(step)=>handleStartPlanTask(step)} onExportGoogleDocs={(planData)=>handleExportPlanToGoogleDocs(idx,planData)} googleConnected={isGoogleConnected()} existingRecurring={blocks.recurring}/>
           </div>
         ))}
+        {/* Once the stream produces anything — a token, a tool call, or the
+           memory-hop status — the live bubble replaces the spinner. The
+           spinner only covers the gap before first byte. */}
         {isLoading&&(pipelineProgress
           ? <PipelineProgressIndicator progress={pipelineProgress}/>
+          : (streamingText || streamingToolCalls.length > 0 || streamingStatus)
+          ? <StreamingMessage text={streamingText} toolCalls={streamingToolCalls} statusLabel={streamingStatus}/>
           : <ThinkingIndicator message={loadingMessage}/>
         )}
         {previewPlanEntry&&(()=>{
