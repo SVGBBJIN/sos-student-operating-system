@@ -17,6 +17,7 @@ npm run eval:harness  # Score cached sample-runs.jsonl against fixtures
 npm run eval:live     # Live Gemini calls, regenerate sample-runs.jsonl (GEMINI_API_KEY required)
 npm run eval:shadow   # Diff Flash vs Pro tier predictions
 npm run eval:cost     # Cost-per-1k-requests projection
+npm run test:context-sources  # Unit tests: PDF/HTML extraction, link classification, chunking
 npm run eval:planning # Planning pipeline regression eval
 ```
 
@@ -61,7 +62,19 @@ shared/ai/                        — Isomorphic AI service layer (runs in both 
   rag/
     retrieve.ts                   — pgvector retrieval (match_memories RPC)
     embeddings.ts                 — Embedding utilities + coalescing
-  lms/                            — LMS integration helpers
+  lms/                            — External context sources (LMS, calendars, documents)
+    adapters/{types,registry}.ts  — Pull adapter contract + provider→adapter map
+    adapters/classroom.ts         — Google Classroom (OAuth2)
+    adapters/canvas.ts            — Canvas (personal access token + instance URL)
+    adapters/gcal.ts              — Google Calendar (OAuth2, read-only)
+    orchestrator.ts               — Runs submission/content/attachment/calendar passes
+    content.ts                    — Course material persistence + embedding
+    calendar.ts                   — Mirrors external events into `events`
+    attachments/                  — One-hop link following + text extraction
+      extract.ts                  — Fetch + dispatch (HTML, text, Google Docs export, PDF)
+      pdf.ts                      — PDF text-layer extractor (Web APIs only, no OCR)
+    embed.ts                      — Chunk + embed into memory_embeddings
+    html.ts                       — HTML→text, link extraction, content hashing
 
 shared/scheduling/priority.ts     — Priority engine (pure, no I/O, 0–1 scores)
 shared/rate-limit.ts              — Content-gen + RPM rate limiting
@@ -262,9 +275,50 @@ Pure, sync, no-I/O scorer. Runs **server-side** (in context assembly) and **clie
 | Deadline Density | 15% | Fraction of 5 tasks sharing same due date |
 | Friction | 10% | `postpone_count × 0.15` |
 
-## LMS Integration
+## External Context Sources
 
-### Architecture
+Two independent halves, both under `shared/lms/`:
+
+1. **Submission evidence** — did the student finish it? (extension + confidence engine, below)
+2. **Course material + calendars** — what were they asked to do, read, and show up for?
+
+### Providers
+
+| Provider | Auth | Submissions | Content | Calendar |
+|----------|------|-------------|---------|----------|
+| `classroom` | OAuth2 (Google) | ✓ | — | — |
+| `canvas` | Personal access token + instance URL | ✓ | ✓ | ✓ |
+| `gcal` | OAuth2 (Google, read-only) | — | — | ✓ |
+| `schoology` | Extension-scraped | ✓ | — | — |
+
+Canvas uses a token rather than OAuth2 because Canvas OAuth2 requires a developer key only a school's Canvas admin can issue; any student can mint a personal access token themselves. `connectWithToken()` verifies credentials against the provider before storing them.
+
+### Sync passes (orchestrator.ts, cron every 10 min)
+
+Each pass is isolated — a failure in one never rolls back the others, and content/attachment/calendar failures record to `last_error` without flipping the integration to `error` state:
+
+1. **Submissions** → `submissions` table, auto-closes linked tasks (unchanged)
+2. **Content** (`fetchContent`) → `lms_content_items`, embedded into `memory_embeddings` as `source: 'lms_content'`. Canvas pulls syllabus, announcements, assignments, quizzes (including standalone ones), discussions, pages, modules, and LTI links.
+3. **Attachments** (one hop) → `lms_attachments`, embedded as `source: 'attachment'`
+4. **Calendar** (`fetchCalendar`) → mirrored into `events` with `external_source`/`external_id` provenance
+
+`content_hash` gates the expensive half: unchanged material is neither re-embedded nor re-crawled, so a 10-min cron doesn't re-embed a stable syllabus 144×/day.
+
+### Attachment extraction
+
+**One hop only** — links found inside an attachment are never followed, bounding the crawl to what a teacher actually attached.
+
+- **Supported**: HTML, plain text, Google Docs/Slides (via `export?format=txt`), Google Sheets (CSV), PDFs with a text layer
+- **Not supported**: scanned PDFs (no OCR — marked `unsupported`, not `failed`), video/audio/archives
+- **Bounds**: 8MB, 15s timeout, 40 attachments/sync, 8/item, concurrency 4
+- **Credential safety**: the Canvas token is attached only on an exact origin match, so it never leaks to a publisher site an assignment links out to
+
+`shared/lms/attachments/pdf.ts` is a Web-API-only PDF text extractor (`DecompressionStream` for FlateDecode streams, then `Tj`/`TJ`/`'`/`"` operators). Note: `TextDecoder('latin1')` is an alias for **windows-1252** — never roundtrip binary through it; slice the original `Uint8Array`.
+
+Run `npm run test:context-sources` after touching any of this.
+
+### Submission evidence
+
 Browser extension (Chrome/Firefox) + backend confidence engine:
 
 1. Extension parses assignment DOM (Google Classroom, Canvas)
@@ -278,7 +332,8 @@ Browser extension (Chrome/Firefox) + backend confidence engine:
 **OAuth flow**: Google Classroom → stores tokens in Supabase for background sync.
 
 ### API Endpoints (LMS)
-- `GET /api/lms-oauth-callback` — Google Classroom OAuth redirect
+- `GET /api/lms-oauth-callback` — Google OAuth redirect (Classroom + Calendar)
+- `POST /api/lms-connect-token` — Connect a token-auth provider (Canvas)
 - `POST /api/lms-courses` — List available courses
 - `POST /api/lms-tracked-courses` — User's tracked courses
 - `POST /api/lms-ingest` — Ingest assignment structure
@@ -295,7 +350,7 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 - `events` — title, event_date, event_type, subject, status, confidence
 - `blocks` — activity, date, start_time/end_time, category
 - `notes` — title, content, subject, parent_id (folders), is_folder, `type` (`note` | `saved_chat` — replaces the old `[chat-save]` name-prefix convention)
-- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata). `source` ∈ `memory | event | task | note | lesson | block | flashcard_deck | study_plan`
+- `memory_embeddings` — pgvector RAG (source, source_id, chunk_idx, embedding vector(1536), metadata). `source` ∈ `memory | event | task | note | lesson | block | flashcard_deck | study_plan | lms_content | attachment`
 
 **Behavioral signals**:
 - `task_events` — event_type (status_change, postpone, complete, etc.), timestamps, metadata
@@ -309,8 +364,14 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 - `flashcard_decks` — title, cards[], source (ai|manual), card_count
 - `grades` — subject, assignment, grade (0–100), grade_type
 
-**LMS**:
+**LMS / context sources**:
 - `lms_submission_events` — evidence per assignment (lms, lms_course_id, evidence_kind, confidence_after)
+- `lms_providers` — provider catalog (mode, auth_type, requires_instance_url)
+- `user_integrations` — per-user credentials (access_token, refresh_token, instance_url, settings)
+- `tracked_courses` — courses (or calendars, for `gcal`) the user syncs
+- `submissions` — normalized submission records
+- `lms_content_items` — course material (kind, title, body_text, due_at, content_hash)
+- `lms_attachments` — one-hop linked documents (source_url, url_hash, body_text, status)
 
 **Admin**:
 - `trigger_dismissals` — suppress re-suggestion (expires_at)

@@ -6,9 +6,15 @@
 
 import type { LMSAdapter, PullAdapter } from "./types.js";
 import { classroomAdapter } from "./classroom.js";
+import { canvasAdapter } from "./canvas.js";
+import { gcalAdapter } from "./gcal.js";
 
 export const registry: Record<string, LMSAdapter> = {
   classroom: classroomAdapter,
+  canvas: canvasAdapter,
+  // Not an LMS, but it satisfies the same pull contract — calendars are just
+  // another source of things the student has to show up for.
+  gcal: gcalAdapter,
 };
 
 export function getAdapter(providerId: string): LMSAdapter | null {
