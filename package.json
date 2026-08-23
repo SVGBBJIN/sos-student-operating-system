@@ -13,7 +13,8 @@
     "eval:live": "tsx scripts/eval-harness.mjs --live",
     "eval:shadow": "tsx scripts/eval-harness.mjs --shadow",
     "eval:planning": "tsx scripts/eval-planning-fallback.mjs",
-    "eval:cost": "tsx scripts/eval-cost.mjs"
+    "eval:cost": "tsx scripts/eval-cost.mjs",
+    "test:context-sources": "tsx scripts/test-context-sources.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.4.0",

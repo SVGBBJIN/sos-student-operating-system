@@ -6,6 +6,10 @@
 import { supabaseService, patchRow, selectRows } from "./supabaseRest.js";
 import { getPullAdapter } from "./adapters/registry.js";
 import { upsertSubmissions } from "./upsert.js";
+import { storeContentItems } from "./content.js";
+import { syncAttachments } from "./attachments/index.js";
+import { mirrorCalendarEvents } from "./calendar.js";
+import { normalizeInstanceUrl } from "./adapters/canvas.js";
 import type { TokenPatch, TrackedCourseRow, UserIntegrationRow } from "./adapters/types.js";
 
 export interface SyncReport {
@@ -20,6 +24,12 @@ export interface SyncReport {
     ok: boolean;
     upserted?: number;
     tasksClosed?: number;
+    contentItems?: number;
+    contentIndexed?: number;
+    attachmentsExtracted?: number;
+    calendarEvents?: number;
+    /** Passes that failed on their own without failing the whole integration. */
+    partialErrors?: string[];
     error?: string;
   }>;
 }
@@ -85,12 +95,69 @@ export async function runSync(opts: RunSyncOptions = {}): Promise<SyncReport> {
         });
       };
 
-      const subs = await adapter.fetchSubmissions({ integration, courses, saveTokens });
+      const adapterCtx = { integration, courses, saveTokens };
+      const subs = await adapter.fetchSubmissions(adapterCtx);
       const { upserted, tasksClosed } = await upsertSubmissions(ctx, integration, subs, "pull");
+
+      // The passes below are enrichment, not the sync's reason for existing.
+      // Each is isolated: a publisher site timing out during the attachment
+      // walk must not roll back the submissions we just reconciled, and must
+      // not mark the integration errored.
+      const partialErrors: string[] = [];
+      let contentItems = 0;
+      let contentIndexed = 0;
+      let attachmentsExtracted = 0;
+      let calendarEvents = 0;
+
+      if (adapter.fetchContent) {
+        try {
+          const items = await adapter.fetchContent(adapterCtx);
+          const stored = await storeContentItems(ctx, integration, items);
+          contentItems = stored.upserted;
+          contentIndexed = stored.indexed;
+
+          // One hop from the material that actually changed this run.
+          try {
+            const attachmentAuth =
+              integration.provider_id === "canvas" && integration.access_token && integration.instance_url
+                ? {
+                    authToken: integration.access_token,
+                    authOrigin: normalizeInstanceUrl(integration.instance_url),
+                  }
+                : {};
+            const att = await syncAttachments(ctx, integration, stored.changed, attachmentAuth);
+            attachmentsExtracted = att.extracted;
+          } catch (err) {
+            partialErrors.push(`attachments: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        } catch (err) {
+          partialErrors.push(`content: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      if (adapter.fetchCalendar) {
+        try {
+          const events = await adapter.fetchCalendar(adapterCtx);
+          const mirrored = await mirrorCalendarEvents(ctx, integration, events);
+          calendarEvents = mirrored.upserted;
+        } catch (err) {
+          partialErrors.push(`calendar: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      if (partialErrors.length > 0) {
+        console.error("[lms-sync] partial pass failures", {
+          provider: integration.provider_id,
+          userId: integration.user_id,
+          errors: partialErrors,
+        });
+      }
 
       await patchRow(ctx, "user_integrations", `id=eq.${encodeURIComponent(integration.id)}`, {
         last_sync_at: new Date().toISOString(),
-        last_error: null,
+        // Surface partial failures without flipping the integration to errored —
+        // the student's submissions did sync, and a red banner would be a lie.
+        last_error: partialErrors.length > 0 ? partialErrors.join("; ").slice(0, 500) : null,
         updated_at: new Date().toISOString(),
       });
 
@@ -102,6 +169,11 @@ export async function runSync(opts: RunSyncOptions = {}): Promise<SyncReport> {
         ok: true,
         upserted,
         tasksClosed,
+        contentItems,
+        contentIndexed,
+        attachmentsExtracted,
+        calendarEvents,
+        ...(partialErrors.length > 0 ? { partialErrors } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

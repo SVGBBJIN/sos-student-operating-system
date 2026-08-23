@@ -52,6 +52,21 @@ export async function patchRow(
   }
 }
 
+export async function deleteRows(
+  ctx: SupabaseRest,
+  table: string,
+  query: string
+): Promise<void> {
+  const res = await fetch(`${ctx.url}/rest/v1/${table}?${query}`, {
+    method: "DELETE",
+    headers: headers(ctx, { Prefer: "return=minimal" }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Supabase delete ${table} ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+
 export async function upsertRows<T>(
   ctx: SupabaseRest,
   table: string,
@@ -73,6 +88,35 @@ export async function upsertRows<T>(
     const body = await res.text().catch(() => "");
     throw new Error(`Supabase upsert ${table} ${res.status}: ${body.slice(0, 200)}`);
   }
+}
+
+/**
+ * Upsert and read the stored rows back. Needed when the caller has to know the
+ * generated ids — embedding rows key on the content row's uuid, so a
+ * return=minimal upsert would leave nothing to point at.
+ */
+export async function upsertRowsReturning<TIn, TOut>(
+  ctx: SupabaseRest,
+  table: string,
+  rows: TIn[],
+  onConflict: string
+): Promise<TOut[]> {
+  if (rows.length === 0) return [];
+  const res = await fetch(
+    `${ctx.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+    {
+      method: "POST",
+      headers: headers(ctx, {
+        Prefer: "resolution=merge-duplicates,return=representation",
+      }),
+      body: JSON.stringify(rows),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Supabase upsert ${table} ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return (await res.json().catch(() => [])) as TOut[];
 }
 
 export async function insertRows<T>(
