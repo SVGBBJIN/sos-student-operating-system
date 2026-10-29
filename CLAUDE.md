@@ -41,30 +41,37 @@ supabase/functions/               — Deno Edge Functions (mirrors of api/* endp
   sos-lms-event/                  — LMS webhook receiver
 
 shared/ai/                        — Isomorphic AI service layer (runs in both Node and Deno)
-  router.ts                       — ONLY file with model strings; tier routing (embed/flash/pro)
-  chat-handler.ts                 — Transport-agnostic chat orchestrator (mode dispatch)
-  chat-core.ts                    — callModel(): single LLM inference entry point
-  voice.ts                        — Groq Whisper transcription helper
-  resilience.ts                   — Retry classification + circuit breaker
+  router.ts                       — ONLY file with model strings; intent → tier → provider routing
+  chat-handler.ts                 — Transport-agnostic chat orchestrator (mode dispatch, rate limits, search_memory hop)
+  chat-core.ts                    — callModel(): single LLM inference entry point (hedged fallback, schema repair)
+  resilience.ts                   — Retry classification, backoff, process-local circuit breaker
+  rpm-tracker.ts                  — Per-tier RPM sliding window; Pro → Flash downgrade near limit
+  grounding.ts                    — Anti-hallucination check on chat-proposed titles
+  coaching.ts                     — Clue + work-check system prompts and output normalization
+  voice.ts                        — Groq Whisper transcription helper (bypasses callModel)
   telemetry.ts                    — Token counter, cost estimator, request logging
-  providers/{types,gemini,groq,index}.ts — LLM provider abstraction
-  schemas/                        — All action schemas (Zod)
-    {actions,studio,study_pack,intent_plan,plan,library,proofread,lms}.ts
+  providers/{types,gemini,groq,index}.ts — LLM provider abstraction (use getProvider())
+  schemas/                        — Zod action schemas (single source of truth for tool defs)
+    {actions,studio,coaching,plan,library,lms,versions,_helpers}.ts
   pipelines/
-    plan.ts                       — unified 3-pass plan pipeline (explicit request / goal / brain-dump → one make_plan action)
-    proofread.ts                  — Writing feedback pipeline
+    agentic.ts                    — Shared draft → critique → refine scaffold (budgets, degradation, progress)
+    plan.ts                       — Unified plan pipeline (explicit request / goal / brain-dump → one make_plan)
   context/
-    enrich.ts                     — Dynamic context enrichment (behavioral + RAG + study signals)
-    ranker.ts                     — Task ranking helpers
+    assembler.ts                  — Builds pinned context sections (top tasks, behavioral, study signals)
+    enrich.ts                     — Parallel signal reads, folded into the base context
+    ranker.ts                     — Token estimate + budget trimming
   signals/
     behavioral.ts                 — Behavioral signals (completion rate, postpone rate, time histogram)
+    study.ts                      — Weak-topic signals from study performance
   rag/
     retrieve.ts                   — pgvector retrieval (match_memories RPC)
     embeddings.ts                 — Embedding utilities + coalescing
   lms/                            — LMS integration helpers
 
+shared/coaching/workcheck.ts      — Pure work-check rules: card/gap caps, coverage, proofread round window
+shared/subjects.js                — Subject inference from titles
 shared/scheduling/priority.ts     — Priority engine (pure, no I/O, 0–1 scores)
-shared/rate-limit.ts              — Content-gen + RPM rate limiting
+shared/rate-limit.ts              — Daily content-generation limit (5/day, Supabase-backed)
 shared/{env,auth,sse}.ts          — Cross-runtime helpers
 
 supabase/migrations/              — DDL in chronological order
@@ -81,8 +88,8 @@ extension/                        — Browser extension (LMS submission tracking
 | Tier | Primary (Groq) | Fallback (Gemini) | Used for |
 |------|---------------|-------------------|----------|
 | `embed` | — | `gemini-embedding-002` | RAG, memory, semantic search |
-| `flash` | `openai/gpt-oss-20b` | `gemini-2.5-flash` | Chat, routing, classification, summarization |
-| `pro` | `openai/gpt-oss-120b` | `gemini-2.5-pro` | Studio, planning, deep reasoning |
+| `flash` | `openai/gpt-oss-20b` | `gemini-2.5-flash` | Intents `chat`, `action_routing`, `clue`; briefing |
+| `pro` | `openai/gpt-oss-120b` | `gemini-2.5-pro` | Intents `plan`, `work_check` |
 
 **Special cases:**
 - **Vision**: Image attachments → `meta-llama/llama-4-scout-17b-16e-instruct` (Groq), fallback: `gemini-2.5-flash`
@@ -94,13 +101,15 @@ Transport-agnostic orchestrator. Mode dispatch:
 
 | Mode | Pipeline | Output |
 |------|----------|--------|
-| `chat` (default) | Action routing + RAG + behavioral context | SSE or JSON |
-| `plan` | 3-pass unified plan pipeline (Pro + thinking 4096) — classifies the input as an explicit request / goal / brain-dump internally and fills the matching bucket(s) of one `make_plan` action | `make_plan` action, or an array of tentative actions when the input was brain-dump-shaped |
-| `studio` | Content generation (forced single tool call) | Flashcards/quiz/outline/summary |
-| `study_pack` | Bundled exam prep artifacts | Summary + concepts + cards + quiz |
-| `proofread` | Writing feedback pipeline | Structured feedback |
-| `briefing` | Daily rollup | Events + tasks + prep gaps |
+| `chat` (default) | Action routing (`toolSet: chat`, Flash) with behavioral + study context. May call `search_memory` once; the handler runs retrieval and re-runs the model with the memories | SSE or JSON; actions include the proposed tool calls |
+| `plan` | 3-pass plan pipeline (Pro, thinking 4096). Classifies input as explicit request / goal / brain-dump and fills the matching buckets of one `make_plan` action | `make_plan`; brain-dump input fills `batch_actions[]` |
+| `clue` | One forward hint, forced `make_clue` call (Flash) | `make_clue` action |
+| `work_check` | Evaluates the student's own work against a rubric (Pro, thinking 2048) | `make_work_check` action |
+| `briefing` | Strict-JSON daily rollup, no tools (Flash) | `briefing` object |
+| `search` | Pure `retrieve()` passthrough, no LLM call | `{ results }` |
 | `voice` | Groq Whisper transcription | `{ text: string }` |
+
+Non-SSE requests are deduplicated in flight by user, mode, and a hash of the last message.
 
 ### SSE Streaming Frames
 - `delta` — text chunk
@@ -122,21 +131,26 @@ Pattern: graceful degradation if critique/refine fail or timeout.
    - **brain-dump** (messy transcript/text dump) → `batch_actions[]`, each item carrying `confidence`/`status`/`commitment` — `confidence >= 0.85` eligible for auto-apply, `confidence < 0.7` routes to review rail, `0.7–0.85` shown for confirmation
 2. Critique (10s cap) — gap/realism/calibration analysis, tailored to whichever bucket was filled
 3. Refine (22s cap) — final plan, same bucket(s) as the draft
-- Total budget: 50s (within Vercel 60s limit)
+- Total budget: 50s (within Vercel 60s limit). Per-pass caps as above; critique and refine are skipped when under 6s remain, and refine runs only when a critique exists
+- Shared scaffold lives in `pipelines/agentic.ts`
 - Progress phases: `analyzing → drafting → reviewing → finalizing`
+- A plan whose buckets are all empty is reported as a failure, not shipped as a blank card
 - Client dispatch (`src/App.jsx`): a populated `batch_actions[]` routes straight to the action review rail (bypassing the propose-mode card); `recurring_blocks`/`milestone_tasks` renders `IntentPlanCard` (batch-creates blocks/tasks + persists a `study_plans` row on "Apply"); `steps[]` renders `PlanCard` in propose mode.
 
-**Proofread** (`shared/ai/pipelines/proofread.ts`):
-- Classify content type → route to specialist (Flash for quick, Pro for deep)
-- Cap: 2 rounds per 2h; terminal round triggers self-read instead of verdict
+**Work-check & clue** (`shared/ai/coaching.ts`, `shared/coaching/workcheck.ts`) — not a multi-pass pipeline; one forced tool call each:
+- Clue (Flash): one forward hint tuned to content type. Never the answer; "still stuck" routes the student to put down an attempt.
+- Work-check (Pro): at most 3 gaps and 5 cards. A rubric pasted by the student overrides internal criteria. Qualitative criteria are questions, not checkboxes.
+- Round window: 2 rounds per 2h (`PROOFREAD_MAX_ROUNDS`, `PROOFREAD_WINDOW_MS`). The terminal round is flagged in `orchestration.terminal`.
 
 ### callModel() Entry Point (chat-core.ts)
-Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`:
+Single LLM inference function. Takes `{intent, toolSet, toolChoice?, messages, onChunk?, budgetMs?, ...}`:
 1. Routes via `router.ts` → model + provider + fallback
-2. Dispatches to provider (Groq or Gemini)
-3. Applies retry/circuit breaker from `resilience.ts`
-4. Validates tool outputs against Zod schemas
-5. Yields chunks through `onChunk` when streaming
+2. Dispatches to the provider. If the primary is slow, the Gemini fallback starts after a 2s hedge delay and the first success wins
+3. Retries and circuit breaker from `resilience.ts`. The breaker opens after 10 failures in 30s and stays open for 60s; an open circuit skips straight to the fallback
+4. Validates tool calls against Zod schemas. On failure, the issues go back to the model once (schema repair)
+5. For default chat (`groundTitles`), checks proposed titles with `grounding.ts`
+6. Yields chunks through `onChunk` when streaming
+7. Pro requests downgrade to Flash when Pro is within 5% of its RPM limit, except intents in `PRO_REQUIRED` (currently `plan`)
 
 ## Action Tools
 
@@ -148,7 +162,6 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 - `add_recurring_event` — repeating events (M–Su, date range)
 - `convert_event_to_block`, `convert_block_to_event` — type conversion
 - `read_calendar` — date range queries
-- `view_schedule` — quick view
 
 ### Tasks
 - `add_task`, `update_task`, `delete_task`, `complete_task`, `postpone_task` — task CRUD
@@ -162,29 +175,27 @@ Single LLM inference function. Takes `{intent, messages, tools?, onChunk?, ...}`
 - `move_note` — note → folder
 - `create_folder` — create folder
 - `read_notes`, `read_project` — lookups
+- `add_note_layer`, `delete_note_layer` — note layers
+
+### Planning & Coaching
+- `make_plan` (`schemas/studio.ts`, not `actions.ts`) — unified plan output. `steps[]` (explicit request), `recurring_blocks[]` + `milestone_tasks[]` + `review_cadence` (goal), or `batch_actions[]` (brain-dump). Limits: steps 0–40, recurring_blocks 0–8, milestone_tasks 0–20, batch_actions 0–60. See Plan pipeline above
+- `plan_intent`, `revise_plan`, `pledge_start` — plan-level actions in `actions.ts`; see the schema for fields
+- `make_clue`, `make_work_check` (`schemas/coaching.ts`) — coaching outputs; see Work-check & clue above
 
 ### Timers
 - `set_timer` — label, duration_seconds OR fire_at OR preset (pomodoro/short_break/long_break)
 - `cancel_timer` — timer_id or label
 
-### Content Generation (Studio)
-| Action | Output | Limits |
-|--------|--------|--------|
-| `create_flashcards` | q/a cards | 1–40 |
-| `create_quiz` | questions + choices + explanation | 1–30 |
-| `create_outline` | sections + points | 1–20 |
-| `create_summary` | bullet summary | 1–20 |
-| `make_plan` | unified plan schema: `steps[]` (explicit request), or `recurring_blocks[]`+`milestone_tasks[]`+`review_cadence` (goal), or `batch_actions[]` (brain-dump) — see Plan pipeline above | steps 0–40, recurring_blocks 0–8, milestone_tasks 0–20, batch_actions 0–60 |
-| `make_study_pack` | summary + concepts + cards + quiz | — |
+### Long-tail task edits
+- `manage_task` — consolidated `update` / `complete` / `delete` / `postpone` on an existing task. Replaces the rare per-verb edit tools
 
-### Grades & Study Sets
-- `log_grade` — subject, assignment, grade (0–100), grade_type
-- `read_study_sets` — list flashcard decks
-- `delete_study_set`, `update_study_set` — deck operations
+### Not server-side (removed from the docs)
+Flashcards, quizzes, outlines, summaries, study packs, grades, and study-set operations are not in the server schemas. Check `src/App.jsx` before assuming an action exists.
 
 ### Control Flow
-- `ask_clarification` — pause and ask for details (multi_select option)
-- `propose_action` — suggest action to user
+- `ask_clarification` — the escape hatch. Asks ONE short question when a request is genuinely ambiguous. Blocking vs. soft severity is set in `chat-core.ts`
+- `search_memory` — model-invoked semantic recall. Executed server-side and stripped from client actions
+- `propose_action` — referenced by client code (`src/App.jsx`, `ProposalCard.jsx`) but has no server schema. Don't add it as a model tool without a schema
 
 ### Confidence & Commitment Gating
 - `confidence >= 0.85` OR `commitment: 'confirmed'` → eligible for auto-apply (if `aiAutoApprove` enabled)
@@ -236,12 +247,12 @@ Located ~line 5889. Switch on `action.type`. Every action:
 
 ## Dynamic Context Enrichment (context/enrich.ts)
 
-Before every LLM turn, server enriches context in parallel (all bounded 3s, graceful degrade on failure):
+Before a turn, the server reads signals in parallel. Each read has a timeout and degrades to nothing on failure:
 
-1. **Behavioral signals** — 30-day completion rate, postpone rate by subject, time-of-day histogram, recent abandons (cached hourly)
-2. **RAG retrieval** — top-8 `memory_embeddings` matching query via pgvector cosine + recency
+1. **Behavioral signals** — 30-day completion rate, postpone rate by subject, time-of-day histogram
+2. **Study signals** — weak topics from study performance
 
-Assembled snippet injected into system prompt with task priority top-3, schedule density, and memory matches.
+`enrichDynamicContext` runs only when the client sends `clientTasks`; otherwise the base context passes through unchanged. Its output is assembled into pinned sections under a ~1500-token budget: top 3 tasks from the priority engine, behavioral patterns, and topics needing review. Retrieved memories are not fetched every turn. See the `search_memory` hop in the Chat Handler section.
 
 ### Note bucket + search
 Saved work (notes, saved chats, flashcard decks, applied study plans) is embedded into `memory_embeddings` on save (`src/lib/supabase.js` `queueEmbedSync()` → `supabase/functions/embed-batch`, auth'd off the caller's own bearer token) and retrievable two ways:
@@ -335,7 +346,7 @@ All tables use Supabase Auth RLS (`auth.uid() = user_id`).
 **Chat body** (`ChatBody`):
 ```typescript
 {
-  mode?: string,                    // "chat" | "planning" | "intent_plan" | "brain_dump" | ...
+  mode?: string,                    // "chat" | "plan" | "clue" | "work_check" | "briefing" | "search" | "voice"
   systemPrompt?: string,
   messages: ChatMessage[],
   imageBase64?: string, imageMimeType?: string,
@@ -369,6 +380,7 @@ SUPABASE_SERVICE_ROLE_KEY — service role key
 GOOGLE_CLIENT_ID          — LMS OAuth
 GOOGLE_CLIENT_SECRET      — LMS OAuth
 AI_PROVIDER_OVERRIDE      — set "gemini" to force Gemini rollback
+GEMINI_RPM_FLASH / _PRO / _EMBED — optional per-tier RPM overrides (see Rate Limiting)
 ```
 
 ### Client-side (VITE_ prefix)
@@ -381,8 +393,8 @@ VITE_GNEWS_TOKEN          — optional (news widget)
 
 ## Rate Limiting
 
-- **Content generation** (studio, planning, intent_plan, study_pack): 5 per day per user
-- **Chat / action_routing**: RPM tier limits via `shared/rate-limit.ts`
+- **Daily content generation** (`shared/rate-limit.ts`): 5 per day per user, for `plan`, `clue`, and `work_check`. Brain-dump `plan` calls (`planKind: "brain_dump"`) are exempt
+- **RPM** (`shared/ai/rpm-tracker.ts`): per-tier sliding window. Defaults are flash 1000, pro 360, embed 3000, overridable with `GEMINI_RPM_FLASH`, `GEMINI_RPM_PRO`, `GEMINI_RPM_EMBED`. Over-limit requests get a 429 with `Retry-After`. These defaults are still Gemini-era; see the TODO in `rpm-tracker.ts`
 - Daily counter tracked server-side and localStorage
 - `RateLimitBanner` displays status + reset countdown
 
@@ -430,7 +442,8 @@ npm run eval:planning # Planning pipeline regression
 4. Run `npm run typecheck` to catch schema mismatches
 
 ### To add a new LLM intent
-1. Add intent name to `router.ts` with tier mapping
+1. Add intent name to `router.ts` with tier mapping (the `Intent` union and `TIER_BY_INTENT`)
 2. Add handler case to `chat-handler.ts` for the new `mode`
-3. If pipeline, add to `shared/ai/pipelines/`
-4. Both runtimes (Vercel + Deno) auto-inherit the logic
+3. If it is a multi-pass pipeline, add it to `shared/ai/pipelines/` and reuse `runAgenticPipeline` from `agentic.ts`
+4. If it must never be downgraded from Pro under RPM pressure, add it to `PRO_REQUIRED` in `chat-core.ts`
+5. Both runtimes (Vercel + Deno) auto-inherit the logic
